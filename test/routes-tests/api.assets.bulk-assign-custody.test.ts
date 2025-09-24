@@ -6,20 +6,12 @@ import { action } from "~/routes/api+/assets.bulk-assign-custody";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
-const dbMocks = vi.hoisted(() => {
-  return {
-    teamMember: {
-      findUnique: vi.fn(),
-    },
-  };
-});
+const teamMemberServiceMocks = vi.hoisted(() => ({
+  getTeamMember: vi.fn(),
+}));
 
 vi.mock("~/database/db.server", () => ({
-  db: {
-    teamMember: {
-      findUnique: dbMocks.teamMember.findUnique,
-    },
-  },
+  db: {},
 }));
 
 vi.mock("~/utils/roles.server", () => ({
@@ -28,6 +20,10 @@ vi.mock("~/utils/roles.server", () => ({
 
 vi.mock("~/modules/asset/service.server", () => ({
   bulkCheckOutAssets: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("~/modules/team-member/service.server", () => ({
+  getTeamMember: teamMemberServiceMocks.getTeamMember,
 }));
 
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -60,7 +56,7 @@ vi.mock("@remix-run/node", async () => {
 });
 
 const requirePermissionMock = vi.mocked(requirePermission);
-const mockTeamMemberFindUnique = dbMocks.teamMember.findUnique;
+const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
 
 function createActionArgs(
   overrides: Partial<ActionFunctionArgs> = {}
@@ -79,7 +75,7 @@ function createActionArgs(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockTeamMemberFindUnique.mockReset();
+  mockGetTeamMember.mockReset();
   requirePermissionMock.mockReset();
 });
 
@@ -91,7 +87,7 @@ describe("api/assets/bulk-assign-custody", () => {
     } as any);
 
     // Custodian not found due to org filter
-    mockTeamMemberFindUnique.mockResolvedValue(null);
+    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
 
     const formData = new FormData();
     formData.set("assetIds", JSON.stringify(["asset-1", "asset-2"]));
@@ -116,11 +112,9 @@ describe("api/assets/bulk-assign-custody", () => {
 
     expect(response.status).toBe(404);
 
-    expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
-      where: {
-        id: "foreign-team-member-123",
-        organizationId: "org-1",
-      },
+    expect(mockGetTeamMember).toHaveBeenCalledWith({
+      id: "foreign-team-member-123",
+      organizationId: "org-1",
       select: { id: true, userId: true },
     });
   });
@@ -132,7 +126,7 @@ describe("api/assets/bulk-assign-custody", () => {
     } as any);
 
     // Valid team member from same org
-    mockTeamMemberFindUnique.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-456",
     });
@@ -160,11 +154,9 @@ describe("api/assets/bulk-assign-custody", () => {
 
     expect(response.status).toBe(200);
 
-    expect(mockTeamMemberFindUnique).toHaveBeenCalledWith({
-      where: {
-        id: "team-member-123",
-        organizationId: "org-1",
-      },
+    expect(mockGetTeamMember).toHaveBeenCalledWith({
+      id: "team-member-123",
+      organizationId: "org-1",
       select: { id: true, userId: true },
     });
   });
@@ -176,7 +168,7 @@ describe("api/assets/bulk-assign-custody", () => {
     } as any);
 
     // Valid team member from same org, but different user
-    mockTeamMemberFindUnique.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
     });
@@ -212,7 +204,7 @@ describe("api/assets/bulk-assign-custody", () => {
     } as any);
 
     // Valid team member from same org, same user
-    mockTeamMemberFindUnique.mockResolvedValue({
+    mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-123", // Same as current user
     });

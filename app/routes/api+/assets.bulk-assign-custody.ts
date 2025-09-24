@@ -1,9 +1,9 @@
 import { OrganizationRoles } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { db } from "~/database/db.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -35,24 +35,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Validate that the custodian belongs to the same organization
-    const teamMember = await db.teamMember.findUnique({
-      where: {
-        id: custodian.id,
-        organizationId, // Ensure custodian is from same org
-      },
+    const teamMember = await getTeamMember({
+      id: custodian.id,
+      organizationId,
       select: { id: true, userId: true },
-    });
-
-    if (!teamMember) {
+    }).catch((cause) => {
       throw new ShelfError({
-        cause: null,
+        cause,
         title: "Team member not found",
         message: "The selected team member could not be found.",
         additionalData: { userId, assetIds, custodian },
         label: "Assets",
         status: 404,
       });
-    }
+    });
 
     if (
       role === OrganizationRoles.SELF_SERVICE &&

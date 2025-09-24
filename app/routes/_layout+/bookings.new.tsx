@@ -9,7 +9,6 @@ import { DateTime } from "luxon";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
 import styles from "~/components/booking/styles.new.css?url";
-import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
 import { createBooking } from "~/modules/booking/service.server";
@@ -19,7 +18,10 @@ import {
   buildTagsSet,
   getTagsForBookingTagsFilter,
 } from "~/modules/tag/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMember,
+  getTeamMemberForCustodianFilter,
+} from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -148,24 +150,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
     } = payload;
 
     // Validate that the custodian belongs to the same organization
-    const custodianFromDb = await db.teamMember.findFirst({
-      where: {
-        id: custodian.id,
-        organizationId, // Ensure custodian is from same org
-      },
+    const custodianFromDb = await getTeamMember({
+      id: custodian.id,
+      organizationId,
       select: { id: true, userId: true },
-    });
-
-    if (!custodianFromDb) {
+    }).catch((cause) => {
       throw new ShelfError({
-        cause: null,
+        cause,
         title: "Team member not found",
         message: "The selected team member could not be found.",
         additionalData: { userId, custodian },
         label: "Booking",
         status: 404,
       });
-    }
+    });
 
     /**
      * Validate if the user is self user and is assigning the booking to

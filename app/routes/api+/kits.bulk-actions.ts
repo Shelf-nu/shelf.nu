@@ -13,6 +13,7 @@ import {
   bulkReleaseKitCustody,
   bulkUpdateKitLocation,
 } from "~/modules/kit/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -87,24 +88,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         // Validate that the custodian belongs to the same organization
-        const teamMember = await db.teamMember.findUnique({
-          where: {
-            id: custodian.id,
-            organizationId, // Ensure custodian is from same org
-          },
+        const teamMember = await getTeamMember({
+          id: custodian.id,
+          organizationId,
           select: { id: true, userId: true },
-        });
-
-        if (!teamMember) {
+        }).catch((cause) => {
           throw new ShelfError({
-            cause: null,
+            cause,
             title: "Team member not found",
             message: "The selected team member could not be found.",
             additionalData: { userId, kitIds, custodian },
             label: "Kit",
             status: 404,
           });
-        }
+        });
 
         if (isSelfService && teamMember.userId !== userId) {
           throw new ShelfError({

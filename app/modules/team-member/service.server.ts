@@ -22,6 +22,16 @@ type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
   };
 }>;
 
+type TeamMemberWithSelect<T extends Prisma.TeamMemberSelect | undefined> =
+  T extends Prisma.TeamMemberSelect
+    ? Prisma.TeamMemberGetPayload<{ select: T }>
+    : TeamMember;
+
+type TeamMemberWithInclude<T extends Prisma.TeamMemberInclude | undefined> =
+  T extends Prisma.TeamMemberInclude
+    ? Prisma.TeamMemberGetPayload<{ include: T }>
+    : TeamMember;
+
 export async function createTeamMember({
   name,
   organizationId,
@@ -316,23 +326,68 @@ export async function getTeamMemberForCustodianFilter({
   }
 }
 
+type GetTeamMemberArgsBase = {
+  id: TeamMember["id"];
+  organizationId: Organization["id"];
+};
+
+export async function getTeamMember(
+  args: GetTeamMemberArgsBase
+): Promise<TeamMember>;
+export async function getTeamMember<T extends Prisma.TeamMemberSelect>(
+  args: GetTeamMemberArgsBase & { select: T; include?: never }
+): Promise<TeamMemberWithSelect<T>>;
+export async function getTeamMember<T extends Prisma.TeamMemberInclude>(
+  args: GetTeamMemberArgsBase & { include: T; select?: never }
+): Promise<TeamMemberWithInclude<T>>;
 export async function getTeamMember({
   id,
   organizationId,
-}: {
-  id: TeamMember["id"];
-  organizationId: Organization["id"];
+  select,
+  include,
+}: GetTeamMemberArgsBase & {
+  select?: Prisma.TeamMemberSelect;
+  include?: Prisma.TeamMemberInclude;
 }) {
   try {
-    return await db.teamMember.findUniqueOrThrow({
+    if (select && include) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot use both select and include when fetching a team member.",
+        additionalData: { id, organizationId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const teamMember = await db.teamMember.findUniqueOrThrow({
       where: { id, organizationId },
+      ...(select ? { select } : {}),
+      ...(include ? { include } : {}),
     });
+
+    if (select) {
+      return teamMember as TeamMemberWithSelect<typeof select>;
+    }
+
+    if (include) {
+      return teamMember as TeamMemberWithInclude<typeof include>;
+    }
+
+    return teamMember as TeamMember;
   } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
-      message: "Team member not found",
-      additionalData: { id },
+      title: "Team member not found",
+      message: "The selected team member could not be found.",
+      additionalData: { id, organizationId },
       label,
+      status: 404,
     });
   }
 }
