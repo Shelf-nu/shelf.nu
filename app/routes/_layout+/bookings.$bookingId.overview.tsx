@@ -41,7 +41,6 @@ import {
   updateBasicBooking,
 } from "~/modules/booking/service.server";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
-import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -672,6 +671,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           intentChoice: checkoutIntentChoice,
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
+          userId: user.id,
         });
 
         await createNotes({
@@ -681,14 +681,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
-        });
-
-        // Also log to booking activity
-        await createSystemBookingNote({
-          bookingId: booking.id,
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out booking **${
-            booking.name
-          }**.`,
         });
 
         sendNotification({
@@ -708,6 +700,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           hints: getClientHint(request),
           intentChoice: checkinIntentChoice,
+          userId: user.id,
         });
 
         await createNotes({
@@ -717,14 +710,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
-        });
-
-        // Also log to booking activity
-        await createSystemBookingNote({
-          bookingId: booking.id,
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in booking **${
-            booking.name
-          }**.`,
         });
 
         sendNotification({
@@ -827,7 +812,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "archive": {
-        await archiveBooking({ id, organizationId });
+        await archiveBooking({ id, organizationId, userId: user.id });
 
         sendNotification({
           title: "Booking archived",
@@ -843,6 +828,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id,
           organizationId,
           hints: getClientHint(request),
+          userId: user.id,
         });
 
         await createNotes({

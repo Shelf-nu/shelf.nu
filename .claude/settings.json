@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "afplay /System/Library/Sounds/Funk.aiff"
+            "command": "afplay ~/Documents/jobs_done.aiff"
           }
         ]
       }

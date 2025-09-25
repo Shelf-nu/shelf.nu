@@ -5,6 +5,7 @@ import { markdocConfig } from "~/utils/markdoc.config";
 import { parseMarkdownToReact } from "~/utils/md";
 import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
+import { BookingStatusComponent } from "./booking-status-component";
 import { DateComponent } from "./date-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
@@ -30,6 +31,7 @@ const defaultComponents = {
   AssetsListComponent,
   KitsListComponent,
   LinkComponent,
+  BookingStatusComponent,
 };
 
 export const MarkdownViewer = ({

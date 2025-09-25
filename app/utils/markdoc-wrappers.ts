@@ -174,6 +174,26 @@ export function wrapLinkForNote(to: string, text: string): string {
 }
 
 /**
+ * Wraps booking status in Markdoc booking_status tag syntax for consistent display
+ *
+ * @param status - Booking status (DRAFT, RESERVED, ONGOING, etc.)
+ * @param custodianUserId - Optional custodian user ID for extra tooltip info
+ * @returns String with booking status wrapped in Markdoc tag syntax
+ *
+ * Example: wrapBookingStatusForNote("RESERVED", "user123")
+ * -> "{% booking_status status=\"RESERVED\" custodianUserId=\"user123\" /%}"
+ */
+export function wrapBookingStatusForNote(
+  status: string,
+  custodianUserId?: string
+): string {
+  const custodianAttr = custodianUserId
+    ? ` custodianUserId="${custodianUserId}"`
+    : "";
+  return `{% booking_status status="${status}"${custodianAttr} /%}`;
+}
+
+/**
  * Regular expression to match Markdoc assets_list tags in note content
  * Matches: {% assets_list count=3 ids="id1,id2,id3" action="added" /%}
  */

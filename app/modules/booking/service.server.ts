@@ -49,6 +49,7 @@ import {
   wrapKitsWithDataForNote,
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
+  wrapBookingStatusForNote,
 } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
@@ -106,6 +107,107 @@ async function cancelScheduler(
         label,
       })
     );
+  }
+}
+
+/**
+ * Creates a consistent status transition note for booking activity logs
+ *
+ * @param bookingId - The booking ID to add the note to
+ * @param fromStatus - The previous booking status
+ * @param toStatus - The new booking status
+ * @param userId - ID of the user who performed the action (if manual)
+ * @param action - Optional custom action description (e.g., "checked-out", "checked-in")
+ * @param custodianUserId - Optional custodian user ID for status badge extra info
+ */
+export async function createStatusTransitionNote({
+  bookingId,
+  fromStatus,
+  toStatus,
+  userId,
+  action,
+  custodianUserId,
+}: {
+  bookingId: string;
+  fromStatus: BookingStatus;
+  toStatus: BookingStatus;
+  userId?: string;
+  action?: string;
+  custodianUserId?: string;
+}) {
+  const fromStatusBadge = wrapBookingStatusForNote(fromStatus, custodianUserId);
+  const toStatusBadge = wrapBookingStatusForNote(toStatus, custodianUserId);
+
+  let content: string;
+
+  if (userId) {
+    // User-initiated transition
+    const user = await getUserByID(userId);
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+
+    const actionText =
+      action || getActionTextFromTransition(fromStatus, toStatus);
+    content = `${userLink} ${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+  } else {
+    // System-initiated transition
+    const actionText = getSystemActionText(fromStatus, toStatus);
+    content = `${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+  }
+
+  await createSystemBookingNote({
+    bookingId,
+    content,
+  });
+}
+
+/**
+ * Gets appropriate action text for user-initiated status transitions
+ */
+export function getActionTextFromTransition(
+  from: BookingStatus,
+  to: BookingStatus
+): string {
+  const transition = `${from}->${to}`;
+
+  switch (transition) {
+    case "DRAFT->RESERVED":
+      return "reserved the booking";
+    case "RESERVED->DRAFT":
+      return "reverted booking to draft";
+    case "RESERVED->CANCELLED":
+    case "ONGOING->CANCELLED":
+    case "OVERDUE->CANCELLED":
+      return "cancelled the booking";
+    case "RESERVED->ONGOING":
+      return "checked-out the booking";
+    case "ONGOING->COMPLETE":
+    case "OVERDUE->COMPLETE":
+      return "checked-in the booking";
+    case "COMPLETE->ARCHIVED":
+      return "archived the booking";
+    default:
+      return "changed the booking status";
+  }
+}
+
+/**
+ * Gets appropriate action text for system-initiated status transitions
+ */
+export function getSystemActionText(
+  from: BookingStatus,
+  to: BookingStatus
+): string {
+  const transition = `${from}->${to}`;
+
+  switch (transition) {
+    case "ONGOING->OVERDUE":
+      return "Booking became overdue";
+    default:
+      return "Booking status changed";
   }
 }
 
@@ -773,22 +875,13 @@ export async function reserveBooking({
     }
 
     // Add activity log for status change to RESERVED
-    if (userId) {
-      const user = await getUserByID(userId);
-      await createSystemBookingNote({
-        bookingId: updatedBooking.id,
-        content: `${wrapUserLinkForNote(
-          user!
-        )} changed the booking status from **${bookingFound.status}** to **${
-          updatedBooking.status
-        }**.`,
-      });
-    } else {
-      await createSystemBookingNote({
-        bookingId: updatedBooking.id,
-        content: `The booking status changed from **${bookingFound.status}** to **${updatedBooking.status}**.`,
-      });
-    }
+    await createStatusTransitionNote({
+      bookingId: updatedBooking.id,
+      fromStatus: bookingFound.status,
+      toStatus: updatedBooking.status,
+      userId,
+      custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
 
     return updatedBooking;
   } catch (cause) {
@@ -809,11 +902,13 @@ export async function checkoutBooking({
   hints,
   from,
   to,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
   from?: Date | null;
   to?: Date | null;
+  userId?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -931,6 +1026,17 @@ export async function checkoutBooking({
       });
     });
 
+    // Create status transition note
+    if (userId) {
+      await createStatusTransitionNote({
+        bookingId: updatedBooking.id,
+        fromStatus: BookingStatus.RESERVED,
+        toStatus: updatedBooking.status,
+        userId,
+        custodianUserId: updatedBooking.custodianUserId || undefined,
+      });
+    }
+
     /** Calculate the time difference between the booking.to and the current time */
     const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
     const lessThanOneHourToCheckin = hours < 1;
@@ -1003,9 +1109,11 @@ export async function checkinBooking({
   organizationId,
   hints,
   intentChoice,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
+  userId?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -1136,6 +1244,17 @@ export async function checkinBooking({
         },
       });
     });
+
+    // Create status transition note
+    if (userId) {
+      await createStatusTransitionNote({
+        bookingId: updatedBooking.id,
+        fromStatus: bookingFound.status,
+        toStatus: BookingStatus.COMPLETE,
+        userId,
+        custodianUserId: updatedBooking.custodianUserId || undefined,
+      });
+    }
 
     /**
      * At this point when user is checking in the booking,
@@ -1497,7 +1616,10 @@ export async function createKitBookingNote({
 export async function archiveBooking({
   id,
   organizationId,
-}: Pick<Booking, "id" | "organizationId">) {
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  userId?: string;
+}) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -1529,9 +1651,12 @@ export async function archiveBooking({
     });
 
     // Add activity log for booking archival
-    await createSystemBookingNote({
+    await createStatusTransitionNote({
       bookingId: updatedBooking.id,
-      content: `The booking was archived. Status changed from **${booking.status}** to **${BookingStatus.ARCHIVED}**.`,
+      fromStatus: booking.status,
+      toStatus: BookingStatus.ARCHIVED,
+      userId,
+      custodianUserId: updatedBooking.custodianUserId || undefined,
     });
 
     return updatedBooking;
@@ -1550,8 +1675,10 @@ export async function cancelBooking({
   id,
   organizationId,
   hints,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
+  userId?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -1649,9 +1776,12 @@ export async function cancelBooking({
     }
 
     // Add activity log for booking cancellation
-    await createSystemBookingNote({
+    await createStatusTransitionNote({
       bookingId: booking.id,
-      content: `The booking was cancelled. Status changed from **${bookingFound.status}** to **${BookingStatus.CANCELLED}**.`,
+      fromStatus: bookingFound.status,
+      toStatus: BookingStatus.CANCELLED,
+      userId,
+      custodianUserId: booking.custodianUserId || undefined,
     });
 
     return booking;
@@ -1704,19 +1834,20 @@ export async function revertBookingToDraft({
 
     // Add activity log for booking revert to draft
     if (userId) {
-      const user = await getUserByID(userId);
-      await createSystemBookingNote({
+      await createStatusTransitionNote({
         bookingId: cancelledBooking.id,
-        content: `${wrapUserLinkForNote(
-          user!
-        )} reverted booking status from **${booking.status}** to **${
-          BookingStatus.DRAFT
-        }**.`,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.DRAFT,
+        userId,
+        custodianUserId: cancelledBooking.custodianUserId || undefined,
       });
     } else {
-      await createSystemBookingNote({
+      // System-initiated revert (fallback)
+      await createStatusTransitionNote({
         bookingId: cancelledBooking.id,
-        content: `Booking status reverted from **${booking.status}** to **${BookingStatus.DRAFT}**.`,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.DRAFT,
+        custodianUserId: cancelledBooking.custodianUserId || undefined,
       });
     }
 
@@ -3088,7 +3219,15 @@ export async function bulkArchiveBookings({
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
-    const bookings = await db.booking.findMany({ where });
+    const bookings = await db.booking.findMany({
+      where,
+      select: {
+        id: true,
+        status: true,
+        custodianUserId: true,
+        activeSchedulerReference: true,
+      },
+    });
 
     const someBookingNotComplete = bookings.some(
       (b) => b.status !== "COMPLETE"
@@ -3115,6 +3254,16 @@ export async function bulkArchiveBookings({
         where: { id: { in: bookings.map((b) => b.id) } },
         data: { status: BookingStatus.ARCHIVED },
       });
+
+      /** Create booking status transition notes for each booking */
+      for (const booking of bookings) {
+        await createStatusTransitionNote({
+          bookingId: booking.id,
+          fromStatus: booking.status,
+          toStatus: BookingStatus.ARCHIVED,
+          custodianUserId: booking.custodianUserId || undefined,
+        });
+      }
     });
 
     /** Cancel any active schedulers */
@@ -3256,6 +3405,17 @@ export async function bulkCancelBookings({
         .flat() satisfies Prisma.NoteCreateManyInput[];
 
       await tx.note.createMany({ data: notesData });
+
+      /** Create booking status transition notes for each booking */
+      for (const booking of bookings) {
+        await createStatusTransitionNote({
+          bookingId: booking.id,
+          fromStatus: booking.status,
+          toStatus: BookingStatus.CANCELLED,
+          userId,
+          custodianUserId: booking.custodianUserId || undefined,
+        });
+      }
     });
 
     /** Cancelling scheduler */

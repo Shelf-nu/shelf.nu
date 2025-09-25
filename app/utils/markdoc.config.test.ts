@@ -125,9 +125,45 @@ describe("markdoc.config", () => {
     });
   });
 
+  describe("booking_status tag configuration", () => {
+    it("should have booking_status tag with correct properties", () => {
+      const bookingStatusTag = (markdocConfig.tags as any).booking_status;
+
+      expect(bookingStatusTag).toBeDefined();
+      expect(bookingStatusTag.render).toBe("BookingStatusComponent");
+      expect(bookingStatusTag.attributes).toBeDefined();
+    });
+
+    it("should have correct booking_status tag attributes", () => {
+      const bookingStatusAttributes = (markdocConfig.tags as any).booking_status
+        .attributes;
+
+      expect(bookingStatusAttributes).toBeDefined();
+      expect(bookingStatusAttributes.status).toEqual(
+        expect.objectContaining({
+          type: String,
+          required: true,
+        })
+      );
+
+      expect(bookingStatusAttributes.custodianUserId).toEqual(
+        expect.objectContaining({
+          type: String,
+          required: false,
+        })
+      );
+    });
+  });
+
   describe("tag completeness", () => {
     it("should have all expected tags", () => {
-      const expectedTags = ["date", "assets_list", "kits_list", "link"];
+      const expectedTags = [
+        "date",
+        "assets_list",
+        "kits_list",
+        "link",
+        "booking_status",
+      ];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
       expectedTags.forEach((tag) => {
@@ -136,7 +172,13 @@ describe("markdoc.config", () => {
     });
 
     it("should not have unexpected tags", () => {
-      const expectedTags = ["date", "assets_list", "kits_list", "link"];
+      const expectedTags = [
+        "date",
+        "assets_list",
+        "kits_list",
+        "link",
+        "booking_status",
+      ];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
       expect(actualTags).toHaveLength(expectedTags.length);
@@ -165,6 +207,13 @@ describe("markdoc.config", () => {
       expect((markdocConfig.tags as any).link.attributes.text.type).toBe(
         String
       );
+      expect(
+        (markdocConfig.tags as any).booking_status.attributes.status.type
+      ).toBe(String);
+      expect(
+        (markdocConfig.tags as any).booking_status.attributes.custodianUserId
+          .type
+      ).toBe(String);
 
       // Check that all boolean attributes use Boolean constructor
       expect((markdocConfig.tags as any).date.attributes.includeTime.type).toBe(
@@ -212,6 +261,15 @@ describe("markdoc.config", () => {
       expect(
         (markdocConfig.tags as any).kits_list.attributes.action.required
       ).toBe(true);
+
+      // Booking status tag - status is required, custodianUserId is optional
+      expect(
+        (markdocConfig.tags as any).booking_status.attributes.status.required
+      ).toBe(true);
+      expect(
+        (markdocConfig.tags as any).booking_status.attributes.custodianUserId
+          .required
+      ).toBe(false);
     });
   });
 

@@ -8,6 +8,8 @@ import type { Config } from "@markdoc/markdoc";
  * - date tag: Renders dates with proper localization and timezone support
  * - assets_list tag: Renders interactive asset count with popover showing asset details
  * - kits_list tag: Renders interactive kit count with popover showing kit details
+ * - link tag: Renders consistent links that open in new tabs
+ * - booking_status tag: Renders booking status badges with consistent styling
  */
 
 export const markdocConfig: Config = {
@@ -90,6 +92,24 @@ export const markdocConfig: Config = {
           type: String,
           required: true,
           description: "Display text for the link",
+        },
+      },
+      selfClosing: true,
+    },
+    booking_status: {
+      render: "BookingStatusComponent",
+      description:
+        "Renders a booking status badge with consistent styling and colors",
+      attributes: {
+        status: {
+          type: String,
+          required: true,
+          description: "The booking status (DRAFT, RESERVED, ONGOING, etc.)",
+        },
+        custodianUserId: {
+          type: String,
+          required: false,
+          description: "Optional custodian user ID for extra tooltip info",
         },
       },
       selfClosing: true,
