@@ -700,11 +700,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "specificAssetIds[]"
         ) as string[];
 
-        console.log(
-          "DEBUG: checkIn action - specificAssetIds:",
-          specificAssetIds
-        );
-
         const booking = await checkinBooking({
           id,
           organizationId,
