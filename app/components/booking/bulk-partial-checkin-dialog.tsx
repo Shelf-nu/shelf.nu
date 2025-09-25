@@ -314,6 +314,7 @@ export default function BulkPartialCheckinDialog({
                 disabled={disabled}
                 portalContainer={formRef.current || undefined}
                 onClose={handleCloseDialog}
+                specificAssetIds={selectedItems.map((item: any) => item.id)}
               />
             ) : (
               <Button

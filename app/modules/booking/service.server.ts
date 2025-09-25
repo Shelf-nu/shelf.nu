@@ -1110,10 +1110,12 @@ export async function checkinBooking({
   hints,
   intentChoice,
   userId,
+  specificAssetIds,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
   userId?: string;
+  specificAssetIds?: string[];
 }) {
   try {
     const bookingFound = await db.booking
@@ -1247,13 +1249,104 @@ export async function checkinBooking({
 
     // Create status transition note
     if (userId) {
-      await createStatusTransitionNote({
-        bookingId: updatedBooking.id,
-        fromStatus: bookingFound.status,
-        toStatus: BookingStatus.COMPLETE,
-        userId,
-        custodianUserId: updatedBooking.custodianUserId || undefined,
-      });
+      console.log(
+        "DEBUG: checkinBooking - creating status note, specificAssetIds:",
+        specificAssetIds
+      );
+      if (specificAssetIds && specificAssetIds.length > 0) {
+        console.log(
+          "DEBUG: checkinBooking - creating ENHANCED completion message"
+        );
+        // Create enhanced completion message with asset details
+        const user = await getUserByID(userId);
+
+        // Get asset and kit data for consistent formatting
+        const assetsWithKitInfo = await db.asset.findMany({
+          where: { id: { in: specificAssetIds } },
+          select: {
+            id: true,
+            title: true,
+            kit: { select: { id: true, name: true } },
+          },
+        });
+
+        // Separate complete kits from individual assets
+        const kitIds = getKitIdsByAssets(
+          updatedBooking.assets.filter((a) => specificAssetIds.includes(a.id))
+        );
+        const completeKits: Array<{ id: string; name: string }> = [];
+        const standaloneAssets: Array<{ id: string; title: string }> = [];
+        const processedKitIds = new Set<string>();
+
+        for (const asset of assetsWithKitInfo) {
+          if (
+            asset.kit &&
+            kitIds.includes(asset.kit.id) &&
+            !processedKitIds.has(asset.kit.id)
+          ) {
+            completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+            processedKitIds.add(asset.kit.id);
+          } else if (!asset.kit) {
+            standaloneAssets.push({ id: asset.id, title: asset.title });
+          }
+        }
+
+        // Build items description
+        const hasKits = completeKits.length > 0;
+        const hasAssets = standaloneAssets.length > 0;
+        let itemsDescription = "";
+
+        if (hasKits && hasAssets) {
+          const kitContent = wrapKitsWithDataForNote(
+            completeKits,
+            "checked in"
+          );
+          const assetContent = wrapAssetsWithDataForNote(
+            standaloneAssets,
+            "checked in"
+          );
+          itemsDescription = `${assetContent} and ${kitContent}`;
+        } else if (hasKits) {
+          itemsDescription = wrapKitsWithDataForNote(
+            completeKits,
+            "checked in"
+          );
+        } else if (hasAssets) {
+          itemsDescription = wrapAssetsWithDataForNote(
+            standaloneAssets,
+            "checked in"
+          );
+        }
+
+        // Create enhanced completion message
+        const fromStatusBadge = wrapBookingStatusForNote(
+          bookingFound.status,
+          updatedBooking.custodianUserId || undefined
+        );
+        const toStatusBadge = wrapBookingStatusForNote(
+          BookingStatus.COMPLETE,
+          updatedBooking.custodianUserId || undefined
+        );
+
+        await createSystemBookingNote({
+          bookingId: updatedBooking.id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+        });
+      } else {
+        console.log(
+          "DEBUG: checkinBooking - creating STANDARD completion message"
+        );
+        // Standard status transition note
+        await createStatusTransitionNote({
+          bookingId: updatedBooking.id,
+          fromStatus: bookingFound.status,
+          toStatus: BookingStatus.COMPLETE,
+          userId,
+          custodianUserId: updatedBooking.custodianUserId || undefined,
+        });
+      }
     }
 
     /**
@@ -1320,6 +1413,11 @@ export async function partialCheckinBooking({
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
 }) {
+  console.log(
+    "DEBUG: partialCheckinBooking called with",
+    assetIds.length,
+    "assets"
+  );
   try {
     const user = await getUserByID(userId);
     // First, validate the booking exists and get its current assets
@@ -1372,13 +1470,22 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
-      // Do complete check-in
-      return await checkinBooking({
+      // Do complete check-in with specific asset information for enhanced messaging
+      const completedBooking = await checkinBooking({
         id,
         organizationId,
         hints,
         intentChoice,
+        userId,
+        specificAssetIds: assetIds,
       });
+
+      return {
+        booking: completedBooking,
+        checkedInAssetCount: assetIds.length,
+        remainingAssetCount: 0,
+        isComplete: true,
+      };
     }
 
     // Validate that all provided assetIds are actually in the booking
@@ -1452,17 +1559,58 @@ export async function partialCheckinBooking({
       });
 
       // BOOKING ACTIVITY LOG: Log partial check-in activity
-      // This creates a system note (type: UPDATE) for the booking activity log
-      // Format follows markdown standards with bold text and booking links
-      await createSystemBookingNote({
-        bookingId: id,
-        content: `${wrapUserLinkForNote(
-          user!
-        )} partially checked in ${wrapAssetsForNote(assetIds, "checked in")}.`,
+      // Get the kit and standalone asset data for consistent formatting
+      const assetsWithKitInfo = await tx.asset.findMany({
+        where: { id: { in: assetIds } },
+        select: {
+          id: true,
+          title: true,
+          kit: { select: { id: true, name: true } },
+        },
       });
 
-      // Get the updated booking with all original assets
-      return tx.booking.findUniqueOrThrow({
+      // Separate complete kits from individual assets
+      const completeKits: Array<{ id: string; name: string }> = [];
+      const standaloneAssets: Array<{ id: string; title: string }> = [];
+      const processedKitIds = new Set<string>();
+
+      for (const asset of assetsWithKitInfo) {
+        if (
+          asset.kit &&
+          completeKitIds.includes(asset.kit.id) &&
+          !processedKitIds.has(asset.kit.id)
+        ) {
+          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+          processedKitIds.add(asset.kit.id);
+        } else if (!asset.kit) {
+          standaloneAssets.push({ id: asset.id, title: asset.title });
+        }
+      }
+
+      const hasKits = completeKits.length > 0;
+      const hasAssets = standaloneAssets.length > 0;
+
+      let itemsDescription = "";
+      if (hasKits && hasAssets) {
+        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
+        const assetContent = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked in"
+        );
+        itemsDescription = `${assetContent} and ${kitContent}`;
+      } else if (hasKits) {
+        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
+        itemsDescription = kitContent;
+      } else if (hasAssets) {
+        const assetContent = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked in"
+        );
+        itemsDescription = assetContent;
+      }
+
+      // Get the updated booking with all original assets first to calculate remaining count
+      const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
         where: { id },
         include: {
           assets: true,
@@ -1471,14 +1619,89 @@ export async function partialCheckinBooking({
           _count: { select: { assets: true } },
         },
       });
+
+      const remainingCount =
+        updatedBookingForNote.assets.length - assetIds.length;
+      const isCompletingBooking = remainingCount === 0;
+
+      console.log(
+        "DEBUG: partialCheckinBooking - remainingCount:",
+        remainingCount,
+        "isCompletingBooking:",
+        isCompletingBooking
+      );
+
+      if (isCompletingBooking) {
+        console.log(
+          "DEBUG: partialCheckinBooking - ENTERING completion branch"
+        );
+        try {
+          // Update booking status to COMPLETE
+          const completedBooking = await tx.booking.update({
+            where: { id },
+            data: { status: BookingStatus.COMPLETE },
+            include: {
+              assets: true,
+              custodianUser: true,
+              custodianTeamMember: true,
+              _count: { select: { assets: true } },
+            },
+          });
+
+          // Create combined completion message
+          const fromStatusBadge = wrapBookingStatusForNote(
+            updatedBookingForNote.status,
+            completedBooking.custodianUserId || undefined
+          );
+          const toStatusBadge = wrapBookingStatusForNote(
+            BookingStatus.COMPLETE,
+            completedBooking.custodianUserId || undefined
+          );
+
+          console.log(
+            "DEBUG: partialCheckinBooking - creating completion note"
+          );
+          await createSystemBookingNote({
+            bookingId: id,
+            content: `${wrapUserLinkForNote(
+              user!
+            )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          });
+
+          return {
+            booking: completedBooking,
+            checkedInAssetCount: assetIds.length,
+            remainingAssetCount: 0,
+            isComplete: true,
+          };
+        } catch (error) {
+          console.log(
+            "DEBUG: partialCheckinBooking - ERROR in completion branch:",
+            error
+          );
+          throw error;
+        }
+      } else {
+        // Regular partial check-in
+        const remainingText = ` (Remaining: ${remainingCount})`;
+
+        await createSystemBookingNote({
+          bookingId: id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
+        });
+
+        return {
+          booking: updatedBookingForNote,
+          checkedInAssetCount: assetIds.length,
+          remainingAssetCount: remainingCount,
+          isComplete: false,
+        };
+      }
     });
 
-    return {
-      booking: updatedBooking,
-      checkedInAssetCount: assetIds.length,
-      remainingAssetCount: updatedBooking.assets.length - assetIds.length,
-      isComplete: false,
-    };
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -3953,19 +4176,27 @@ export type PartialCheckinDetailsType = Record<
 >;
 
 export async function checkinAssets({
+  formData,
   request,
   bookingId,
   organizationId,
   userId,
   authSession,
 }: {
+  formData: FormData;
   request: Request;
   bookingId: string;
   organizationId: string;
   userId: string;
   authSession: AuthSession;
 }) {
-  const formData = await request.formData();
+  console.log(
+    "DEBUG: checkinAssets called with userId:",
+    userId,
+    "bookingId:",
+    bookingId
+  );
+
   const { assetIds, checkinIntentChoice, returnJson } = parseData(
     formData,
     partialCheckinAssetsSchema.extend({
@@ -3978,7 +4209,14 @@ export async function checkinAssets({
   );
   const hints = getClientHint(request);
 
-  await partialCheckinBooking({
+  console.log(
+    "DEBUG: checkinAssets - parsed assetIds:",
+    assetIds,
+    "checkinIntentChoice:",
+    checkinIntentChoice
+  );
+
+  const result = await partialCheckinBooking({
     id: bookingId,
     organizationId,
     assetIds,
@@ -3987,11 +4225,17 @@ export async function checkinAssets({
     intentChoice: checkinIntentChoice,
   });
 
+  const notificationMessage = result.isComplete
+    ? `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      } and completed the booking.`
+    : `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      } from booking.`;
+
   sendNotification({
-    title: "Assets checked in",
-    message: `Successfully checked in ${assetIds.length} asset${
-      assetIds.length > 1 ? "s" : ""
-    } from booking.`,
+    title: result.isComplete ? "Booking completed" : "Assets checked in",
+    message: notificationMessage,
     icon: { name: "success", variant: "success" },
     senderId: authSession.userId,
   });

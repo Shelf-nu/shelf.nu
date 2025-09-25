@@ -478,8 +478,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
+    const formData = await request.formData();
     const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
-      await request.clone().formData(),
+      formData,
       z.object({
         intent: z.enum([
           "save",
@@ -537,8 +538,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
-    // We get the form data again from the request, so it can be used within the switch statements below
-    const formData = await request.clone().formData();
+    // Form data is already extracted above and will be reused
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
       select: { id: true, status: true, from: true, to: true },
@@ -695,12 +695,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn":
+        // Extract specific asset IDs if provided (for enhanced completion messaging)
+        const specificAssetIds = formData.getAll(
+          "specificAssetIds[]"
+        ) as string[];
+
+        console.log(
+          "DEBUG: checkIn action - specificAssetIds:",
+          specificAssetIds
+        );
+
         const booking = await checkinBooking({
           id,
           organizationId,
           hints: getClientHint(request),
           intentChoice: checkinIntentChoice,
           userId: user.id,
+          specificAssetIds:
+            specificAssetIds.length > 0 ? specificAssetIds : undefined,
         });
 
         await createNotes({
@@ -724,11 +736,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       case "partial-checkin": {
         return await checkinAssets({
+          formData,
+          request,
           bookingId: id,
           organizationId,
           userId,
           authSession,
-          request: request.clone(),
         });
       }
       case "delete": {

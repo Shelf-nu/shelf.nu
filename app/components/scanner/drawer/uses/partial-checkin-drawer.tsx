@@ -685,6 +685,7 @@ const CustomForm = ({
             variant="default"
             disabled={isLoading || hasBlockers}
             portalContainer={formRef.current || undefined}
+            specificAssetIds={assetIdsForCheckin}
           />
         ) : (
           <Button

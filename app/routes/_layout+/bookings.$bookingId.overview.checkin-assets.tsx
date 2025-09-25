@@ -137,12 +137,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.checkin,
     });
+
+    const formData = await request.formData();
+
     return await checkinAssets({
+      formData,
+      request,
       bookingId,
       organizationId,
       userId,
       authSession,
-      request,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
