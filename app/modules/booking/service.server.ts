@@ -1249,14 +1249,7 @@ export async function checkinBooking({
 
     // Create status transition note
     if (userId) {
-      console.log(
-        "DEBUG: checkinBooking - creating status note, specificAssetIds:",
-        specificAssetIds
-      );
       if (specificAssetIds && specificAssetIds.length > 0) {
-        console.log(
-          "DEBUG: checkinBooking - creating ENHANCED completion message"
-        );
         // Create enhanced completion message with asset details
         const user = await getUserByID(userId);
 
@@ -1272,7 +1265,9 @@ export async function checkinBooking({
 
         // Separate complete kits from individual assets
         const kitIds = getKitIdsByAssets(
-          updatedBooking.assets.filter((a) => specificAssetIds.includes(a.id))
+          (updatedBooking.assets || []).filter(
+            (a) => specificAssetIds?.includes(a.id)
+          )
         );
         const completeKits: Array<{ id: string; name: string }> = [];
         const standaloneAssets: Array<{ id: string; title: string }> = [];
@@ -1335,9 +1330,6 @@ export async function checkinBooking({
           )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
       } else {
-        console.log(
-          "DEBUG: checkinBooking - creating STANDARD completion message"
-        );
         // Standard status transition note
         await createStatusTransitionNote({
           bookingId: updatedBooking.id,
@@ -1413,11 +1405,6 @@ export async function partialCheckinBooking({
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
 }) {
-  console.log(
-    "DEBUG: partialCheckinBooking called with",
-    assetIds.length,
-    "assets"
-  );
   try {
     const user = await getUserByID(userId);
     // First, validate the booking exists and get its current assets
@@ -1624,17 +1611,7 @@ export async function partialCheckinBooking({
         updatedBookingForNote.assets.length - assetIds.length;
       const isCompletingBooking = remainingCount === 0;
 
-      console.log(
-        "DEBUG: partialCheckinBooking - remainingCount:",
-        remainingCount,
-        "isCompletingBooking:",
-        isCompletingBooking
-      );
-
       if (isCompletingBooking) {
-        console.log(
-          "DEBUG: partialCheckinBooking - ENTERING completion branch"
-        );
         try {
           // Update booking status to COMPLETE
           const completedBooking = await tx.booking.update({
@@ -1658,9 +1635,6 @@ export async function partialCheckinBooking({
             completedBooking.custodianUserId || undefined
           );
 
-          console.log(
-            "DEBUG: partialCheckinBooking - creating completion note"
-          );
           await createSystemBookingNote({
             bookingId: id,
             content: `${wrapUserLinkForNote(
@@ -1675,10 +1649,6 @@ export async function partialCheckinBooking({
             isComplete: true,
           };
         } catch (error) {
-          console.log(
-            "DEBUG: partialCheckinBooking - ERROR in completion branch:",
-            error
-          );
           throw error;
         }
       } else {
@@ -4190,13 +4160,6 @@ export async function checkinAssets({
   userId: string;
   authSession: AuthSession;
 }) {
-  console.log(
-    "DEBUG: checkinAssets called with userId:",
-    userId,
-    "bookingId:",
-    bookingId
-  );
-
   const { assetIds, checkinIntentChoice, returnJson } = parseData(
     formData,
     partialCheckinAssetsSchema.extend({
@@ -4208,13 +4171,6 @@ export async function checkinAssets({
     })
   );
   const hints = getClientHint(request);
-
-  console.log(
-    "DEBUG: checkinAssets - parsed assetIds:",
-    assetIds,
-    "checkinIntentChoice:",
-    checkinIntentChoice
-  );
 
   const result = await partialCheckinBooking({
     id: bookingId,
