@@ -14,6 +14,7 @@ import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
 import { handleDetection, processFrame, updateCanvasSize } from "./utils";
@@ -27,7 +28,7 @@ import type { ActionType } from "./drawer/action-switcher";
 
 export type OnCodeDetectionSuccessProps = {
   value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
-  type?: "qr" | "barcode"; // Code type - optional for backward compatibility
+  type?: "qr" | "barcode" | "samId"; // Code type - optional for backward compatibility
   error?: string;
   barcodeType?: BarcodeType; // Specific barcode type when type is "barcode"
 };
@@ -38,6 +39,48 @@ export type OnCodeDetectionSuccess = ({
   error,
   barcodeType,
 }: OnCodeDetectionSuccessProps) => void | Promise<void>;
+
+type HandleScannerInputValueArgs = {
+  rawValue: string;
+  paused: boolean;
+  onCodeDetectionSuccess?: OnCodeDetectionSuccess;
+  allowNonShelfCodes: boolean;
+};
+
+export async function handleScannerInputValue({
+  rawValue,
+  paused,
+  onCodeDetectionSuccess,
+  allowNonShelfCodes,
+}: HandleScannerInputValueArgs) {
+  if (!rawValue) {
+    return false;
+  }
+
+  if (paused) {
+    return false;
+  }
+
+  const sequentialId = parseSequentialId(rawValue);
+
+  if (sequentialId) {
+    await onCodeDetectionSuccess?.({
+      value: sequentialId,
+      type: "samId",
+    });
+    return true;
+  }
+
+  const result = extractQrIdFromValue(rawValue);
+  await handleDetection({
+    result,
+    onCodeDetectionSuccess,
+    allowNonShelfCodes,
+    paused,
+  });
+
+  return true;
+}
 
 // Legacy type aliases for backward compatibility
 export type OnQrDetectionSuccessProps = OnCodeDetectionSuccessProps;
@@ -59,6 +102,9 @@ type CodeScannerProps = {
 
   /** Error message to show when scanner encounters an unsupported barcode */
   errorMessage?: string;
+
+  /** Custom title for the error overlay */
+  errorTitle?: string;
 
   /** Custom class for the scanner mode.
    * Can be a string or a function that receives the mode and returns a string
@@ -91,6 +137,7 @@ export const CodeScanner = ({
   setPaused,
   scanMessage,
   errorMessage,
+  errorTitle,
 
   scannerModeClassName,
   scannerModeCallback,
@@ -239,7 +286,9 @@ export const CodeScanner = ({
                   <span className="mb-5 size-14 text-primary">
                     <ErrorIcon />
                   </span>
-                  <h5 className="mb-2">Unsupported Barcode detected</h5>
+                  <h5 className="mb-2">
+                    {errorTitle || "Unsupported Barcode detected"}
+                  </h5>
                   <p className="mb-4 max-w-[300px] text-red-600">
                     {errorMessage}
                   </p>
@@ -301,14 +350,14 @@ function ScannerMode({
 
   const handleInputSubmit = useCallback(
     async (input: HTMLInputElement) => {
-      if (!input.value.trim()) return;
+      const rawValue = input.value.trim();
+      if (!rawValue) return;
 
-      const result = extractQrIdFromValue(input.value);
-      await handleDetection({
-        result,
+      await handleScannerInputValue({
+        rawValue,
+        paused,
         onCodeDetectionSuccess,
         allowNonShelfCodes,
-        paused,
       });
 
       // Run the callback if passed
