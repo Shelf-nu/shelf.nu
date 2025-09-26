@@ -6,6 +6,7 @@ import {
   wrapKitsWithDataForNote,
   wrapUserLinkForNote,
   wrapLinkForNote,
+  wrapCustodianForNote,
   extractDateTags,
   extractAssetsListTags,
   DATE_TAG_REGEX,
@@ -389,6 +390,70 @@ describe("wrapLinkForNote", () => {
     );
     expect(result).toBe(
       `{% link to="/settings/organization" text="Organization Settings" /%}`
+    );
+  });
+});
+
+describe("wrapCustodianForNote", () => {
+  it("should wrap custodian with user as link", () => {
+    const custodian = {
+      teamMember: {
+        name: "John's Team Member",
+        user: {
+          id: "user123",
+          firstName: "John",
+          lastName: "Doe",
+        },
+      },
+    };
+    const result = wrapCustodianForNote(custodian);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/user123" text="John Doe" /%}`
+    );
+  });
+
+  it("should wrap custodian without user as bold text", () => {
+    const custodian = {
+      teamMember: {
+        name: "External Team Member",
+        user: null,
+      },
+    };
+    const result = wrapCustodianForNote(custodian);
+    expect(result).toBe("**External Team Member**");
+  });
+
+  it("should handle custodian with user having only firstName", () => {
+    const custodian = {
+      teamMember: {
+        name: "Jane's Team Member",
+        user: {
+          id: "user456",
+          firstName: "Jane",
+          lastName: null,
+        },
+      },
+    };
+    const result = wrapCustodianForNote(custodian);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/user456" text="Jane" /%}`
+    );
+  });
+
+  it("should handle custodian with user having empty names", () => {
+    const custodian = {
+      teamMember: {
+        name: "Anonymous Team Member",
+        user: {
+          id: "user789",
+          firstName: "",
+          lastName: "",
+        },
+      },
+    };
+    const result = wrapCustodianForNote(custodian);
+    expect(result).toBe(
+      `{% link to="/settings/team/users/user789" text="Unknown User" /%}`
     );
   });
 });

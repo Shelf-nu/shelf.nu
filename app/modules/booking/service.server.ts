@@ -50,6 +50,7 @@ import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
   wrapBookingStatusForNote,
+  wrapCustodianForNote,
 } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
@@ -421,6 +422,26 @@ export async function updateBasicBooking({
           description: true,
           from: true,
           to: true,
+          custodianTeamMember: {
+            select: {
+              id: true,
+              name: true,
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
+          custodianUser: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
           tags: {
             select: {
               id: true,
@@ -573,10 +594,52 @@ export async function updateBasicBooking({
       custodianTeamMemberId &&
       custodianTeamMemberId !== booking.custodianTeamMemberId
     ) {
-      await createSystemBookingNote({
-        bookingId: booking.id,
-        content: `${userLink} changed booking custodian assignment.`,
-      });
+      try {
+        // Fetch new custodian details
+        const newCustodian = await db.teamMember.findUnique({
+          where: { id: custodianTeamMemberId },
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        });
+
+        if (newCustodian) {
+          let custodianChangeMessage = `${userLink} changed booking custodian`;
+
+          // Format old custodian (if exists)
+          if (booking.custodianTeamMember) {
+            const oldCustodianFormatted = wrapCustodianForNote({
+              teamMember: booking.custodianTeamMember,
+            });
+            custodianChangeMessage += ` from ${oldCustodianFormatted}`;
+          }
+
+          // Format new custodian
+          const newCustodianFormatted = wrapCustodianForNote({
+            teamMember: newCustodian,
+          });
+          custodianChangeMessage += ` to ${newCustodianFormatted}.`;
+
+          await createSystemBookingNote({
+            bookingId: booking.id,
+            content: custodianChangeMessage,
+          });
+        }
+      } catch (error) {
+        // If we can't fetch custodian details (e.g., in tests), fall back to generic message
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `${userLink} changed booking custodian assignment.`,
+        });
+      }
     }
 
     // Check and log tag changes

@@ -218,3 +218,37 @@ export function extractAssetsListTags(content: string): Array<{
     action: match[3],
   }));
 }
+
+/**
+ * Formats custodian information for booking notes with proper links or bold text
+ *
+ * @param custodian - Custodian object with team member and optional user info
+ * @returns Formatted string for use in booking notes
+ *
+ * If custodian has a user: "{% link to="/settings/team/users/123" text="John Doe" /%}"
+ * If custodian is team member only: "**Team Member Name**"
+ */
+export function wrapCustodianForNote(custodian: {
+  teamMember: {
+    name: string;
+    user?: {
+      id: string;
+      firstName?: string | null;
+      lastName?: string | null;
+    } | null;
+  };
+}): string {
+  const { teamMember } = custodian;
+
+  if (teamMember.user) {
+    // Custodian has a user account, create a link
+    return wrapUserLinkForNote({
+      id: teamMember.user.id,
+      firstName: teamMember.user.firstName,
+      lastName: teamMember.user.lastName,
+    });
+  } else {
+    // Team member without user account, use bold text
+    return `**${teamMember.name}**`;
+  }
+}
