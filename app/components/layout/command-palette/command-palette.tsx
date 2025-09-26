@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SerializeFrom } from "@remix-run/node";
-import { useFetcher, useNavigate, useRouteLoaderData } from "@remix-run/react";
+import { useNavigate, useRouteLoaderData } from "@remix-run/react";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
   CompassIcon,
   FilePlus2Icon,
   LayoutDashboardIcon,
+  MapPinIcon,
+  PackageIcon,
   SearchIcon,
   SettingsIcon,
+  UserIcon,
   UserPlus2Icon,
 } from "lucide-react";
 
@@ -22,6 +25,7 @@ import {
   CommandShortcut,
 } from "~/components/shared/command";
 import { Spinner } from "~/components/shared/spinner";
+import useApiQuery from "~/hooks/use-api-query";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
@@ -33,6 +37,10 @@ const SEARCH_DEBOUNCE_MS = 300;
 export type CommandPaletteSearchResponse = DataOrErrorResponse<{
   query: string;
   assets: AssetSearchResult[];
+  kits: KitSearchResult[];
+  bookings: BookingSearchResult[];
+  locations: LocationSearchResult[];
+  teamMembers: TeamMemberSearchResult[];
 }>;
 
 export type AssetSearchResult = {
@@ -42,6 +50,40 @@ export type AssetSearchResult = {
   mainImage: string | null;
   mainImageExpiration: string | null;
   locationName: string | null;
+};
+
+export type KitSearchResult = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  assetCount: number;
+};
+
+export type BookingSearchResult = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  custodianName: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+export type LocationSearchResult = {
+  id: string;
+  name: string;
+  description: string | null;
+  address: string | null;
+  assetCount: number;
+};
+
+export type TeamMemberSearchResult = {
+  id: string;
+  name: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
 };
 
 type QuickCommand = {
@@ -168,35 +210,50 @@ export function getAssetCommandValue(asset: AssetSearchResult) {
   return [`asset-${asset.id}`, ...searchableFields].join(" ").trim();
 }
 
-export function shouldApplyAssetResults({
-  currentQuery,
-  currentDebouncedQuery,
-  latestRequestedQuery,
-  responseQuery,
-}: {
-  currentQuery: string;
-  currentDebouncedQuery: string;
-  latestRequestedQuery: string | null;
-  responseQuery: string | null;
-}) {
-  if (!currentQuery && !currentDebouncedQuery) {
-    return false;
-  }
+export function getKitCommandValue(kit: KitSearchResult) {
+  const searchableFields = [kit.name, kit.description ?? "", kit.id].filter(
+    Boolean
+  );
 
-  if (
-    latestRequestedQuery &&
-    responseQuery &&
-    latestRequestedQuery !== responseQuery
-  ) {
-    return false;
-  }
+  return [`kit-${kit.id}`, ...searchableFields].join(" ").trim();
+}
 
-  return true;
+export function getBookingCommandValue(booking: BookingSearchResult) {
+  const searchableFields = [
+    booking.name,
+    booking.description ?? "",
+    booking.custodianName ?? "",
+    booking.id,
+  ].filter(Boolean);
+
+  return [`booking-${booking.id}`, ...searchableFields].join(" ").trim();
+}
+
+export function getLocationCommandValue(location: LocationSearchResult) {
+  const searchableFields = [
+    location.name,
+    location.description ?? "",
+    location.address ?? "",
+    location.id,
+  ].filter(Boolean);
+
+  return [`location-${location.id}`, ...searchableFields].join(" ").trim();
+}
+
+export function getTeamMemberCommandValue(member: TeamMemberSearchResult) {
+  const searchableFields = [
+    member.name,
+    member.email ?? "",
+    member.firstName ?? "",
+    member.lastName ?? "",
+    member.id,
+  ].filter(Boolean);
+
+  return [`member-${member.id}`, ...searchableFields].join(" ").trim();
 }
 
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
-  const fetcher = useFetcher<CommandPaletteSearchResponse>();
   const navigate = useNavigate();
   const layoutData = useRouteLoaderData<SerializeFrom<LayoutLoaderResponse>>(
     "routes/_layout+/_layout"
@@ -204,8 +261,21 @@ export function CommandPalette() {
 
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [assetResults, setAssetResults] = useState<AssetSearchResult[]>([]);
-  const lastRequestedQueryRef = useRef<string | null>(null);
+
+  const searchParams = useMemo(() => {
+    if (!debouncedQuery) return undefined;
+    return new URLSearchParams({ q: debouncedQuery });
+  }, [debouncedQuery]);
+
+  const {
+    data: searchData,
+    isLoading,
+    error: fetchError,
+  } = useApiQuery<CommandPaletteSearchResponse>({
+    api: "/api/command-palette/search",
+    searchParams,
+    enabled: open && Boolean(debouncedQuery),
+  });
 
   const canInviteUsers = useMemo(() => {
     const roles = layoutData?.currentOrganizationUserRoles ?? [];
@@ -242,8 +312,6 @@ export function CommandPalette() {
     if (!open) {
       setQuery("");
       setDebouncedQuery("");
-      setAssetResults([]);
-      lastRequestedQueryRef.current = null;
     }
   }, [open]);
 
@@ -258,48 +326,6 @@ export function CommandPalette() {
 
     return () => window.clearTimeout(timeout);
   }, [query, open]);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    if (!debouncedQuery) {
-      setAssetResults([]);
-      lastRequestedQueryRef.current = null;
-      return;
-    }
-
-    const searchParams = new URLSearchParams({ q: debouncedQuery });
-    lastRequestedQueryRef.current = debouncedQuery;
-    fetcher.load(`/api/command-palette/search?${searchParams.toString()}`);
-  }, [debouncedQuery, fetcher, open]);
-
-  useEffect(() => {
-    if (!fetcher.data) {
-      return;
-    }
-
-    if ("assets" in fetcher.data && Array.isArray(fetcher.data.assets)) {
-      const responseQuery =
-        typeof fetcher.data.query === "string" ? fetcher.data.query : null;
-
-      if (
-        !shouldApplyAssetResults({
-          currentQuery: query,
-          currentDebouncedQuery: debouncedQuery,
-          latestRequestedQuery: lastRequestedQueryRef.current,
-          responseQuery,
-        })
-      ) {
-        return;
-      }
-
-      setAssetResults(fetcher.data.assets);
-    } else if (fetcher.data.error) {
-      setAssetResults([]);
-    }
-  }, [debouncedQuery, fetcher.data, query]);
 
   const navigationResults = useMemo(() => {
     if (!query) {
@@ -337,29 +363,48 @@ export function CommandPalette() {
     return fuse.search(query).map((result) => result.item);
   }, [availableActions, query]);
 
-  const assetMatches = useMemo(() => {
-    if (!assetResults.length) {
+  const assetResults = useMemo(() => {
+    if (!searchData || searchData.error) {
       return [];
     }
+    return searchData.assets || [];
+  }, [searchData]);
 
-    if (!query) {
-      return assetResults.slice(0, ASSET_RESULTS_LIMIT);
+  const kitResults = useMemo(() => {
+    if (!searchData || searchData.error) {
+      return [];
     }
+    return searchData.kits || [];
+  }, [searchData]);
 
-    const fuse = new Fuse(assetResults, {
-      keys: ["title", "sequentialId", "id", "locationName"],
-      threshold: 0.35,
-      ignoreLocation: true,
-    });
+  const bookingResults = useMemo(() => {
+    if (!searchData || searchData.error) {
+      return [];
+    }
+    return searchData.bookings || [];
+  }, [searchData]);
 
-    return fuse
-      .search(query)
-      .slice(0, ASSET_RESULTS_LIMIT)
-      .map((result) => result.item);
-  }, [assetResults, query]);
+  const locationResults = useMemo(() => {
+    if (!searchData || searchData.error) {
+      return [];
+    }
+    return searchData.locations || [];
+  }, [searchData]);
 
-  const isSearching = fetcher.state === "loading";
-  const fetchError = fetcher.data?.error;
+  const teamMemberResults = useMemo(() => {
+    if (!searchData || searchData.error) {
+      return [];
+    }
+    return searchData.teamMembers || [];
+  }, [searchData]);
+
+  const assetMatches = useMemo(
+    () => assetResults.slice(0, ASSET_RESULTS_LIMIT),
+    [assetResults]
+  );
+
+  const isSearching = isLoading;
+  const errorMessage = fetchError || searchData?.error?.message;
 
   const shortcutLabel = useMemo(() => getShortcutLabel(), []);
 
@@ -373,8 +418,9 @@ export function CommandPalette() {
       <CommandInput
         value={query}
         onValueChange={setQuery}
-        placeholder="Search assets or type a command..."
+        placeholder="Search assets, kits, bookings, locations, team members..."
         autoFocus
+        className="my-4 rounded border-gray-100"
       />
       <CommandList className="divide-y divide-gray-100">
         <CommandEmpty>
@@ -382,9 +428,9 @@ export function CommandPalette() {
             <span className="flex items-center gap-2 text-gray-500">
               <Spinner className="size-4" /> Searching...
             </span>
-          ) : fetchError ? (
+          ) : errorMessage ? (
             <span className="text-error-600">
-              {fetchError.message || "Something went wrong"}
+              {errorMessage || "Something went wrong"}
             </span>
           ) : (
             "No results found"
@@ -415,6 +461,111 @@ export function CommandPalette() {
                   <span className="truncate text-xs text-gray-500">
                     {asset.sequentialId || asset.id}
                     {asset.locationName ? ` • ${asset.locationName}` : ""}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+
+        {kitResults.length > 0 ? (
+          <CommandGroup heading="Kits">
+            {kitResults.map((kit) => (
+              <CommandItem
+                key={kit.id}
+                value={getKitCommandValue(kit)}
+                onSelect={() => handleSelect(`/kits/${kit.id}`)}
+                className="gap-3"
+              >
+                <PackageIcon className="size-4 text-gray-500" />
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium text-gray-900">
+                    {kit.name}
+                  </span>
+                  <span className="truncate text-xs text-gray-500">
+                    {kit.status} • {kit.assetCount} assets
+                    {kit.description ? ` • ${kit.description}` : ""}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+
+        {bookingResults.length > 0 ? (
+          <CommandGroup heading="Bookings">
+            {bookingResults.map((booking) => (
+              <CommandItem
+                key={booking.id}
+                value={getBookingCommandValue(booking)}
+                onSelect={() => handleSelect(`/bookings/${booking.id}`)}
+                className="gap-3"
+              >
+                <CalendarIcon className="size-4 text-gray-500" />
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium text-gray-900">
+                    {booking.name}
+                  </span>
+                  <span className="truncate text-xs text-gray-500">
+                    {booking.status}
+                    {booking.custodianName ? ` • ${booking.custodianName}` : ""}
+                    {booking.from && booking.to
+                      ? ` • ${new Date(
+                          booking.from
+                        ).toLocaleDateString()} - ${new Date(
+                          booking.to
+                        ).toLocaleDateString()}`
+                      : ""}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+
+        {locationResults.length > 0 ? (
+          <CommandGroup heading="Locations">
+            {locationResults.map((location) => (
+              <CommandItem
+                key={location.id}
+                value={getLocationCommandValue(location)}
+                onSelect={() => handleSelect(`/locations/${location.id}`)}
+                className="gap-3"
+              >
+                <MapPinIcon className="size-4 text-gray-500" />
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium text-gray-900">
+                    {location.name}
+                  </span>
+                  <span className="truncate text-xs text-gray-500">
+                    {location.assetCount} assets
+                    {location.address ? ` • ${location.address}` : ""}
+                    {location.description ? ` • ${location.description}` : ""}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+
+        {teamMemberResults.length > 0 ? (
+          <CommandGroup heading="Team Members">
+            {teamMemberResults.map((member) => (
+              <CommandItem
+                key={member.id}
+                value={getTeamMemberCommandValue(member)}
+                onSelect={() =>
+                  handleSelect(`/settings/team/members/${member.id}`)
+                }
+                className="gap-3"
+              >
+                <UserIcon className="size-4 text-gray-500" />
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium text-gray-900">
+                    {member.name}
+                  </span>
+                  <span className="truncate text-xs text-gray-500">
+                    {member.email || "No email"}
                   </span>
                 </div>
               </CommandItem>
@@ -488,7 +639,7 @@ export function CommandPalette() {
       <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
         <div className="flex items-center gap-2">
           <SearchIcon className="size-4" />
-          Use keywords, asset IDs, serials, or locations
+          Search across all assets, kits, bookings, locations, and team members
         </div>
         <CommandShortcut className={tw("bg-white")}>
           {shortcutLabel}

@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   getAssetCommandValue,
-  shouldApplyAssetResults,
+  getBookingCommandValue,
+  getKitCommandValue,
+  getLocationCommandValue,
+  getTeamMemberCommandValue,
   type AssetSearchResult,
+  type BookingSearchResult,
+  type KitSearchResult,
+  type LocationSearchResult,
+  type TeamMemberSearchResult,
 } from "./command-palette";
 
 describe("getAssetCommandValue", () => {
@@ -38,35 +45,128 @@ describe("getAssetCommandValue", () => {
   });
 });
 
-describe("shouldApplyAssetResults", () => {
-  const baseParams = {
-    currentQuery: "cam",
-    currentDebouncedQuery: "cam",
-    latestRequestedQuery: "cam",
-    responseQuery: "cam",
+describe("getKitCommandValue", () => {
+  const baseKit: KitSearchResult = {
+    id: "kit-456",
+    name: "Camera Kit",
+    description: "Professional camera equipment",
+    status: "AVAILABLE",
+    assetCount: 5,
   };
 
-  it("returns false when the input has been cleared", () => {
-    expect(
-      shouldApplyAssetResults({
-        ...baseParams,
-        currentQuery: "",
-        currentDebouncedQuery: "",
-      })
-    ).toBe(false);
+  it("includes the primary searchable fields", () => {
+    const value = getKitCommandValue(baseKit);
+
+    expect(value).toContain("kit-456");
+    expect(value).toContain("Camera Kit");
+    expect(value).toContain("Professional camera equipment");
   });
 
-  it("returns false for stale responses", () => {
-    expect(
-      shouldApplyAssetResults({
-        ...baseParams,
-        latestRequestedQuery: "camera",
-        responseQuery: "cam",
-      })
-    ).toBe(false);
+  it("falls back gracefully when optional fields are missing", () => {
+    const value = getKitCommandValue({
+      ...baseKit,
+      description: null,
+    });
+
+    expect(value).toContain("kit-456");
+    expect(value).toContain("Camera Kit");
+    expect(value).not.toContain("null");
+  });
+});
+
+describe("getBookingCommandValue", () => {
+  const baseBooking: BookingSearchResult = {
+    id: "booking-789",
+    name: "Photo Shoot",
+    description: "Wedding photography session",
+    status: "RESERVED",
+    custodianName: "John Doe",
+    from: "2024-01-15T10:00:00Z",
+    to: "2024-01-15T18:00:00Z",
+  };
+
+  it("includes the primary searchable fields", () => {
+    const value = getBookingCommandValue(baseBooking);
+
+    expect(value).toContain("booking-789");
+    expect(value).toContain("Photo Shoot");
+    expect(value).toContain("Wedding photography session");
+    expect(value).toContain("John Doe");
   });
 
-  it("returns true for the latest matching response", () => {
-    expect(shouldApplyAssetResults(baseParams)).toBe(true);
+  it("falls back gracefully when optional fields are missing", () => {
+    const value = getBookingCommandValue({
+      ...baseBooking,
+      description: null,
+      custodianName: null,
+    });
+
+    expect(value).toContain("booking-789");
+    expect(value).toContain("Photo Shoot");
+    expect(value).not.toContain("null");
+  });
+});
+
+describe("getLocationCommandValue", () => {
+  const baseLocation: LocationSearchResult = {
+    id: "location-101",
+    name: "Main Studio",
+    description: "Primary photography studio",
+    address: "123 Main St, City",
+    assetCount: 12,
+  };
+
+  it("includes the primary searchable fields", () => {
+    const value = getLocationCommandValue(baseLocation);
+
+    expect(value).toContain("location-101");
+    expect(value).toContain("Main Studio");
+    expect(value).toContain("Primary photography studio");
+    expect(value).toContain("123 Main St, City");
+  });
+
+  it("falls back gracefully when optional fields are missing", () => {
+    const value = getLocationCommandValue({
+      ...baseLocation,
+      description: null,
+      address: null,
+    });
+
+    expect(value).toContain("location-101");
+    expect(value).toContain("Main Studio");
+    expect(value).not.toContain("null");
+  });
+});
+
+describe("getTeamMemberCommandValue", () => {
+  const baseMember: TeamMemberSearchResult = {
+    id: "member-202",
+    name: "Jane Smith",
+    email: "jane@example.com",
+    firstName: "Jane",
+    lastName: "Smith",
+  };
+
+  it("includes the primary searchable fields", () => {
+    const value = getTeamMemberCommandValue(baseMember);
+
+    expect(value).toContain("member-202");
+    expect(value).toContain("Jane Smith");
+    expect(value).toContain("jane@example.com");
+    expect(value).toContain("Jane");
+    expect(value).toContain("Smith");
+  });
+
+  it("falls back gracefully when optional fields are missing", () => {
+    const value = getTeamMemberCommandValue({
+      ...baseMember,
+      email: null,
+      firstName: null,
+      lastName: null,
+    });
+
+    expect(value).toContain("member-202");
+    expect(value).toContain("Jane Smith");
+    expect(value).not.toContain("null");
   });
 });
