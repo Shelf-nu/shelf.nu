@@ -163,6 +163,7 @@ describe("markdoc.config", () => {
         "kits_list",
         "link",
         "booking_status",
+        "description",
       ];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
@@ -178,6 +179,7 @@ describe("markdoc.config", () => {
         "kits_list",
         "link",
         "booking_status",
+        "description",
       ];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
@@ -213,6 +215,12 @@ describe("markdoc.config", () => {
       expect(
         (markdocConfig.tags as any).booking_status.attributes.custodianUserId
           .type
+      ).toBe(String);
+      expect(
+        (markdocConfig.tags as any).description.attributes.oldText.type
+      ).toBe(String);
+      expect(
+        (markdocConfig.tags as any).description.attributes.newText.type
       ).toBe(String);
 
       // Check that all boolean attributes use Boolean constructor

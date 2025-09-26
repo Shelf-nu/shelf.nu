@@ -51,6 +51,7 @@ import {
   wrapUserLinkForNote,
   wrapBookingStatusForNote,
   wrapCustodianForNote,
+  wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
@@ -563,9 +564,12 @@ export async function updateBasicBooking({
     if (description !== undefined && description !== booking.description) {
       const oldDesc = booking.description || "(empty)";
       const newDesc = description || "(empty)";
+
+      const descriptionChange = wrapDescriptionForNote(oldDesc, newDesc);
+
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking description from **${oldDesc}** to **${newDesc}**.`,
+        content: `${userLink} changed booking description from ${descriptionChange}.`,
       });
     }
 

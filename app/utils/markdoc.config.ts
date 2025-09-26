@@ -10,6 +10,7 @@ import type { Config } from "@markdoc/markdoc";
  * - kits_list tag: Renders interactive kit count with popover showing kit details
  * - link tag: Renders consistent links that open in new tabs
  * - booking_status tag: Renders booking status badges with consistent styling
+ * - description tag: Renders truncated descriptions with popover for full text
  */
 
 export const markdocConfig: Config = {
@@ -110,6 +111,24 @@ export const markdocConfig: Config = {
           type: String,
           required: false,
           description: "Optional custodian user ID for extra tooltip info",
+        },
+      },
+      selfClosing: true,
+    },
+    description: {
+      render: "DescriptionComponent",
+      description:
+        "Renders truncated descriptions with popover showing full text on click",
+      attributes: {
+        oldText: {
+          type: String,
+          required: false,
+          description: "The previous description text",
+        },
+        newText: {
+          type: String,
+          required: false,
+          description: "The new description text",
         },
       },
       selfClosing: true,

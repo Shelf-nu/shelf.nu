@@ -7,6 +7,7 @@ import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
 import { BookingStatusComponent } from "./booking-status-component";
 import { DateComponent } from "./date-component";
+import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
 
@@ -32,6 +33,7 @@ const defaultComponents = {
   KitsListComponent,
   LinkComponent,
   BookingStatusComponent,
+  DescriptionComponent,
 };
 
 export const MarkdownViewer = ({

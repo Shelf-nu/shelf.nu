@@ -7,6 +7,7 @@ import {
   wrapUserLinkForNote,
   wrapLinkForNote,
   wrapCustodianForNote,
+  wrapDescriptionForNote,
   extractDateTags,
   extractAssetsListTags,
   DATE_TAG_REGEX,
@@ -454,6 +455,91 @@ describe("wrapCustodianForNote", () => {
     const result = wrapCustodianForNote(custodian);
     expect(result).toBe(
       `{% link to="/settings/team/users/user789" text="Unknown User" /%}`
+    );
+  });
+});
+
+describe("wrapDescriptionForNote", () => {
+  it("should wrap single new description", () => {
+    const result = wrapDescriptionForNote(null, "This is a new description");
+    expect(result).toBe(
+      `{% description newText="This is a new description" /%}`
+    );
+  });
+
+  it("should wrap single old description", () => {
+    const result = wrapDescriptionForNote("This is an old description", null);
+    expect(result).toBe(
+      `{% description oldText="This is an old description" /%}`
+    );
+  });
+
+  it("should wrap both old and new descriptions for changes", () => {
+    const result = wrapDescriptionForNote(
+      "Old description text",
+      "New description text"
+    );
+    expect(result).toBe(
+      `{% description oldText="Old description text" newText="New description text" /%}`
+    );
+  });
+
+  it("should handle descriptions with quotes by escaping them", () => {
+    const oldText = 'Description with "quotes" in it';
+    const newText = 'Another "quoted" description';
+    const result = wrapDescriptionForNote(oldText, newText);
+    expect(result).toBe(
+      `{% description oldText="Description with &quot;quotes&quot; in it" newText="Another &quot;quoted&quot; description" /%}`
+    );
+  });
+
+  it("should handle empty strings as falsy values", () => {
+    const result = wrapDescriptionForNote("", "");
+    expect(result).toBe(`{% description /%}`);
+  });
+
+  it("should handle non-empty strings properly", () => {
+    const result = wrapDescriptionForNote("old", "new");
+    expect(result).toBe(`{% description oldText="old" newText="new" /%}`);
+  });
+
+  it("should handle undefined values gracefully", () => {
+    const result = wrapDescriptionForNote(undefined, undefined);
+    expect(result).toBe(`{% description /%}`);
+  });
+
+  it("should handle mixed undefined and string values", () => {
+    const result1 = wrapDescriptionForNote("Some text", undefined);
+    expect(result1).toBe(`{% description oldText="Some text" /%}`);
+
+    const result2 = wrapDescriptionForNote(undefined, "New text");
+    expect(result2).toBe(`{% description newText="New text" /%}`);
+  });
+
+  it("should handle long descriptions", () => {
+    const longText =
+      "This is a very long description that goes on and on and on and contains multiple sentences with lots of detail about the booking and what it includes and excludes.";
+    const result = wrapDescriptionForNote(null, longText);
+    expect(result).toBe(
+      `{% description newText="This is a very long description that goes on and on and on and contains multiple sentences with lots of detail about the booking and what it includes and excludes." /%}`
+    );
+  });
+
+  it("should handle descriptions with special characters", () => {
+    const textWithSpecial =
+      "Description with émojis 🚀 and spëcial chars & symbols < > /";
+    const result = wrapDescriptionForNote(textWithSpecial, null);
+    expect(result).toBe(
+      `{% description oldText="Description with émojis 🚀 and spëcial chars & symbols < > /" /%}`
+    );
+  });
+
+  it("should handle newlines and multiple quotes", () => {
+    const textWithNewlines =
+      'Multi-line\ndescription with\n"multiple" "quotes"';
+    const result = wrapDescriptionForNote(null, textWithNewlines);
+    expect(result).toBe(
+      `{% description newText="Multi-line\ndescription with\n&quot;multiple&quot; &quot;quotes&quot;" /%}`
     );
   });
 });

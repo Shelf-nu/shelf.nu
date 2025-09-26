@@ -252,3 +252,30 @@ export function wrapCustodianForNote(custodian: {
     return `**${teamMember.name}**`;
   }
 }
+
+/**
+ * Wraps description text in Markdoc description tag syntax for truncation and popover display
+ *
+ * @param oldText - The previous description text (optional)
+ * @param newText - The new description text (optional)
+ * @returns String with description wrapped in Markdoc tag syntax
+ *
+ * Examples:
+ * - Single description: wrapDescriptionForNote(undefined, "New description")
+ *   -> "{% description newText=\"New description\" /%}"
+ * - Description change: wrapDescriptionForNote("Old description", "New description")
+ *   -> "{% description oldText=\"Old description\" newText=\"New description\" /%}"
+ */
+export function wrapDescriptionForNote(
+  oldText?: string | null,
+  newText?: string | null
+): string {
+  const oldAttr = oldText
+    ? ` oldText="${oldText.replace(/"/g, "&quot;")}"`
+    : "";
+  const newAttr = newText
+    ? ` newText="${newText.replace(/"/g, "&quot;")}"`
+    : "";
+
+  return `{% description${oldAttr}${newAttr} /%}`;
+}
