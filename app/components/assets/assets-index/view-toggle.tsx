@@ -23,7 +23,7 @@ export function AvailabilityViewToggle({
           variant="secondary"
           className={tw(
             "px-[14px]  hover:cursor-pointer",
-            "font-normal text-gray-500",
+            "font-normal text-gray-600", // Changed from text-gray-500 to text-gray-600 for better contrast
             !isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
@@ -38,13 +38,14 @@ export function AvailabilityViewToggle({
           }}
           title="Switch to list view"
           tooltip="List view"
+          aria-label="Switch to list view"
           icon="sort"
         />
         <Button
           variant="secondary"
           className={tw(
             "px-[14px] hover:cursor-pointer",
-            "font-normal text-gray-500",
+            "font-normal text-gray-600", // Changed from text-gray-500 to text-gray-600 for better contrast
             isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
@@ -59,6 +60,7 @@ export function AvailabilityViewToggle({
           }}
           title={"Switch to availability view"}
           tooltip="Availability view"
+          aria-label="Switch to availability view"
         >
           <CalendarIcon className="size-5" />
         </Button>

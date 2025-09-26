@@ -220,7 +220,7 @@ export function ValueField({
                 <TooltipProvider delayDuration={100}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-700">
+                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-600 hover:text-gray-700"> {/* Improved contrast from text-gray-400 to text-gray-600 */}
                         <HelpIcon />
                       </i>
                     </TooltipTrigger>
