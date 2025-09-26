@@ -31,7 +31,13 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import {
+  resolveAssetIdFromSamId,
+  type ResolveAssetIdFromSamIdOptions,
+} from "./scanner-sam-id";
 import type { AllowedModelNames } from "../api+/model-filters";
+
+const DEFAULT_ERROR_TITLE = "Unsupported Barcode detected";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -124,6 +130,7 @@ const QRScanner = () => {
     "Processing QR code..."
   );
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [errorTitle, setErrorTitle] = useState<string | undefined>(undefined);
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false);
@@ -156,6 +163,7 @@ const QRScanner = () => {
         // Clear error message when unpausing (for "Continue Scanning" button)
         if (!value) {
           setErrorMessage(undefined);
+          setErrorTitle(undefined);
           setScanMessage("Processing QR code...");
         }
       }
@@ -177,6 +185,7 @@ const QRScanner = () => {
         // Handle error case (unsupported barcode type)
         if (error) {
           handleSetPaused(true);
+          setErrorTitle(DEFAULT_ERROR_TITLE);
           setErrorMessage(error);
           setScanMessage(""); // Clear scan message for error state
           return;
@@ -185,14 +194,45 @@ const QRScanner = () => {
         isNavigating.current = true;
         handleSetPaused(true);
         setErrorMessage(undefined); // Clear any previous errors
+        setErrorTitle(undefined);
         setScanMessage("Redirecting to mapped asset...");
 
         // Navigate to appropriate route based on code type
         if (type === "barcode") {
           navigate(`/barcode/${encodeURIComponent(value)}`);
-        } else {
-          navigate(`/qr/${value}`);
+          return;
         }
+
+        if (type === "samId") {
+          setScanMessage("Looking up asset...");
+
+          const options: ResolveAssetIdFromSamIdOptions = {
+            samId: value,
+            fetcher: fetch,
+          };
+
+          void resolveAssetIdFromSamId(options)
+            .then((assetId) => {
+              setScanMessage("Redirecting to mapped asset...");
+              navigate(`/assets/${assetId}`);
+            })
+            .catch((samError) => {
+              const reason = makeShelfError(
+                samError,
+                { samId: value, source: "scanner-samId" },
+                false
+              );
+
+              setErrorTitle(reason.title || "SAM ID lookup failed");
+              setErrorMessage(reason.message);
+              setScanMessage("");
+              isNavigating.current = false;
+            });
+
+          return;
+        }
+
+        navigate(`/qr/${value}`);
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction
@@ -201,7 +241,7 @@ const QRScanner = () => {
         addItem(value, error, type);
       }
     },
-    [addItem, navigate, handleSetPaused] // action is not a dependency since we use the ref
+    [addItem, navigate, handleSetPaused]
   );
 
   return (
@@ -217,6 +257,7 @@ const QRScanner = () => {
           setPaused={handleSetPaused}
           scanMessage={scanMessage}
           errorMessage={errorMessage}
+          errorTitle={errorTitle}
           actionSwitcher={<ActionSwitcher />}
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")

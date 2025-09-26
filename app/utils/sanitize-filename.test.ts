@@ -96,7 +96,7 @@ describe("sanitizeFilename", () => {
     test("handles multiple malicious characters in extension", () => {
       const result = sanitizeFilename('document.pdf";\\/malicious');
       expect(result).toBe("document.pdfmalicious");
-      expect(result).not.toMatch(/[";\\\/]/);
+      expect(result).not.toMatch(/[";\\/]/);
     });
   });
 });
