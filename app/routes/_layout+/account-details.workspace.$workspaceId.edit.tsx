@@ -1,9 +1,4 @@
-import {
-  Currency,
-  OrganizationRoles,
-  OrganizationType,
-  QrIdDisplayPreference,
-} from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
   json,
   MaxPartSizeExceededError,
