@@ -14,9 +14,9 @@ describe("resolveAssetIdFromSamId", () => {
       json: vi.fn().mockResolvedValue(SUCCESS_RESPONSE),
     } as unknown as Response);
 
-    await expect(resolveAssetIdFromSamId({ samId: "SAM-0001", fetcher })).resolves.toBe(
-      "asset-123"
-    );
+    await expect(
+      resolveAssetIdFromSamId({ samId: "SAM-0001", fetcher })
+    ).resolves.toBe("asset-123");
 
     expect(fetcher).toHaveBeenCalledWith("/api/get-scanned-item/SAM-0001");
   });

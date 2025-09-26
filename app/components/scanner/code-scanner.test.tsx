@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CodeScanner, handleScannerInputValue } from "~/components/scanner/code-scanner";
+import {
+  CodeScanner,
+  handleScannerInputValue,
+} from "~/components/scanner/code-scanner";
 import { handleDetection } from "~/components/scanner/utils";
 
 vi.mock("react-webcam", () => ({

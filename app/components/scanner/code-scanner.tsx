@@ -47,6 +47,16 @@ type HandleScannerInputValueArgs = {
   allowNonShelfCodes: boolean;
 };
 
+/**
+ * Handles the input value from the scanner mode.
+ * If the value is a sequential ID, it triggers the onCodeDetectionSuccess callback directly.
+ * If it's a QR code or barcode, it uses handleDetection to process it.
+ * @param rawValue - The raw input value from the scanner
+ * @param paused - Whether the scanner is currently paused
+ * @param onCodeDetectionSuccess - Callback to trigger on successful code detection
+ * @param allowNonShelfCodes - Whether to allow non-shelf codes (barcodes not in the Shelf system)
+ * @returns true if a value was processed, false otherwise
+ */
 export async function handleScannerInputValue({
   rawValue,
   paused,
