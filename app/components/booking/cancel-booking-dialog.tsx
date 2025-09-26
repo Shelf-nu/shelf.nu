@@ -1,8 +1,6 @@
-import { useSubmit } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -13,6 +11,7 @@ import {
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
+import { Form } from "../custom-form";
 import { AlertIcon } from "../icons/library";
 
 type CancelBookingDialogProps = {
@@ -20,23 +19,16 @@ type CancelBookingDialogProps = {
 };
 
 export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
-  const submit = useSubmit();
   const disabled = useDisabled();
-
-  function handleConfirm() {
-    const formData = new FormData();
-    formData.append("intent", "cancel");
-    submit(formData, { method: "post" });
-  }
 
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
+          type="button"
           variant="link"
           className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
           width="full"
-          as="span"
         >
           Cancel
         </Button>
@@ -63,18 +55,18 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
               </Button>
             </AlertDialogCancel>
 
-            <AlertDialogAction asChild>
+            <Form method="post">
+              <input type="hidden" name="intent" value="cancel" />
               <Button
-                type="button"
+                type="submit"
                 className={tw(
                   "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 )}
-                onClick={handleConfirm}
                 disabled={disabled}
               >
                 Cancel booking
               </Button>
-            </AlertDialogAction>
+            </Form>
           </div>
         </AlertDialogFooter>
       </AlertDialogContent>
