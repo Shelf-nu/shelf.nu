@@ -14,6 +14,7 @@ import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
 import { handleDetection, processFrame, updateCanvasSize } from "./utils";
@@ -27,7 +28,7 @@ import type { ActionType } from "./drawer/action-switcher";
 
 export type OnCodeDetectionSuccessProps = {
   value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
-  type?: "qr" | "barcode"; // Code type - optional for backward compatibility
+  type?: "qr" | "barcode" | "samId"; // Code type - optional for backward compatibility
   error?: string;
   barcodeType?: BarcodeType; // Specific barcode type when type is "barcode"
 };
@@ -301,15 +302,25 @@ function ScannerMode({
 
   const handleInputSubmit = useCallback(
     async (input: HTMLInputElement) => {
-      if (!input.value.trim()) return;
+      const rawValue = input.value.trim();
+      if (!rawValue) return;
 
-      const result = extractQrIdFromValue(input.value);
-      await handleDetection({
-        result,
-        onCodeDetectionSuccess,
-        allowNonShelfCodes,
-        paused,
-      });
+      const sequentialId = parseSequentialId(rawValue);
+
+      if (sequentialId) {
+        await onCodeDetectionSuccess?.({
+          value: sequentialId,
+          type: "samId",
+        });
+      } else {
+        const result = extractQrIdFromValue(rawValue);
+        await handleDetection({
+          result,
+          onCodeDetectionSuccess,
+          allowNonShelfCodes,
+          paused,
+        });
+      }
 
       // Run the callback if passed
       if (callback) {

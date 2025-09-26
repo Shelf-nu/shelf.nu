@@ -165,7 +165,7 @@ const QRScanner = () => {
 
   // Define the handler using useCallback to prevent recreating it on every render
   const handleCodeDetectionSuccess = useCallback(
-    ({ value, error, type }: OnCodeDetectionSuccessProps) => {
+    async ({ value, error, type }: OnCodeDetectionSuccessProps) => {
       // IMPORTANT: Always use the current value from the ref
       const currentAction = actionRef.current;
 
@@ -190,9 +190,46 @@ const QRScanner = () => {
         // Navigate to appropriate route based on code type
         if (type === "barcode") {
           navigate(`/barcode/${encodeURIComponent(value)}`);
-        } else {
-          navigate(`/qr/${value}`);
+          return;
         }
+
+        if (type === "samId") {
+          try {
+            setScanMessage("Looking up asset...");
+            const response = await fetch(
+              `/api/get-scanned-item/${encodeURIComponent(value)}`
+            );
+            const payload = await response.json();
+
+            if (!response.ok || payload?.error) {
+              throw new Error(
+                payload?.error?.message ||
+                  "Unable to find an asset for that SAM ID."
+              );
+            }
+
+            const assetId: string | undefined = payload?.qr?.asset?.id;
+
+            if (!assetId) {
+              throw new Error("Asset not found for that SAM ID.");
+            }
+
+            setScanMessage("Redirecting to mapped asset...");
+            navigate(`/assets/${assetId}`);
+          } catch (samError) {
+            const message =
+              samError instanceof Error
+                ? samError.message
+                : "Unable to find an asset for that SAM ID.";
+            setErrorMessage(message);
+            setScanMessage("");
+            isNavigating.current = false;
+          }
+
+          return;
+        }
+
+        navigate(`/qr/${value}`);
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction

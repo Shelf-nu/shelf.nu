@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -25,6 +26,7 @@ import {
   KIT_INCLUDE,
   QR_INCLUDE,
 } from "~/utils/scanner-includes.server";
+import { parseSequentialId } from "~/utils/sequential-id";
 
 // Re-export types for backward compatibility
 export type AssetFromQr = AssetFromScanner;
@@ -80,17 +82,52 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude: Prisma.KitInclude | undefined;
     };
 
+    const assetInclude: Prisma.AssetInclude = {
+      ...ASSET_INCLUDE,
+      ...(assetExtraInclude ?? {}),
+    };
+
+    const kitInclude: Prisma.KitInclude = {
+      ...KIT_INCLUDE,
+      ...(kitExtraInclude ?? {}),
+    };
+
+    const sequentialId = parseSequentialId(qrId);
+
+    if (sequentialId) {
+      const asset = await db.asset.findFirst({
+        where: {
+          organizationId,
+          sequentialId,
+        },
+        include: assetInclude,
+      });
+
+      if (!asset) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This SAM ID doesn't exist or it doesn't belong to your current organization.",
+          additionalData: { sequentialId, shouldSendNotification: false },
+          label: "Scan",
+          shouldBeCaptured: false,
+        });
+      }
+
+      return json(
+        data({
+          qr: {
+            type: "asset" as const,
+            asset,
+          },
+        })
+      );
+    }
+
     const include = {
       ...QR_INCLUDE,
-
-      // Include additional data based on search params. This will override the default includes
-      ...(assetExtraInclude
-        ? { asset: { include: { ...ASSET_INCLUDE, ...assetExtraInclude } } }
-        : undefined),
-
-      ...(kitExtraInclude
-        ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
-        : undefined),
+      asset: { include: assetInclude },
+      kit: { include: kitInclude },
     };
 
     const qr = await getQr({
