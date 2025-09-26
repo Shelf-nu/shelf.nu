@@ -23,7 +23,7 @@ export function AvailabilityViewToggle({
           variant="secondary"
           className={tw(
             "px-[14px]  hover:cursor-pointer",
-            "font-normal text-gray-600", // Changed from text-gray-500 to text-gray-600 for better contrast
+            "font-normal text-gray-600",
             !isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}
@@ -45,7 +45,7 @@ export function AvailabilityViewToggle({
           variant="secondary"
           className={tw(
             "px-[14px] hover:cursor-pointer",
-            "font-normal text-gray-600", // Changed from text-gray-500 to text-gray-600 for better contrast
+            "font-normal text-gray-600",
             isAvailabilityView ? disabledButtonStyles : "",
             modeIsSimple ? "py-[10px]" : ""
           )}

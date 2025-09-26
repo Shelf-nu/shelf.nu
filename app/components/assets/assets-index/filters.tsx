@@ -74,12 +74,12 @@ export function AssetIndexFilters({
                 as="button"
                 onClick={clearFilters}
                 variant="link"
-                className="block min-w-28 max-w-none font-normal text-gray-600 hover:text-gray-700" // Improved contrast from text-gray-500
+                className="block min-w-28 max-w-none font-normal text-gray-600 hover:text-gray-700"
                 type="button"
               >
                 Clear all filters
               </Button>
-              <div className="text-gray-600"> | </div> {/* Improved contrast from text-gray-500 */}
+              <div className="text-gray-600"> | </div>
             </div>
           ) : null}
           <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
