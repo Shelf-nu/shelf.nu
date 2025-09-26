@@ -44,7 +44,6 @@ import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapDateForNote,
-  wrapAssetsForNote,
   wrapKitsForNote,
   wrapKitsWithDataForNote,
   wrapAssetsWithDataForNote,
@@ -1806,23 +1805,27 @@ export async function updateBookingAssets({
     // Creates user-attributed note when assets are added to a booking
     // Skip note creation if kits are involved - kit notes are created separately
     if (!kitIds || kitIds.length === 0) {
+      // Fetch asset data to use proper wrapper for single assets
+      const assets = await db.asset.findMany({
+        where: { id: { in: assetIds }, organizationId },
+        select: { id: true, title: true },
+      });
+
+      const assetContent = wrapAssetsWithDataForNote(assets, "added");
+
       if (userId) {
         const user = await getUserByID(userId);
         await createSystemBookingNote({
           bookingId: booking.id,
-          content: `${wrapUserLinkForNote(user!)} added ${wrapAssetsForNote(
-            assetIds,
-            "added"
-          )} to the booking.`,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} added ${assetContent} to the booking.`,
         });
       } else {
         // Fallback for backward compatibility when userId is not provided
         await createSystemBookingNote({
           bookingId: booking.id,
-          content: `${wrapAssetsForNote(
-            assetIds,
-            "added"
-          )} added to the booking.`,
+          content: `${assetContent} added to the booking.`,
         });
       }
     }
@@ -2797,10 +2800,7 @@ export async function removeAssets({
           ? wrapKitsWithDataForNote(kits, "removed")
           : wrapKitsForNote(kitIds, "removed");
 
-      const assetContent =
-        assets.length > 0
-          ? wrapAssetsWithDataForNote(assets, "removed")
-          : wrapAssetsForNote(assetIds, "removed");
+      const assetContent = wrapAssetsWithDataForNote(assets, "removed");
 
       await createSystemBookingNote({
         bookingId: booking.id,
@@ -2823,10 +2823,7 @@ export async function removeAssets({
       });
     } else if (hasAssets) {
       // Only assets removed
-      const assetContent =
-        assets.length > 0
-          ? wrapAssetsWithDataForNote(assets, "removed")
-          : wrapAssetsForNote(assetIds, "removed");
+      const assetContent = wrapAssetsWithDataForNote(assets, "removed");
 
       await createSystemBookingNote({
         bookingId: booking.id,

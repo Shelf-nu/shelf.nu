@@ -1,6 +1,5 @@
 import {
   wrapDateForNote,
-  wrapAssetsForNote,
   wrapKitsForNote,
   wrapAssetsWithDataForNote,
   wrapKitsWithDataForNote,
@@ -40,42 +39,6 @@ describe("markdoc-wrappers", () => {
       const result = wrapDateForNote(date, true);
 
       expect(result).toBe('{% date value="2023-12-25T10:30:00.000Z" /%}');
-    });
-  });
-
-  describe("wrapAssetsForNote", () => {
-    it("should wrap single asset ID", () => {
-      const assetIds = ["asset-1"];
-      const result = wrapAssetsForNote(assetIds, "added");
-
-      expect(result).toBe(
-        '{% assets_list count=1 ids="asset-1" action="added" /%}'
-      );
-    });
-
-    it("should wrap multiple asset IDs", () => {
-      const assetIds = ["asset-1", "asset-2", "asset-3"];
-      const result = wrapAssetsForNote(assetIds, "removed");
-
-      expect(result).toBe(
-        '{% assets_list count=3 ids="asset-1,asset-2,asset-3" action="removed" /%}'
-      );
-    });
-
-    it("should default action to 'added'", () => {
-      const assetIds = ["asset-1"];
-      const result = wrapAssetsForNote(assetIds);
-
-      expect(result).toBe(
-        '{% assets_list count=1 ids="asset-1" action="added" /%}'
-      );
-    });
-
-    it("should handle empty array", () => {
-      const assetIds: string[] = [];
-      const result = wrapAssetsForNote(assetIds, "added");
-
-      expect(result).toBe('{% assets_list count=0 ids="" action="added" /%}');
     });
   });
 

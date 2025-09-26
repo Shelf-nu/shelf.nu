@@ -43,23 +43,31 @@ export function extractDateTags(content: string): string[] {
 }
 
 /**
- * Wraps asset information in Markdoc assets_list tag syntax for interactive display
+ * Wraps asset information with actual asset data (preferred method)
  *
- * @param assetIds - Array of asset IDs or single asset ID
+ * @param assets - Array of asset objects with id and title, or single asset object
  * @param action - Action performed on the assets (e.g., "added", "removed")
- * @returns String with assets wrapped in Markdoc tag syntax
+ * @returns String with appropriate format based on count
  *
- * Example: wrapAssetsForNote(["id1", "id2"], "added") -> "{% assets_list count=2 ids=\"id1,id2\" action=\"added\" /%}"
+ * For single asset: Direct link with title (e.g., "Canon Camera")
+ * For multiple assets: Interactive component with popover (e.g., "3 assets")
  */
-export function wrapAssetsForNote(
-  assetIds: string[] | string,
+export function wrapAssetsWithDataForNote(
+  assets: Array<{ id: string; title: string }> | { id: string; title: string },
   action: string = "added"
 ): string {
-  const ids = Array.isArray(assetIds) ? assetIds : [assetIds];
-  const count = ids.length;
-  const idsString = ids.join(",");
+  const assetArray = Array.isArray(assets) ? assets : [assets];
+  const count = assetArray.length;
 
-  return `{% assets_list count=${count} ids="${idsString}" action="${action}" /%}`;
+  if (count === 1) {
+    // For single asset, use link tag to ensure proper styling and new tab behavior
+    const asset = assetArray[0];
+    return `{% link to="/assets/${asset.id}" text="${asset.title}" /%}`;
+  } else {
+    // For multiple assets, use interactive component
+    const idsString = assetArray.map((a) => a.id).join(",");
+    return `{% assets_list count=${count} ids="${idsString}" action="${action}" /%}`;
+  }
 }
 
 /**
@@ -107,34 +115,6 @@ export function wrapKitsWithDataForNote(
     // For multiple kits, use interactive component
     const idsString = kitArray.map((k) => k.id).join(",");
     return `{% kits_list count=${count} ids="${idsString}" action="${action}" /%}`;
-  }
-}
-
-/**
- * Wraps asset information with actual asset data to avoid loading flash for single items
- *
- * @param assets - Array of asset objects with id and title, or single asset object
- * @param action - Action performed on the assets (e.g., "added", "removed")
- * @returns String with appropriate format based on count
- *
- * For single asset: Direct link with title
- * For multiple assets: Interactive component with popover
- */
-export function wrapAssetsWithDataForNote(
-  assets: Array<{ id: string; title: string }> | { id: string; title: string },
-  action: string = "added"
-): string {
-  const assetArray = Array.isArray(assets) ? assets : [assets];
-  const count = assetArray.length;
-
-  if (count === 1) {
-    // For single asset, use link tag to ensure proper styling and new tab behavior
-    const asset = assetArray[0];
-    return `{% link to="/assets/${asset.id}" text="${asset.title}" /%}`;
-  } else {
-    // For multiple assets, use interactive component
-    const idsString = assetArray.map((a) => a.id).join(",");
-    return `{% assets_list count=${count} ids="${idsString}" action="${action}" /%}`;
   }
 }
 
