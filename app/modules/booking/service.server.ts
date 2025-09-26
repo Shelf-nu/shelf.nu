@@ -42,6 +42,16 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { data, getCurrentSearchParams, parseData } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapDateForNote,
+  wrapKitsForNote,
+  wrapKitsWithDataForNote,
+  wrapAssetsWithDataForNote,
+  wrapUserLinkForNote,
+  wrapBookingStatusForNote,
+  wrapCustodianForNote,
+  wrapDescriptionForNote,
+} from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
 import {
@@ -75,6 +85,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
@@ -97,6 +108,107 @@ async function cancelScheduler(
         label,
       })
     );
+  }
+}
+
+/**
+ * Creates a consistent status transition note for booking activity logs
+ *
+ * @param bookingId - The booking ID to add the note to
+ * @param fromStatus - The previous booking status
+ * @param toStatus - The new booking status
+ * @param userId - ID of the user who performed the action (if manual)
+ * @param action - Optional custom action description (e.g., "checked-out", "checked-in")
+ * @param custodianUserId - Optional custodian user ID for status badge extra info
+ */
+export async function createStatusTransitionNote({
+  bookingId,
+  fromStatus,
+  toStatus,
+  userId,
+  action,
+  custodianUserId,
+}: {
+  bookingId: string;
+  fromStatus: BookingStatus;
+  toStatus: BookingStatus;
+  userId?: string;
+  action?: string;
+  custodianUserId?: string;
+}) {
+  const fromStatusBadge = wrapBookingStatusForNote(fromStatus, custodianUserId);
+  const toStatusBadge = wrapBookingStatusForNote(toStatus, custodianUserId);
+
+  let content: string;
+
+  if (userId) {
+    // User-initiated transition
+    const user = await getUserByID(userId);
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+
+    const actionText =
+      action || getActionTextFromTransition(fromStatus, toStatus);
+    content = `${userLink} ${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+  } else {
+    // System-initiated transition
+    const actionText = getSystemActionText(fromStatus, toStatus);
+    content = `${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+  }
+
+  await createSystemBookingNote({
+    bookingId,
+    content,
+  });
+}
+
+/**
+ * Gets appropriate action text for user-initiated status transitions
+ */
+export function getActionTextFromTransition(
+  from: BookingStatus,
+  to: BookingStatus
+): string {
+  const transition = `${from}->${to}`;
+
+  switch (transition) {
+    case "DRAFT->RESERVED":
+      return "reserved the booking";
+    case "RESERVED->DRAFT":
+      return "reverted booking to draft";
+    case "RESERVED->CANCELLED":
+    case "ONGOING->CANCELLED":
+    case "OVERDUE->CANCELLED":
+      return "cancelled the booking";
+    case "RESERVED->ONGOING":
+      return "checked-out the booking";
+    case "ONGOING->COMPLETE":
+    case "OVERDUE->COMPLETE":
+      return "checked-in the booking";
+    case "COMPLETE->ARCHIVED":
+      return "archived the booking";
+    default:
+      return "changed the booking status";
+  }
+}
+
+/**
+ * Gets appropriate action text for system-initiated status transitions
+ */
+export function getSystemActionText(
+  from: BookingStatus,
+  to: BookingStatus
+): string {
+  const transition = `${from}->${to}`;
+
+  switch (transition) {
+    case "ONGOING->OVERDUE":
+      return "Booking became overdue";
+    default:
+      return "Booking status changed";
   }
 }
 
@@ -279,6 +391,7 @@ export async function updateBasicBooking({
   description,
   organizationId,
   tags,
+  userId,
 }: Partial<
   Pick<
     Booking,
@@ -294,6 +407,7 @@ export async function updateBasicBooking({
 > &
   Pick<Booking, "id" | "organizationId"> & {
     tags: { id: string }[];
+    userId?: User["id"];
   }) {
   try {
     const booking = await db.booking
@@ -303,6 +417,37 @@ export async function updateBasicBooking({
           id: true,
           status: true,
           custodianUserId: true,
+          custodianTeamMemberId: true,
+          name: true,
+          description: true,
+          from: true,
+          to: true,
+          custodianTeamMember: {
+            select: {
+              id: true,
+              name: true,
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
+          custodianUser: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          tags: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -394,10 +539,135 @@ export async function updateBasicBooking({
       }
     }
 
-    return await db.booking.update({
+    const updatedBooking = await db.booking.update({
       where: { id: booking.id },
       data: dataToUpdate,
     });
+
+    // BOOKING ACTIVITY LOG: Create separate notes for each change
+    // This approach creates individual notes for each field change with proper user attribution
+
+    // Get user data for attribution if userId is provided
+    const user = userId ? await getUserByID(userId) : null;
+    const userLink = user ? wrapUserLinkForNote(user) : "**System**";
+
+    // Check and log name changes
+    if (name && name !== booking.name) {
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
+      });
+    }
+
+    // Check and log description changes
+    if (description !== undefined && description !== booking.description) {
+      const oldDesc = booking.description || "(empty)";
+      const newDesc = description || "(empty)";
+
+      const descriptionChange = wrapDescriptionForNote(oldDesc, newDesc);
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking description from ${descriptionChange}.`,
+      });
+    }
+
+    // Check and log start date changes
+    if (from && booking.from && from.getTime() !== booking.from.getTime()) {
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking start date from **${wrapDateForNote(
+          booking.from
+        )}** to **${wrapDateForNote(from)}**.`,
+      });
+    }
+
+    // Check and log end date changes
+    if (to && booking.to && to.getTime() !== booking.to.getTime()) {
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking end date from **${wrapDateForNote(
+          booking.to
+        )}** to **${wrapDateForNote(to)}**.`,
+      });
+    }
+
+    // Check and log custodian changes
+    if (
+      custodianTeamMemberId &&
+      custodianTeamMemberId !== booking.custodianTeamMemberId
+    ) {
+      try {
+        // Fetch new custodian details
+        const newCustodian = await db.teamMember.findUnique({
+          where: { id: custodianTeamMemberId },
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        });
+
+        if (newCustodian) {
+          let custodianChangeMessage = `${userLink} changed booking custodian`;
+
+          // Format old custodian (if exists)
+          if (booking.custodianTeamMember) {
+            const oldCustodianFormatted = wrapCustodianForNote({
+              teamMember: booking.custodianTeamMember,
+            });
+            custodianChangeMessage += ` from ${oldCustodianFormatted}`;
+          }
+
+          // Format new custodian
+          const newCustodianFormatted = wrapCustodianForNote({
+            teamMember: newCustodian,
+          });
+          custodianChangeMessage += ` to ${newCustodianFormatted}.`;
+
+          await createSystemBookingNote({
+            bookingId: booking.id,
+            content: custodianChangeMessage,
+          });
+        }
+      } catch (error) {
+        // If we can't fetch custodian details (e.g., in tests), fall back to generic message
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `${userLink} changed booking custodian assignment.`,
+        });
+      }
+    }
+
+    // Check and log tag changes
+    const oldTagIds = booking.tags.map((tag) => tag.id).sort();
+    const newTagIds = tags.map((tag) => tag.id).sort();
+
+    if (JSON.stringify(oldTagIds) !== JSON.stringify(newTagIds)) {
+      // Get tag names for better readability
+      const oldTagNames =
+        booking.tags.map((tag) => tag.name).join(", ") || "(none)";
+
+      // Get new tag names - we need to fetch them since we only have IDs
+      const newTags = await db.tag.findMany({
+        where: { id: { in: newTagIds } },
+        select: { name: true },
+      });
+      const newTagNames = newTags.map((tag) => tag.name).join(", ") || "(none)";
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
+      });
+    }
+
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -425,6 +695,7 @@ export async function reserveBooking({
   hints,
   isSelfServiceOrBase,
   tags,
+  userId,
 }: Partial<
   Pick<
     Booking,
@@ -442,6 +713,7 @@ export async function reserveBooking({
     hints: ClientHint;
     isSelfServiceOrBase: boolean;
     tags: { id: string }[];
+    userId?: User["id"];
   }) {
   try {
     const bookingFound = await db.booking
@@ -668,6 +940,15 @@ export async function reserveBooking({
       });
     }
 
+    // Add activity log for status change to RESERVED
+    await createStatusTransitionNote({
+      bookingId: updatedBooking.id,
+      fromStatus: bookingFound.status,
+      toStatus: updatedBooking.status,
+      userId,
+      custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
+
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
@@ -687,11 +968,13 @@ export async function checkoutBooking({
   hints,
   from,
   to,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
   from?: Date | null;
   to?: Date | null;
+  userId?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -809,6 +1092,17 @@ export async function checkoutBooking({
       });
     });
 
+    // Create status transition note
+    if (userId) {
+      await createStatusTransitionNote({
+        bookingId: updatedBooking.id,
+        fromStatus: BookingStatus.RESERVED,
+        toStatus: updatedBooking.status,
+        userId,
+        custodianUserId: updatedBooking.custodianUserId || undefined,
+      });
+    }
+
     /** Calculate the time difference between the booking.to and the current time */
     const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
     const lessThanOneHourToCheckin = hours < 1;
@@ -881,9 +1175,13 @@ export async function checkinBooking({
   organizationId,
   hints,
   intentChoice,
+  userId,
+  specificAssetIds,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
+  userId?: string;
+  specificAssetIds?: string[];
 }) {
   try {
     const bookingFound = await db.booking
@@ -1015,6 +1313,100 @@ export async function checkinBooking({
       });
     });
 
+    // Create status transition note
+    if (userId) {
+      if (specificAssetIds && specificAssetIds.length > 0) {
+        // Create enhanced completion message with asset details
+        const user = await getUserByID(userId);
+
+        // Get asset and kit data for consistent formatting
+        const assetsWithKitInfo = await db.asset.findMany({
+          where: { id: { in: specificAssetIds } },
+          select: {
+            id: true,
+            title: true,
+            kit: { select: { id: true, name: true } },
+          },
+        });
+
+        // Separate complete kits from individual assets
+        const kitIds = getKitIdsByAssets(
+          (updatedBooking.assets || []).filter(
+            (a) => specificAssetIds?.includes(a.id)
+          )
+        );
+        const completeKits: Array<{ id: string; name: string }> = [];
+        const standaloneAssets: Array<{ id: string; title: string }> = [];
+        const processedKitIds = new Set<string>();
+
+        for (const asset of assetsWithKitInfo) {
+          if (
+            asset.kit &&
+            kitIds.includes(asset.kit.id) &&
+            !processedKitIds.has(asset.kit.id)
+          ) {
+            completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+            processedKitIds.add(asset.kit.id);
+          } else if (!asset.kit) {
+            standaloneAssets.push({ id: asset.id, title: asset.title });
+          }
+        }
+
+        // Build items description
+        const hasKits = completeKits.length > 0;
+        const hasAssets = standaloneAssets.length > 0;
+        let itemsDescription = "";
+
+        if (hasKits && hasAssets) {
+          const kitContent = wrapKitsWithDataForNote(
+            completeKits,
+            "checked in"
+          );
+          const assetContent = wrapAssetsWithDataForNote(
+            standaloneAssets,
+            "checked in"
+          );
+          itemsDescription = `${assetContent} and ${kitContent}`;
+        } else if (hasKits) {
+          itemsDescription = wrapKitsWithDataForNote(
+            completeKits,
+            "checked in"
+          );
+        } else if (hasAssets) {
+          itemsDescription = wrapAssetsWithDataForNote(
+            standaloneAssets,
+            "checked in"
+          );
+        }
+
+        // Create enhanced completion message
+        const fromStatusBadge = wrapBookingStatusForNote(
+          bookingFound.status,
+          updatedBooking.custodianUserId || undefined
+        );
+        const toStatusBadge = wrapBookingStatusForNote(
+          BookingStatus.COMPLETE,
+          updatedBooking.custodianUserId || undefined
+        );
+
+        await createSystemBookingNote({
+          bookingId: updatedBooking.id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+        });
+      } else {
+        // Standard status transition note
+        await createStatusTransitionNote({
+          bookingId: updatedBooking.id,
+          fromStatus: bookingFound.status,
+          toStatus: BookingStatus.COMPLETE,
+          userId,
+          custodianUserId: updatedBooking.custodianUserId || undefined,
+        });
+      }
+    }
+
     /**
      * At this point when user is checking in the booking,
      * we just have to cancel all active scheduler (if there is any).
@@ -1123,9 +1515,7 @@ export async function partialCheckinBooking({
       // Creating the record here would cause checkinBooking to filter out the current assets
 
       // Create notes before complete check-in since this was initiated as explicit check-in
-      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via explicit check-in scanner for booking **[${
-        bookingFound.name
-      }](/bookings/${id})**. All assets were scanned, so complete check-in was performed.`;
+      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1133,13 +1523,22 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
-      // Do complete check-in
-      return await checkinBooking({
+      // Do complete check-in with specific asset information for enhanced messaging
+      const completedBooking = await checkinBooking({
         id,
         organizationId,
         hints,
         intentChoice,
+        userId,
+        specificAssetIds: assetIds,
       });
+
+      return {
+        booking: completedBooking,
+        checkedInAssetCount: assetIds.length,
+        remainingAssetCount: 0,
+        isComplete: true,
+      };
     }
 
     // Validate that all provided assetIds are actually in the booking
@@ -1204,9 +1603,7 @@ export async function partialCheckinBooking({
       });
 
       // Create audit notes for each checked-in asset using createNotes
-      const noteContent = `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in via partial check-in for booking **[${
-        bookingFound.name
-      }](/bookings/${bookingFound.id})**.`;
+      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via partial check-in.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1214,8 +1611,59 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
-      // Get the updated booking with all original assets
-      return tx.booking.findUniqueOrThrow({
+      // BOOKING ACTIVITY LOG: Log partial check-in activity
+      // Get the kit and standalone asset data for consistent formatting
+      const assetsWithKitInfo = await tx.asset.findMany({
+        where: { id: { in: assetIds } },
+        select: {
+          id: true,
+          title: true,
+          kit: { select: { id: true, name: true } },
+        },
+      });
+
+      // Separate complete kits from individual assets
+      const completeKits: Array<{ id: string; name: string }> = [];
+      const standaloneAssets: Array<{ id: string; title: string }> = [];
+      const processedKitIds = new Set<string>();
+
+      for (const asset of assetsWithKitInfo) {
+        if (
+          asset.kit &&
+          completeKitIds.includes(asset.kit.id) &&
+          !processedKitIds.has(asset.kit.id)
+        ) {
+          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+          processedKitIds.add(asset.kit.id);
+        } else if (!asset.kit) {
+          standaloneAssets.push({ id: asset.id, title: asset.title });
+        }
+      }
+
+      const hasKits = completeKits.length > 0;
+      const hasAssets = standaloneAssets.length > 0;
+
+      let itemsDescription = "";
+      if (hasKits && hasAssets) {
+        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
+        const assetContent = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked in"
+        );
+        itemsDescription = `${assetContent} and ${kitContent}`;
+      } else if (hasKits) {
+        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
+        itemsDescription = kitContent;
+      } else if (hasAssets) {
+        const assetContent = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked in"
+        );
+        itemsDescription = assetContent;
+      }
+
+      // Get the updated booking with all original assets first to calculate remaining count
+      const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
         where: { id },
         include: {
           assets: true,
@@ -1224,14 +1672,72 @@ export async function partialCheckinBooking({
           _count: { select: { assets: true } },
         },
       });
+
+      const remainingCount =
+        updatedBookingForNote.assets.length - assetIds.length;
+      const isCompletingBooking = remainingCount === 0;
+
+      if (isCompletingBooking) {
+        try {
+          // Update booking status to COMPLETE
+          const completedBooking = await tx.booking.update({
+            where: { id },
+            data: { status: BookingStatus.COMPLETE },
+            include: {
+              assets: true,
+              custodianUser: true,
+              custodianTeamMember: true,
+              _count: { select: { assets: true } },
+            },
+          });
+
+          // Create combined completion message
+          const fromStatusBadge = wrapBookingStatusForNote(
+            updatedBookingForNote.status,
+            completedBooking.custodianUserId || undefined
+          );
+          const toStatusBadge = wrapBookingStatusForNote(
+            BookingStatus.COMPLETE,
+            completedBooking.custodianUserId || undefined
+          );
+
+          await createSystemBookingNote({
+            bookingId: id,
+            content: `${wrapUserLinkForNote(
+              user!
+            )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          });
+
+          return {
+            booking: completedBooking,
+            checkedInAssetCount: assetIds.length,
+            remainingAssetCount: 0,
+            isComplete: true,
+          };
+        } catch (error) {
+          throw error;
+        }
+      } else {
+        // Regular partial check-in
+        const remainingText = ` (Remaining: ${remainingCount})`;
+
+        await createSystemBookingNote({
+          bookingId: id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
+        });
+
+        return {
+          booking: updatedBookingForNote,
+          checkedInAssetCount: assetIds.length,
+          remainingAssetCount: remainingCount,
+          isComplete: false,
+        };
+      }
     });
 
-    return {
-      booking: updatedBooking,
-      checkedInAssetCount: assetIds.length,
-      remainingAssetCount: updatedBooking.assets.length - assetIds.length,
-      isComplete: false,
-    };
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1248,9 +1754,11 @@ export async function updateBookingAssets({
   organizationId,
   assetIds,
   kitIds,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
   kitIds?: Kit["id"][];
+  userId?: User["id"];
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
@@ -1293,6 +1801,35 @@ export async function updateBookingAssets({
       return b;
     });
 
+    // BOOKING ACTIVITY LOG: Log asset addition activity
+    // Creates user-attributed note when assets are added to a booking
+    // Skip note creation if kits are involved - kit notes are created separately
+    if (!kitIds || kitIds.length === 0) {
+      // Fetch asset data to use proper wrapper for single assets
+      const assets = await db.asset.findMany({
+        where: { id: { in: assetIds }, organizationId },
+        select: { id: true, title: true },
+      });
+
+      const assetContent = wrapAssetsWithDataForNote(assets, "added");
+
+      if (userId) {
+        const user = await getUserByID(userId);
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} added ${assetContent} to the booking.`,
+        });
+      } else {
+        // Fallback for backward compatibility when userId is not provided
+        await createSystemBookingNote({
+          bookingId: booking.id,
+          content: `${assetContent} added to the booking.`,
+        });
+      }
+    }
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -1305,10 +1842,47 @@ export async function updateBookingAssets({
   }
 }
 
+export async function createKitBookingNote({
+  bookingId,
+  kitIds,
+  kits = [],
+  userId,
+  action = "added",
+}: {
+  bookingId: string;
+  kitIds: string[];
+  kits?: Array<{ id: string; name: string }>;
+  userId?: string;
+  action?: string;
+}) {
+  const kitContent =
+    kits.length > 0
+      ? wrapKitsWithDataForNote(kits, action)
+      : wrapKitsForNote(kitIds, action);
+
+  if (userId) {
+    const user = await getUserByID(userId);
+    await createSystemBookingNote({
+      bookingId,
+      content: `${wrapUserLinkForNote(
+        user!
+      )} ${action} ${kitContent} to the booking.`,
+    });
+  } else {
+    await createSystemBookingNote({
+      bookingId,
+      content: `${kitContent} ${action} to the booking.`,
+    });
+  }
+}
+
 export async function archiveBooking({
   id,
   organizationId,
-}: Pick<Booking, "id" | "organizationId">) {
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  userId?: string;
+}) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -1334,10 +1908,21 @@ export async function archiveBooking({
       });
     }
 
-    return await db.booking.update({
+    const updatedBooking = await db.booking.update({
       where: { id: booking.id },
       data: { status: BookingStatus.ARCHIVED },
     });
+
+    // Add activity log for booking archival
+    await createStatusTransitionNote({
+      bookingId: updatedBooking.id,
+      fromStatus: booking.status,
+      toStatus: BookingStatus.ARCHIVED,
+      userId,
+      custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
+
+    return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1353,8 +1938,10 @@ export async function cancelBooking({
   id,
   organizationId,
   hints,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
+  userId?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -1451,6 +2038,15 @@ export async function cancelBooking({
       });
     }
 
+    // Add activity log for booking cancellation
+    await createStatusTransitionNote({
+      bookingId: booking.id,
+      fromStatus: bookingFound.status,
+      toStatus: BookingStatus.CANCELLED,
+      userId,
+      custodianUserId: booking.custodianUserId || undefined,
+    });
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -1466,7 +2062,10 @@ export async function cancelBooking({
 export async function revertBookingToDraft({
   id,
   organizationId,
-}: Pick<Booking, "id" | "organizationId">) {
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  userId?: User["id"];
+}) {
   try {
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -1496,6 +2095,25 @@ export async function revertBookingToDraft({
       data: { status: BookingStatus.DRAFT },
     });
 
+    // Add activity log for booking revert to draft
+    if (userId) {
+      await createStatusTransitionNote({
+        bookingId: cancelledBooking.id,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.DRAFT,
+        userId,
+        custodianUserId: cancelledBooking.custodianUserId || undefined,
+      });
+    } else {
+      // System-initiated revert (fallback)
+      await createStatusTransitionNote({
+        bookingId: cancelledBooking.id,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.DRAFT,
+        custodianUserId: cancelledBooking.custodianUserId || undefined,
+      });
+    }
+
     /** Cancels all scheduled events */
     await cancelScheduler(cancelledBooking);
 
@@ -1516,9 +2134,11 @@ export async function extendBooking({
   organizationId,
   newEndDate,
   hints,
+  userId,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
+  userId: string;
 }) {
   try {
     const booking = await db.booking
@@ -1600,6 +2220,17 @@ export async function extendBooking({
         to: newEndDate,
       },
       include: BOOKING_INCLUDE_FOR_EMAIL,
+    });
+
+    // Add activity log for booking extension
+    const user = await getUserByID(userId);
+    await createSystemBookingNote({
+      bookingId: updatedBooking.id,
+      content: `${wrapUserLinkForNote(
+        user!
+      )} extended the booking from **${wrapDateForNote(
+        booking.to!
+      )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
 
     /** Send extended booking email */
@@ -2089,6 +2720,8 @@ export async function removeAssets({
   lastName,
   userId,
   kitIds = [],
+  kits = [],
+  assets = [],
   organizationId,
 }: {
   booking: Pick<Booking, "id"> & {
@@ -2098,6 +2731,8 @@ export async function removeAssets({
   lastName: string;
   userId: string;
   kitIds?: Kit["id"][];
+  kits?: Array<{ id: string; name: string }>;
+  assets?: Array<{ id: string; title: string }>;
   organizationId: Booking["organizationId"];
 }) {
   try {
@@ -2140,14 +2775,63 @@ export async function removeAssets({
       }
     }
 
+    const userForNotes = { firstName, lastName, id: userId };
+
     await createNotes({
-      content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
-        b.name
-      }](/bookings/${b.id})**.`,
+      content: `${wrapUserLinkForNote(
+        userForNotes
+      )} removed asset from booking.`,
       type: "UPDATE",
       userId,
       assetIds,
     });
+
+    // BOOKING ACTIVITY LOG: Log removal activity
+    // Creates system note when assets/kits are removed from a booking
+    // Handles three cases: kits only, assets only, or both combined
+    const hasKits = kitIds && kitIds.length > 0;
+    // Check if we have standalone assets (not belonging to kits being removed)
+    const hasAssets = assets && assets.length > 0;
+
+    if (hasKits && hasAssets) {
+      // Both kits and assets removed - create combined note
+      const kitContent =
+        kits.length > 0
+          ? wrapKitsWithDataForNote(kits, "removed")
+          : wrapKitsForNote(kitIds, "removed");
+
+      const assetContent = wrapAssetsWithDataForNote(assets, "removed");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} removed ${kitContent} and ${assetContent} from booking.`,
+      });
+    } else if (hasKits) {
+      // Only kits removed
+      const kitContent =
+        kits.length > 0
+          ? wrapKitsWithDataForNote(kits, "removed")
+          : wrapKitsForNote(kitIds, "removed");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} removed ${kitContent} from booking.`,
+      });
+    } else if (hasAssets) {
+      // Only assets removed
+      const assetContent = wrapAssetsWithDataForNote(assets, "removed");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} removed ${assetContent} from booking.`,
+      });
+    }
 
     return b;
   } catch (cause) {
@@ -2792,7 +3476,15 @@ export async function bulkArchiveBookings({
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
-    const bookings = await db.booking.findMany({ where });
+    const bookings = await db.booking.findMany({
+      where,
+      select: {
+        id: true,
+        status: true,
+        custodianUserId: true,
+        activeSchedulerReference: true,
+      },
+    });
 
     const someBookingNotComplete = bookings.some(
       (b) => b.status !== "COMPLETE"
@@ -2819,6 +3511,16 @@ export async function bulkArchiveBookings({
         where: { id: { in: bookings.map((b) => b.id) } },
         data: { status: BookingStatus.ARCHIVED },
       });
+
+      /** Create booking status transition notes for each booking */
+      for (const booking of bookings) {
+        await createStatusTransitionNote({
+          bookingId: booking.id,
+          fromStatus: booking.status,
+          toStatus: BookingStatus.ARCHIVED,
+          custodianUserId: booking.custodianUserId || undefined,
+        });
+      }
     });
 
     /** Cancel any active schedulers */
@@ -2952,9 +3654,7 @@ export async function bulkCancelBookings({
         .map((b) =>
           b.assets.map((asset) => ({
             assetId: asset.id,
-            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
-              b.name
-            }](/bookings/${b.id})**.`,
+            content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** cancelled booking.`,
             userId,
             type: "UPDATE" as const,
           }))
@@ -2962,6 +3662,17 @@ export async function bulkCancelBookings({
         .flat() satisfies Prisma.NoteCreateManyInput[];
 
       await tx.note.createMany({ data: notesData });
+
+      /** Create booking status transition notes for each booking */
+      for (const booking of bookings) {
+        await createStatusTransitionNote({
+          bookingId: booking.id,
+          fromStatus: booking.status,
+          toStatus: BookingStatus.CANCELLED,
+          userId,
+          custodianUserId: booking.custodianUserId || undefined,
+        });
+      }
     });
 
     /** Cancelling scheduler */
@@ -3020,31 +3731,106 @@ export async function addScannedAssetsToBooking({
   assetIds,
   bookingId,
   organizationId,
+  userId,
 }: {
   assetIds: Asset["id"][];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
+  userId: string;
 }) {
   try {
     const booking = await db.booking.findFirstOrThrow({
       where: { id: bookingId, organizationId },
     });
 
-    /** We just add all the assets to the booking, and let the user manage the list on the booking page.
-     * If there are already checked out or in custody assets, the user wont be able to check out
-     */
-
-    /** Adding assets into booking */
-    return await db.$transaction(async (tx) => {
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
-      });
+    // Separate assets and kits from the scanned IDs
+    const assets = await db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, title: true },
     });
+
+    const kits = await db.kit.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, name: true, assets: { select: { id: true } } },
+    });
+
+    // Get asset IDs that belong to the selected kits to avoid double-connecting
+    const kitAssetIds = kits.flatMap((kit) =>
+      kit.assets.map((asset) => asset.id)
+    );
+
+    // Filter out assets that belong to the selected kits
+    const standaloneAssets = assets.filter(
+      (asset) => !kitAssetIds.includes(asset.id)
+    );
+
+    /** Adding assets to booking (both standalone and from kits) */
+    // Collect all asset IDs to connect (standalone assets + kit assets)
+    const allAssetIdsToConnect = [
+      ...standaloneAssets.map((asset) => asset.id),
+      ...kitAssetIds,
+    ];
+
+    const updatedBooking = await db.booking.update({
+      where: { id: booking.id },
+      data: {
+        assets: {
+          connect: allAssetIdsToConnect.map((id) => ({ id })),
+        },
+      },
+    });
+
+    // Create booking activity notes
+    const user = await getUserByID(userId);
+    const userForNotes = {
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
+      id: userId,
+    };
+
+    const hasKits = kits.length > 0;
+    const hasAssets = standaloneAssets.length > 0;
+
+    if (hasKits && hasAssets) {
+      // Both kits and assets added - create combined note
+      const kitContent = wrapKitsWithDataForNote(
+        kits.map((kit) => ({ id: kit.id, name: kit.name })),
+        "added"
+      );
+      const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} added ${kitContent} and ${assetContent} to booking.`,
+      });
+    } else if (hasKits) {
+      // Only kits added
+      const kitContent = wrapKitsWithDataForNote(
+        kits.map((kit) => ({ id: kit.id, name: kit.name })),
+        "added"
+      );
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} added ${kitContent} to booking.`,
+      });
+    } else if (hasAssets) {
+      // Only assets added
+      const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} added ${assetContent} to booking.`,
+      });
+    }
+
+    return updatedBooking;
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -3054,7 +3840,7 @@ export async function addScannedAssetsToBooking({
     throw new ShelfError({
       cause,
       message,
-      additionalData: { assetIds, bookingId, organizationId },
+      additionalData: { assetIds, bookingId, organizationId, userId },
       label,
     });
   }
@@ -3424,19 +4210,20 @@ export type PartialCheckinDetailsType = Record<
 >;
 
 export async function checkinAssets({
+  formData,
   request,
   bookingId,
   organizationId,
   userId,
   authSession,
 }: {
+  formData: FormData;
   request: Request;
   bookingId: string;
   organizationId: string;
   userId: string;
   authSession: AuthSession;
 }) {
-  const formData = await request.formData();
   const { assetIds, checkinIntentChoice, returnJson } = parseData(
     formData,
     partialCheckinAssetsSchema.extend({
@@ -3449,7 +4236,7 @@ export async function checkinAssets({
   );
   const hints = getClientHint(request);
 
-  await partialCheckinBooking({
+  const result = await partialCheckinBooking({
     id: bookingId,
     organizationId,
     assetIds,
@@ -3458,11 +4245,17 @@ export async function checkinAssets({
     intentChoice: checkinIntentChoice,
   });
 
+  const notificationMessage = result.isComplete
+    ? `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      } and completed the booking.`
+    : `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      } from booking.`;
+
   sendNotification({
-    title: "Assets checked in",
-    message: `Successfully checked in ${assetIds.length} asset${
-      assetIds.length > 1 ? "s" : ""
-    } from booking.`,
+    title: result.isComplete ? "Booking completed" : "Assets checked in",
+    message: notificationMessage,
     icon: { name: "success", variant: "success" },
     senderId: authSession.userId,
   });

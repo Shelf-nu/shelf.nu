@@ -10,7 +10,7 @@ import {
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import {
   PermissionAction,
@@ -19,6 +19,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { BookingOverviewPDF } from "./booking-overview-pdf";
+import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 
 import ExtendBookingDialog from "./extend-booking-dialog";
@@ -80,31 +81,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           <When
             truthy={(isOngoing || isReserved || isOverdue) && canCancelBooking}
           >
-            <DropdownMenuItem asChild>
-              <Button
-                variant="link"
-                className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
-                width="full"
-                name="intent"
-                value="cancel"
-                as="span"
-                /**
-                 * Here we have to deal with a interesting case that is in a way a conflict between how react works and web platform
-                 * So this button within the react code, is inside a form that is in the parent component, however because its a radix dropdown, it gets rendered within a portal
-                 * So the button is actually rendered outside the form, and when you click on it, it does not submit the form
-                 * So we have to manually submit the data here.
-                 *
-                 * Keep in mind that even though its rendered in the DOM within a portal, react will still detect it as being inside the form, so there could be some hydration errors
-                 */
-                onClick={() => {
-                  const formData = new FormData();
-                  formData.append("intent", "cancel");
-                  submit(formData, { method: "post" });
-                }}
-              >
-                Cancel
-              </Button>
-            </DropdownMenuItem>
+            <CancelBookingDialog bookingName={booking.name} />
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog

@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -14,27 +14,22 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
-import AddAssetsToBookingDrawer, {
-  addScannedAssetsToBookingSchema,
-} from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
+import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
+import { db } from "~/database/db.server";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
-  addScannedAssetsToBooking,
+  checkinAssets,
   getBooking,
+  getDetailedPartialCheckinData,
 } from "~/modules/booking/service.server";
+import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canUserManageBookingAssets } from "~/utils/bookings";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
+
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  assertIsPost,
-  data,
-  error,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
+import { assertIsPost, data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -60,7 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         request,
         entity: PermissionEntity.booking,
-        action: PermissionAction.update,
+        action: PermissionAction.checkin,
       }
     );
 
@@ -79,17 +74,48 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message:
-          "You are not allowed to add assets for this booking at the moment.",
+          "You cannot check in assets for this booking at the moment. The booking may not be ongoing or you may not have permission to manage its assets.",
         label: "Booking",
         shouldBeCaptured: false,
       });
     }
-    const title = `Scan assets for booking | ${booking.name}`;
+
+    // Always fetch partial check-in data for scanner validation
+    // We need this data to detect blockers for already checked-in assets/kits
+    const { checkedInAssetIds, partialCheckinDetails } =
+      await getDetailedPartialCheckinData(booking.id);
+
+    // Calculate partial check-in progress
+    // For progress calculation, we need the TOTAL number of assets in the booking,
+    // not the filtered count from booking.assets (which may be filtered by status)
+    const totalBookingAssets = await db.asset.count({
+      where: {
+        bookings: {
+          some: { id: booking.id },
+        },
+      },
+    });
+
+    const partialCheckinProgress = calculatePartialCheckinProgress(
+      totalBookingAssets,
+      checkedInAssetIds,
+      booking.status
+    );
+
+    const title = `Scan assets to check in | ${booking.name}`;
     const header: HeaderData = {
       title,
     };
 
-    return json(data({ title, header, booking }));
+    return json(
+      data({
+        title,
+        header,
+        booking,
+        partialCheckinProgress,
+        partialCheckinDetails,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw json(error(reason), { status: reason.status });
@@ -109,23 +135,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.booking,
-      action: PermissionAction.update,
+      action: PermissionAction.checkin,
     });
 
     const formData = await request.formData();
 
-    const { assetIds } = parseData(formData, addScannedAssetsToBookingSchema);
-
-    await addScannedAssetsToBooking({ bookingId, assetIds, organizationId });
-
-    sendNotification({
-      title: "Assets added",
-      message: "All the scanned assets has been successfully added to booking.",
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
+    return await checkinAssets({
+      formData,
+      request,
+      bookingId,
+      organizationId,
+      userId,
+      authSession,
     });
-
-    return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     return json(error(reason), { status: reason.status });
@@ -137,23 +159,24 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Scan QR codes to add to booking",
-  name: "booking.scan-assets",
+  breadcrumb: () => "Scan QR codes to check in",
+  name: "booking.overview.checkin-assets",
 };
 
-export default function ScanAssetsForBookings() {
+export default function CheckinAssetsFromBooking() {
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
+
   function handleCodeDetectionSuccess({
     value: qrId,
     error,
     type,
   }: OnCodeDetectionSuccessProps) {
-    /** WE send the error to the item. addItem will automatically handle the data based on its value */
+    /** Send the scanned data to the item. addItem will automatically handle the data based on its value */
     addItem(qrId, error, type);
   }
 
@@ -161,13 +184,14 @@ export default function ScanAssetsForBookings() {
     <>
       <Header hidePageDescription />
 
-      <AddAssetsToBookingDrawer isLoading={isLoading} />
+      <PartialCheckinDrawer isLoading={isLoading} defaultExpanded={true} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
           backButtonText="Booking"
+          // backButtonUrl={`/bookings/${booking.id}?state=${AssetStatus.CHECKED_OUT}`}
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}

@@ -24,7 +24,7 @@ export default function BulkRemoveAssetAndKitDialog() {
       title={`Remove selected items (${totalSelectedItems})`}
       arrayFieldId="assetOrKitIds"
       description={`Are you sure you want to remove ${totalSelectedItems} selected item(s)? This action cannot be undone.`}
-      actionUrl={`/bookings/${booking.id}`}
+      actionUrl={`/bookings/${booking.id}/overview`}
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <>
