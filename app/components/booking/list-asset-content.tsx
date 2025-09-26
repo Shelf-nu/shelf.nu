@@ -6,7 +6,7 @@ import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import {
   getBookingContextAssetStatus,
   isAssetPartiallyCheckedIn,

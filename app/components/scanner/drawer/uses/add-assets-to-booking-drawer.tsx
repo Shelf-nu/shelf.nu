@@ -10,7 +10,7 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId.scan-assets";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -26,9 +26,15 @@ import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 
 // Export the schema so it can be reused
-export const addScannedAssetsToBookingSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
-});
+export const addScannedAssetsToBookingSchema = z
+  .object({
+    assetIds: z.array(z.string()),
+    kitIds: z.array(z.string()),
+  })
+  .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {
+    message: "At least one asset or kit must be selected",
+    path: ["assetIds"],
+  });
 
 /**
  * Drawer component for managing scanned assets to be added to bookings
@@ -65,10 +71,9 @@ export default function AddAssetsToBookingDrawer({
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitFromQr);
 
-  // List of asset IDs for the form
-  const assetIdsForBooking = Array.from(
-    new Set([...assetIds, ...kits.flatMap((k) => k.assets.map((a) => a.id))])
-  );
+  // Separate asset IDs and kit IDs for the form
+  const assetIdsForBooking = Array.from(new Set(assetIds));
+  const kitIdsForBooking = kits.map((k) => k.id);
 
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
@@ -244,7 +249,10 @@ export default function AddAssetsToBookingDrawer({
   return (
     <ConfigurableDrawer
       schema={addScannedAssetsToBookingSchema}
-      formData={{ assetIds: assetIdsForBooking }}
+      formData={{
+        assetIds: assetIdsForBooking,
+        kitIds: kitIdsForBooking,
+      }}
       items={items}
       onClearItems={clearList}
       title="Items scanned"

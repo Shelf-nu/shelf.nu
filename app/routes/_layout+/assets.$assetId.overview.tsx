@@ -43,6 +43,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -320,6 +321,16 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : null}
+              {asset?.qrCodes?.[0] ? (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Shelf QR ID
+                  </span>
+                  <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                    {asset.qrCodes[0].id}
+                  </div>
+                </li>
+              ) : null}
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Created
@@ -494,11 +505,11 @@ export default function AssetOverview() {
                             />
                           ) : isLink(customFieldDisplayValue as string) ? (
                             <Button
-                              role="link"
-                              variant="link"
-                              className="text-gray text-start font-normal underline hover:text-gray-600"
+                              variant="link-gray"
                               target="_blank"
-                              to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+                              to={buildCustomFieldLinkHref(
+                                customFieldDisplayValue as string
+                              )}
                             >
                               {customFieldDisplayValue as string}
                             </Button>
@@ -615,6 +626,7 @@ export default function AssetOverview() {
                 name: asset.title,
                 type: "asset",
               }}
+              sequentialId={asset.sequentialId}
             />
           )}
           <When

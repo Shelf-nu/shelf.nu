@@ -5,7 +5,7 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { getBookingContextKitStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import KitImage from "../kits/kit-image";

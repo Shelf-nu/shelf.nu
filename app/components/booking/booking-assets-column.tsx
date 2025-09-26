@@ -4,8 +4,8 @@ import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
@@ -17,6 +17,7 @@ import { ListHeader } from "../list/list-header";
 import { ListItem } from "../list/list-item";
 import ListTitle from "../list/list-title";
 import { Button } from "../shared/button";
+import { InfoTooltip } from "../shared/info-tooltip";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Th } from "../table";
 import { BookingPagination } from "./booking-pagination";
@@ -41,14 +42,16 @@ export function BookingAssetsColumn() {
   // Determine if we should show the check-in columns
   const shouldShowCheckinColumns = useMemo(() => {
     // const currentStatusFilter = searchParams.get("status");
-    const isOngoing =
+    const hasValidStatus =
       booking.status === BookingStatus.ONGOING ||
-      booking.status === BookingStatus.OVERDUE;
+      booking.status === BookingStatus.OVERDUE ||
+      booking.status === BookingStatus.COMPLETE ||
+      booking.status === BookingStatus.ARCHIVED;
     const hasPartialCheckins = partialCheckinProgress?.hasPartialCheckins;
     // const isNotCheckedOutFilter =
     //   currentStatusFilter !== AssetStatus.CHECKED_OUT;
 
-    return isOngoing && hasPartialCheckins;
+    return hasValidStatus && hasPartialCheckins;
     // && isNotCheckedOutFilter;
   }, [
     booking.status,
@@ -194,8 +197,30 @@ export function BookingAssetsColumn() {
                     <Th>Category</Th>
                     {shouldShowCheckinColumns && (
                       <>
-                        <Th className="whitespace-nowrap">Checked in on</Th>
-                        <Th className="whitespace-nowrap">Checked in by</Th>
+                        <Th className="whitespace-nowrap">
+                          Checked in on{" "}
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p>
+                                Shows the date when the asset was checked in via
+                                a partial check-in.
+                              </p>
+                            }
+                          />
+                        </Th>
+                        <Th className="whitespace-nowrap">
+                          Checked in by{" "}
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p>
+                                Shows the user who checked in the asset via a
+                                partial check-in.
+                              </p>
+                            }
+                          />
+                        </Th>
                       </>
                     )}
                     <Th> </Th>

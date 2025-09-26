@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 
+import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import {
   createBooking,
   partialCheckinBooking,
@@ -25,6 +26,9 @@ import {
   revertBookingToDraft,
   extendBooking,
   removeAssets,
+  // Test helper functions
+  getActionTextFromTransition,
+  getSystemActionText,
 } from "./service.server";
 
 // @vitest-environment node
@@ -83,6 +87,16 @@ vitest.mock("~/database/db.server", () => ({
         lastName: "User",
       }),
     },
+    bookingNote: {
+      create: vitest.fn().mockResolvedValue({}),
+      findMany: vitest.fn().mockResolvedValue([]),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 1 }),
+    },
+    tag: {
+      findMany: vitest
+        .fn()
+        .mockResolvedValue([{ name: "Tag 1" }, { name: "Tag 2" }]),
+    },
   },
 }));
 
@@ -96,6 +110,10 @@ vitest.mock("~/modules/qr/service.server", () => ({
 
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn(),
+}));
+
+vitest.mock("~/modules/booking-note/service.server", () => ({
+  createSystemBookingNote: vitest.fn().mockResolvedValue({}),
 }));
 
 vitest.mock("~/modules/user/service.server", () => ({
@@ -328,7 +346,7 @@ describe("partialCheckinBooking", () => {
     // Verify notes created
     expect(noteService.createNotes).toHaveBeenCalledWith({
       content:
-        "**Test User** checked in via partial check-in for booking **[Test Booking](/bookings/booking-1)**.",
+        "**[Test User](/settings/team/users/user-1)** checked in via partial check-in.",
       type: "UPDATE",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -638,6 +656,7 @@ describe("updateBasicBooking", () => {
       id: "booking-1",
       status: BookingStatus.DRAFT,
       custodianUserId: "user-1",
+      tags: [{ id: "tag-3", name: "Old Tag" }], // Add existing tags
     });
 
     const updatedBooking = { ...mockBookingData, ...mockUpdateBookingParams };
@@ -675,6 +694,7 @@ describe("updateBasicBooking", () => {
       id: "booking-1",
       status: BookingStatus.ONGOING,
       custodianUserId: "user-1",
+      tags: [{ id: "tag-3", name: "Old Tag" }], // Add existing tags
     });
 
     const updatedBooking = { ...mockBookingData, name: "Updated Booking Name" };
@@ -1511,6 +1531,7 @@ describe("extendBooking", () => {
       organizationId: "org-1",
       newEndDate: new Date("2025-01-02T17:00:00Z"),
       hints: mockClientHints,
+      userId: "user-1",
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -1538,6 +1559,7 @@ describe("extendBooking", () => {
         organizationId: "org-1",
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
+        userId: "user-1",
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -1580,3 +1602,163 @@ describe("removeAssets", () => {
     });
   });
 });
+
+describe("wrapBookingStatusForNote", () => {
+  it("should wrap booking status without custodianUserId", () => {
+    const result = wrapBookingStatusForNote("DRAFT");
+    expect(result).toBe('{% booking_status status="DRAFT" /%}');
+  });
+
+  it("should wrap booking status with custodianUserId", () => {
+    const result = wrapBookingStatusForNote("RESERVED", "user-123");
+    expect(result).toBe(
+      '{% booking_status status="RESERVED" custodianUserId="user-123" /%}'
+    );
+  });
+
+  it("should handle empty custodianUserId", () => {
+    const result = wrapBookingStatusForNote("ONGOING", "");
+    expect(result).toBe('{% booking_status status="ONGOING" /%}');
+  });
+
+  it("should handle undefined custodianUserId", () => {
+    const result = wrapBookingStatusForNote("COMPLETE");
+    expect(result).toBe('{% booking_status status="COMPLETE" /%}');
+  });
+
+  it("should handle all booking statuses", () => {
+    const statuses = [
+      "DRAFT",
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "CANCELLED",
+      "ARCHIVED",
+    ];
+
+    statuses.forEach((status) => {
+      const result = wrapBookingStatusForNote(status);
+      expect(result).toBe(`{% booking_status status="${status}" /%}`);
+    });
+  });
+});
+
+describe("getActionTextFromTransition", () => {
+  it("should return correct action text for DRAFT->RESERVED transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED
+    );
+    expect(result).toBe("reserved the booking");
+  });
+
+  it("should return correct action text for RESERVED->ONGOING transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING
+    );
+    expect(result).toBe("checked-out the booking");
+  });
+
+  it("should return correct action text for ONGOING->COMPLETE transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.ONGOING,
+      BookingStatus.COMPLETE
+    );
+    expect(result).toBe("checked-in the booking");
+  });
+
+  it("should return correct action text for RESERVED->CANCELLED transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.RESERVED,
+      BookingStatus.CANCELLED
+    );
+    expect(result).toBe("cancelled the booking");
+  });
+
+  it("should return correct action text for ONGOING->CANCELLED transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.ONGOING,
+      BookingStatus.CANCELLED
+    );
+    expect(result).toBe("cancelled the booking");
+  });
+
+  it("should return correct action text for OVERDUE->CANCELLED transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.OVERDUE,
+      BookingStatus.CANCELLED
+    );
+    expect(result).toBe("cancelled the booking");
+  });
+
+  it("should return correct action text for COMPLETE->ARCHIVED transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.COMPLETE,
+      BookingStatus.ARCHIVED
+    );
+    expect(result).toBe("archived the booking");
+  });
+
+  it("should return correct action text for RESERVED->DRAFT transition", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.RESERVED,
+      BookingStatus.DRAFT
+    );
+    expect(result).toBe("reverted booking to draft");
+  });
+
+  it("should return fallback action text for unknown transitions", () => {
+    const result = getActionTextFromTransition(
+      BookingStatus.DRAFT,
+      BookingStatus.COMPLETE
+    );
+    expect(result).toBe("changed the booking status");
+  });
+});
+
+describe("getSystemActionText", () => {
+  it("should return correct system action text for ONGOING->OVERDUE transition", () => {
+    const result = getSystemActionText(
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE
+    );
+    expect(result).toBe("Booking became overdue");
+  });
+
+  it("should return fallback system action text for unknown transitions", () => {
+    const result = getSystemActionText(
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED
+    );
+    expect(result).toBe("Booking status changed");
+  });
+
+  it("should return correct system action text for all booking statuses", () => {
+    // Test that the function handles all status combinations gracefully
+    const statuses = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.COMPLETE,
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+    ];
+
+    statuses.forEach((fromStatus) => {
+      statuses.forEach((toStatus) => {
+        if (fromStatus !== toStatus) {
+          const result = getSystemActionText(fromStatus, toStatus);
+          expect(typeof result).toBe("string");
+          expect(result.length).toBeGreaterThan(0);
+        }
+      });
+    });
+  });
+});
+
+// Note: createStatusTransitionNote is well-tested through integration tests above
+// The function is used by reserveBooking, checkoutBooking, checkinBooking, cancelBooking,
+// archiveBooking, revertBookingToDraft, and bulkCancelBookings/bulkArchiveBookings

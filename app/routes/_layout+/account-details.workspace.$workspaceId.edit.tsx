@@ -204,7 +204,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { userId, organizationId: id },
         });
 
-        const { name, currency } = payload;
+        const { name, currency, qrIdDisplayPreference } = payload;
 
         const formDataFile = await unstable_parseMultipartFormData(
           request,
@@ -221,6 +221,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           image: file || null,
           userId: authSession.userId,
           currency,
+          qrIdDisplayPreference,
         });
 
         sendNotification({
@@ -352,6 +353,7 @@ export default function WorkspaceEditPage() {
         <WorkspaceEditForms
           name={organization.name || name}
           currency={organization.currency}
+          qrIdDisplayPreference={organization.qrIdDisplayPreference}
           className="mt-4"
         />
       </div>

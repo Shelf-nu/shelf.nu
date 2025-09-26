@@ -280,7 +280,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         const kit = await db.kit.update({
-          where: { id: kitId },
+          where: { id: kitId, organizationId },
           data: {
             assets: { disconnect: { id: assetId } },
           },
@@ -292,7 +292,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          */
         if (kit.custody?.custodianId) {
           await db.asset.update({
-            where: { id: assetId },
+            where: { id: assetId, organizationId },
             data: {
               status: AssetStatus.AVAILABLE,
               custody: { delete: true },
