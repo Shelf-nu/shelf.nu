@@ -31,11 +31,11 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import type { AllowedModelNames } from "../api+/model-filters";
 import {
   resolveAssetIdFromSamId,
   type ResolveAssetIdFromSamIdOptions,
 } from "./scanner-sam-id";
+import type { AllowedModelNames } from "../api+/model-filters";
 
 const DEFAULT_ERROR_TITLE = "Unsupported Barcode detected";
 
@@ -130,9 +130,7 @@ const QRScanner = () => {
     "Processing QR code..."
   );
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
-  const [errorTitle, setErrorTitle] = useState<string | undefined>(
-    undefined
-  );
+  const [errorTitle, setErrorTitle] = useState<string | undefined>(undefined);
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false);
