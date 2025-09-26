@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { SearchIcon } from "lucide-react";
 
 import { tw } from "~/utils/tw";
-import { useCommandPalette } from "./command-palette-context";
+import { useCommandPaletteSafe } from "./command-palette-context";
 
 type CommandPaletteButtonVariant = "default" | "icon";
 
@@ -28,8 +28,15 @@ export function CommandPaletteButton({
   className?: string;
   variant?: CommandPaletteButtonVariant;
 }) {
-  const { setOpen } = useCommandPalette();
+  const context = useCommandPaletteSafe();
   const shortcut = useShortcutLabel();
+
+  // Don't render if the command palette provider is not available
+  if (!context) {
+    return null;
+  }
+
+  const { setOpen } = context;
 
   if (variant === "icon") {
     return (

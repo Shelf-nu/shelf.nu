@@ -5,9 +5,10 @@ import { CommandPaletteButton } from "./command-palette-button";
 import {
   CommandPaletteProvider as CommandPaletteProviderComponent,
   useCommandPalette,
+  useCommandPaletteSafe,
 } from "./command-palette-context";
 
-export { CommandPaletteButton, useCommandPalette };
+export { CommandPaletteButton, useCommandPalette, useCommandPaletteSafe };
 export const CommandPalette = CommandPaletteComponent;
 export const CommandPaletteProvider = CommandPaletteProviderComponent;
 

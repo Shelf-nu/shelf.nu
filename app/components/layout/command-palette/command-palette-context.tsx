@@ -22,6 +22,11 @@ export function useCommandPalette() {
   return context;
 }
 
+export function useCommandPaletteSafe() {
+  const context = useContext(CommandPaletteContext);
+  return context;
+}
+
 export function CommandPaletteProvider({
   children,
 }: {
