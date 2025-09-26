@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { SearchIcon } from "lucide-react";
 
+import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
 import { useCommandPaletteSafe } from "./command-palette-context";
-import { Button } from "~/components/shared/button";
 
 type CommandPaletteButtonVariant = "default" | "icon";
 
