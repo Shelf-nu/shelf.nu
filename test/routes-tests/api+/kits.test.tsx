@@ -41,10 +41,51 @@ const mockKits = [
   {
     id: "kit-1",
     name: "Photography Kit",
+    image: "kit-image-1.jpg",
+    imageExpiration: "2024-12-31T23:59:59Z",
+    assets: [
+      {
+        id: "asset-1",
+        title: "Canon Camera",
+        mainImage: "camera.jpg",
+        mainImageExpiration: "2024-12-31T23:59:59Z",
+        category: {
+          name: "Cameras",
+        },
+      },
+      {
+        id: "asset-2",
+        title: "Tripod",
+        mainImage: "tripod.jpg",
+        mainImageExpiration: "2024-12-31T23:59:59Z",
+        category: {
+          name: "Accessories",
+        },
+      },
+    ],
+    _count: {
+      assets: 2,
+    },
   },
   {
     id: "kit-2",
     name: "Video Production Kit",
+    image: "kit-image-2.jpg",
+    imageExpiration: "2024-12-31T23:59:59Z",
+    assets: [
+      {
+        id: "asset-3",
+        title: "Video Camera",
+        mainImage: "video-camera.jpg",
+        mainImageExpiration: "2024-12-31T23:59:59Z",
+        category: {
+          name: "Cameras",
+        },
+      },
+    ],
+    _count: {
+      assets: 1,
+    },
   },
 ];
 
@@ -85,6 +126,29 @@ describe("/api/kits", () => {
         select: {
           id: true,
           name: true,
+          image: true,
+          imageExpiration: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              category: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+            orderBy: {
+              title: "asc",
+            },
+          },
+          _count: {
+            select: {
+              assets: true,
+            },
+          },
         },
         orderBy: {
           name: "asc",
@@ -152,6 +216,29 @@ describe("/api/kits", () => {
         select: {
           id: true,
           name: true,
+          image: true,
+          imageExpiration: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              category: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+            orderBy: {
+              title: "asc",
+            },
+          },
+          _count: {
+            select: {
+              assets: true,
+            },
+          },
         },
         orderBy: {
           name: "asc",
@@ -181,6 +268,29 @@ describe("/api/kits", () => {
         select: {
           id: true,
           name: true,
+          image: true,
+          imageExpiration: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              category: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+            orderBy: {
+              title: "asc",
+            },
+          },
+          _count: {
+            select: {
+              assets: true,
+            },
+          },
         },
         orderBy: {
           name: "asc",
@@ -212,6 +322,29 @@ describe("/api/kits", () => {
         select: {
           id: true,
           name: true,
+          image: true,
+          imageExpiration: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              category: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+            orderBy: {
+              title: "asc",
+            },
+          },
+          _count: {
+            select: {
+              assets: true,
+            },
+          },
         },
         orderBy: {
           name: "asc",
@@ -321,6 +454,10 @@ describe("/api/kits", () => {
           select: {
             id: true,
             name: true,
+            image: true,
+            imageExpiration: true,
+            assets: expect.any(Object),
+            _count: expect.any(Object),
           },
         })
       );

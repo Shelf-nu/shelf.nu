@@ -6,6 +6,7 @@ import {
 } from "@radix-ui/react-popover";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { AssetImage } from "~/components/assets/asset-image/component";
 import useApiQuery from "~/hooks/use-api-query";
 
 /**
@@ -82,57 +83,58 @@ export function AssetsListComponent({
       </PopoverTrigger>
 
       <PopoverContent
-        className="z-[999999] max-h-[400px] w-80 overflow-scroll rounded-md border bg-white"
+        className="z-[999999] max-h-48 w-80 overflow-y-auto rounded border bg-white p-3"
         side="top"
         sideOffset={8}
       >
-        <div className="p-4">
-          {isLoading && (
-            <div className="flex items-center justify-center py-4">
-              <Spinner className="size-4" />
-              <span className="ml-2 text-sm text-gray-500">
-                Loading assets...
-              </span>
-            </div>
-          )}
+        {isLoading && (
+          <div className="flex items-center justify-center py-4">
+            <Spinner className="size-4" />
+            <span className="ml-2 text-sm text-gray-500">
+              Loading assets...
+            </span>
+          </div>
+        )}
 
-          {!isLoading && data && (
-            <div className="space-y-2">
-              {data.assets.map((asset) => (
-                <a
-                  key={asset.id}
-                  href={`/assets/${asset.id}`}
+        {!isLoading && data && (
+          <div className="space-y-1">
+            {data.assets.map((asset) => (
+              <div
+                key={asset.id}
+                className="flex items-center gap-2 text-sm text-gray-700"
+              >
+                <AssetImage
+                  className="size-5"
+                  asset={{
+                    id: asset.id,
+                    thumbnailImage: asset.mainImage,
+                    mainImage: asset.mainImage,
+                    mainImageExpiration: null,
+                  }}
+                  alt={`${asset.title} main image`}
+                />
+                <Button
+                  variant="link"
+                  to={`/assets/${asset.id}`}
                   target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-decoration-none flex items-center space-x-3 rounded p-2 hover:bg-gray-50"
+                  className="h-auto p-0 font-medium text-gray-700 hover:text-gray-900"
                 >
-                  {asset.mainImage && (
-                    <img
-                      src={asset.mainImage}
-                      alt={asset.title}
-                      className="size-8 rounded object-cover"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <span className="truncate text-sm font-medium text-gray-900">
-                      {asset.title}
-                    </span>
-                  </div>
-                </a>
-              ))}
-            </div>
-          )}
+                  {asset.title}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
 
-          {!isLoading && error && (
-            <div className="py-2 text-sm text-gray-500">
-              Failed to load asset details
-            </div>
-          )}
+        {!isLoading && error && (
+          <div className="py-2 text-sm text-gray-500">
+            Failed to load asset details
+          </div>
+        )}
 
-          {!isLoading && data?.assets.length === 0 && (
-            <div className="py-2 text-sm text-gray-500">No assets found</div>
-          )}
-        </div>
+        {!isLoading && data?.assets.length === 0 && (
+          <div className="py-2 text-sm text-gray-500">No assets found</div>
+        )}
       </PopoverContent>
     </Popover>
   );
