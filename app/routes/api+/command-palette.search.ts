@@ -39,12 +39,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
     }
 
-    const { organizationId, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, role, canSeeAllBookings, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.commandPaletteSearch,
+        action: PermissionAction.read,
+      });
 
     const terms = query
       .split(/[\s,]+/)
@@ -182,12 +183,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         ],
       }));
 
-    // Check permissions for different entity types
-    const hasKitPermission = ["OWNER", "ADMIN", "CURATOR"].includes(role);
-    const hasBookingPermission = ["OWNER", "ADMIN", "CURATOR", "BASE"].includes(
-      role
-    );
-    const hasLocationPermission = ["OWNER", "ADMIN", "CURATOR"].includes(role);
+    // Check permissions for different entity types based on actual roles
+    const hasKitPermission = ["OWNER", "ADMIN"].includes(role);
+    const hasBookingPermission = [
+      "OWNER",
+      "ADMIN",
+      "SELF_SERVICE",
+      "BASE",
+    ].includes(role);
+    const hasLocationPermission = ["OWNER", "ADMIN"].includes(role);
     const hasTeamMemberPermission = ["OWNER", "ADMIN"].includes(role);
 
     // Prepare where clauses
@@ -206,6 +210,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(bookingSearchConditions.length
         ? { OR: bookingSearchConditions }
         : {}),
+      // BASE and SELF_SERVICE users can only see their own bookings unless org settings allow otherwise
+      ...(canSeeAllBookings ? {} : { custodianUserId: userId }),
     };
 
     const locationWhere: Prisma.LocationWhereInput = {
@@ -221,6 +227,31 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(teamMemberSearchConditions.length
         ? { OR: teamMemberSearchConditions }
         : {}),
+      // BASE and SELF_SERVICE users can only see team members they have custody access to
+      ...(canSeeAllCustody
+        ? {}
+        : {
+            OR: [
+              // Team members they have assets in custody from
+              {
+                custodies: {
+                  some: {
+                    custodian: { userId },
+                  },
+                },
+              },
+              // Team members they have kits in custody from
+              {
+                kitCustodies: {
+                  some: {
+                    custodian: { userId },
+                  },
+                },
+              },
+              // Their own team member record
+              { userId },
+            ],
+          }),
     };
 
     // Execute parallel searches
