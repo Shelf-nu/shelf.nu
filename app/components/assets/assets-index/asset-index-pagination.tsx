@@ -59,6 +59,7 @@ export function AssetIndexPagination() {
             onClick={handleScrollToTop}
             variant="secondary"
             title="Scroll to top"
+            aria-label="Scroll to top"
             className="h-[34px]"
           >
             <ChevronRight className="chev -rotate-90" />
@@ -89,6 +90,7 @@ export function AssetIndexPagination() {
                   )}
                   name="mode"
                   value="SIMPLE"
+                  aria-label="Switch to simple mode"
                 >
                   Simple
                 </Button>
@@ -100,6 +102,7 @@ export function AssetIndexPagination() {
                   )}
                   name="mode"
                   value="ADVANCED"
+                  aria-label="Switch to advanced mode"
                 >
                   Advanced
                 </Button>
