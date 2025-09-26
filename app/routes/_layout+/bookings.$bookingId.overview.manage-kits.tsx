@@ -57,9 +57,9 @@ import {
   getKitIdsByAssets,
   removeAssets,
   updateBookingAssets,
+  createKitBookingNote,
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
-import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -373,24 +373,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets from kits
         kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
+        userId,
       });
 
-      /** We create notes for the newly added assets */
-      await createNotes({
-        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
-          b.name
-        }](/bookings/${b.id})**.`,
-        type: "UPDATE",
-        userId,
-        assetIds: newAssetIds, // Only the new assets
-      });
+      /** We create notes for the newly added kits instead of individual assets */
+      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
+      if (newlyAddedKitIds.length > 0) {
+        await createKitBookingNote({
+          bookingId: b.id,
+          kitIds: newlyAddedKitIds,
+          kits: newlyAddedKits.map((kit) => ({ id: kit.id, name: kit.name })),
+          userId,
+          action: "added",
+        });
+      }
     }
 
     /** If some kits were removed, we also need to handle those */
     if (removedKitIds.length > 0) {
       const removedKits = await db.kit.findMany({
         where: { id: { in: removedKitIds } },
-        select: { assets: { select: { id: true } } },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true } },
+        },
       });
       const allRemovedAssetIds = removedKits.flatMap((k) =>
         k.assets.map((a) => a.id)
@@ -402,6 +409,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         lastName: user?.lastName || "",
         userId,
         kitIds: removedKitIds,
+        kits: removedKits.map((kit) => ({ id: kit.id, name: kit.name })),
         organizationId,
       });
     }
@@ -448,7 +456,7 @@ export default function AddKitsToBooking() {
 
   const manageAssetsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/manage-assets?${new URLSearchParams({
+      `/bookings/${booking.id}/overview/manage-assets?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),

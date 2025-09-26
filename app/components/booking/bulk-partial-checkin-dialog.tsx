@@ -12,7 +12,7 @@ import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import type {
   BookingPageLoaderData,
   BookingPageActionData,
-} from "~/routes/_layout+/bookings.$bookingId";
+} from "~/routes/_layout+/bookings.$bookingId.overview";
 import { getBookingContextAssetStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import CheckinDialog from "./checkin-dialog";
@@ -314,6 +314,7 @@ export default function BulkPartialCheckinDialog({
                 disabled={disabled}
                 portalContainer={formRef.current || undefined}
                 onClose={handleCloseDialog}
+                specificAssetIds={selectedItems.map((item: any) => item.id)}
               />
             ) : (
               <Button

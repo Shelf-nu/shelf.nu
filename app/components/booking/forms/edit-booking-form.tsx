@@ -11,7 +11,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
-} from "~/routes/_layout+/bookings.$bookingId";
+} from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
