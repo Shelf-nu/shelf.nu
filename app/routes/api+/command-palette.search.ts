@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -39,13 +40,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
     }
 
-    const { organizationId, role, canSeeAllBookings, canSeeAllCustody } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.commandPaletteSearch,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      role,
+      canSeeAllBookings,
+      canSeeAllCustody,
+      currentOrganization,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.commandPaletteSearch,
+      action: PermissionAction.read,
+    });
 
     const terms = query
       .split(/[\s,]+/)
@@ -183,16 +189,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         ],
       }));
 
+    // Check if this is a personal workspace - they don't have bookings or team members
+    const isPersonalWorkspace = isPersonalOrg(currentOrganization);
+
     // Check permissions for different entity types based on actual roles
     const hasKitPermission = ["OWNER", "ADMIN"].includes(role);
-    const hasBookingPermission = [
-      "OWNER",
-      "ADMIN",
-      "SELF_SERVICE",
-      "BASE",
-    ].includes(role);
+    const hasBookingPermission =
+      !isPersonalWorkspace &&
+      ["OWNER", "ADMIN", "SELF_SERVICE", "BASE"].includes(role);
     const hasLocationPermission = ["OWNER", "ADMIN"].includes(role);
-    const hasTeamMemberPermission = ["OWNER", "ADMIN"].includes(role);
+    const hasTeamMemberPermission =
+      !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
 
     // Prepare where clauses
     const assetWhere: Prisma.AssetWhereInput = {

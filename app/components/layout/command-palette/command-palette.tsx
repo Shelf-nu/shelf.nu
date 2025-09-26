@@ -28,6 +28,7 @@ import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { isPersonalOrg } from "~/utils/organization";
 import { tw } from "~/utils/tw";
 import { useCommandPalette } from "./command-palette-context";
 
@@ -93,6 +94,7 @@ type QuickCommand = {
   href: string;
   keywords?: string[];
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  isVisible?: (context: CommandContext) => boolean;
 };
 
 type QuickAction = QuickCommand & {
@@ -102,6 +104,7 @@ type QuickAction = QuickCommand & {
 type CommandContext = {
   canInviteUsers: boolean;
   canCreateBookings: boolean;
+  isPersonalWorkspace: boolean;
 };
 
 const NAVIGATION_COMMANDS: QuickCommand[] = [
@@ -120,6 +123,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/bookings",
     keywords: ["reservations", "schedule", "calendar"],
     icon: CalendarIcon,
+    isVisible: ({ canCreateBookings }) => canCreateBookings,
   },
   {
     id: "team",
@@ -128,6 +132,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/team",
     keywords: ["users", "members", "people"],
     icon: UserPlus2Icon,
+    isVisible: ({ isPersonalWorkspace }) => !isPersonalWorkspace,
   },
   {
     id: "settings",
@@ -283,13 +288,15 @@ export function CommandPalette() {
   }, [layoutData?.currentOrganizationUserRoles]);
 
   const canCreateBookings = layoutData?.canUseBookings ?? false;
+  const isPersonalWorkspace = isPersonalOrg(layoutData?.currentOrganization);
 
   const commandContext = useMemo<CommandContext>(
     () => ({
       canInviteUsers,
       canCreateBookings,
+      isPersonalWorkspace,
     }),
-    [canInviteUsers, canCreateBookings]
+    [canInviteUsers, canCreateBookings, isPersonalWorkspace]
   );
 
   useEffect(() => {
@@ -327,19 +334,27 @@ export function CommandPalette() {
     return () => window.clearTimeout(timeout);
   }, [query, open]);
 
+  const availableNavigation = useMemo(
+    () =>
+      NAVIGATION_COMMANDS.filter((nav) =>
+        nav.isVisible ? nav.isVisible(commandContext) : true
+      ),
+    [commandContext]
+  );
+
   const navigationResults = useMemo(() => {
     if (!query) {
-      return NAVIGATION_COMMANDS;
+      return availableNavigation;
     }
 
-    const fuse = new Fuse(NAVIGATION_COMMANDS, {
+    const fuse = new Fuse(availableNavigation, {
       keys: ["label", "description", "keywords"],
       threshold: 0.4,
       ignoreLocation: true,
     });
 
     return fuse.search(query).map((result) => result.item);
-  }, [query]);
+  }, [query, availableNavigation]);
 
   const availableActions = useMemo(
     () =>
@@ -639,7 +654,9 @@ export function CommandPalette() {
       <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
         <div className="flex items-center gap-2">
           <SearchIcon className="size-4" />
-          Search across all assets, kits, bookings, locations, and team members
+          {isPersonalOrg(layoutData?.currentOrganization)
+            ? "Search across all assets, kits, and locations"
+            : "Search across all assets, kits, bookings, locations, and team members"}
         </div>
         <CommandShortcut className={tw("bg-white")}>
           {shortcutLabel}
