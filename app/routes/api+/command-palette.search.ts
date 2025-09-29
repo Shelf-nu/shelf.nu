@@ -3,6 +3,7 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { getAssets } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -66,62 +67,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       fields.map((field) => ({
         [field]: { contains: term, mode: Prisma.QueryMode.insensitive },
       }));
-
-    // Asset search conditions
-    const assetSearchConditions: Prisma.AssetWhereInput[] = searchTerms.map(
-      (term) => ({
-        OR: [
-          {
-            title: { contains: term, mode: Prisma.QueryMode.insensitive },
-          },
-          {
-            sequentialId: {
-              contains: term,
-              mode: Prisma.QueryMode.insensitive,
-            },
-          },
-          {
-            id: { contains: term, mode: Prisma.QueryMode.insensitive },
-          },
-          {
-            description: {
-              contains: term,
-              mode: Prisma.QueryMode.insensitive,
-            },
-          },
-          {
-            location: {
-              name: { contains: term, mode: Prisma.QueryMode.insensitive },
-            },
-          },
-          {
-            qrCodes: {
-              some: {
-                id: { contains: term, mode: Prisma.QueryMode.insensitive },
-              },
-            },
-          },
-          {
-            barcodes: {
-              some: {
-                value: { contains: term, mode: Prisma.QueryMode.insensitive },
-              },
-            },
-          },
-          {
-            customFields: {
-              some: {
-                value: {
-                  path: ["valueText"],
-                  string_contains: term,
-                  mode: Prisma.QueryMode.insensitive,
-                },
-              },
-            },
-          },
-        ],
-      })
-    );
 
     // Kit search conditions
     const kitSearchConditions: Prisma.KitWhereInput[] = searchTerms.map(
@@ -201,11 +146,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const hasTeamMemberPermission =
       !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
 
-    // Prepare where clauses
-    const assetWhere: Prisma.AssetWhereInput = {
-      organizationId,
-      ...(assetSearchConditions.length ? { OR: assetSearchConditions } : {}),
-    };
+    // Prepare where clauses for other entities
 
     const kitWhere: Prisma.KitWhereInput = {
       organizationId,
@@ -262,79 +203,80 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     // Execute parallel searches
-    const [assets, kits, bookings, locations, teamMembers] = await Promise.all([
-      // Assets (always allowed)
-      db.asset.findMany({
-        where: assetWhere,
-        take: 8,
-        orderBy: [{ updatedAt: "desc" }, { title: "asc" }],
-        include: {
-          location: { select: { name: true } },
-        },
-      }),
+    const [assetResults, kits, bookings, locations, teamMembers] =
+      await Promise.all([
+        // Assets (always allowed) - using enhanced search from asset service
+        getAssets({
+          search: query,
+          organizationId,
+          page: 1,
+          orderBy: "title",
+          orderDirection: "asc",
+          perPage: 8,
+        }),
 
-      // Kits (permission-gated)
-      hasKitPermission
-        ? db.kit.findMany({
-            where: kitWhere,
-            take: 6,
-            orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-            include: {
-              _count: { select: { assets: true } },
-            },
-          })
-        : Promise.resolve([]),
-
-      // Bookings (permission-gated)
-      hasBookingPermission
-        ? db.booking.findMany({
-            where: bookingWhere,
-            take: 6,
-            orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-            include: {
-              custodianUser: {
-                select: { firstName: true, lastName: true, email: true },
+        // Kits (permission-gated)
+        hasKitPermission
+          ? db.kit.findMany({
+              where: kitWhere,
+              take: 6,
+              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+              include: {
+                _count: { select: { assets: true } },
               },
-              custodianTeamMember: { select: { name: true } },
-            },
-          })
-        : Promise.resolve([]),
+            })
+          : Promise.resolve([]),
 
-      // Locations (permission-gated)
-      hasLocationPermission
-        ? db.location.findMany({
-            where: locationWhere,
-            take: 6,
-            orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-            include: {
-              _count: { select: { assets: true } },
-            },
-          })
-        : Promise.resolve([]),
+        // Bookings (permission-gated)
+        hasBookingPermission
+          ? db.booking.findMany({
+              where: bookingWhere,
+              take: 6,
+              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+              include: {
+                custodianUser: {
+                  select: { firstName: true, lastName: true, email: true },
+                },
+                custodianTeamMember: { select: { name: true } },
+              },
+            })
+          : Promise.resolve([]),
 
-      // Team members (permission-gated)
-      hasTeamMemberPermission
-        ? db.teamMember.findMany({
-            where: teamMemberWhere,
-            take: 8,
-            orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  email: true,
+        // Locations (permission-gated)
+        hasLocationPermission
+          ? db.location.findMany({
+              where: locationWhere,
+              take: 6,
+              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+              include: {
+                _count: { select: { assets: true } },
+              },
+            })
+          : Promise.resolve([]),
+
+        // Team members (permission-gated)
+        hasTeamMemberPermission
+          ? db.teamMember.findMany({
+              where: teamMemberWhere,
+              take: 8,
+              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+              include: {
+                user: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                  },
                 },
               },
-            },
-          })
-        : Promise.resolve([]),
-    ]);
+            })
+          : Promise.resolve([]),
+      ]);
 
     return json(
       data({
         query,
-        assets: assets.map((asset) => ({
+        assets: assetResults.assets.map((asset) => ({
           id: asset.id,
           title: asset.title,
           sequentialId: asset.sequentialId,

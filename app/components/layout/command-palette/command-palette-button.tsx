@@ -75,9 +75,8 @@ export function CommandPaletteButton({
       )}
     >
       <div className="flex w-full items-center gap-2">
-        <SearchIcon className="size-4" />
-        <span className="hidden sm:inline">Search</span>
-        <span className="sm:hidden">Search...</span>
+        <span className="hidden sm:inline">Quick find</span>
+        <span className="sm:hidden">Quick find...</span>
         <span className="ml-auto hidden items-center gap-1 rounded bg-gray-50 px-1 text-[10px] font-medium  text-gray-500 md:inline-flex md:border md:border-gray-200">
           {shortcut}
         </span>
