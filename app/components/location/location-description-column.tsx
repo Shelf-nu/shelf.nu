@@ -15,7 +15,7 @@ export function LocationDescriptionColumn({
   value,
 }: LocationDescriptionColumnProps) {
   return (
-    <Td className="max-w-62 whitespace-pre-wrap">
+    <Td className="min-w-[250px] max-w-[250px] whitespace-pre-wrap">
       {/* Only show tooltip when value is more than 60 - 2 rows of 30 */}
       {value.length > 60 ? (
         <TooltipProvider>
