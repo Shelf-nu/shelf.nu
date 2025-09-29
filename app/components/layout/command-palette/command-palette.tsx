@@ -26,6 +26,7 @@ import {
 } from "~/components/shared/command";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -105,6 +106,7 @@ type CommandContext = {
   canInviteUsers: boolean;
   canCreateBookings: boolean;
   isPersonalWorkspace: boolean;
+  isBaseOrSelfService: boolean;
 };
 
 const NAVIGATION_COMMANDS: QuickCommand[] = [
@@ -117,22 +119,32 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     icon: CompassIcon,
   },
   {
+    id: "kits",
+    label: "Kits",
+    description: "Browse and manage asset kits",
+    href: "/kits",
+    keywords: ["packages", "bundles", "collections"],
+    icon: PackageIcon,
+  },
+  {
     id: "bookings",
     label: "Bookings",
     description: "View upcoming and past bookings",
     href: "/bookings",
     keywords: ["reservations", "schedule", "calendar"],
     icon: CalendarIcon,
-    isVisible: ({ canCreateBookings }) => canCreateBookings,
+    isVisible: ({ canCreateBookings, isPersonalWorkspace }) =>
+      canCreateBookings && !isPersonalWorkspace,
   },
   {
     id: "team",
     label: "Team",
     description: "Manage team members and roles",
-    href: "/team",
+    href: "/settings/team/users",
     keywords: ["users", "members", "people"],
     icon: UserPlus2Icon,
-    isVisible: ({ isPersonalWorkspace }) => !isPersonalWorkspace,
+    isVisible: ({ isPersonalWorkspace, isBaseOrSelfService }) =>
+      !isPersonalWorkspace && !isBaseOrSelfService,
   },
   {
     id: "settings",
@@ -141,6 +153,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/settings",
     keywords: ["preferences", "configuration"],
     icon: SettingsIcon,
+    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
   },
   {
     id: "dashboard",
@@ -149,6 +162,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/dashboard",
     keywords: ["overview", "analytics"],
     icon: LayoutDashboardIcon,
+    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
   },
 ];
 
@@ -160,6 +174,16 @@ const ACTION_COMMANDS: QuickAction[] = [
     href: "/assets/new",
     keywords: ["new", "asset", "inventory"],
     icon: FilePlus2Icon,
+    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
+  },
+  {
+    id: "create-kit",
+    label: "Create kit",
+    description: "Bundle assets into a new kit",
+    href: "/kits/new",
+    keywords: ["new", "kit", "inventory", "collection"],
+    icon: PackageIcon,
+    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
   },
   {
     id: "create-booking",
@@ -177,7 +201,8 @@ const ACTION_COMMANDS: QuickAction[] = [
     href: "/settings/team/invites",
     keywords: ["team", "user", "invite"],
     icon: UserPlus2Icon,
-    isVisible: ({ canInviteUsers }) => canInviteUsers,
+    isVisible: ({ canInviteUsers, isPersonalWorkspace }) =>
+      canInviteUsers && !isPersonalWorkspace,
   },
 ];
 
@@ -289,14 +314,21 @@ export function CommandPalette() {
 
   const canCreateBookings = layoutData?.canUseBookings ?? false;
   const isPersonalWorkspace = isPersonalOrg(layoutData?.currentOrganization);
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   const commandContext = useMemo<CommandContext>(
     () => ({
       canInviteUsers,
       canCreateBookings,
       isPersonalWorkspace,
+      isBaseOrSelfService,
     }),
-    [canInviteUsers, canCreateBookings, isPersonalWorkspace]
+    [
+      canInviteUsers,
+      canCreateBookings,
+      isPersonalWorkspace,
+      isBaseOrSelfService,
+    ]
   );
 
   useEffect(() => {
