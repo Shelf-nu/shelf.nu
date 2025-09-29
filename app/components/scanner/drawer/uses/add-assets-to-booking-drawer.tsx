@@ -29,12 +29,15 @@ import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 export const addScannedAssetsToBookingSchema = z
   .object({
     assetIds: z.array(z.string()),
-    kitIds: z.array(z.string()),
+    kitIds: z.array(z.string()).optional(), // Only needed for notes
   })
-  .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {
-    message: "At least one asset or kit must be selected",
-    path: ["assetIds"],
-  });
+  .refine(
+    (data) => data.assetIds.length > 0 || (data.kitIds?.length ?? 0) > 0,
+    {
+      message: "At least one asset or kit must be selected",
+      path: ["assetIds"],
+    }
+  );
 
 /**
  * Drawer component for managing scanned assets to be added to bookings
