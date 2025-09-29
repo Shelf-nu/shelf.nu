@@ -21,6 +21,14 @@ describe("getAssetCommandValue", () => {
     mainImage: null,
     mainImageExpiration: null,
     locationName: "Studio",
+    description: null,
+    qrCodes: [],
+    categoryName: null,
+    tagNames: [],
+    custodianName: null,
+    custodianUserName: null,
+    barcodes: [],
+    customFieldValues: [],
   };
 
   it("includes the primary searchable fields", () => {

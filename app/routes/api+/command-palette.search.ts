@@ -213,6 +213,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           orderBy: "title",
           orderDirection: "asc",
           perPage: 8,
+          extraInclude: {
+            barcodes: {
+              select: { id: true, value: true, type: true },
+            },
+          },
         }),
 
         // Kits (permission-gated)
@@ -283,6 +288,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           mainImage: asset.mainImage,
           mainImageExpiration: asset.mainImageExpiration?.toISOString() ?? null,
           locationName: asset.location?.name ?? null,
+          description: asset.description,
+          qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
+          categoryName: asset.category?.name ?? null,
+          tagNames: asset.tags?.map((tag) => tag.name) ?? [],
+          custodianName: (asset.custody as any)?.custodian?.name ?? null,
+          custodianUserName: (asset.custody as any)?.custodian?.user
+            ? `${(asset.custody as any).custodian.user.firstName} ${
+                (asset.custody as any).custodian.user.lastName
+              }`.trim()
+            : null,
+          barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
+          customFieldValues:
+            asset.customFields
+              ?.map((cf) => {
+                const value = cf.value as any;
+                const extractedValue = value?.raw ?? value ?? "";
+                return String(extractedValue);
+              })
+              .filter(Boolean) ?? [],
         })),
         kits: kits.map((kit) => ({
           id: kit.id,

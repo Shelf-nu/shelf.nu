@@ -52,6 +52,14 @@ export type AssetSearchResult = {
   mainImage: string | null;
   mainImageExpiration: string | null;
   locationName: string | null;
+  description: string | null;
+  qrCodes: string[];
+  categoryName: string | null;
+  tagNames: string[];
+  custodianName: string | null;
+  custodianUserName: string | null;
+  barcodes: string[];
+  customFieldValues: string[];
 };
 
 export type KitSearchResult = {
@@ -235,9 +243,115 @@ export function getAssetCommandValue(asset: AssetSearchResult) {
     asset.sequentialId ?? "",
     asset.id,
     asset.locationName ?? "",
+    asset.description ?? "",
+    asset.categoryName ?? "",
+    asset.custodianName ?? "",
+    asset.custodianUserName ?? "",
+    ...(asset.qrCodes ?? []),
+    ...(asset.tagNames ?? []),
+    ...(asset.barcodes ?? []),
+    ...(asset.customFieldValues ?? []),
   ].filter(Boolean);
 
   return [`asset-${asset.id}`, ...searchableFields].join(" ").trim();
+}
+
+function getAssetSubtitle(asset: AssetSearchResult, query: string): string {
+  const lowercaseQuery = query.toLowerCase().trim();
+
+  // Check if query matches any QR codes
+  const matchingQrCode = asset.qrCodes?.find((qr) =>
+    qr.toLowerCase().includes(lowercaseQuery)
+  );
+  if (matchingQrCode) {
+    return `QR: ${matchingQrCode}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches any barcodes
+  const matchingBarcode = asset.barcodes?.find((barcode) =>
+    barcode.toLowerCase().includes(lowercaseQuery)
+  );
+  if (matchingBarcode) {
+    return `Barcode: ${matchingBarcode}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches category
+  if (
+    asset.categoryName &&
+    asset.categoryName.toLowerCase().includes(lowercaseQuery)
+  ) {
+    return `Category: ${asset.categoryName}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches any tags
+  const matchingTag = asset.tagNames?.find((tag) =>
+    tag.toLowerCase().includes(lowercaseQuery)
+  );
+  if (matchingTag) {
+    return `Tag: ${matchingTag}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches custodian name
+  if (
+    asset.custodianName &&
+    asset.custodianName.toLowerCase().includes(lowercaseQuery)
+  ) {
+    return `Custodian: ${asset.custodianName}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches custodian user name
+  if (
+    asset.custodianUserName &&
+    asset.custodianUserName.toLowerCase().includes(lowercaseQuery)
+  ) {
+    return `Custodian: ${asset.custodianUserName}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches any custom field values
+  const matchingCustomField = asset.customFieldValues?.find((value) =>
+    String(value).toLowerCase().includes(lowercaseQuery)
+  );
+  if (matchingCustomField) {
+    const stringValue = String(matchingCustomField);
+    const truncatedValue =
+      stringValue.length > 30
+        ? stringValue.substring(0, 27) + "..."
+        : stringValue;
+    return `Custom field: ${truncatedValue}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Check if query matches description
+  if (
+    asset.description &&
+    asset.description.toLowerCase().includes(lowercaseQuery)
+  ) {
+    const truncatedDesc =
+      asset.description.length > 40
+        ? asset.description.substring(0, 37) + "..."
+        : asset.description;
+    return `Description: ${truncatedDesc}${
+      asset.locationName ? ` • ${asset.locationName}` : ""
+    }`;
+  }
+
+  // Default subtitle
+  return `${asset.sequentialId || asset.id}${
+    asset.locationName ? ` • ${asset.locationName}` : ""
+  }`;
 }
 
 export function getKitCommandValue(kit: KitSearchResult) {
@@ -506,8 +620,7 @@ export function CommandPalette() {
                     {asset.title}
                   </span>
                   <span className="truncate text-xs text-gray-500">
-                    {asset.sequentialId || asset.id}
-                    {asset.locationName ? ` • ${asset.locationName}` : ""}
+                    {getAssetSubtitle(asset, debouncedQuery)}
                   </span>
                 </div>
               </CommandItem>
@@ -612,7 +725,7 @@ export function CommandPalette() {
                     {member.name}
                   </span>
                   <span className="truncate text-xs text-gray-500">
-                    {member.email || "No email"}
+                    {member.email || "NRM"}
                   </span>
                 </div>
               </CommandItem>
