@@ -221,7 +221,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const hasAssetIds = Boolean(assetIds);
 
     if (intent === "scan") {
-      return redirect(`/bookings/${booking.id}/scan-assets`);
+      return redirect(`/bookings/${booking.id}/overview/scan-assets`);
     }
 
     if (hasAssetIds) {
