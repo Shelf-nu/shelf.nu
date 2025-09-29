@@ -263,9 +263,14 @@ export async function createInvite(
       expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
     }); //keep only needed data in token to maintain the size
 
+    const inviterName =
+      `${invite.inviter.firstName ?? ""} ${
+        invite.inviter.lastName ?? ""
+      }`.trim() || "Someone";
+
     sendEmail({
       to: inviteeEmail,
-      subject: `✉️ You have been invited to ${invite.organization.name}`,
+      subject: `✉️ ${inviterName} invited you to ${invite.organization.name}`,
       text: inviteEmailText({ invite, token, extraMessage }),
       html: invitationTemplateString({ invite, token, extraMessage }),
     });
@@ -773,10 +778,14 @@ export async function bulkInviteUsers({
       const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
         expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
       });
+      const inviterName =
+        `${invite.inviter.firstName ?? ""} ${
+          invite.inviter.lastName ?? ""
+        }`.trim() || "Someone";
 
       sendEmail({
         to: invite.inviteeEmail,
-        subject: `✉️ You have been invited to ${invite.organization.name}`,
+        subject: `✉️ ${inviterName} invited you to ${invite.organization.name}`,
         text: inviteEmailText({ invite, token, extraMessage }),
         html: invitationTemplateString({ invite, token, extraMessage }),
       });

@@ -314,9 +314,12 @@ export async function action({ request }: ActionFunctionArgs) {
           subscription.trial_end && subscription.trial_start;
 
         if (isTrialSubscription) {
+          const trialSubjectName = user.firstName?.trim();
           sendEmail({
             to: user.email,
-            subject: "Your shelf.nu free trial is ending soon",
+            subject: trialSubjectName
+              ? `⏰ ${trialSubjectName}, your trial ends in 3 days`
+              : "⏰ Your trial ends in 3 days",
             text: trialEndsSoonText({
               user: {
                 firstName: user?.firstName ?? null,

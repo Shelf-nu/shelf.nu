@@ -218,7 +218,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendEmail({
           to: payload.email,
           subject: "Delete account request received",
-          text: `We have received your request to delete your account. It will be processed within 72 hours.\n\n Kind regards,\nthe Shelf team \n\n`,
+          text: `Howdy,\n\nWe received your request to delete your account. It will be processed within 72 hours.\n\nIf you change your mind, reply to this email before we process it.\n\nThanks,\nThe Shelf Team\n\n`,
         });
 
         sendNotification({
@@ -274,7 +274,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Send email with OTP using our email service
         sendEmail({
           to: newEmail,
-          subject: `🔐 Shelf verification code: ${linkData.properties.email_otp}`,
+          subject: `🔐 Verification code: ${linkData.properties.email_otp}`,
           text: changeEmailAddressTextEmail({
             otp: linkData.properties.email_otp,
             user,

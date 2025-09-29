@@ -24,21 +24,27 @@ export const inviteEmailText = ({
 
 ${invite.inviter.firstName} ${
   invite.inviter.lastName
-} invites you to join Shelf as a member of ${
-  invite.organization.name
-}’s workspace.
+} invited you to their Shelf workspace: ${invite.organization.name}.
 
-Click the link to accept the invite:
-${SERVER_URL}/accept-invite/${invite.id}?token=${token}
+→ Accept invite: ${SERVER_URL}/accept-invite/${invite.id}?token=${token}
 
-Once you’re done setting up your account, you'll be able to access the workspace and start exploring features like Asset Explorer, Location Tracking, Collaboration, Custom fields and more.
+What is Shelf?
+Asset tracking that doesn't suck. QR codes, bookings, team collaboration - the stuff spreadsheets can't do.
 
-If you have any questions or need assistance, please don't hesitate to contact our support team at ${SUPPORT_EMAIL}.
+Once you're in:
+- See all assets in ${invite.organization.name}
+- Create bookings
+- Track locations
+- Collaborate with your team
+
+Questions? ${SUPPORT_EMAIL}
 
 ${extraMessage ? extraMessage : ""}
 
 Thanks,
 The Shelf Team
+
+P.S. - Need labels? → http://store.shelf.nu
 `;
 
 export const revokeAccessEmailText = ({
@@ -47,9 +53,11 @@ export const revokeAccessEmailText = ({
   orgName: string;
 }) => `Howdy,
 
-Your access to ${orgName} has been revoked.
+Your access to ${orgName} on Shelf has been revoked.
 
-If you think this is a mistake, please contact the organization’s administrator.
+If this is a mistake, contact the workspace administrator.
+
+Need your own workspace? Create one free → ${SERVER_URL}
 
 Thanks,
 The Shelf Team

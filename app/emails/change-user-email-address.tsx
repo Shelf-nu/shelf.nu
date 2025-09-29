@@ -1,4 +1,5 @@
 import { Container, Head, Html, render, Text } from "@react-email/components";
+import { SUPPORT_EMAIL } from "~/utils/env";
 import { styles } from "./styles";
 
 /**
@@ -14,13 +15,14 @@ export const changeEmailAddressTextEmail = ({
   user.lastName ? user.lastName : ""
 },
 
-Your verification code for email change is: ${otp}
+Your email change verification code: **${otp}**
 
-Don't share this OTP with anyone. Our customer service team will never ask you for your password, OTP, credit card, or banking info.
-This code will expire in 1 hour. If you have not requested this change, please ignore the email and contact support immediately.
+Don't share this with anyone. This code expires in 1 hour.
 
-Kind regards,
-the Shelf team`;
+If you didn't request this, ignore this email and contact ${SUPPORT_EMAIL}.
+
+Thanks,
+The Shelf Team`;
 
 function ChangeEmailAddressHtmlEmailTemplate({
   otp,
@@ -32,7 +34,7 @@ function ChangeEmailAddressHtmlEmailTemplate({
   return (
     <Html>
       <Head>
-        <title>🔐 Your verification code for email change is: {otp}</title>
+        <title>🔐 Verification code: {otp}</title>
       </Head>
 
       <Container style={{ maxWidth: "100%" }}>
@@ -42,26 +44,24 @@ function ChangeEmailAddressHtmlEmailTemplate({
             {`${user.firstName ? user.firstName : ""} ${
               user.lastName ? user.lastName : ""
             }`}
-            ,
           </Text>
           <Text style={{ ...styles.p }}>
-            Your verification code for email change is:
+            Your email change verification code:
           </Text>
           <h2>
             <b>{otp}</b>
           </h2>
           <Text style={{ ...styles.p }}>
-            Don't share this OTP with anyone. Our customer service team will
-            never ask you for your password, OTP, credit card, or banking info.
+            Don't share this with anyone. This code expires in 1 hour.
           </Text>
           <Text style={{ ...styles.p }}>
-            This code will expire in 1 hour. If you have not requested this
-            change, please ignore the email and contact support immediately.
+            If you didn't request this, ignore this email and contact{" "}
+            {SUPPORT_EMAIL}.
             <br />
             <br />
-            Kind regards,
+            Thanks,
             <br />
-            the Shelf team
+            The Shelf Team
           </Text>
         </div>
       </Container>

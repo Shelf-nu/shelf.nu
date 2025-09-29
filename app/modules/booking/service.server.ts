@@ -62,6 +62,7 @@ import {
 } from "./constants";
 import {
   assetReservedEmailContent,
+  bookingApprovalRequestEmailContent,
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
@@ -881,14 +882,16 @@ export async function reserveBooking({
       const custodian = bookingFound?.custodianUser
         ? `${bookingFound.custodianUser.firstName} ${bookingFound.custodianUser.lastName}`
         : bookingFound.custodianTeamMember?.name ?? "";
+      const custodianName = custodian.trim() || "the requester";
 
       /** Prepare email content */
-      const subject = `✅ Booking reserved (${bookingFound.name}) - shelf.nu`;
+      const subject = `✅ Booking confirmed: ${bookingFound.name}`;
 
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
         assetsCount: bookingFound._count.assets,
-        custodian: custodian,
+        custodian:
+          custodian.trim() || bookingFound.custodianTeamMember?.name || "",
         from,
         to,
         hints,
@@ -897,9 +900,13 @@ export async function reserveBooking({
 
       const html = bookingUpdatesTemplateString({
         booking: bookingFound,
-        heading: `Booking reservation for ${custodian}`,
+        heading: "Your booking is confirmed.",
         assetCount: bookingFound._count.assets,
         hints,
+        bodyLines: [
+          "**Pro tip:** Print QR labels for faster checkout → http://store.shelf.nu",
+        ],
+        buttonLabel: "View booking",
       });
       /** END Prepare email content */
 
@@ -912,19 +919,32 @@ export async function reserveBooking({
           organizationId,
         });
 
-        const adminSubject = `Booking reservation request (${bookingFound.name}) by ${custodian} - shelf.nu`;
+        const adminSubject = `📋 Booking approval needed: ${bookingFound.name}`;
 
         sendEmail({
           to: adminsEmails.join(","),
           subject: adminSubject,
-          text,
+          text: bookingApprovalRequestEmailContent({
+            bookingName: bookingFound.name,
+            assetsCount: bookingFound._count.assets,
+            custodian:
+              custodian.trim() || bookingFound.custodianTeamMember?.name || "",
+            from,
+            to,
+            hints,
+            bookingId: bookingFound.id,
+          }),
           /** We need to invoke this function separately for the admin email as the footer of emails is different */
           html: bookingUpdatesTemplateString({
             booking: bookingFound,
-            heading: `Booking reservation request for ${custodian}`,
+            heading: "Booking approval needed.",
             assetCount: bookingFound._count.assets,
             hints,
             isAdminEmail: true,
+            bodyLines: [
+              `${custodianName} requested a booking that needs your approval.`,
+            ],
+            buttonLabel: "Approve or decline",
           }),
         });
       }
@@ -1419,12 +1439,14 @@ export async function checkinBooking({
       const custodian = updatedBooking?.custodianUser
         ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
         : updatedBooking.custodianTeamMember?.name ?? "";
+      const custodianName =
+        custodian.trim() || updatedBooking.custodianTeamMember?.name || "";
 
-      const subject = `🎉 Booking completed (${updatedBooking.name}) - shelf.nu`;
+      const subject = `✅ Booking complete: ${updatedBooking.name}`;
       const text = completedBookingEmailContent({
         bookingName: updatedBooking.name,
         assetsCount: updatedBooking._count.assets,
-        custodian: custodian,
+        custodian: custodianName,
         from: updatedBooking.from as Date, // We can safely cast here as we know the booking is overdue so it must have a from and to date
         to: updatedBooking.to as Date,
         bookingId: updatedBooking.id,
@@ -1433,9 +1455,11 @@ export async function checkinBooking({
 
       const html = bookingUpdatesTemplateString({
         booking: updatedBooking,
-        heading: `Your booking has been completed: "${updatedBooking.name}".`,
+        heading: "All done! Your booking is complete.",
         assetCount: updatedBooking._count.assets,
         hints,
+        bodyLines: ["**Need more labels?** Stock up → http://store.shelf.nu"],
+        buttonLabel: "View history",
       });
 
       sendEmail({
@@ -2010,13 +2034,17 @@ export async function cancelBooking({
     await cancelScheduler(booking);
 
     if (booking.custodianUser?.email) {
-      const subject = `Booking canceled (${booking.name}) - shelf.nu`;
+      const custodian = booking.custodianUser
+        ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+        : booking.custodianTeamMember?.name ?? "";
+      const custodianName =
+        custodian.trim() || booking.custodianTeamMember?.name || "";
+
+      const subject = `❌ Booking cancelled: ${booking.name}`;
       const text = cancelledBookingEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
-        custodian:
-          `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
-          (booking.custodianTeamMember?.name as string),
+        custodian: custodianName,
         from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
         to: booking.to as Date,
         bookingId: booking.id,
@@ -2025,9 +2053,11 @@ export async function cancelBooking({
 
       const html = bookingUpdatesTemplateString({
         booking: booking,
-        heading: `Your booking has been cancelled: "${booking.name}".`,
+        heading: "Your booking has been cancelled.",
         assetCount: booking._count.assets,
         hints,
+        bodyLines: ["If this was a mistake, contact your workspace admin."],
+        hideViewButton: true,
       });
 
       sendEmail({
@@ -2238,11 +2268,13 @@ export async function extendBooking({
       const custodian = updatedBooking?.custodianUser
         ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
         : updatedBooking.custodianTeamMember?.name ?? "";
+      const custodianName =
+        custodian.trim() || updatedBooking.custodianTeamMember?.name || "";
 
       const text = extendBookingEmailContent({
         bookingName: updatedBooking.name,
         assetsCount: updatedBooking._count.assets,
-        custodian,
+        custodian: custodianName,
         from: updatedBooking.from!,
         to: updatedBooking.to!,
         hints,
@@ -2257,16 +2289,19 @@ export async function extendBooking({
 
       const html = bookingUpdatesTemplateString({
         booking: updatedBooking,
-        heading: `Booking extended from ${format(booking.to!)} to ${format(
-          newEndDate
-        )}`,
+        heading: "Your booking has been extended.",
         assetCount: updatedBooking._count.assets,
         hints,
+        bodyLines: [
+          `**New return date:** ${format(newEndDate)}`,
+          `**Previous return date:** ${format(booking.to!)}`,
+        ],
+        buttonLabel: "View booking",
       });
 
       sendEmail({
         to: updatedBooking.custodianUser.email,
-        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
+        subject: `📅 Booking extended: ${updatedBooking.name}`,
         text,
         html,
       });
@@ -2888,13 +2923,17 @@ export async function deleteBooking(
 
     const email = b.custodianUser?.email;
     if (email) {
-      const subject = `🗑️ Booking deleted (${b.name}) - shelf.nu`;
+      const custodian = b.custodianUser
+        ? `${b.custodianUser.firstName} ${b.custodianUser.lastName}`
+        : b.custodianTeamMember?.name ?? "";
+      const custodianName =
+        custodian.trim() || b.custodianTeamMember?.name || "";
+
+      const subject = `🗑️ Booking deleted: ${b.name}`;
       const text = deletedBookingEmailContent({
         bookingName: b.name,
         assetsCount: b._count.assets,
-        custodian:
-          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-          (b.custodianTeamMember?.name as string),
+        custodian: custodianName,
         from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
         to: b.to as Date,
         bookingId: b.id,
@@ -2902,10 +2941,12 @@ export async function deleteBooking(
       });
       const html = bookingUpdatesTemplateString({
         booking: b,
-        heading: `Your booking has been deleted: "${b.name}".`,
+        heading: "Your booking has been deleted.",
         assetCount: b._count.assets,
         hints,
         hideViewButton: true,
+        bodyLines: ["This action is permanent. The booking no longer exists."],
+        showCustodian: true,
       });
 
       sendEmail({
@@ -3420,28 +3461,37 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    const emailConfigs = bookingsToSendEmail.map((b) => ({
-      to: b.custodianUser?.email ?? "",
-      subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-      text: deletedBookingEmailContent({
-        bookingName: b.name,
-        assetsCount: b.assets.length,
-        custodian:
-          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-          (b.custodianTeamMember?.name as string),
-        from: b.from as Date,
-        to: b.to as Date,
-        bookingId: b.id,
-        hints,
-      }),
-      html: bookingUpdatesTemplateString({
-        booking: b,
-        heading: `Your booking as been deleted: "${b.name}"`,
-        assetCount: b.assets.length,
-        hints,
-        hideViewButton: true,
-      }),
-    }));
+    const emailConfigs = bookingsToSendEmail.map((b) => {
+      const custodian = b.custodianUser
+        ? `${b.custodianUser.firstName} ${b.custodianUser.lastName}`
+        : b.custodianTeamMember?.name ?? "";
+      const custodianName =
+        custodian.trim() || b.custodianTeamMember?.name || "";
+
+      return {
+        to: b.custodianUser?.email ?? "",
+        subject: `🗑️ Booking deleted: ${b.name}`,
+        text: deletedBookingEmailContent({
+          bookingName: b.name,
+          assetsCount: b.assets.length,
+          custodian: custodianName,
+          from: b.from as Date,
+          to: b.to as Date,
+          bookingId: b.id,
+          hints,
+        }),
+        html: bookingUpdatesTemplateString({
+          booking: b,
+          heading: "Your booking has been deleted.",
+          assetCount: b.assets.length,
+          hints,
+          hideViewButton: true,
+          bodyLines: [
+            "This action is permanent. The booking no longer exists.",
+          ],
+        }),
+      };
+    });
 
     return emailConfigs.map(sendEmail);
   } catch (cause) {
@@ -3683,13 +3733,17 @@ export async function bulkCancelBookings({
     /** Sending cancellation emails */
     await Promise.all(
       bookingsToSendEmail.map((b) => {
-        const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
+        const custodian = b.custodianUser
+          ? `${b.custodianUser.firstName} ${b.custodianUser.lastName}`
+          : b.custodianTeamMember?.name ?? "";
+        const custodianName =
+          custodian.trim() || b.custodianTeamMember?.name || "";
+
+        const subject = `❌ Booking cancelled: ${b.name}`;
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
           assetsCount: b._count.assets,
-          custodian:
-            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-            (b.custodianTeamMember?.name as string),
+          custodian: custodianName,
           from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
           to: b.to as Date,
           bookingId: b.id,
@@ -3698,9 +3752,11 @@ export async function bulkCancelBookings({
 
         const html = bookingUpdatesTemplateString({
           booking: b,
-          heading: `Your booking has been cancelled: "${b.name}".`,
+          heading: "Your booking has been cancelled.",
           assetCount: b._count.assets,
           hints,
+          bodyLines: ["If this was a mistake, contact your workspace admin."],
+          hideViewButton: true,
         });
 
         return sendEmail({

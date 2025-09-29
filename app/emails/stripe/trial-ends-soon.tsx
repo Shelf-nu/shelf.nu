@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
+import { SERVER_URL } from "~/utils/env";
 interface Props {
   user: { firstName?: string | null; lastName?: string | null; email: string };
   subscription: Stripe.Subscription;
@@ -9,14 +9,29 @@ export const trialEndsSoonText = ({ user, subscription }: Props) => `Howdy ${
   user.firstName ? user.firstName : ""
 } ${user.lastName ? user.lastName : ""},
 
-You are reaching the end of your trial period with Shelf, which concludes on ${new Date(
-  (subscription.trial_end as number) * 1000 // We force this as we check it before even calling the send email function
-).toLocaleDateString()}. It's been a pleasure having you explore what Shelf has to offer. To maintain uninterrupted access to our premium features, we invite you to transition to one of our paid plans. You can make this upgrade by visiting your subscription settings: ${SERVER_URL}/account-details/subscription .
+Your Shelf trial ends on ${new Date(
+  (subscription.trial_end as number) * 1000
+).toLocaleDateString()}.
 
-Should you have any inquiries or require further assistance, our support team is at your disposal. You can reach us via email at ${SUPPORT_EMAIL}.
+After that, your workspace freezes completely.
 
-Thank you for considering Shelf for your needs. We look forward to continuing to support your journey.
+What stops working:
+❌ You can't access your assets
+❌ Your team gets locked out
+❌ Bookings stop working
 
-Warm regards,
-The Shelf Team
+Your data is safe, but everything pauses until you upgrade.
+
+→ Keep your workspace active: ${SERVER_URL}/account-details/subscription
+
+Takes 60 seconds. Your setup stays intact.
+
+Questions? Hit reply.
+
+Best,
+Carlos A. Virreira
+Founder / CEO
+Shelf Asset Management, Inc.
+
+P.S. - Not ready? Reply and tell me why. Maybe I can help.
 `;

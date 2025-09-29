@@ -24,6 +24,7 @@ import {
 } from "~/modules/auth/service.server";
 
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
+import { SERVER_URL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
 import { getRedirectUrlFromRequest, type ValidationError } from "~/utils/http";
@@ -1146,8 +1147,8 @@ export async function softDeleteUser(id: User["id"]) {
     /** Send an email to the user that their request has been completed */
     void sendEmail({
       to: user.email,
-      subject: "Your account has been deleted",
-      text: `Your shelf account has been deleted. \n\n Kind regards, \n Shelf Team\n\n`,
+      subject: "Your Shelf account has been deleted",
+      text: `Hi,\n\nYour Shelf account has been deleted as requested.\n\nWhat was deleted:\n- All assets, bookings, and data\n- All team access\n- All workspace history\n\nThis is permanent.\n\nIf this was a mistake, you can create a new account at ${SERVER_URL} - but your previous data cannot be recovered.\n\nWe're sorry to see you go. If you're open to sharing why, reply to this email.\n\nThanks,\nThe Shelf Team\n\n`,
     });
 
     if (error) {

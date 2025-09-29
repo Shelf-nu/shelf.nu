@@ -4,7 +4,6 @@ import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
-import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
@@ -42,7 +41,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (email && booking.from && booking.to) {
     sendEmail({
       to: email,
-      subject: `🔔 Checkout reminder (${booking.name}) - shelf.nu`,
+      subject: `🔔 Checkout soon: ${booking.name} (starts in 1 hour)`,
       text: checkoutReminderEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
@@ -56,12 +55,13 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       }),
       html: bookingUpdatesTemplateString({
         booking,
-        heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
-          new Date(booking.from),
-          new Date()
-        )}.`,
+        heading: "Your booking starts in 1 hour.",
         assetCount: booking._count.assets,
         hints: data.hints,
+        bodyLines: [
+          "**Using QR codes?** Durable labels make it faster → http://store.shelf.nu",
+        ],
+        buttonLabel: "Checkout now",
       }),
     });
   }
@@ -156,7 +156,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (email) {
     sendEmail({
       to: email,
-      subject: `⚠️ Overdue booking (${booking.name}) - shelf.nu`,
+      subject: `⚠️ OVERDUE: ${booking.name}`,
       text: overdueBookingEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
@@ -170,9 +170,13 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       }),
       html: bookingUpdatesTemplateString({
         booking,
-        heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
+        heading: "This booking is overdue.",
         assetCount: booking._count.assets,
         hints: data.hints,
+        bodyLines: [
+          "If you still need these assets, extend the booking to avoid blocking other reservations.",
+        ],
+        buttonLabel: "Check in now",
       }),
     });
   }
