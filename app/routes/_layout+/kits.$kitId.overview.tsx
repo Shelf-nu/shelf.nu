@@ -114,6 +114,17 @@ export default function KitOverview() {
           </span>
           <div className="mt-1 w-3/5 text-gray-600 md:mt-0">{kit?.id}</div>
         </li>
+
+        {kit?.qrCodes?.[0] ? (
+          <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+            <span className="w-1/4 text-[14px] font-medium text-gray-900">
+              Shelf QR ID
+            </span>
+            <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+              {kit.qrCodes[0].id}
+            </div>
+          </li>
+        ) : null}
         <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
           <span className="w-1/4 text-[14px] font-medium text-gray-900">
             Created

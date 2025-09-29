@@ -172,6 +172,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id: bookingId,
       organizationId,
       assetIds: finalAssetIds,
+      userId,
     });
 
     await createNotes({

@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import { formatBookingDuration } from "~/modules/booking/helpers";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { BookingAssetsColumn } from "./booking-assets-column";
 import { BookingStatistics } from "./booking-statistics";

@@ -7,6 +7,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import {
   BOOKING_INCLUDE_FOR_EMAIL,
@@ -19,6 +20,7 @@ import {
 } from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
+import { createSystemBookingNote } from "../booking-note/service.server";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
@@ -132,6 +134,21 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     );
     return;
   }
+
+  // Create status transition note for automatic overdue transition
+  const fromStatusBadge = wrapBookingStatusForNote(
+    "ONGOING",
+    booking.custodianUserId || undefined
+  );
+  const toStatusBadge = wrapBookingStatusForNote(
+    "OVERDUE",
+    booking.custodianUserId || undefined
+  );
+
+  await createSystemBookingNote({
+    bookingId: booking.id,
+    content: `Booking became overdue. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+  });
 
   /** Send the OVERDUE email */
   const email = booking.custodianUser?.email;

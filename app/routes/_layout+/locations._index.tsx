@@ -99,7 +99,6 @@ export default function LocationsIndexPage() {
           to="new"
           role="link"
           aria-label={`new location`}
-          icon="plus"
           data-test-id="createNewLocation"
         >
           New location

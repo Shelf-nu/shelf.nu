@@ -6,7 +6,7 @@ import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";

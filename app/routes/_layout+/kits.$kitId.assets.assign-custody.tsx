@@ -24,6 +24,7 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -160,7 +161,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -181,25 +182,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const user = await getUserByID(userId);
 
-    if (isSelfService) {
-      const custodian = await db.teamMember.findUnique({
-        where: { id: custodianId },
-        select: { id: true, userId: true },
+    // Validate that the custodian belongs to the same organization
+    const custodianTeamMember = await getTeamMember({
+      id: custodianId,
+      organizationId,
+      select: { id: true, userId: true },
+    }).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, kitId, custodianId },
+        label: "Kit",
+        status: 404,
       });
+    });
 
-      if (custodian?.userId !== user.id) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, kitId, custodianId },
-          label: "Kit",
-        });
-      }
+    if (isSelfService && custodianTeamMember.userId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, kitId, custodianId },
+        label: "Kit",
+      });
     }
 
     const kit = await db.kit.update({
-      where: { id: kitId },
+      where: { id: kitId, organizationId },
       data: {
         status: KitStatus.IN_CUSTODY,
         custody: { create: { custodian: { connect: { id: custodianId } } } },
@@ -215,7 +225,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        */
       ...kit.assets.map((asset) =>
         db.asset.update({
-          where: { id: asset.id },
+          where: { id: asset.id, organizationId },
           data: {
             status: AssetStatus.IN_CUSTODY,
             custody: {

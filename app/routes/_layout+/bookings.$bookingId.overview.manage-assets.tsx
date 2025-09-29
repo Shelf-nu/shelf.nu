@@ -75,6 +75,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -372,11 +373,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets
+        userId,
       });
 
       /** We create notes for the newly added assets */
       await createNotes({
-        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+        content: `${wrapUserLinkForNote(user!)} added asset to booking **[${
           b.name
         }](/bookings/${b.id})**.`,
         type: "UPDATE",
@@ -387,12 +389,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** If some assets were removed, we also need to handle those */
     if (removedAssetIds.length > 0) {
+      // Get the removed assets with their titles for proper note generation
+      const removedAssets = await db.asset.findMany({
+        where: {
+          id: { in: removedAssetIds },
+          organizationId,
+        },
+        select: { id: true, title: true },
+      });
+
       await removeAssets({
         booking: { id: bookingId, assetIds: removedAssetIds },
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
         userId: authSession.userId,
         organizationId,
+        assets: removedAssets,
       });
     }
 
@@ -451,7 +463,7 @@ export default function AddAssetsToNewBooking() {
 
   const manageKitsUrl = useMemo(
     () =>
-      `/bookings/${booking.id}/manage-kits?${new URLSearchParams({
+      `/bookings/${booking.id}/overview/manage-kits?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
         bookingFrom: new Date(booking.from as string).toISOString(),

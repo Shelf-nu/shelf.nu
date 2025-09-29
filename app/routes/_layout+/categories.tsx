@@ -156,7 +156,6 @@ export default function CategoriesPage() {
           to="new"
           role="link"
           aria-label={`new category`}
-          icon="plus"
           data-test-id="createNewCategory"
         >
           New category

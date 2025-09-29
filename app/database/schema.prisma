@@ -58,6 +58,7 @@ model User {
   assets            Asset[]
   categories        Category[]
   notes             Note[]
+  bookingNotes      BookingNote[]      @relation("BookingNoteUser")
   qrCodes           Qr[]
   scans             Scan[]
   tags              Tag[]
@@ -306,6 +307,26 @@ model Note {
 
   // Indexes for foreign keys
   @@index([assetId])
+  @@index([userId])
+}
+
+model BookingNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user      User?    @relation("BookingNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId    String?
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  bookingId String
+
+  // Indexes for foreign keys
+  @@index([bookingId])
   @@index([userId])
 }
 
@@ -912,6 +933,7 @@ model Booking {
   organizationId String
 
   assets Asset[]
+  notes  BookingNote[]
 
   tags Tag[]
   partialCheckins PartialBookingCheckin[]

@@ -235,7 +235,7 @@ export default function KitsIndexPage() {
     <>
       <Header>
         {canCreateKit && (
-          <Button to="new" role="link" aria-label="new kit" icon="kit">
+          <Button to="new" role="link" aria-label="new kit">
             New kit
           </Button>
         )}
