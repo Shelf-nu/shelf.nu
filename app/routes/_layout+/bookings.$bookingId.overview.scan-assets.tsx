@@ -121,7 +121,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Combine asset IDs and kit IDs for the backend function
     // The backend expects both asset and kit IDs in the assetIds parameter
-    const allIds = [...assetIds, ...(kitIds || [])];
+    const allIds = [...assetIds, ...kitIds];
 
     await addScannedAssetsToBooking({
       bookingId,
