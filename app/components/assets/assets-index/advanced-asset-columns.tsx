@@ -536,7 +536,7 @@ function BarcodeColumn({
             trigger={<Button variant="link-gray">{barcode.value}</Button>}
           />
           {index < barcodes.length - 1 && (
-            <span className="text-gray-400">, </span>
+            <span className="text-gray-600">, </span>
           )}
         </span>
       ))}
