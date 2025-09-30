@@ -13,13 +13,6 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/forms/select";
 import { SelectWithOther } from "~/components/forms/select-with-other";
 import { Button } from "~/components/shared/button";
 import {
@@ -35,6 +28,14 @@ import {
   getAuthUserById,
   signInWithEmail,
 } from "~/modules/auth/service.server";
+import { upsertBusinessIntel } from "~/modules/business-intel/service.server";
+import {
+  ROLE_OPTIONS,
+  TEAM_SIZE_OPTIONS,
+  PRIMARY_USE_CASE_OPTIONS,
+  CURRENT_SOLUTION_OPTIONS,
+  TIMELINE_OPTIONS,
+} from "~/modules/onboarding/constants";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationById } from "~/modules/organization/service.server";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
@@ -51,49 +52,8 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
-import { isOption } from "~/utils/options";
 import { createStripeCustomer } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
-
-const ROLE_OPTIONS = [
-  "Operations Manager",
-  "IT Administrator",
-  "Facilities Manager",
-  "Equipment Manager",
-  "Office Manager",
-  "Business Owner",
-  "Project Manager",
-  "Personal use", // Allows individual signups to provide a meaningful answer
-] as const;
-
-const TEAM_SIZE_OPTIONS = [
-  "Just me (1)",
-  "Small team (2-10)",
-  "Department (11-50)",
-  "Large organization (50+)",
-] as const;
-
-const PRIMARY_USE_CASE_OPTIONS = [
-  "IT hardware",
-  "Office equipment",
-  "Facilities assets",
-  "Tools & machinery",
-  "Inventory & supplies",
-] as const;
-
-const CURRENT_SOLUTION_OPTIONS = [
-  "Spreadsheets",
-  "Paper logs",
-  "Dedicated asset tool",
-  "Not tracking yet",
-] as const;
-
-const TIMELINE_OPTIONS = [
-  "This week",
-  "Within a month",
-  "Next quarter",
-  "Just exploring",
-] as const;
 
 const trimString = (value: unknown) =>
   typeof value === "string" ? value.trim() : value;
@@ -118,11 +78,11 @@ function requiredTrimmedField(message: string) {
 
 function createOnboardingSchema({
   userSignedUpWithPassword,
-  showHowDidYouFindUs,
+  collectBusinessIntel,
   requireCompanyName,
 }: {
   userSignedUpWithPassword: boolean;
-  showHowDidYouFindUs: boolean;
+  collectBusinessIntel: boolean;
   requireCompanyName: boolean;
 }) {
   return z
@@ -138,27 +98,67 @@ function createOnboardingSchema({
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
-      referralSource: showHowDidYouFindUs
+      referralSource: collectBusinessIntel
         ? z.string().min(5, "Field is required.")
         : z.string().optional().nullable(),
-      jobTitle: requiredTrimmedField("Role is required"),
-      teamSize: requiredTrimmedField("Team size is required"),
-      companyName: requireCompanyName
-        ? requiredTrimmedField("Company or organization is required")
+      jobTitle: collectBusinessIntel
+        ? requiredTrimmedField("Role is required")
         : optionalTrimmedField,
+      teamSize: optionalTrimmedField,
+      companyName: optionalTrimmedField,
       primaryUseCase: optionalTrimmedField,
       currentSolution: optionalTrimmedField,
       timeline: optionalTrimmedField,
     })
     .superRefine(
-      ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
+      (
+        {
+          password,
+          confirmPassword,
+          username,
+          firstName,
+          lastName,
+          jobTitle,
+          teamSize,
+          companyName,
+        },
+        ctx
+      ) => {
         if (password !== confirmPassword) {
-          return ctx.addIssue({
+          ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Password and confirm password must match",
             path: ["confirmPassword"],
           });
         }
+
+        // Only validate teamSize and companyName if collectBusinessIntel is true
+        // and jobTitle is not "Personal use"
+        if (collectBusinessIntel && jobTitle !== "Personal use") {
+          // teamSize is only required for non-invited users
+          if (
+            requireCompanyName &&
+            (!teamSize || teamSize.trim().length === 0)
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Team size is required",
+              path: ["teamSize"],
+            });
+          }
+
+          if (
+            requireCompanyName &&
+            (!companyName || companyName.trim().length === 0)
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Company or organization is required",
+              path: ["companyName"],
+            });
+          }
+        }
+
         return { password, confirmPassword, username, firstName, lastName };
       }
     );
@@ -178,7 +178,12 @@ async function resolveInvitedCompanyName({
   try {
     const organization = await getOrganizationById(verifiedOrganizationId);
     return organization.name ?? fallback ?? undefined;
-  } catch {
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `Failed to resolve organization name for ${verifiedOrganizationId}:`,
+      error
+    );
     return fallback ?? undefined;
   }
 }
@@ -197,6 +202,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           organization: { select: { name: true } },
         },
       },
+      businessIntel: true,
     });
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
@@ -228,14 +234,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const organizationName =
       organizationMembership?.organization?.name ??
-      (user.createdWithInvite ? user.companyName ?? null : null);
+      (user.createdWithInvite ? user.businessIntel?.companyName ?? null : null);
 
     const verifiedOrganizationId =
       organizationMembership?.organizationId ?? null;
 
     const OnboardingFormSchema = createOnboardingSchema({
       userSignedUpWithPassword,
-      showHowDidYouFindUs: config.showHowDidYouFindUs,
+      collectBusinessIntel: config.collectBusinessIntel,
       requireCompanyName,
     });
 
@@ -250,7 +256,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user,
         userSignedUpWithPassword,
         OnboardingFormSchema,
-        showHowDidYouFindUs: config.showHowDidYouFindUs,
+        collectBusinessIntel: config.collectBusinessIntel,
         createdWithInvite,
         requireCompanyName,
         organizationName,
@@ -318,7 +324,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const OnboardingFormSchema = createOnboardingSchema({
       userSignedUpWithPassword: metadata.userSignedUpWithPassword,
-      showHowDidYouFindUs: config.showHowDidYouFindUs,
+      collectBusinessIntel: config.collectBusinessIntel,
       requireCompanyName: !createdWithInvite,
     });
 
@@ -337,32 +343,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ...accountFields
     } = payload;
 
+    // Separate user account fields from business intel fields
     const userUpdatePayload: typeof accountFields & {
       id: string;
       onboarded: true;
-      referralSource: typeof referralSource;
-      jobTitle: typeof jobTitle;
-      teamSize: typeof teamSize;
-      companyName: string | undefined;
-      primaryUseCase: typeof primaryUseCase;
-      currentSolution: typeof currentSolution;
-      timeline: typeof timeline;
       password?: typeof password;
       confirmPassword?: typeof confirmPassword;
     } = {
       ...accountFields,
       id: userId,
       onboarded: true,
-      referralSource,
-      jobTitle,
-      teamSize,
-      companyName: await resolveInvitedCompanyName({
-        verifiedOrganizationId,
-        fallback: companyName ?? existingUser.companyName ?? null,
-      }),
-      primaryUseCase,
-      currentSolution,
-      timeline,
     };
 
     if (!metadata.userSignedUpWithPassword) {
@@ -373,10 +363,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
     /** Update the user */
     const user = await updateUser(userUpdatePayload);
 
+    /** Save business intelligence data separately */
+    if (config.collectBusinessIntel) {
+      await upsertBusinessIntel({
+        userId,
+        howDidYouHearAboutUs: referralSource,
+        jobTitle,
+        teamSize,
+        companyName: await resolveInvitedCompanyName({
+          verifiedOrganizationId,
+          fallback: companyName ?? null,
+        }),
+        primaryUseCase,
+        currentSolution,
+        timeline,
+      });
+    }
+
     /**
      * When setting password as part of onboarding, the session gets destroyed as part of the normal password reset flow.
      * In this case, we need to create a new session for the user.
-     * We only need to do that if the user DIDNT sign up using password. In that case the password gets set in the updateUser above
+     * We only need to do that if the user didn't sign up using password. In that case the password gets set in the updateUser above
      */
     if (user && !metadata.userSignedUpWithPassword) {
       //making sure new session is created.
@@ -440,7 +447,7 @@ export default function Onboarding() {
     userSignedUpWithPassword,
     title,
     subHeading,
-    showHowDidYouFindUs,
+    collectBusinessIntel,
     organizationName,
     requireCompanyName,
     organizationId,
@@ -448,7 +455,7 @@ export default function Onboarding() {
 
   const OnboardingFormSchema = createOnboardingSchema({
     userSignedUpWithPassword,
-    showHowDidYouFindUs,
+    collectBusinessIntel,
     requireCompanyName,
   });
 
@@ -457,32 +464,27 @@ export default function Onboarding() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  // Business intel data from new table, fallback to legacy fields for historical data
+  const businessIntel = user?.businessIntel;
+  const jobTitleDefault = businessIntel?.jobTitle ?? null;
+  const teamSizeDefault = businessIntel?.teamSize ?? null;
   const companyNameDefault = requireCompanyName
-    ? user?.companyName ?? ""
-    : organizationName ?? user?.companyName ?? "";
+    ? businessIntel?.companyName ?? ""
+    : organizationName ?? businessIntel?.companyName ?? "";
+  const referralSourceDefault =
+    businessIntel?.howDidYouHearAboutUs ?? user?.referralSource ?? "";
 
-  const initialTeamSize = isOption(
-    TEAM_SIZE_OPTIONS,
-    user?.teamSize ?? undefined
-  )
-    ? (user?.teamSize as (typeof TEAM_SIZE_OPTIONS)[number])
-    : "";
-  const [teamSizeSelection, setTeamSizeSelection] = useState(initialTeamSize);
-
-  const initialTimeline = isOption(
-    TIMELINE_OPTIONS,
-    user?.timeline ?? undefined
-  )
-    ? (user?.timeline as (typeof TIMELINE_OPTIONS)[number])
-    : "";
-  const [timelineSelection, setTimelineSelection] = useState(initialTimeline);
-
-  const [customizeOpen, setCustomizeOpen] = useState(
-    Boolean(user?.primaryUseCase || user?.currentSolution || user?.timeline)
+  const [isPersonalUse, setIsPersonalUse] = useState(
+    jobTitleDefault === "Personal use"
   );
 
-  const jobTitleError = zo.errors.jobTitle()?.message;
-  const teamSizeError = zo.errors.teamSize()?.message;
+  const [customizeOpen, setCustomizeOpen] = useState(
+    Boolean(
+      businessIntel?.primaryUseCase ||
+        businessIntel?.currentSolution ||
+        businessIntel?.timeline
+    )
+  );
 
   return (
     <div className="p-6 sm:p-8">
@@ -563,169 +565,121 @@ export default function Onboarding() {
           </>
         )}
 
-        <When truthy={showHowDidYouFindUs}>
-          <Input
-            required
-            label="How did you hear about us?"
-            placeholder="Twitter, Reddit, ChatGPT, Google, etc..."
-            name={zo.fields.referralSource()}
-            error={zo.errors.referralSource()?.message}
-          />
+        <When truthy={collectBusinessIntel}>
+          <>
+            <Input
+              required
+              label="How did you hear about us?"
+              placeholder="Twitter, Reddit, ChatGPT, Google, etc..."
+              name={zo.fields.referralSource()}
+              defaultValue={referralSourceDefault}
+              error={zo.errors.referralSource()?.message}
+            />
+
+            <SelectWithOther
+              label="What's your role?"
+              name={zo.fields.jobTitle()}
+              options={ROLE_OPTIONS}
+              required
+              error={zo.errors.jobTitle()?.message}
+              defaultValue={jobTitleDefault}
+              otherInputLabel="Specify your role"
+              otherInputPlaceholder="Tell us about your role"
+              onValueChange={(value) => {
+                setIsPersonalUse(value === "Personal use");
+              }}
+            />
+
+            <When truthy={!isPersonalUse && requireCompanyName}>
+              <SelectWithOther
+                label="How many people will use this?"
+                name={zo.fields.teamSize()}
+                options={TEAM_SIZE_OPTIONS}
+                required
+                error={zo.errors.teamSize()?.message}
+                defaultValue={teamSizeDefault}
+                otherInputLabel="Specify team size"
+                otherInputPlaceholder="Enter your team size"
+              />
+            </When>
+
+            <When truthy={!isPersonalUse && requireCompanyName}>
+              <Input
+                label="Company/Organization"
+                placeholder="Shelf Inc."
+                name={zo.fields.companyName()}
+                error={zo.errors.companyName()?.message}
+                defaultValue={companyNameDefault}
+                required
+              />
+            </When>
+
+            <When truthy={isPersonalUse || !requireCompanyName}>
+              <input
+                type="hidden"
+                name={zo.fields.companyName()}
+                value={companyNameDefault}
+              />
+            </When>
+          </>
         </When>
 
-        <div className="grid gap-5 md:grid-cols-2">
-          <SelectWithOther
-            label="What's your role?"
-            name={zo.fields.jobTitle()}
-            options={ROLE_OPTIONS}
-            required
-            error={jobTitleError}
-            defaultValue={user?.jobTitle ?? null}
-            otherInputLabel="Specify your role"
-            otherInputPlaceholder="Tell us about your role"
-          />
-          <div>
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-gray-700">
-                How many people will use this?
-                <span className="text-error-500"> *</span>
-              </span>
-              <Select
-                value={teamSizeSelection || undefined}
-                onValueChange={(value) => setTeamSizeSelection(value)}
+        <When truthy={collectBusinessIntel}>
+          <Collapsible open={customizeOpen} onOpenChange={setCustomizeOpen}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-left font-medium text-gray-700 hover:bg-gray-100"
               >
-                <SelectTrigger
-                  aria-label="Select team size"
-                  className={tw(
-                    "px-3 py-2 text-left text-gray-900 data-[placeholder]:text-gray-500",
-                    teamSizeError &&
-                      "border-error-300 focus:border-error-300 focus:ring-error-100"
-                  )}
-                >
-                  <SelectValue placeholder="Select team size" />
-                </SelectTrigger>
-                <SelectContent
-                  position="popper"
-                  className="w-full min-w-[260px]"
-                  align="start"
-                >
-                  <div className="max-h-60 overflow-auto">
-                    {TEAM_SIZE_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </div>
-                </SelectContent>
-              </Select>
-            </label>
-            <input
-              type="hidden"
-              name={zo.fields.teamSize()}
-              value={teamSizeSelection}
-            />
-            <When truthy={Boolean(teamSizeError)}>
-              <p className="mt-1 text-sm text-error-500">{teamSizeError}</p>
-            </When>
-          </div>
-        </div>
-
-        {requireCompanyName ? (
-          <Input
-            label="Company/Organization"
-            placeholder="Shelf Inc."
-            name={zo.fields.companyName()}
-            error={zo.errors.companyName()?.message}
-            defaultValue={companyNameDefault}
-            required
-          />
-        ) : (
-          <input
-            type="hidden"
-            name={zo.fields.companyName()}
-            value={companyNameDefault}
-          />
-        )}
-
-        <Collapsible open={customizeOpen} onOpenChange={setCustomizeOpen}>
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-left font-medium text-gray-700 hover:bg-gray-100"
-            >
-              <span>
-                Help us customize Shelf
-                <span className="ml-1 text-sm font-normal text-gray-500">
-                  (optional)
-                </span>
-              </span>
-              <ChevronDownIcon
-                className={tw(
-                  "size-4 transition-transform duration-200",
-                  customizeOpen ? "rotate-180" : ""
-                )}
-              />
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="mt-4 grid gap-5 md:grid-cols-2">
-              <SelectWithOther
-                label="What will you primarily track?"
-                name={zo.fields.primaryUseCase()}
-                options={PRIMARY_USE_CASE_OPTIONS}
-                defaultValue={user?.primaryUseCase ?? null}
-                otherInputLabel="Tell us what you'll track"
-                otherInputPlaceholder="Describe your use case"
-                placeholder="Select an option"
-              />
-              <SelectWithOther
-                label="How do you currently track assets?"
-                name={zo.fields.currentSolution()}
-                options={CURRENT_SOLUTION_OPTIONS}
-                defaultValue={user?.currentSolution ?? null}
-                otherInputLabel="Share your current solution"
-                otherInputPlaceholder="Let us know what you use today"
-                placeholder="Select an option"
-              />
-              <div className="md:col-span-2">
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    When do you need this working?
+                <span>
+                  Help us customize Shelf
+                  <span className="ml-1 text-sm font-normal text-gray-500">
+                    (optional)
                   </span>
-                  <Select
-                    value={timelineSelection || undefined}
-                    onValueChange={(value) => setTimelineSelection(value)}
-                  >
-                    <SelectTrigger
-                      aria-label="Select timeline"
-                      className="px-3 py-2 text-left text-gray-900 data-[placeholder]:text-gray-500"
-                    >
-                      <SelectValue placeholder="Select an option" />
-                    </SelectTrigger>
-                    <SelectContent
-                      position="popper"
-                      className="w-full min-w-[260px]"
-                      align="start"
-                    >
-                      <div className="max-h-60 overflow-auto">
-                        {TIMELINE_OPTIONS.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </div>
-                    </SelectContent>
-                  </Select>
-                </label>
-                <input
-                  type="hidden"
-                  name={zo.fields.timeline()}
-                  value={timelineSelection}
+                </span>
+                <ChevronDownIcon
+                  className={tw(
+                    "size-4 transition-transform duration-200",
+                    customizeOpen ? "rotate-180" : ""
+                  )}
                 />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="mt-4 grid gap-5 md:grid-cols-2">
+                <SelectWithOther
+                  label="What will you primarily track?"
+                  name={zo.fields.primaryUseCase()}
+                  options={PRIMARY_USE_CASE_OPTIONS}
+                  defaultValue={businessIntel?.primaryUseCase ?? null}
+                  otherInputLabel="Tell us what you'll track"
+                  otherInputPlaceholder="Describe your use case"
+                  placeholder="Select an option"
+                />
+                <SelectWithOther
+                  label="How do you currently track assets?"
+                  name={zo.fields.currentSolution()}
+                  options={CURRENT_SOLUTION_OPTIONS}
+                  defaultValue={businessIntel?.currentSolution ?? null}
+                  otherInputLabel="Share your current solution"
+                  otherInputPlaceholder="Let us know what you use today"
+                  placeholder="Select an option"
+                />
+                <div className="md:col-span-2">
+                  <SelectWithOther
+                    label="When do you need this working?"
+                    name={zo.fields.timeline()}
+                    options={TIMELINE_OPTIONS}
+                    defaultValue={businessIntel?.timeline ?? null}
+                    otherInputLabel="Specify your timeline"
+                    otherInputPlaceholder="Tell us about your timeline"
+                    placeholder="Select an option"
+                  />
+                </div>
               </div>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+            </CollapsibleContent>
+          </Collapsible>
+        </When>
 
         <div>
           <Button

@@ -11,13 +11,6 @@ export interface UpdateUserPayload {
   password?: string;
   confirmPassword?: string;
   usedFreeTrial?: boolean;
-  referralSource?: User["referralSource"];
-  jobTitle?: User["jobTitle"];
-  teamSize?: User["teamSize"];
-  companyName?: User["companyName"];
-  primaryUseCase?: User["primaryUseCase"];
-  currentSolution?: User["currentSolution"];
-  timeline?: User["timeline"];
 }
 
 export interface UpdateUserResponse {

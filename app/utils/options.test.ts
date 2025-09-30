@@ -29,7 +29,7 @@ describe("options utilities", () => {
     });
   });
 
-  it("falls back to \"other\" with the trimmed custom value", () => {
+  it('falls back to "other" with the trimmed custom value', () => {
     expect(resolveSelectState(OPTIONS, " custom ")).toEqual({
       selection: "other",
       customValue: "custom",
