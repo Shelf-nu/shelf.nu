@@ -411,7 +411,7 @@ const unavailableBookingStatuses = [
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
  */
-async function getAssets(params: {
+export async function getAssets(params: {
   organizationId: Organization["id"];
   page: number;
   orderBy: SortingOptions;

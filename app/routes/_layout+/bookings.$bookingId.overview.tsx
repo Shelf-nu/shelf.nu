@@ -461,7 +461,7 @@ export const links: LinksFunction = () => [
 
 export const handle = {
   breadcrumb: () => "single",
-  name: "bookings.$bookingId",
+  name: "bookings.$bookingId.overview",
 };
 
 export type BookingPageActionData = typeof action;

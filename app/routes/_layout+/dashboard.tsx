@@ -18,6 +18,7 @@ import MostScannedCategories from "~/components/dashboard/most-scanned-categorie
 import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { getBookings } from "~/modules/booking/service.server";
 
@@ -138,8 +139,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookieHeader = request.headers.get("Cookie");
     const cookie = (await userPrefs.parse(cookieHeader)) || {};
 
+    const header: HeaderData = {
+      title: "Dashboard",
+    };
+
     return json(
       data({
+        header,
         assets,
         locale: getLocale(request),
         currency: currentOrganization?.currency,
@@ -190,7 +196,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <Header />
+      <Header> </Header>
       {completedAllChecks || skipOnboardingChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />

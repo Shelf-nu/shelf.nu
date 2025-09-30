@@ -29,10 +29,11 @@ import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 export const addScannedAssetsToBookingSchema = z
   .object({
     assetIds: z.array(z.string()),
-    kitIds: z.array(z.string()),
+    kitIds: z.array(z.string()).optional().default([]),
   })
   .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {
     message: "At least one asset or kit must be selected",
+
     path: ["assetIds"],
   });
 
