@@ -527,7 +527,7 @@ export const AssetForm = ({
         <AssetCustomFields zo={zo} schema={FormSchema} currency={currency} />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
-          <div className="hidden flex-1 justify-end gap-2 md:flex">
+          <div className="flex flex-1 justify-end gap-2">
             <Actions disabled={disabled} />
           </div>
         </FormRow>
