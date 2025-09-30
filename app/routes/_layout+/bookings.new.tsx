@@ -225,7 +225,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     if (hasAssetIds) {
-      return redirect(`/bookings/${booking.id}`);
+      return redirect(`/bookings/${booking.id}/overview`);
     } else {
       const manageAssetsUrl = `/bookings/${
         booking.id
