@@ -39,7 +39,7 @@ import {
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
-import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
+import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
@@ -198,7 +198,10 @@ export async function createUserOrAttachOrg({
   createdWithInvite: boolean;
 }) {
   try {
-    const shelfUser = await db.user.findFirst({ where: { email } });
+    const shelfUser = await db.user.findFirst({
+      where: { email },
+      select: { id: true },
+    });
 
     /**
      * If user does not exist, create a new user and attach the org to it
@@ -466,7 +469,7 @@ async function handleSCIMTransition(
 export async function updateUserFromSSO(
   authSession: AuthSession,
   existingUser: Prisma.UserGetPayload<{
-    include: typeof INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION;
+    select: typeof USER_WITH_SSO_DETAILS_SELECT;
   }>,
   userData: {
     firstName: string;
@@ -498,7 +501,7 @@ export async function updateUserFromSSO(
       user = await db.user.update({
         where: { id: userId },
         data: { firstName, lastName },
-        include: INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+        select: USER_WITH_SSO_DETAILS_SELECT,
       });
     }
 
@@ -700,9 +703,13 @@ export async function createUser(
               sso: true,
             }),
           },
-          include: {
-            ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
-            organizations: true,
+          select: {
+            ...USER_WITH_SSO_DETAILS_SELECT,
+            organizations: {
+              select: {
+                id: true,
+              },
+            },
           },
         });
 

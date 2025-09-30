@@ -289,6 +289,7 @@ export const action = async ({
         await db.user.update({
           where: { id: shelfUserId },
           data: { skipSubscriptionCheck },
+          select: { id: true },
         });
 
         sendNotification({

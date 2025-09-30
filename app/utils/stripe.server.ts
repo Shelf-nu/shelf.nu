@@ -302,6 +302,7 @@ export const createStripeCustomer = async ({
       await db.user.update({
         where: { id: userId },
         data: { customerId },
+        select: { id: true },
       });
 
       return customerId;

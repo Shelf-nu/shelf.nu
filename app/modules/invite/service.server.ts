@@ -140,6 +140,7 @@ export async function createInvite(
           some: { organizationId },
         },
       },
+      select: { id: true },
     });
 
     if (existingUser) {

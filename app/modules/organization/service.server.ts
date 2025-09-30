@@ -132,7 +132,14 @@ export async function createOrganization({
   image: File | null;
 }) {
   try {
-    const owner = await db.user.findFirstOrThrow({ where: { id: userId } });
+    const owner = await db.user.findFirstOrThrow({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
 
     const data = {
       name,
