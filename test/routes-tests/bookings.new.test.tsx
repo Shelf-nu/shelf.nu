@@ -1,5 +1,6 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/_layout+/bookings.new";
@@ -209,6 +210,44 @@ describe("bookings/new - custodian assignment", () => {
       organizationId: "org-1",
       select: { id: true, userId: true },
     });
+  });
+
+  it("redirects scan intent to the booking overview scan assets page", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      isSelfServiceOrBase: false,
+    } as any);
+
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+    });
+
+    const formData = new FormData();
+    formData.set("name", "Test Booking");
+    formData.set("startDate", "2024-01-01T10:00");
+    formData.set("endDate", "2024-01-02T10:00");
+    formData.set(
+      "custodian",
+      JSON.stringify({
+        id: "team-member-123",
+        name: "Valid Team Member",
+      })
+    );
+    formData.set("intent", "scan");
+
+    const request = new Request("https://example.com/bookings/new", {
+      method: "POST",
+      body: formData,
+    });
+
+    const response = await action(createActionArgs({ request }));
+
+    expect(response.status).toBe(302);
+    expect(vi.mocked(redirect)).toHaveBeenCalledWith(
+      "/bookings/booking-123/overview/scan-assets"
+    );
   });
 
   it("prevents self-service users from assigning booking to other team members", async () => {
