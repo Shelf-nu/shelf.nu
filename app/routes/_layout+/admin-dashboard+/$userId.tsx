@@ -82,6 +82,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         },
       },
       customTierLimit: true,
+      businessIntel: true,
     });
 
     const userOrganizations = await db.userOrganization
@@ -320,6 +321,7 @@ export default function Area51UserPage() {
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
   type User = NonNullable<LoaderData["user"]>;
+  type BusinessIntel = NonNullable<User["businessIntel"]>;
 
   const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
     switch (key) {
@@ -358,6 +360,25 @@ export default function Area51UserPage() {
           : null;
     }
   };
+  const renderBusinessIntelValue = (
+    value: BusinessIntel[keyof BusinessIntel]
+  ): ReactNode => {
+    if (value === null || value === undefined) {
+      return "—";
+    }
+
+    if (typeof value === "string" && value.trim().length === 0) {
+      return "—";
+    }
+
+    return value;
+  };
+  const businessIntelExcludedFields = new Set<keyof BusinessIntel>([
+    "id",
+    "userId",
+    "createdAt",
+    "updatedAt",
+  ]);
   const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
@@ -373,7 +394,12 @@ export default function Area51UserPage() {
               {user
                 ? Object.entries(user)
                     .filter(
-                      ([k, _v]) => !["qrCodes", "customTierLimit"].includes(k)
+                      ([k, _v]) =>
+                        ![
+                          "qrCodes",
+                          "customTierLimit",
+                          "businessIntel",
+                        ].includes(k)
                     )
                     .map(([key, value]) => (
                       <li key={key}>
@@ -383,6 +409,28 @@ export default function Area51UserPage() {
                     ))
                 : null}
             </ul>
+            {user.businessIntel ? (
+              <div className="mt-6">
+                <h4 className="font-semibold">Business intel</h4>
+                <ul className="mt-2 space-y-1">
+                  {Object.entries(user.businessIntel)
+                    .filter(
+                      ([key]) =>
+                        !businessIntelExcludedFields.has(
+                          key as keyof BusinessIntel
+                        )
+                    )
+                    .map(([key, value]) => (
+                      <li key={key}>
+                        <span className="font-semibold">{key}</span>:{" "}
+                        {renderBusinessIntelValue(
+                          value as BusinessIntel[keyof BusinessIntel]
+                        )}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           {hasCustomTier && (
