@@ -45,7 +45,18 @@ export async function loader({ context }: LoaderFunctionArgs) {
      * as its their own account settings.
      */
     const [user, tierLimit] = await Promise.all([
-      getUserByID(userId),
+      getUserByID({
+        id: userId,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          customerId: true,
+          tierId: true,
+          usedFreeTrial: true,
+        },
+      }),
       getUserTierLimit(userId),
     ]);
 

@@ -121,7 +121,10 @@ export const action = async ({
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
 
     if (isSelfService) {
       const custody = await db.custody.findUnique({

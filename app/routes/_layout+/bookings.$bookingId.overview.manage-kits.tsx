@@ -294,7 +294,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
 
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },

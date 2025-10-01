@@ -70,18 +70,42 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    const user = await getUserByID(shelfUserId, {
-      qrCodes: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          asset: {
-            select: {
-              title: true,
+    const user = await getUserByID({
+      id: shelfUserId,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        profilePicture: true,
+        createdAt: true,
+        updatedAt: true,
+        tierId: true,
+        skipSubscriptionCheck: true,
+        customerId: true,
+        usedFreeTrial: true,
+        sso: true,
+        customTierLimit: {
+          select: {
+            maxOrganizations: true,
+            isEnterprise: true,
+          },
+        },
+        qrCodes: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            createdAt: true,
+            type: true,
+            asset: {
+              select: {
+                title: true,
+              },
             },
           },
         },
       },
-      customTierLimit: true,
     });
 
     const userOrganizations = await db.userOrganization
@@ -270,7 +294,15 @@ export const action = async ({
           return json(data({ success: true }));
         }
       case "createCustomerId": {
-        const user = await getUserByID(shelfUserId);
+        const user = await getUserByID({
+          id: shelfUserId,
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        });
         await createStripeCustomer({
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,

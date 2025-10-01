@@ -171,7 +171,10 @@ export async function createScanNote({
     const { assetId, organizationId } = await getQr({ id: qrId });
     if (assetId) {
       if (userId && userId != "anonymous") {
-        const { firstName, lastName } = await getUserByID(userId);
+        const { firstName, lastName } = await getUserByID({
+          id: userId,
+          select: { firstName: true, lastName: true },
+        });
         const userName =
           (firstName ? firstName.trim() : "") +
           " " +

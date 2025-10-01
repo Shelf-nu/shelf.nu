@@ -74,7 +74,19 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: {
+        id: true,
+        onboarded: true,
+        username: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        customerId: true,
+        createdWithInvite: true,
+      },
+    });
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
       return redirect("/assets");

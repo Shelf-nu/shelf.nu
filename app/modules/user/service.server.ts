@@ -53,28 +53,61 @@ import {
 
 const label: ErrorLabel = "User";
 
-type UserWithInclude<T extends Prisma.UserInclude | undefined> =
-  T extends Prisma.UserInclude ? Prisma.UserGetPayload<{ include: T }> : User;
+type GetUserByIdArgs<
+  TSelect extends Prisma.UserSelect | undefined,
+  TInclude extends Prisma.UserInclude | undefined
+> = {
+  id: User["id"];
+  select?: TSelect;
+  include?: TInclude;
+};
 
-export async function getUserByID<T extends Prisma.UserInclude | undefined>(
-  id: User["id"],
-  include?: T
-): Promise<UserWithInclude<T>> {
+type GetUserByIdReturn<
+  TSelect extends Prisma.UserSelect | undefined,
+  TInclude extends Prisma.UserInclude | undefined
+> = TSelect extends Prisma.UserSelect
+  ? Prisma.UserGetPayload<{ select: TSelect }>
+  : TInclude extends Prisma.UserInclude
+  ? Prisma.UserGetPayload<{ include: TInclude }>
+  : Pick<User, "id">;
+
+export async function getUserByID<
+  TSelect extends Prisma.UserSelect | undefined,
+  TInclude extends Prisma.UserInclude | undefined
+>({
+  id,
+  select,
+  include,
+}: GetUserByIdArgs<TSelect, TInclude>): Promise<
+  GetUserByIdReturn<TSelect, TInclude>
+> {
   try {
+    if (select && include) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot use both select and include in getUserByID. Please choose one.",
+        additionalData: { id, select, include },
+        label,
+      });
+    }
+
     const user = await db.user.findUniqueOrThrow({
       where: { id },
-      include: {
-        ...include,
-      },
+      ...(select
+        ? { select }
+        : include
+        ? { include }
+        : { select: { id: true } }),
     });
 
-    return user as UserWithInclude<T>;
+    return user as GetUserByIdReturn<TSelect, TInclude>;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "User not found",
       message: "The user you are trying to access does not exist.",
-      additionalData: { id, include },
+      additionalData: { id, select, include },
       label,
     });
   }
@@ -200,7 +233,7 @@ export async function createUserOrAttachOrg({
   try {
     const shelfUser = await db.user.findFirst({
       where: { email },
-      select: { id: true },
+      select: USER_WITH_SSO_DETAILS_SELECT,
     });
 
     /**
@@ -1005,7 +1038,10 @@ export async function updateProfilePicture({
   userId: User["id"];
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, profilePicture: true },
+    });
     const previousProfilePictureUrl = user.profilePicture || undefined;
 
     const fileData = await parseFileFormData({
@@ -1061,16 +1097,20 @@ export async function updateProfilePicture({
  */
 export async function softDeleteUser(id: User["id"]) {
   try {
-    const user = await getUserByID(id, {
-      contact: {
-        select: {
-          id: true,
+    const user = await getUserByID({
+      id,
+      select: {
+        id: true,
+        userOrganizations: {
+          include: {
+            organization: {
+              select: { id: true, userId: true },
+            },
+          },
         },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
-            select: { id: true, userId: true },
+        contact: {
+          select: {
+            id: true,
           },
         },
       },

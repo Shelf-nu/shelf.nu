@@ -103,7 +103,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const user = await getUserByID(authSession.userId);
+    const user = await getUserByID({
+      id: authSession.userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
 
     const booking = await updateBookingAssets({
       id: bookingId,

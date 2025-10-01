@@ -67,24 +67,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const user = await getUserByID(userId, {
-      roles: true,
-      organizations: {
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          imageId: true,
-        },
-      },
-      userOrganizations: {
-        where: {
-          userId: authSession.userId,
-        },
-        select: {
-          id: true,
-          organization: true,
-          roles: true,
+    const user = await getUserByID({
+      id: userId,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        profilePicture: true,
+        onboarded: true,
+        customerId: true,
+        skipSubscriptionCheck: true,
+        tierId: true,
+        roles: { select: { id: true, name: true } },
+        userOrganizations: {
+          where: {
+            userId: authSession.userId,
+          },
+          select: {
+            id: true,
+            roles: true,
+            organization: { select: { id: true } },
+          },
         },
       },
     });

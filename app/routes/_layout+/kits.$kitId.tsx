@@ -243,7 +243,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: intent2ActionMap[intent],
     });
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
 
     const { image } = parseData(
       formData,

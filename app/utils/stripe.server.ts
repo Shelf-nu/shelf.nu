@@ -520,7 +520,7 @@ export async function validateSubscriptionIsActive({
   user,
   subscription,
 }: {
-  user: User;
+  user: Pick<User, "id" | "skipSubscriptionCheck" | "tierId">;
   subscription: Stripe.Subscription | null;
 }) {
   if (user.skipSubscriptionCheck) return;

@@ -279,12 +279,16 @@ export const canCreateMoreOrganizations = ({
  */
 export async function assertUserCanCreateMoreOrganizations(userId: string) {
   const [user, tierLimit] = await Promise.all([
-    await getUserByID(userId, {
-      userOrganizations: {
-        include: {
-          organization: {
-            select: {
-              userId: true,
+    await getUserByID({
+      id: userId,
+      select: {
+        id: true,
+        userOrganizations: {
+          include: {
+            organization: {
+              select: {
+                userId: true,
+              },
             },
           },
         },

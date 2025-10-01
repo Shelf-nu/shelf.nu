@@ -143,7 +143,10 @@ export async function createStatusTransitionNote({
 
   if (userId) {
     // User-initiated transition
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
     const userLink = wrapUserLinkForNote({
       id: userId,
       firstName: user?.firstName,
@@ -548,7 +551,12 @@ export async function updateBasicBooking({
     // This approach creates individual notes for each field change with proper user attribution
 
     // Get user data for attribution if userId is provided
-    const user = userId ? await getUserByID(userId) : null;
+    const user = userId
+      ? await getUserByID({
+          id: userId,
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
 
     // Check and log name changes
@@ -1317,7 +1325,10 @@ export async function checkinBooking({
     if (userId) {
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
-        const user = await getUserByID(userId);
+        const user = await getUserByID({
+          id: userId,
+          select: { id: true, firstName: true, lastName: true },
+        });
 
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
@@ -1472,7 +1483,10 @@ export async function partialCheckinBooking({
   intentChoice?: CheckinIntentEnum;
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
     // First, validate the booking exists and get its current assets
     const bookingFound = await db.booking
       .findUniqueOrThrow({
@@ -1814,7 +1828,10 @@ export async function updateBookingAssets({
       const assetContent = wrapAssetsWithDataForNote(assets, "added");
 
       if (userId) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID({
+          id: userId,
+          select: { id: true, firstName: true, lastName: true },
+        });
         await createSystemBookingNote({
           bookingId: booking.id,
           content: `${wrapUserLinkForNote(
@@ -1861,7 +1878,10 @@ export async function createKitBookingNote({
       : wrapKitsForNote(kitIds, action);
 
   if (userId) {
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
     await createSystemBookingNote({
       bookingId,
       content: `${wrapUserLinkForNote(
@@ -2223,7 +2243,10 @@ export async function extendBooking({
     });
 
     // Add activity log for booking extension
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
       content: `${wrapUserLinkForNote(
@@ -3351,7 +3374,10 @@ export async function bulkDeleteBookings({
           assets: { select: { id: true, kitId: true } },
         },
       }),
-      getUserByID(userId),
+      getUserByID({
+        id: userId,
+        select: { id: true, firstName: true, lastName: true },
+      }),
     ]);
 
     /** We have to send mails to custodianUsers */
@@ -3576,7 +3602,10 @@ export async function bulkCancelBookings({
           assets: { select: { id: true, kitId: true } },
         },
       }),
-      getUserByID(userId),
+      getUserByID({
+        id: userId,
+        select: { id: true, firstName: true, lastName: true },
+      }),
     ]);
 
     /** Bookings with any of these statuses cannot be cancelled */
@@ -3781,7 +3810,10 @@ export async function addScannedAssetsToBooking({
     });
 
     // Create booking activity notes
-    const user = await getUserByID(userId);
+    const user = await getUserByID({
+      id: userId,
+      select: { id: true, firstName: true, lastName: true },
+    });
     const userForNotes = {
       firstName: user?.firstName || "",
       lastName: user?.lastName || "",
