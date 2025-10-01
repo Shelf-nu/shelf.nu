@@ -71,12 +71,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       select: {
         id: true,
         email: true,
+        username: true,
         firstName: true,
         lastName: true,
         profilePicture: true,
         onboarded: true,
         customerId: true,
         skipSubscriptionCheck: true,
+        sso: true,
         tierId: true,
         roles: { select: { id: true, name: true } },
         userOrganizations: {

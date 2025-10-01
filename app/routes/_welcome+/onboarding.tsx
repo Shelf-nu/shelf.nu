@@ -79,11 +79,6 @@ export async function loader({ context }: LoaderFunctionArgs) {
         id: true,
         onboarded: true,
         username: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        customerId: true,
-        createdWithInvite: true,
       },
     });
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */

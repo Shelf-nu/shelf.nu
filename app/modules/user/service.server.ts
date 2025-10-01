@@ -55,7 +55,7 @@ const label: ErrorLabel = "User";
 
 type GetUserByIdReturn<
   TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined
+  TInclude extends Prisma.UserInclude | undefined,
 > = TSelect extends Prisma.UserSelect
   ? Prisma.UserGetPayload<{ select: TSelect }>
   : TInclude extends Prisma.UserInclude
@@ -64,7 +64,7 @@ type GetUserByIdReturn<
 
 type GetUserByIdOptions<
   TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined
+  TInclude extends Prisma.UserInclude | undefined,
 > = {
   select?: TSelect;
   include?: TInclude;
@@ -72,13 +72,11 @@ type GetUserByIdOptions<
 
 export async function getUserByID<
   TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined
+  TInclude extends Prisma.UserInclude | undefined,
 >(
   id: User["id"],
   options?: GetUserByIdOptions<TSelect, TInclude>
-): Promise<
-  GetUserByIdReturn<TSelect, TInclude>
-> {
+): Promise<GetUserByIdReturn<TSelect, TInclude>> {
   try {
     const select = options?.select;
     const include = options?.include;
@@ -519,7 +517,7 @@ export async function updateUserFromSSO(
     };
   }
 ): Promise<{
-  user: User;
+  user: Prisma.UserGetPayload<{ select: typeof USER_WITH_SSO_DETAILS_SELECT }>;
   org: Organization | null;
   transitions: UserOrgTransition[];
 }> {
@@ -1100,6 +1098,8 @@ export async function softDeleteUser(id: User["id"]) {
     const user = await getUserByID(id, {
       select: {
         id: true,
+        email: true,
+        profilePicture: true,
         userOrganizations: {
           include: {
             organization: {
