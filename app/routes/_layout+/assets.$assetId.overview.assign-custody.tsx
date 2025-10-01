@@ -209,13 +209,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
+        select: {
+          id: true,
+          title: true,
         },
       })
       .catch((cause) => {

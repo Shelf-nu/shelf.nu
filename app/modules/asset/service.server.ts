@@ -3329,7 +3329,7 @@ export async function relinkQrCode({
       assetId,
       userId,
       type: "UPDATE",
-      content: `**${user.firstName?.trim()}** has changed QR code ${
+      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has changed QR code ${
         oldQrCode ? `from **${oldQrCode.id}**` : ""
       } to **${qrId}**`,
     }),
