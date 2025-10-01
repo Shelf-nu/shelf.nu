@@ -275,8 +275,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ];
     }
 
-    const user = await getUserByID({
-      id: authSession.userId,
+    const user = await getUserByID(authSession.userId, {
       select: { id: true, firstName: true, lastName: true },
     });
 

@@ -166,8 +166,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         label: "Booking",
       });
     }
-    const user = await getUserByID({
-      id: authSession.userId,
+    const user = await getUserByID(authSession.userId, {
       select: { id: true, firstName: true, lastName: true },
     });
 

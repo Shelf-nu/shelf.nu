@@ -44,8 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, customerId: true },
     });
 

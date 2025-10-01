@@ -70,8 +70,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    const user = await getUserByID({
-      id: shelfUserId,
+    const user = await getUserByID(shelfUserId, {
       select: {
         id: true,
         email: true,
@@ -294,8 +293,7 @@ export const action = async ({
           return json(data({ success: true }));
         }
       case "createCustomerId": {
-        const user = await getUserByID({
-          id: shelfUserId,
+        const user = await getUserByID(shelfUserId, {
           select: {
             id: true,
             email: true,

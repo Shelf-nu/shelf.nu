@@ -121,8 +121,7 @@ export const action = async ({
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
 

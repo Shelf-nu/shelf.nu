@@ -45,8 +45,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
      * as its their own account settings.
      */
     const [user, tierLimit] = await Promise.all([
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: {
           id: true,
           email: true,

@@ -74,8 +74,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: {
         id: true,
         onboarded: true,

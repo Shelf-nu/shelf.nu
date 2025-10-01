@@ -67,8 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: {
         id: true,
         email: true,

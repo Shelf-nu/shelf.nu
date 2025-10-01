@@ -236,8 +236,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Invalid payload type");
 
         const ssoDomains = await getConfiguredSSODomains();
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true, email: true },
         });
         // Validate the payload using our schema
@@ -310,7 +309,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const { otp, email: newEmail } = payload;
 
         /** Just to make sure the user exists */
-        await getUserByID({ id: userId, select: { id: true } });
+        await getUserByID(userId, { select: { id: true } });
 
         // Attempt to verify the OTP
         const { error: verifyError } = await getSupabaseAdmin().auth.verifyOtp({

@@ -143,8 +143,7 @@ export async function createStatusTransitionNote({
 
   if (userId) {
     // User-initiated transition
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
     const userLink = wrapUserLinkForNote({
@@ -552,8 +551,7 @@ export async function updateBasicBooking({
 
     // Get user data for attribution if userId is provided
     const user = userId
-      ? await getUserByID({
-          id: userId,
+      ? await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         })
       : null;
@@ -1325,8 +1323,7 @@ export async function checkinBooking({
     if (userId) {
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
 
@@ -1483,8 +1480,7 @@ export async function partialCheckinBooking({
   intentChoice?: CheckinIntentEnum;
 }) {
   try {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
     // First, validate the booking exists and get its current assets
@@ -1828,8 +1824,7 @@ export async function updateBookingAssets({
       const assetContent = wrapAssetsWithDataForNote(assets, "added");
 
       if (userId) {
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
         await createSystemBookingNote({
@@ -1878,8 +1873,7 @@ export async function createKitBookingNote({
       : wrapKitsForNote(kitIds, action);
 
   if (userId) {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
     await createSystemBookingNote({
@@ -2243,8 +2237,7 @@ export async function extendBooking({
     });
 
     // Add activity log for booking extension
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
     await createSystemBookingNote({
@@ -3374,8 +3367,7 @@ export async function bulkDeleteBookings({
           assets: { select: { id: true, kitId: true } },
         },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -3602,8 +3594,7 @@ export async function bulkCancelBookings({
           assets: { select: { id: true, kitId: true } },
         },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -3810,8 +3801,7 @@ export async function addScannedAssetsToBooking({
     });
 
     // Create booking activity notes
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
     const userForNotes = {

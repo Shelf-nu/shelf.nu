@@ -36,8 +36,7 @@ export async function createAssetReminder({
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
-    const user = await getUserByID({
-      id: createdById,
+    const user = await getUserByID(createdById, {
       select: { id: true, firstName: true, lastName: true },
     });
 

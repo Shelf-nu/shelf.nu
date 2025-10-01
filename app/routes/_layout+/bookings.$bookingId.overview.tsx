@@ -533,7 +533,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         action: intent2ActionMap[intent],
       });
 
-    const user = await getUserByID({ id: userId, select: { id: true } });
+    const user = await getUserByID(userId, { select: { id: true } });
 
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),

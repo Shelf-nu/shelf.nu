@@ -53,15 +53,6 @@ import {
 
 const label: ErrorLabel = "User";
 
-type GetUserByIdArgs<
-  TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined
-> = {
-  id: User["id"];
-  select?: TSelect;
-  include?: TInclude;
-};
-
 type GetUserByIdReturn<
   TSelect extends Prisma.UserSelect | undefined,
   TInclude extends Prisma.UserInclude | undefined
@@ -71,17 +62,27 @@ type GetUserByIdReturn<
   ? Prisma.UserGetPayload<{ include: TInclude }>
   : Pick<User, "id">;
 
+type GetUserByIdOptions<
+  TSelect extends Prisma.UserSelect | undefined,
+  TInclude extends Prisma.UserInclude | undefined
+> = {
+  select?: TSelect;
+  include?: TInclude;
+};
+
 export async function getUserByID<
   TSelect extends Prisma.UserSelect | undefined,
   TInclude extends Prisma.UserInclude | undefined
->({
-  id,
-  select,
-  include,
-}: GetUserByIdArgs<TSelect, TInclude>): Promise<
+>(
+  id: User["id"],
+  options?: GetUserByIdOptions<TSelect, TInclude>
+): Promise<
   GetUserByIdReturn<TSelect, TInclude>
 > {
   try {
+    const select = options?.select;
+    const include = options?.include;
+
     if (select && include) {
       throw new ShelfError({
         cause: null,
@@ -107,7 +108,7 @@ export async function getUserByID<
       cause,
       title: "User not found",
       message: "The user you are trying to access does not exist.",
-      additionalData: { id, select, include },
+      additionalData: { id, ...options },
       label,
     });
   }
@@ -1038,8 +1039,7 @@ export async function updateProfilePicture({
   userId: User["id"];
 }) {
   try {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, profilePicture: true },
     });
     const previousProfilePictureUrl = user.profilePicture || undefined;
@@ -1097,8 +1097,7 @@ export async function updateProfilePicture({
  */
 export async function softDeleteUser(id: User["id"]) {
   try {
-    const user = await getUserByID({
-      id,
+    const user = await getUserByID(id, {
       select: {
         id: true,
         userOrganizations: {

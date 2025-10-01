@@ -1032,8 +1032,7 @@ export async function bulkAssignKitCustody({
           },
         },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -1169,8 +1168,7 @@ export async function bulkReleaseKitCustody({
           },
         },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -1458,8 +1456,7 @@ export async function updateKitLocation({
 
       // Add notes to assets about location update via parent kit
       if (userId && assetIds.length > 0) {
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
         const location = await db.location.findUnique({
@@ -1502,8 +1499,7 @@ export async function updateKitLocation({
 
       // Add notes to assets about location removal via parent kit
       if (userId && assetIds.length > 0) {
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
         const currentLocation = await db.location.findUnique({
@@ -1602,8 +1598,7 @@ export async function bulkUpdateKitLocation({
 
       // Create notes for affected assets
       if (allAssets.length > 0) {
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
         const location = await db.location.findUnique({
@@ -1641,8 +1636,7 @@ export async function bulkUpdateKitLocation({
 
       // Also remove location from assets and create notes
       if (allAssets.length > 0) {
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
 
@@ -1702,8 +1696,7 @@ export async function updateKitAssets({
   addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
   try {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
 
@@ -1867,8 +1860,7 @@ export async function updateKitAssets({
         });
 
         // Create notes for assets that had their location changed
-        const user = await getUserByID({
-          id: userId,
+        const user = await getUserByID(userId, {
           select: { id: true, firstName: true, lastName: true },
         });
         await Promise.all(
@@ -1901,8 +1893,7 @@ export async function updateKitAssets({
           });
 
           // Create notes for assets that had their location removed
-          const user = await getUserByID({
-            id: userId,
+          const user = await getUserByID(userId, {
             select: { id: true, firstName: true, lastName: true },
           });
           await Promise.all(
@@ -2054,8 +2045,7 @@ export async function bulkRemoveAssetsFromKits({
   request: Request;
 }) {
   try {
-    const user = await getUserByID({
-      id: userId,
+    const user = await getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     });
 

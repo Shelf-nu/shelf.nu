@@ -2844,8 +2844,7 @@ export async function bulkCheckOutAssets({
         where,
         select: { id: true, title: true, status: true },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -2945,8 +2944,7 @@ export async function bulkCheckInAssets({
           },
         },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -3059,8 +3057,7 @@ export async function bulkUpdateAssetLocation({
           kit: { select: { id: true, name: true } },
         },
       }),
-      getUserByID({
-        id: userId,
+      getUserByID(userId, {
         select: { id: true, firstName: true, lastName: true },
       }),
     ]);
@@ -3282,8 +3279,7 @@ export async function relinkQrCode({
 }) {
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),
-    getUserByID({
-      id: userId,
+    getUserByID(userId, {
       select: { id: true, firstName: true, lastName: true },
     }),
     db.asset.findFirst({
