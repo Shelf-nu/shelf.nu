@@ -11,7 +11,6 @@ export interface UpdateUserPayload {
   password?: string;
   confirmPassword?: string;
   usedFreeTrial?: boolean;
-  referralSource?: User["referralSource"];
 }
 
 export interface UpdateUserResponse {
