@@ -309,7 +309,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const { otp, email: newEmail } = payload;
 
         /** Just to make sure the user exists */
-        await getUserByID(userId, { select: { id: true } });
+        await getUserByID(userId, {
+          select: { id: true },
+        });
 
         // Attempt to verify the OTP
         const { error: verifyError } = await getSupabaseAdmin().auth.verifyOtp({

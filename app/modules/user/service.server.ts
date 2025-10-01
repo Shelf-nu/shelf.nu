@@ -53,30 +53,26 @@ import {
 
 const label: ErrorLabel = "User";
 
-type GetUserByIdReturn<
-  TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined,
-> = TSelect extends Prisma.UserSelect
-  ? Prisma.UserGetPayload<{ select: TSelect }>
-  : TInclude extends Prisma.UserInclude
-  ? Prisma.UserGetPayload<{ include: TInclude }>
-  : Pick<User, "id">;
-
-type GetUserByIdOptions<
-  TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined,
-> = {
-  select?: TSelect;
-  include?: TInclude;
-};
-
-export async function getUserByID<
-  TSelect extends Prisma.UserSelect | undefined,
-  TInclude extends Prisma.UserInclude | undefined,
->(
+// Overload 1: With select
+export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
-  options?: GetUserByIdOptions<TSelect, TInclude>
-): Promise<GetUserByIdReturn<TSelect, TInclude>> {
+  options: { select: TSelect; include?: never }
+): Promise<Prisma.UserGetPayload<{ select: TSelect }>>;
+
+// Overload 2: With include
+export function getUserByID<TInclude extends Prisma.UserInclude>(
+  id: User["id"],
+  options: { include: TInclude; select?: never }
+): Promise<Prisma.UserGetPayload<{ include: TInclude }>>;
+
+// Overload 3: Without options (default)
+export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
+
+// Implementation
+export async function getUserByID(
+  id: User["id"],
+  options?: { select?: Prisma.UserSelect; include?: Prisma.UserInclude }
+): Promise<any> {
   try {
     const select = options?.select;
     const include = options?.include;
@@ -100,7 +96,7 @@ export async function getUserByID<
         : { select: { id: true } }),
     });
 
-    return user as GetUserByIdReturn<TSelect, TInclude>;
+    return user;
   } catch (cause) {
     throw new ShelfError({
       cause,
