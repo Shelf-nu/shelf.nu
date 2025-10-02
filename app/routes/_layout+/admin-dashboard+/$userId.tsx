@@ -7,6 +7,7 @@ import {
   type CustomTierLimit,
   OrganizationRoles,
   type UserBusinessIntel,
+  type Prisma,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -115,7 +116,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
             timeline: true,
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     const userOrganizations = await db.userOrganization

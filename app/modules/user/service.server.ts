@@ -70,8 +70,8 @@ type UserSelectionOption<TSelect, TInclude> =
 type GetUserByIDReturn<T> = T extends UserSelectOption<infer S>
   ? Prisma.UserGetPayload<{ select: S }>
   : T extends UserIncludeOption<infer I>
-    ? Prisma.UserGetPayload<{ include: I }>
-    : Pick<User, "id">;
+  ? Prisma.UserGetPayload<{ include: I }>
+  : Pick<User, "id">;
 
 export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
@@ -87,7 +87,7 @@ export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
 
 export async function getUserByID<
   TSelect extends Prisma.UserSelect,
-  TInclude extends Prisma.UserInclude
+  TInclude extends Prisma.UserInclude,
 >(
   id: User["id"],
   options?: UserSelectionOption<TSelect, TInclude>
@@ -1142,7 +1142,7 @@ export async function softDeleteUser(id: User["id"]) {
             id: true,
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(
