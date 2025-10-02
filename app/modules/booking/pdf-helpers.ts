@@ -5,8 +5,8 @@ import type {
   Organization,
   Prisma,
   Kit,
+  OrganizationRoles,
 } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
