@@ -94,6 +94,7 @@ export type TeamMemberSearchResult = {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
+  userId: string | null;
 };
 
 type QuickCommand = {
@@ -394,6 +395,24 @@ export function getTeamMemberCommandValue(member: TeamMemberSearchResult) {
   ].filter(Boolean);
 
   return [`member-${member.id}`, ...searchableFields].join(" ").trim();
+}
+
+export function getTeamMemberHref(member: TeamMemberSearchResult) {
+  const trimmedUserId = member.userId?.trim();
+  if (trimmedUserId) {
+    return `/settings/team/users/${trimmedUserId}`;
+  }
+
+  if (typeof member.userId === "string") {
+    return "/settings/team/users";
+  }
+
+  const trimmedMemberId = member.id?.trim();
+  if (trimmedMemberId) {
+    return `/settings/team/nrm/${trimmedMemberId}/edit`;
+  }
+
+  return "/settings/team/nrm";
 }
 
 export function CommandPalette() {
@@ -714,9 +733,7 @@ export function CommandPalette() {
               <CommandItem
                 key={member.id}
                 value={getTeamMemberCommandValue(member)}
-                onSelect={() =>
-                  handleSelect(`/settings/team/members/${member.id}`)
-                }
+                onSelect={() => handleSelect(getTeamMemberHref(member))}
                 className="gap-3"
               >
                 <UserIcon className="size-4 text-gray-500" />

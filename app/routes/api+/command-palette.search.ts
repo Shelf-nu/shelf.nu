@@ -339,6 +339,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           email: member.user?.email || null,
           firstName: member.user?.firstName || null,
           lastName: member.user?.lastName || null,
+          userId: member.userId,
         })),
       })
     );
