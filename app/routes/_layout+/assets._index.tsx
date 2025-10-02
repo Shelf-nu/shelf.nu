@@ -23,6 +23,13 @@ import {
 } from "~/modules/asset/data.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { SAVED_FILTER_VIEWS } from "~/modules/asset-filter-presets/constants";
+import {
+  createPreset,
+  deletePreset,
+  listPresetsForUser,
+  renamePreset,
+} from "~/modules/asset-filter-presets/service.server";
 import {
   changeMode,
   getAssetIndexSettings,
@@ -33,6 +40,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ENABLE_SAVED_ASSET_FILTERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import {
@@ -148,13 +156,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     const formData = await request.formData();
 
-    const { intent } = parseData(
-      formData,
-      z.object({ intent: z.enum(["bulk-delete"]) })
-    );
+    const IntentSchema = z.enum([
+      "bulk-delete",
+      "create-preset",
+      "rename-preset",
+      "delete-preset",
+    ]);
 
-    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+    const { intent } = parseData(formData, z.object({ intent: IntentSchema }));
+
+    const intent2ActionMap: Record<
+      z.infer<typeof IntentSchema>,
+      PermissionAction
+    > = {
       "bulk-delete": PermissionAction.delete,
+      "create-preset": PermissionAction.read,
+      "rename-preset": PermissionAction.read,
+      "delete-preset": PermissionAction.read,
     };
 
     const { organizationId } = await requirePermission({
@@ -163,6 +181,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: intent2ActionMap[intent],
     });
+
+    const isPresetIntent =
+      intent === "create-preset" ||
+      intent === "rename-preset" ||
+      intent === "delete-preset";
+
+    if (isPresetIntent && !ENABLE_SAVED_ASSET_FILTERS) {
+      throw new ShelfError({
+        cause: null,
+        label: "Assets",
+        message: "Saved searches are not available yet.",
+        status: 404,
+      });
+    }
 
     switch (intent) {
       case "bulk-delete": {
@@ -188,6 +220,81 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return json(data({ success: true }));
+      }
+
+      case "create-preset": {
+        const submission = parseData(
+          formData,
+          z.object({
+            intent: z.literal("create-preset"),
+            name: z.string().min(1).max(60),
+            query: z.string(),
+            view: z.enum(SAVED_FILTER_VIEWS).optional(),
+          })
+        );
+
+        await createPreset({
+          organizationId,
+          ownerId: userId,
+          name: submission.name,
+          query: submission.query,
+          view: submission.view,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return json(data({ savedFilterPresets }));
+      }
+
+      case "rename-preset": {
+        const submission = parseData(
+          formData,
+          z.object({
+            intent: z.literal("rename-preset"),
+            presetId: z.string().min(1),
+            name: z.string().min(1).max(60),
+          })
+        );
+
+        await renamePreset({
+          id: submission.presetId,
+          organizationId,
+          ownerId: userId,
+          name: submission.name,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return json(data({ savedFilterPresets }));
+      }
+
+      case "delete-preset": {
+        const submission = parseData(
+          formData,
+          z.object({
+            intent: z.literal("delete-preset"),
+            presetId: z.string().min(1),
+          })
+        );
+
+        await deletePreset({
+          id: submission.presetId,
+          organizationId,
+          ownerId: userId,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return json(data({ savedFilterPresets }));
       }
 
       default: {

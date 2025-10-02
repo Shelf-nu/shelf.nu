@@ -14,6 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ENABLE_SAVED_ASSET_FILTERS } from "~/utils/env";
 import { data, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
@@ -31,6 +32,8 @@ import {
   updateAssetsWithBookingCustodians,
 } from "./service.server";
 import { getAllSelectedValuesFromFilters } from "./utils.server";
+import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
+import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
@@ -229,6 +232,9 @@ export async function simpleModeLoader({
       kits: [] as Kit[],
       // Those tags are used for the tags autocomplete on the booking form
       tagsData,
+      savedFilterPresets: [],
+      savedFilterPresetsEnabled: false,
+      savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {
       headers,
@@ -293,6 +299,10 @@ export async function advancedModeLoader({
   });
 
   /** Query tierLimit, assets & Asset index settings */
+  const savedPresetsPromise = ENABLE_SAVED_ASSET_FILTERS
+    ? listPresetsForUser({ organizationId, ownerId: userId })
+    : Promise.resolve([]);
+
   let [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
@@ -301,6 +311,7 @@ export async function advancedModeLoader({
     kits,
     totalKits,
     tagsData,
+    savedFilterPresets,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -344,6 +355,7 @@ export async function advancedModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
+    savedPresetsPromise,
   ]);
 
   const header: HeaderData = {
@@ -409,6 +421,9 @@ export async function advancedModeLoader({
       tags,
       totalTags,
       tagsData,
+      savedFilterPresets,
+      savedFilterPresetsEnabled: ENABLE_SAVED_ASSET_FILTERS,
+      savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {
       headers,

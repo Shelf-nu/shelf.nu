@@ -19,6 +19,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
 export const ASSET_SORTING_OPTIONS = {
@@ -185,7 +186,8 @@ function AdvancedAssetIndexFilters() {
       }}
       searchClassName="leading-5"
     >
-      <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+      <div className="flex w-full flex-wrap items-center justify-around gap-3 md:w-auto md:justify-end md:gap-4">
+        <SavedFilterPresetsControls />
         <Button
           variant="link"
           target="_blank"

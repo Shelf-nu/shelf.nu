@@ -210,6 +210,12 @@ export const ENABLE_PREMIUM_FEATURES =
     isRequired: false,
   }) === "true" || false;
 
+export const ENABLE_SAVED_ASSET_FILTERS =
+  getEnv("ENABLE_SAVED_ASSET_FILTERS", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
 export const SHOW_HOW_DID_YOU_FIND_US =
   getEnv("SHOW_HOW_DID_YOU_FIND_US", {
     isSecret: false,
