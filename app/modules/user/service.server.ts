@@ -53,56 +53,90 @@ import {
 
 const label: ErrorLabel = "User";
 
-// Overload 1: With select
+type UserSelectOption<TSelect extends Prisma.UserSelect> = {
+  select: TSelect;
+  include?: never;
+};
+
+type UserIncludeOption<TInclude extends Prisma.UserInclude> = {
+  include: TInclude;
+  select?: never;
+};
+
+type UserSelectionOption<TSelect, TInclude> =
+  | UserSelectOption<TSelect & Prisma.UserSelect>
+  | UserIncludeOption<TInclude & Prisma.UserInclude>;
+
+type GetUserByIDReturn<T> = T extends UserSelectOption<infer S>
+  ? Prisma.UserGetPayload<{ select: S }>
+  : T extends UserIncludeOption<infer I>
+    ? Prisma.UserGetPayload<{ include: I }>
+    : Pick<User, "id">;
+
 export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
-  options: { select: TSelect; include?: never }
-): Promise<Prisma.UserGetPayload<{ select: TSelect }>>;
+  options: UserSelectOption<TSelect>
+): Promise<GetUserByIDReturn<UserSelectOption<TSelect>>>;
 
-// Overload 2: With include
 export function getUserByID<TInclude extends Prisma.UserInclude>(
   id: User["id"],
-  options: { include: TInclude; select?: never }
-): Promise<Prisma.UserGetPayload<{ include: TInclude }>>;
+  options: UserIncludeOption<TInclude>
+): Promise<GetUserByIDReturn<UserIncludeOption<TInclude>>>;
 
-// Overload 3: Without options (default)
 export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
 
-// Implementation
-export async function getUserByID(
+export async function getUserByID<
+  TSelect extends Prisma.UserSelect,
+  TInclude extends Prisma.UserInclude
+>(
   id: User["id"],
-  options?: { select?: Prisma.UserSelect; include?: Prisma.UserInclude }
-): Promise<any> {
+  options?: UserSelectionOption<TSelect, TInclude>
+): Promise<
+  | GetUserByIDReturn<UserSelectOption<TSelect>>
+  | GetUserByIDReturn<UserIncludeOption<TInclude>>
+  | Pick<User, "id">
+> {
   try {
-    const select = options?.select;
-    const include = options?.include;
-
-    if (select && include) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "Cannot use both select and include in getUserByID. Please choose one.",
-        additionalData: { id, select, include },
-        label,
+    if (!options) {
+      const user = await db.user.findUniqueOrThrow({
+        where: { id },
+        select: { id: true },
       });
+
+      return user;
     }
 
-    const user = await db.user.findUniqueOrThrow({
-      where: { id },
-      ...(select
-        ? { select }
-        : include
-        ? { include }
-        : { select: { id: true } }),
-    });
+    if ("select" in options) {
+      const user = await db.user.findUniqueOrThrow({
+        where: { id },
+        select: options.select,
+      });
 
-    return user;
+      return user as GetUserByIDReturn<UserSelectOption<TSelect>>;
+    }
+
+    if ("include" in options) {
+      const user = await db.user.findUniqueOrThrow({
+        where: { id },
+        include: options.include,
+      });
+
+      return user as GetUserByIDReturn<UserIncludeOption<TInclude>>;
+    }
+
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Invalid options provided to getUserByID. Please choose select or include.",
+      additionalData: { id, options },
+      label,
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "User not found",
       message: "The user you are trying to access does not exist.",
-      additionalData: { id, ...options },
+      additionalData: options ? { id, options } : { id },
       label,
     });
   }
