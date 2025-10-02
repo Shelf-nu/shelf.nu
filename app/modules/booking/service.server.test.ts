@@ -1,4 +1,9 @@
-import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import {
+  BookingStatus,
+  AssetStatus,
+  KitStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";
@@ -1622,6 +1627,7 @@ describe("extendBooking", () => {
       newEndDate: new Date("2025-01-02T17:00:00Z"),
       hints: mockClientHints,
       userId: "user-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -1650,8 +1656,290 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
+        role: OrganizationRoles.ADMIN,
       })
     ).rejects.toThrow(ShelfError);
+  });
+
+  it("should allow self service user to extend their own booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("should prevent self service user from extending others booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-2",
+      custodianUserId: "user-2",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should prevent base user from extending any booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.BASE,
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should allow owner to extend any booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-2", // Different user created it
+      custodianUserId: "user-2", // Different user is custodian
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]); // No conflicts
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1", // Different user (OWNER)
+        role: OrganizationRoles.OWNER,
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("should allow self service user who is custodian (not creator) to extend", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-2", // Different creator
+      custodianUserId: "user-1", // But user is custodian
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]); // No conflicts
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("should allow self service user who is creator (not custodian) to extend", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-1", // User is creator
+      custodianUserId: "user-2", // But different custodian
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]); // No conflicts
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("should prevent extension when clashing bookings exist", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      to: new Date("2025-01-01T17:00:00Z"),
+      assets: [{ id: "asset-1" }, { id: "asset-2" }],
+    };
+
+    const clashingBooking = {
+      id: "booking-2",
+      name: "Conflicting Booking",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([clashingBooking]); // Clashing booking exists
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(
+      "Cannot extend booking because the extended period is overlapping"
+    );
+  });
+
+  it("should allow extension when no clashing bookings exist", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [{ id: "asset-1" }],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]); // No clashing bookings
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("should transition OVERDUE booking to ONGOING when extended", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.OVERDUE,
+      to: new Date("2025-01-01T17:00:00Z"),
+    };
+
+    const extendedBooking = {
+      ...mockBooking,
+      status: BookingStatus.ONGOING, // Should transition to ONGOING
+      to: new Date("2025-01-02T17:00:00Z"),
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]); // No conflicts
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(extendedBooking);
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-02T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BookingStatus.ONGOING,
+          to: expect.any(Date),
+        }),
+      })
+    );
+    expect(result.status).toBe(BookingStatus.ONGOING);
   });
 });
 

@@ -39,7 +39,7 @@ import {
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
-import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
+import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
@@ -53,28 +53,56 @@ import {
 
 const label: ErrorLabel = "User";
 
-type UserWithInclude<T extends Prisma.UserInclude | undefined> =
-  T extends Prisma.UserInclude ? Prisma.UserGetPayload<{ include: T }> : User;
-
-export async function getUserByID<T extends Prisma.UserInclude | undefined>(
+// Overload 1: With select
+export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
-  include?: T
-): Promise<UserWithInclude<T>> {
+  options: { select: TSelect; include?: never }
+): Promise<Prisma.UserGetPayload<{ select: TSelect }>>;
+
+// Overload 2: With include
+export function getUserByID<TInclude extends Prisma.UserInclude>(
+  id: User["id"],
+  options: { include: TInclude; select?: never }
+): Promise<Prisma.UserGetPayload<{ include: TInclude }>>;
+
+// Overload 3: Without options (default)
+export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
+
+// Implementation
+export async function getUserByID(
+  id: User["id"],
+  options?: { select?: Prisma.UserSelect; include?: Prisma.UserInclude }
+): Promise<any> {
   try {
+    const select = options?.select;
+    const include = options?.include;
+
+    if (select && include) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot use both select and include in getUserByID. Please choose one.",
+        additionalData: { id, select, include },
+        label,
+      });
+    }
+
     const user = await db.user.findUniqueOrThrow({
       where: { id },
-      include: {
-        ...include,
-      },
+      ...(select
+        ? { select }
+        : include
+        ? { include }
+        : { select: { id: true } }),
     });
 
-    return user as UserWithInclude<T>;
+    return user;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "User not found",
       message: "The user you are trying to access does not exist.",
-      additionalData: { id, include },
+      additionalData: { id, ...options },
       label,
     });
   }
@@ -198,7 +226,10 @@ export async function createUserOrAttachOrg({
   createdWithInvite: boolean;
 }) {
   try {
-    const shelfUser = await db.user.findFirst({ where: { email } });
+    const shelfUser = await db.user.findFirst({
+      where: { email },
+      select: USER_WITH_SSO_DETAILS_SELECT,
+    });
 
     /**
      * If user does not exist, create a new user and attach the org to it
@@ -466,7 +497,7 @@ async function handleSCIMTransition(
 export async function updateUserFromSSO(
   authSession: AuthSession,
   existingUser: Prisma.UserGetPayload<{
-    include: typeof INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION;
+    select: typeof USER_WITH_SSO_DETAILS_SELECT;
   }>,
   userData: {
     firstName: string;
@@ -482,7 +513,7 @@ export async function updateUserFromSSO(
     };
   }
 ): Promise<{
-  user: User;
+  user: Prisma.UserGetPayload<{ select: typeof USER_WITH_SSO_DETAILS_SELECT }>;
   org: Organization | null;
   transitions: UserOrgTransition[];
 }> {
@@ -498,7 +529,7 @@ export async function updateUserFromSSO(
       user = await db.user.update({
         where: { id: userId },
         data: { firstName, lastName },
-        include: INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+        select: USER_WITH_SSO_DETAILS_SELECT,
       });
     }
 
@@ -700,9 +731,13 @@ export async function createUser(
               sso: true,
             }),
           },
-          include: {
-            ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
-            organizations: true,
+          select: {
+            ...USER_WITH_SSO_DETAILS_SELECT,
+            organizations: {
+              select: {
+                id: true,
+              },
+            },
           },
         });
 
@@ -998,7 +1033,9 @@ export async function updateProfilePicture({
   userId: User["id"];
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: { id: true, profilePicture: true },
+    });
     const previousProfilePictureUrl = user.profilePicture || undefined;
 
     const fileData = await parseFileFormData({
@@ -1055,15 +1092,20 @@ export async function updateProfilePicture({
 export async function softDeleteUser(id: User["id"]) {
   try {
     const user = await getUserByID(id, {
-      contact: {
-        select: {
-          id: true,
+      select: {
+        id: true,
+        email: true,
+        profilePicture: true,
+        userOrganizations: {
+          include: {
+            organization: {
+              select: { id: true, userId: true },
+            },
+          },
         },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
-            select: { id: true, userId: true },
+        contact: {
+          select: {
+            id: true,
           },
         },
       },

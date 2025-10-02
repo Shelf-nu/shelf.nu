@@ -196,14 +196,32 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const searchParams = getCurrentSearchParams(request);
     const organizationIdParam = searchParams.get("organizationId") ?? undefined;
     const user = await getUserByID(userId, {
-      userOrganizations: {
-        select: {
-          organizationId: true,
-          organization: { select: { name: true } },
+      select: {
+        id: true,
+        onboarded: true,
+        username: true,
+        createdWithInvite: true,
+        referralSource: true,
+        userOrganizations: {
+          select: {
+            organizationId: true,
+            organization: { select: { name: true } },
+          },
+        },
+        businessIntel: {
+          select: {
+            jobTitle: true,
+            teamSize: true,
+            companyName: true,
+            howDidYouHearAboutUs: true,
+            primaryUseCase: true,
+            currentSolution: true,
+            timeline: true,
+          },
         },
       },
-      businessIntel: true,
     });
+
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
       return redirect("/assets");
@@ -283,7 +301,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await request.formData();
 
     const existingUser = await getUserByID(userId, {
-      userOrganizations: { select: { organizationId: true } },
+      select: {
+        id: true,
+        createdWithInvite: true,
+        userOrganizations: {
+          select: { organizationId: true },
+        },
+      },
     });
 
     const metadata = parseData(

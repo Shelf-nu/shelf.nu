@@ -13,6 +13,7 @@ export async function requireUserWithPermission(name: Roles, userId: string) {
   try {
     return await db.user.findFirstOrThrow({
       where: { id: userId, roles: { some: { name } } },
+      select: { id: true },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -37,6 +38,7 @@ export async function isAdmin(context: Record<string, any>) {
       id: authSession.userId,
       roles: { some: { name: Roles["ADMIN"] } },
     },
+    select: { id: true },
   });
 
   return !!user;
