@@ -1,10 +1,11 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { formatDatesForICal } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -21,12 +22,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
   try {
     /** Check if the current user is allowed to read booking */
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     const booking = await getBooking({
       id: bookingId,
@@ -35,14 +37,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     });
 
     /** For self service & base users, we only allow them to read their own bookings */
-    if (isSelfServiceOrBase && booking.custodianUserId !== authSession.userId) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "You are not authorized to download the calendar for this booking",
-        status: 403,
-        label: "Booking",
-        shouldBeCaptured: false,
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking,
+        userId: authSession.userId,
+        role,
+        action: "download the calendar for",
+        checkCustodianOnly: true,
       });
     }
     const hints = getClientHint(request);

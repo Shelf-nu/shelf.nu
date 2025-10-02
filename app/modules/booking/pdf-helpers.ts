@@ -5,9 +5,10 @@ import type {
   Organization,
   Prisma,
   Kit,
+  OrganizationRoles,
 } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
@@ -54,16 +55,13 @@ export async function fetchAllPdfRelatedData(
       extraInclude: { tags: { select: { id: true, name: true } } },
     });
 
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      booking.custodianUserId !== userId
-    ) {
-      throw new ShelfError({
-        cause: null,
-        message: "You are not authorized to view this booking",
-        status: 403,
-        label: "Booking",
-        shouldBeCaptured: false,
+    if (role) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "view",
+        checkCustodianOnly: true,
       });
     }
 
