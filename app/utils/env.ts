@@ -19,6 +19,7 @@ declare global {
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
+      COLLECT_BUSINESS_INTEL: string;
     };
   }
 }
@@ -58,6 +59,7 @@ declare global {
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
+      COLLECT_BUSINESS_INTEL: string;
     }
   }
 }
@@ -212,6 +214,12 @@ export const ENABLE_PREMIUM_FEATURES =
 
 export const SHOW_HOW_DID_YOU_FIND_US =
   getEnv("SHOW_HOW_DID_YOU_FIND_US", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const COLLECT_BUSINESS_INTEL =
+  getEnv("COLLECT_BUSINESS_INTEL", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;

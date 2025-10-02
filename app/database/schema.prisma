@@ -78,7 +78,9 @@ model User {
   tier              Tier               @relation(fields: [tierId], references: [id])
   assetReminders    AssetReminder[]
   contact           UserContact?
+  businessIntel     UserBusinessIntel?
 
+  // @deprecated - Historical data only. New entries go to UserBusinessIntel table
   referralSource String? // "How did you hear about us?" field.
 
   // A user can have multiple asset index settings, 1 for each organization
@@ -124,6 +126,34 @@ model UserContact {
   @@index([countryRegion]) // For country-based filtering
   @@index([zipPostalCode]) // For postal code searches
   @@index([city, countryRegion]) // For city within country queries
+}
+
+model UserBusinessIntel {
+  id String @id @default(cuid())
+
+  // Business intelligence fields collected during onboarding
+  // Note: User.referralSource is deprecated and kept for historical data
+  howDidYouHearAboutUs String? // "How did you hear about us?" - new entries go here
+  jobTitle             String? // User's role
+  teamSize             String? // Number of people using Shelf
+  companyName          String? // Company or organization name
+  primaryUseCase       String? // What they'll primarily track
+  currentSolution      String? // How they currently track assets
+  timeline             String? // When they need Shelf working
+
+  // Relationships
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String @unique
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for efficient querying
+  @@index([userId]) // Foreign key index
+  @@index([companyName]) // For company-based analytics
+  @@index([jobTitle]) // For role-based analytics
+  @@index([teamSize]) // For team size analytics
 }
 
 model Asset {

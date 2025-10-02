@@ -6,6 +6,7 @@ import {
   type User,
   type CustomTierLimit,
   OrganizationRoles,
+  type UserBusinessIntel,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -102,6 +103,17 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
                 title: true,
               },
             },
+          },
+        },
+        businessIntel: {
+          select: {
+            howDidYouHearAboutUs: true,
+            jobTitle: true,
+            teamSize: true,
+            companyName: true,
+            primaryUseCase: true,
+            currentSolution: true,
+            timeline: true,
           },
         },
       },
@@ -351,6 +363,16 @@ export default function Area51UserPage() {
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
   type User = NonNullable<LoaderData["user"]>;
+  type BusinessIntel = Pick<
+    UserBusinessIntel,
+    | "howDidYouHearAboutUs"
+    | "jobTitle"
+    | "teamSize"
+    | "companyName"
+    | "primaryUseCase"
+    | "currentSolution"
+    | "timeline"
+  >;
 
   const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
     switch (key) {
@@ -389,6 +411,20 @@ export default function Area51UserPage() {
           : null;
     }
   };
+  const renderBusinessIntelValue = (
+    value: BusinessIntel[keyof BusinessIntel]
+  ): ReactNode => {
+    if (value === null || value === undefined) {
+      return "—";
+    }
+
+    if (typeof value === "string" && value.trim().length === 0) {
+      return "—";
+    }
+
+    return value;
+  };
+
   const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
@@ -404,7 +440,12 @@ export default function Area51UserPage() {
               {user
                 ? Object.entries(user)
                     .filter(
-                      ([k, _v]) => !["qrCodes", "customTierLimit"].includes(k)
+                      ([k, _v]) =>
+                        ![
+                          "qrCodes",
+                          "customTierLimit",
+                          "businessIntel",
+                        ].includes(k)
                     )
                     .map(([key, value]) => (
                       <li key={key}>
@@ -414,6 +455,21 @@ export default function Area51UserPage() {
                     ))
                 : null}
             </ul>
+            {user.businessIntel ? (
+              <div className="mt-6">
+                <h4 className="font-semibold">Business intel</h4>
+                <ul className="mt-2 space-y-1">
+                  {Object.entries(user.businessIntel).map(([key, value]) => (
+                    <li key={key}>
+                      <span className="font-semibold">{key}</span>:{" "}
+                      {renderBusinessIntelValue(
+                        value as BusinessIntel[keyof BusinessIntel]
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           {hasCustomTier && (
