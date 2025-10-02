@@ -302,6 +302,7 @@ export const createStripeCustomer = async ({
       await db.user.update({
         where: { id: userId },
         data: { customerId },
+        select: { id: true },
       });
 
       return customerId;
@@ -519,7 +520,7 @@ export async function validateSubscriptionIsActive({
   user,
   subscription,
 }: {
-  user: User;
+  user: Pick<User, "id" | "skipSubscriptionCheck" | "tierId">;
   subscription: Stripe.Subscription | null;
 }) {
   if (user.skipSubscriptionCheck) return;

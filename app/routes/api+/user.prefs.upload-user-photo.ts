@@ -19,7 +19,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: { id: true, profilePicture: true },
+    });
 
     /** needed for deleting */
     const previousProfilePictureUrl = user.profilePicture;

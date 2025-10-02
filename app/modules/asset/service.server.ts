@@ -2844,7 +2844,9 @@ export async function bulkCheckOutAssets({
         where,
         select: { id: true, title: true, status: true },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: { id: true, firstName: true, lastName: true },
+      }),
     ]);
 
     const assetsNotAvailable = assets.some(
@@ -2942,7 +2944,9 @@ export async function bulkCheckInAssets({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: { id: true, firstName: true, lastName: true },
+      }),
     ]);
 
     const hasAssetsWithoutCustody = assets.some((asset) => !asset.custody);
@@ -3053,7 +3057,9 @@ export async function bulkUpdateAssetLocation({
           kit: { select: { id: true, name: true } },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: { id: true, firstName: true, lastName: true },
+      }),
     ]);
 
     // Check if any assets belong to kits and prevent bulk location updates
@@ -3273,7 +3279,9 @@ export async function relinkQrCode({
 }) {
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),
-    getUserByID(userId),
+    getUserByID(userId, {
+      select: { id: true, firstName: true, lastName: true },
+    }),
     db.asset.findFirst({
       where: { id: assetId, organizationId },
       select: { qrCodes: { select: { id: true } } },
@@ -3321,7 +3329,7 @@ export async function relinkQrCode({
       assetId,
       userId,
       type: "UPDATE",
-      content: `**${user.firstName?.trim()}** has changed QR code ${
+      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has changed QR code ${
         oldQrCode ? `from **${oldQrCode.id}**` : ""
       } to **${qrId}**`,
     }),

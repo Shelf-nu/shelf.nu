@@ -180,7 +180,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { id: custodianId, name: custodianName } = custodian;
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: { id: true, firstName: true, lastName: true },
+    });
 
     // Validate that the custodian belongs to the same organization
     const custodianTeamMember = await getTeamMember({

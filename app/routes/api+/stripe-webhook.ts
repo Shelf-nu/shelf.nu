@@ -39,9 +39,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const user = await db.user
       .findFirstOrThrow({
         where: { customerId },
-        include: {
-          tier: true,
-          customTierLimit: true,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          tierId: true,
         },
       })
       .catch((cause) => {
@@ -109,6 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
             data: {
               tierId: tierId as TierId,
             },
+            select: { id: true },
           })
           .catch((cause) => {
             throw new ShelfError({
@@ -150,6 +154,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 tierId: tierId as TierId,
                 usedFreeTrial: true,
               },
+              select: { email: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -202,6 +207,7 @@ export async function action({ request }: ActionFunctionArgs) {
               data: {
                 tierId: "free",
               },
+              select: { id: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -250,6 +256,7 @@ export async function action({ request }: ActionFunctionArgs) {
               data: {
                 tierId: tierId as TierId,
               },
+              select: { id: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -281,6 +288,7 @@ export async function action({ request }: ActionFunctionArgs) {
               data: {
                 tierId: TierId.free,
               },
+              select: { id: true },
             })
             .catch((cause) => {
               throw new ShelfError({

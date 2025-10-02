@@ -19,9 +19,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // Verify user has permission (owner or admin in org)
     const user = await getUserByID(userId, {
-      userOrganizations: {
-        where: { organizationId },
-        select: { roles: true },
+      select: {
+        id: true,
+        userOrganizations: {
+          where: { organizationId },
+          select: { roles: true },
+        },
       },
     });
 
