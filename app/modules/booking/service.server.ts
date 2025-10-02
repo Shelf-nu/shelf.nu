@@ -1,4 +1,9 @@
-import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import {
+  BookingStatus,
+  AssetStatus,
+  KitStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import type {
   Booking,
   Prisma,
@@ -2135,10 +2140,12 @@ export async function extendBooking({
   newEndDate,
   hints,
   userId,
+  role,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
+  role: OrganizationRoles;
 }) {
   try {
     const booking = await db.booking
@@ -2151,6 +2158,8 @@ export async function extendBooking({
           activeSchedulerReference: true,
           assets: { select: { id: true } },
           from: true,
+          creatorId: true,
+          custodianUserId: true,
         },
       })
       .catch((cause) => {
@@ -2161,6 +2170,31 @@ export async function extendBooking({
             "Booking not found. Are you sure it exists in the current workspace?",
         });
       });
+
+    if (role === OrganizationRoles.BASE) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "You are not authorized to extend this booking.",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const isBookingOwner =
+        booking.creatorId === userId || booking.custodianUserId === userId;
+
+      if (!isBookingOwner) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: "You are not authorized to extend this booking.",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+    }
 
     /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
     const clashingBookings: ClashingBooking[] = await db.booking.findMany({

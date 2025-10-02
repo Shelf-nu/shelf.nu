@@ -1,4 +1,9 @@
-import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import {
+  BookingStatus,
+  AssetStatus,
+  KitStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";
@@ -1532,6 +1537,7 @@ describe("extendBooking", () => {
       newEndDate: new Date("2025-01-02T17:00:00Z"),
       hints: mockClientHints,
       userId: "user-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -1560,6 +1566,85 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should allow self service user to extend their own booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      to: new Date("2025-01-02T17:00:00Z"),
+    });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it("should prevent self service user from extending others booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-2",
+      custodianUserId: "user-2",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should prevent base user from extending any booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.BASE,
       })
     ).rejects.toThrow(ShelfError);
   });

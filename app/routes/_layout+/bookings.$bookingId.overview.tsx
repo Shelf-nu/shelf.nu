@@ -520,7 +520,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
-      "extend-booking": PermissionAction.update,
+      "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
     };
@@ -936,6 +936,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints,
           newEndDate,
           userId,
+          role,
         });
 
         sendNotification({

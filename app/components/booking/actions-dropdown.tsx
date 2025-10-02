@@ -52,7 +52,13 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     action: PermissionAction.cancel,
   });
 
-  const canExtendBooking = isOngoing || isOverdue;
+  const canExtendBooking =
+    (isOngoing || isOverdue) &&
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.extend,
+    });
 
   return (
     <DropdownMenu modal={false}>
