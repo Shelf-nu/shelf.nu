@@ -112,7 +112,7 @@ export async function resolveUserAction(
 
       sendEmail({
         to: user.email,
-        subject: `Access to ${org.name} has been revoked`,
+        subject: `Access to ${org.name} removed`,
         text: revokeAccessEmailText({ orgName: org.name }),
       });
 

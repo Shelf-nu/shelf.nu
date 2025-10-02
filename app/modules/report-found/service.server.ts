@@ -1,6 +1,7 @@
 import type { Asset, Kit, Prisma, ReportFound, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { normalizeQrData } from "~/utils/qr";
 
@@ -66,8 +67,8 @@ export async function sendReportEmails({
   const isUnlinked = !qr.assetId && !qr.kitId;
 
   const subject = isUnlinked
-    ? "Reported unlinked qr found"
-    : `Reported ${type} found`;
+    ? "Someone scanned your unlinked QR code"
+    : `Someone found your ${type}: ${normalizedName}`;
 
   try {
     return await Promise.all([
@@ -76,17 +77,17 @@ export async function sendReportEmails({
         to: ownerEmail,
         subject,
         text: item
-          ? `Your ${type} ${normalizedName} has been reported found. The reason is: \n\n| ${message} \n\n For contact use this email: ${reporterEmail}\n\nEmail sent via shelf.nu\n\n`
-          : `The QR code own (${qr.id}) has been reported found. The reason is: \n\n| ${message} \n\n For contact use this email: ${reporterEmail}\n\nEmail sent via shelf.nu\n\n`,
+          ? `Howdy,\n\nYour ${type} ${normalizedName} was reported found.\n\n**Message from finder:**\n${message}\n\n**Contact them:** ${reporterEmail}\n\n→ View ${type}: ${SERVER_URL}/${type}s/${item.id}\n\nThanks,\nThe Shelf Team\n\n---\nEmail sent via shelf.nu\n\n`
+          : `Howdy,\n\nYour QR code (${qr.id}) was reported found, but it's not linked to an asset yet.\n\n**Message from finder:**\n${message}\n\n**Contact them:** ${reporterEmail}\n\n→ Link this QR: ${SERVER_URL}/qr/${qr.id}\n\nThanks,\nThe Shelf Team\n\n---\nEmail sent via shelf.nu\n\n`,
       }),
 
       /** Send email to reporter */
       sendEmail({
         to: reporterEmail,
-        subject,
+        subject: "Thanks for reporting",
         text: item
-          ? `Thank you for contacting the owner of the ${type} you found. They have been notified of your message and will contact you if they are interested.\n\nEmail sent via shelf.nu\n\n`
-          : `Thank you for contacting the owner of the QR code you found. They have been notified of your message and will contact you if they are interested.\n\nEmail sent via shelf.nu\n\n`,
+          ? `Howdy,\n\nThanks for contacting the owner of the ${type} you found. They've been notified and will reach out to you at ${reporterEmail} if they need more details.\n\nThanks,\nThe Shelf Team\n\n---\nEmail sent via shelf.nu\n\n`
+          : `Howdy,\n\nThanks for contacting the QR code owner. They've been notified and will reach out to you at ${reporterEmail} if they need more details.\n\nThanks,\nThe Shelf Team\n\n---\nEmail sent via shelf.nu\n\n`,
       }),
     ]);
   } catch (cause) {

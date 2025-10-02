@@ -7,6 +7,7 @@ import {
   Container,
   Section,
   Img,
+  Link,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
@@ -36,12 +37,10 @@ export function InvitationEmailTemplate({
         <LogoForEmail />
 
         <div style={{ paddingTop: "8px" }}>
+          <Text style={{ marginBottom: "12px", ...styles.p }}>Howdy,</Text>
           <Text style={{ marginBottom: "24px", ...styles.p }}>
-            Howdy,
-            <br />
-            {invite.inviter.firstName} {invite.inviter.lastName} invites you to
-            join Shelf as a member of {invite.organization.name}
-            's workspace. Click the link to accept the invite:
+            {invite.inviter.firstName} {invite.inviter.lastName} invited you to
+            their Shelf workspace: <strong>{invite.organization.name}</strong>.
           </Text>
 
           {extraMessage ? (
@@ -89,17 +88,33 @@ export function InvitationEmailTemplate({
           >
             Accept the invite
           </Button>
+          <Text style={{ ...styles.p, marginTop: "24px" }}>
+            <strong>What is Shelf?</strong> Asset tracking that doesn't suck. QR
+            codes, bookings, team collaboration – the stuff spreadsheets can't
+            do.
+          </Text>
+          <ul style={{ textAlign: "left", paddingLeft: "24px" }}>
+            <li>See all assets in {invite.organization.name}</li>
+            <li>Create bookings</li>
+            <li>Track locations</li>
+            <li>Collaborate with your team</li>
+          </ul>
           <Text style={{ ...styles.p, marginBottom: "24px" }}>
-            Once you’re done setting up your account, you'll be able to access
-            the workspace and start exploring features like Asset Explorer,
-            Location Tracking, Collaboration, Custom fields and more. If you
-            have any questions or need assistance, please don't hesitate to
-            contact our support team at {SUPPORT_EMAIL}.
+            Questions? {SUPPORT_EMAIL}
           </Text>
 
           <Text style={{ marginBottom: "32px", ...styles.p }}>
             Thanks, <br />
             The Shelf team
+          </Text>
+          <Text style={{ ...styles.p, marginBottom: "16px" }}>
+            P.S. - Need labels?{" "}
+            <Link
+              href="http://store.shelf.nu"
+              style={{ color: emailPrimaryColor }}
+            >
+              http://store.shelf.nu
+            </Link>
           </Text>
           <Text style={{ fontSize: "14px", color: "#344054" }}>
             This is an automatic email sent from shelf.nu to{" "}

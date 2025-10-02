@@ -7,7 +7,7 @@ import {
   Container,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
-import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
+import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { LogoForEmail } from "../logo";
@@ -16,7 +16,7 @@ import { styles } from "../styles";
 
 export const sendTeamTrialWelcomeEmail = ({ email }: { email: string }) => {
   try {
-    const subject = `Your Shelf Team Trial is Ready - Next Steps`;
+    const subject = `Your Shelf Team Trial is ready`;
     const html = welcomeToTrialEmailHtml();
     const text = welcomeToTrialEmailText();
 
@@ -41,37 +41,35 @@ export const sendTeamTrialWelcomeEmail = ({ email }: { email: string }) => {
 /**
  * THis is the text version of the onboarding email
  */
-export const welcomeToTrialEmailText = () => `Dear Shelf user,
-Carlos Virreira here, Co-founder of Shelf Asset Management, Inc. I'm thrilled to inform you that your Shelf Team Trial has been activated! This is an excellent step towards more efficient asset management for your team.
+export const welcomeToTrialEmailText = () => `Hi there,
 
-To get started with your trial:
+Carlos here. Your Team Trial is live.
 
-Create Your Team Workspace:
+Week 1: Get Assets In
+→ Create team workspace: ${SERVER_URL}/account-details/workspace
+→ Add 10-20 assets
+→ Print QR codes (this is the magic)
 
-Visit https://app.shelf.nu/account-details/workspace to see all your workspaces. You'll find a "NEW WORKSPACE" button enabled - click this to create your team workspace if you haven't already.
+Week 2: Add Your Team
+→ Invite colleagues
+→ Set up locations
+→ Create your first booking
 
+Week 3: Go Deep
+→ Custom Fields: https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf
+→ Kits: https://www.shelf.nu/features/kits
+→ Bookings: https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature
 
-Add Your First Assets:
-Start populating your inventory to see Shelf in action. Don't forget to try our QR code feature for easy asset tracking.
+Need labels? → http://store.shelf.nu
 
+Questions? Hit reply.
 
-Invite Team Members:
-Collaboration is key. Add your colleagues to truly experience the power of Shelf.
+Best,
+Carlos A. Virreira
+Founder / CEO
+Shelf Asset Management, Inc.
 
-
-Explore Key Features:
-Custom Fields: Tailor Shelf to your specific needs - https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf
-Bookings: Efficiently manage equipment reservations - https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature
-Kits: Group related assets for easier management - https://www.shelf.nu/features/kits
-
-Need help? Our support team is ready to assist you. Check out our Knowledge Base for quick answers, or reach out directly at ${SUPPORT_EMAIL}.
-
-Remember, your trial gives you full access to all our premium features. Make the most of it!
-
-Happy asset tracking,
-Carlos Virreira
-Co-founder, Shelf Asset Management, Inc.
-P.S. Have questions or feedback? I'd love to hear from you. Reply directly to this email, and let's chat!
+P.S. - Most teams see ROI in week 2.
 `;
 
 function WelcomeToTrialEmailTemplate() {
@@ -80,84 +78,95 @@ function WelcomeToTrialEmailTemplate() {
   return (
     <Html>
       <Head>
-        <title>Your Shelf Team Trial is Ready - Next Steps</title>
+        <title>Your Shelf Team Trial is ready</title>
       </Head>
 
       <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
         <LogoForEmail />
 
         <div style={{ paddingTop: "8px" }}>
-          Dear Shelf user,
+          <Text style={{ marginBottom: "12px", ...styles.p }}>Hi there,</Text>
           <Text style={{ marginBottom: "24px", ...styles.p }}>
-            Carlos Virreira here, Co-founder of Shelf Asset Management, Inc. I'm
-            thrilled to inform you that your Shelf Team Trial has been
-            activated! This is an excellent step towards more efficient asset
-            management for your team.
-            <br />
-            To get started with your trial:
-            <br />
-            <h2>Create Your Team Workspace:</h2>
+            Carlos here. Your Team Trial is live.
           </Text>
-          <ol style={{ ...styles.li }}>
+
+          <Text style={{ ...styles.p, fontWeight: 600 }}>
+            Week 1: Get Assets In
+          </Text>
+          <ul style={{ ...styles.li }}>
             <li>
-              Visit{" "}
+              Create team workspace:{" "}
               <Link
                 href={`${SERVER_URL}/account-details/workspace`}
                 style={{ color: emailPrimaryColor }}
               >
                 {SERVER_URL}/account-details/workspace
-              </Link>{" "}
-              to see all your workspaces. You'll find a "NEW WORKSPACE" button
-              enabled - click this to create your team workspace if you haven't
-              already.
+              </Link>
+            </li>
+            <li>Add 10-20 assets</li>
+            <li>Print QR codes (this is the magic)</li>
+          </ul>
+
+          <Text style={{ ...styles.p, fontWeight: 600 }}>
+            Week 2: Add Your Team
+          </Text>
+          <ul style={{ ...styles.li }}>
+            <li>Invite colleagues</li>
+            <li>Set up locations</li>
+            <li>Create your first booking</li>
+          </ul>
+
+          <Text style={{ ...styles.p, fontWeight: 600 }}>Week 3: Go Deep</Text>
+          <ul style={{ ...styles.li }}>
+            <li>
+              <Link
+                href="https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf"
+                style={{ color: emailPrimaryColor }}
+              >
+                Custom Fields
+              </Link>
             </li>
             <li>
-              Add Your First Assets: Start populating your inventory to see
-              Shelf in action. Don't forget to try our QR code feature for easy
-              asset tracking.
+              <Link
+                href="https://www.shelf.nu/features/kits"
+                style={{ color: emailPrimaryColor }}
+              >
+                Kits
+              </Link>
             </li>
             <li>
-              Invite Team Members: Collaboration is key. Add your colleagues to
-              truly experience the power of Shelf.
+              <Link
+                href="https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature"
+                style={{ color: emailPrimaryColor }}
+              >
+                Bookings
+              </Link>
             </li>
-          </ol>
-          <h2>Explore Key Features:</h2>
-          <Link
-            href="https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf"
-            style={{ color: emailPrimaryColor }}
-          >
-            Custom Fields: Tailor Shelf to your specific needs
-          </Link>
-          <br />
-          <Link
-            href="https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature"
-            style={{ color: emailPrimaryColor }}
-          >
-            Bookings: Efficiently manage equipment reservations
-          </Link>
-          <br />
-          <Link
-            href="https://www.shelf.nu/features/kits"
-            style={{ color: emailPrimaryColor }}
-          >
-            Kits: Group related assets for easier management
-          </Link>
-          <br />
+          </ul>
+
+          <Text style={{ marginBottom: "16px", ...styles.p }}>
+            Need labels?{" "}
+            <Link
+              href="http://store.shelf.nu"
+              style={{ color: emailPrimaryColor }}
+            >
+              http://store.shelf.nu
+            </Link>
+          </Text>
           <Text style={{ marginBottom: "24px", ...styles.p }}>
-            Need help? Our support team is ready to assist you. Check out our
-            Knowledge Base for quick answers, or reach out directly at{" "}
-            {SUPPORT_EMAIL}.
+            Questions? Hit reply.
+          </Text>
+          <Text style={{ marginBottom: "24px", ...styles.p }}>
+            Best,
             <br />
-            Remember, your trial gives you full access to all our premium
-            features. Make the most of it!
+            Carlos A. Virreira
             <br />
+            Founder / CEO
             <br />
-            Happy asset tracking, <br />
-            Carlos Virreira <br />
-            Co-founder, Shelf Asset Management, Inc.
-            <br />
-            P.S. Have questions or feedback? I'd love to hear from you. Reply
-            directly to this email, and let's chat!
+            Shelf Asset Management, Inc.
+          </Text>
+          <Text style={{ ...styles.p }}>
+            P.S. - Most teams see ROI in week 2.
           </Text>
         </div>
       </Container>

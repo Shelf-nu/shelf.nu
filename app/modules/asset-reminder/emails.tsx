@@ -32,25 +32,26 @@ export function assetAlertEmailText({
   const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
 
   const note = isOwner
-    ? `You are receiving this email because the original person was removed from workspace ${workspaceName}.`
-    : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}. 
-If you think you weren't supposed to have received this email please contact the owner of the workspace.`;
+    ? `You're receiving this because you own workspace ${workspaceName}.`
+    : `This reminder was set in workspace ${workspaceName}.`;
+  const followUp = isOwner
+    ? ""
+    : "If this looks wrong, contact your workspace admin.";
 
-  return `Asset reminder notice
+  return `Hi ${userName},
 
-Hi ${userName}, your asset reminder date has been reached. Please
-perform the required action for alert.
+Your asset reminder is due today.
 
-${asset.title}
-${asset.id}
+**${asset.title}**
+ID: ${asset.id}
 
-Reminder - ${reminder.name}
+**Reminder:** ${reminder.name}
+**Action needed:** ${reminder.message}
 
-${reminder.message}
-
-${SERVER_URL}/assets/${asset.id}
+→ View asset: ${SERVER_URL}/assets/${asset.id}
 
 ${note}
+${followUp ? `\n${followUp}` : ""}
 
 Thanks,
 The Shelf Team
@@ -106,8 +107,7 @@ function AssetAlertEmailTemplate({
           <Text style={styles.h1}>Asset Reminder Notice</Text>
 
           <Text style={{ marginBottom: "20px", ...styles.p }}>
-            Hi {userName}, your asset reminder date has been reached. Please
-            perform the required actions for this alert.
+            Hi {userName}, your asset reminder is due today.
           </Text>
 
           <Row
@@ -153,12 +153,12 @@ function AssetAlertEmailTemplate({
           <Text
             style={{ ...styles.h2, marginBottom: "4px", textAlign: "left" }}
           >
-            {reminder.name}
+            Reminder: {reminder.name}
           </Text>
           <Text
-            style={{ ...styles.p, marginBottom: "32px", textAlign: "left" }}
+            style={{ ...styles.p, marginBottom: "12px", textAlign: "left" }}
           >
-            {reminder.message}
+            Action needed: {reminder.message}
           </Text>
 
           <Button
@@ -169,26 +169,22 @@ function AssetAlertEmailTemplate({
               marginBottom: "30px",
             }}
           >
-            Open asset page
+            View asset
           </Button>
 
           {isOwner ? (
             <Text style={{ ...styles.p, marginBottom: "48px" }}>
-              You are receiving this email because the original person was
-              removed from workspace{" "}
+              You're receiving this because you own workspace{" "}
               <span style={{ fontWeight: "bold" }}>{workspaceName}</span>.
             </Text>
           ) : (
             <>
               <Text style={{ ...styles.p, marginBottom: "10px" }}>
-                This email was sent to{" "}
-                <span style={{ fontWeight: "bold" }}>{user.email}</span> because
-                it is part of the Shelf workspace{" "}
+                This reminder was set in workspace{" "}
                 <span style={{ fontWeight: "bold" }}>{workspaceName}</span>.
               </Text>
               <Text style={{ ...styles.p, marginBottom: "48px" }}>
-                If you think you weren't supposed to have received this email
-                please contact the owner of the workspace.
+                If this looks wrong, contact your workspace admin.
               </Text>
             </>
           )}

@@ -1,3 +1,5 @@
+import { SERVER_URL } from "~/utils/env";
+
 export function newOwnerEmailText({
   newOwnerName,
   workspaceName,
@@ -7,12 +9,14 @@ export function newOwnerEmailText({
 }) {
   return `Hi ${newOwnerName},
 
-You have successfully been assigned as the owner of the workspace "${workspaceName}".
+You're now the owner of workspace "${workspaceName}".
 
-This means you now have full control over:
+You now control:
 - Workspace settings
 - Billing and subscription
 - User management
+
+→ Manage workspace: ${SERVER_URL}/account-details/workspace
 
 Thanks,
 The Shelf Team
@@ -30,11 +34,14 @@ export function previousOwnerEmailText({
 }) {
   return `Hi ${previousOwnerName},
 
-You have successfully transferred ownership of the workspace "${workspaceName}" to "${newOwnerName}".
+You transferred ownership of "${workspaceName}" to ${newOwnerName}.
 
-As a result:
-- You are now an admin in the workspace
-- You no longer have access to billing or ownership-level settings
+Your new role:
+- You're now an admin
+- You no longer have billing access
+- You can't transfer ownership
+
+→ View workspace: ${SERVER_URL}/account-details/workspace
 
 Thanks,
 The Shelf Team

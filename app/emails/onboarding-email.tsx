@@ -1,3 +1,5 @@
+import { SERVER_URL } from "~/utils/env";
+
 /**
  * THis is the text version of the onboarding email
  */
@@ -7,19 +9,24 @@ export const onboardingEmailText = ({
   firstName: string;
 }) => `Hi ${firstName},
 
-Thrilled to have you on board at Shelf! I'm Carlos Virreira, one of the co-founders, and I'm excited to learn more about your needs as an asset management professional.
+Carlos here, founder of Shelf. Welcome!
 
-How do you plan to use Shelf.nu? 
+Get started in 3 steps:
 
-What features are essential for you in an asset management system? 
+1. Add your first asset (2 min) → ${SERVER_URL}/assets/new
+2. Generate a QR code (1 click)
+3. Invite your team (optional)
 
-Your input is key as we fine-tune Shelf.nu for professionals like yourself.
+I built Shelf because asset chaos drove me crazy. Spreadsheets failing. Assets missing. Hours wasted.
 
-Feel free to hit reply and share anything in your mind. All mails reach my personal inbox and I love receiving mails.
+You don't need to master everything today. Just add one asset.
 
-Greetings from The Netherlands,
+Need help? Hit reply. Goes straight to my inbox.
 
-Carlos Virreira
-Founder & Vision Lead
+Need labels? → http://store.shelf.nu
+
+Best,
+Carlos A. Virreira
+Founder / CEO
 Shelf Asset Management, Inc.
 `;
