@@ -1196,10 +1196,19 @@ export async function checkinBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          assets: { select: { id: true, kitId: true, status: true } },
-          partialCheckins: {
+          assets: {
             select: {
-              assetIds: true,
+              id: true,
+              kitId: true,
+              status: true,
+              bookings: {
+                select: { id: true, status: true },
+                where: {
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
             },
           },
         },
@@ -1262,19 +1271,27 @@ export async function checkinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      // Create set of asset IDs that have been partially checked in
-      const partiallyCheckedInAssetIds = new Set(
-        (bookingFound.partialCheckins || []).flatMap((pc) => pc.assetIds)
-      );
-
-      // Only update assets that are CHECKED_OUT in this booking's context
-      // Skip assets that have partial check-ins (they're effectively available in this booking's context)
       const assetsToCheckin = bookingFound.assets
-        .filter(
-          (asset) =>
-            asset.status === AssetStatus.CHECKED_OUT &&
-            !partiallyCheckedInAssetIds.has(asset.id)
-        )
+        .filter((asset) => {
+          if (asset.status !== AssetStatus.CHECKED_OUT) {
+            return false;
+          }
+
+          const hasActiveBookingConflict = (asset.bookings ?? []).some(
+            (linkedBooking) =>
+              linkedBooking.id !== bookingFound.id &&
+              (linkedBooking.status === BookingStatus.ONGOING ||
+                linkedBooking.status === BookingStatus.OVERDUE)
+          );
+
+          if (hasActiveBookingConflict) {
+            return false;
+          }
+
+          // No other active booking is using this asset, so we can safely
+          // reset its status as part of completing the current booking.
+          return true;
+        })
         .map((asset) => asset.id);
 
       if (assetsToCheckin.length > 0) {

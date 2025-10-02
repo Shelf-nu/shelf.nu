@@ -1218,8 +1218,18 @@ describe("checkinBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       assets: [
-        { id: "asset-1", kitId: null, status: AssetStatus.CHECKED_OUT },
-        { id: "asset-2", kitId: "kit-1", status: AssetStatus.CHECKED_OUT },
+        {
+          id: "asset-1",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+        },
+        {
+          id: "asset-2",
+          kitId: "kit-1",
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+        },
       ],
       partialCheckins: [],
     };
@@ -1244,6 +1254,147 @@ describe("checkinBooking", () => {
     });
 
     expect(result).toEqual(checkedInBooking);
+  });
+
+  it("should reset checked out assets even when partial check-in history exists", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.OVERDUE,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+        },
+        {
+          id: "asset-2",
+          kitId: "kit-1",
+          status: AssetStatus.AVAILABLE,
+          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+        },
+      ],
+      partialCheckins: [
+        {
+          assetIds: ["asset-1"],
+        },
+      ],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] } },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+  });
+
+  it("should not reset assets that are checked out in another active booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.OVERDUE,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [
+            { id: "booking-1", status: BookingStatus.OVERDUE },
+            { id: "booking-2", status: BookingStatus.ONGOING },
+          ],
+        },
+      ],
+      partialCheckins: [
+        {
+          assetIds: ["asset-1"],
+        },
+      ],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("should reset all assets (kit + singular) even when singular is in partial check-in history", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.OVERDUE,
+      assets: [
+        // Kit with 3 assets
+        {
+          id: "kit-asset-1",
+          kitId: "kit-1",
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+        },
+        {
+          id: "kit-asset-2",
+          kitId: "kit-1",
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+        },
+        {
+          id: "kit-asset-3",
+          kitId: "kit-1",
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+        },
+        // Singular asset that was partially checked in
+        {
+          id: "singular-asset",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+        },
+      ],
+      partialCheckins: [
+        {
+          assetIds: ["singular-asset"],
+        },
+      ],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ["kit-asset-1", "kit-asset-2", "kit-asset-3", "singular-asset"],
+        },
+      },
+      data: { status: AssetStatus.AVAILABLE },
+    });
   });
 
   it("should handle checkin for non-ongoing booking", async () => {
