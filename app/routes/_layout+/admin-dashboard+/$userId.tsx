@@ -97,7 +97,6 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           select: {
             id: true,
             createdAt: true,
-            type: true,
             asset: {
               select: {
                 title: true,
