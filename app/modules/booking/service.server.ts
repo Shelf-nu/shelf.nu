@@ -1830,7 +1830,7 @@ export async function updateBookingAssets({
         await createSystemBookingNote({
           bookingId: booking.id,
           content: `${wrapUserLinkForNote(
-            user!
+            user
           )} added ${assetContent} to the booking.`,
         });
       } else {
@@ -1879,7 +1879,7 @@ export async function createKitBookingNote({
     await createSystemBookingNote({
       bookingId,
       content: `${wrapUserLinkForNote(
-        user!
+        user
       )} ${action} ${kitContent} to the booking.`,
     });
   } else {
@@ -2243,7 +2243,7 @@ export async function extendBooking({
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
       content: `${wrapUserLinkForNote(
-        user!
+        user
       )} extended the booking from **${wrapDateForNote(
         booking.to!
       )}** to **${wrapDateForNote(newEndDate)}**.`,
