@@ -1201,7 +1201,14 @@ export async function checkinBooking({
               id: true,
               kitId: true,
               status: true,
-              bookings: { select: { id: true, status: true } },
+              bookings: {
+                select: { id: true, status: true },
+                where: {
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
             },
           },
         },
