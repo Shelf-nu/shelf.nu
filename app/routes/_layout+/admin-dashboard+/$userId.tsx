@@ -6,6 +6,7 @@ import {
   type User,
   type CustomTierLimit,
   OrganizationRoles,
+  type UserBusinessIntel,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -71,18 +72,51 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     await requireAdmin(userId);
 
     const user = await getUserByID(shelfUserId, {
-      qrCodes: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          asset: {
-            select: {
-              title: true,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        profilePicture: true,
+        createdAt: true,
+        updatedAt: true,
+        tierId: true,
+        skipSubscriptionCheck: true,
+        customerId: true,
+        usedFreeTrial: true,
+        sso: true,
+        customTierLimit: {
+          select: {
+            maxOrganizations: true,
+            isEnterprise: true,
+          },
+        },
+        qrCodes: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            createdAt: true,
+            type: true,
+            asset: {
+              select: {
+                title: true,
+              },
             },
           },
         },
+        businessIntel: {
+          select: {
+            howDidYouHearAboutUs: true,
+            jobTitle: true,
+            teamSize: true,
+            companyName: true,
+            primaryUseCase: true,
+            currentSolution: true,
+            timeline: true,
+          },
+        },
       },
-      customTierLimit: true,
-      businessIntel: true,
     });
 
     const userOrganizations = await db.userOrganization
@@ -271,7 +305,14 @@ export const action = async ({
           return json(data({ success: true }));
         }
       case "createCustomerId": {
-        const user = await getUserByID(shelfUserId);
+        const user = await getUserByID(shelfUserId, {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        });
         await createStripeCustomer({
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
@@ -290,6 +331,7 @@ export const action = async ({
         await db.user.update({
           where: { id: shelfUserId },
           data: { skipSubscriptionCheck },
+          select: { id: true },
         });
 
         sendNotification({
@@ -321,7 +363,16 @@ export default function Area51UserPage() {
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
   type User = NonNullable<LoaderData["user"]>;
-  type BusinessIntel = NonNullable<User["businessIntel"]>;
+  type BusinessIntel = Pick<
+    UserBusinessIntel,
+    | "howDidYouHearAboutUs"
+    | "jobTitle"
+    | "teamSize"
+    | "companyName"
+    | "primaryUseCase"
+    | "currentSolution"
+    | "timeline"
+  >;
 
   const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
     switch (key) {
@@ -373,12 +424,7 @@ export default function Area51UserPage() {
 
     return value;
   };
-  const businessIntelExcludedFields = new Set<keyof BusinessIntel>([
-    "id",
-    "userId",
-    "createdAt",
-    "updatedAt",
-  ]);
+
   const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
@@ -413,21 +459,14 @@ export default function Area51UserPage() {
               <div className="mt-6">
                 <h4 className="font-semibold">Business intel</h4>
                 <ul className="mt-2 space-y-1">
-                  {Object.entries(user.businessIntel)
-                    .filter(
-                      ([key]) =>
-                        !businessIntelExcludedFields.has(
-                          key as keyof BusinessIntel
-                        )
-                    )
-                    .map(([key, value]) => (
-                      <li key={key}>
-                        <span className="font-semibold">{key}</span>:{" "}
-                        {renderBusinessIntelValue(
-                          value as BusinessIntel[keyof BusinessIntel]
-                        )}
-                      </li>
-                    ))}
+                  {Object.entries(user.businessIntel).map(([key, value]) => (
+                    <li key={key}>
+                      <span className="font-semibold">{key}</span>:{" "}
+                      {renderBusinessIntelValue(
+                        value as BusinessIntel[keyof BusinessIntel]
+                      )}
+                    </li>
+                  ))}
                 </ul>
               </div>
             ) : null}

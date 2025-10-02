@@ -44,7 +44,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: { id: true, customerId: true },
+    });
 
     /** Get the Stripe customer */
     const customer = user.customerId

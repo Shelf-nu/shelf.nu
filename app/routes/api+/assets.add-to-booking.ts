@@ -78,7 +78,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: { id: true, firstName: true, lastName: true },
+    });
     const booking = await updateBookingAssets({
       id,
       organizationId,
