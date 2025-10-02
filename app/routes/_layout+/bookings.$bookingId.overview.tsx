@@ -1,4 +1,4 @@
-import { TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor, OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -52,6 +52,7 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sortBookingAssets } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -749,10 +750,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
           const b = await getBooking({ id, organizationId, request });
-          if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
+          validateBookingOwnership({
+            booking: b,
+            userId,
+            role,
+            action: "delete",
+          });
+
+          // BASE users can only delete DRAFT bookings
+          if (
+            role === OrganizationRoles.BASE &&
+            b.status !== BookingStatus.DRAFT
+          ) {
             throw new ShelfError({
               cause: null,
-              message: "You are not authorized to delete this booking",
+              message:
+                "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
               status: 403,
               label: "Booking",
             });

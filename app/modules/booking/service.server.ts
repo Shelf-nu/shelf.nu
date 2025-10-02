@@ -1,9 +1,4 @@
-import {
-  BookingStatus,
-  AssetStatus,
-  KitStatus,
-  OrganizationRoles,
-} from "@prisma/client";
+import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
 import type {
   Booking,
   Prisma,
@@ -13,6 +8,7 @@ import type {
   User,
   UserOrganization,
   Tag,
+  OrganizationRoles,
 } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
@@ -27,6 +23,7 @@ import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/par
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
@@ -2185,61 +2182,13 @@ export async function extendBooking({
         });
       });
 
-    if (role === OrganizationRoles.BASE) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message: "You are not authorized to extend this booking.",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
-
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      const isBookingOwner =
-        booking.creatorId === userId || booking.custodianUserId === userId;
-
-      if (!isBookingOwner) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message: "You are not authorized to extend this booking.",
-          status: 403,
-          shouldBeCaptured: false,
-        });
-      }
-    }
-
-    /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
-    const clashingBookings: ClashingBooking[] = await db.booking.findMany({
-      where: {
-        id: { not: booking.id },
-        organizationId,
-        status: {
-          in: [BookingStatus.RESERVED],
-        },
-        assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
-        // Check for bookings that start within the extension period
-        from: {
-          gt: booking.to!,
-          lte: newEndDate,
-        },
-      },
-      select: { id: true, name: true },
+    validateBookingOwnership({
+      booking,
+      userId,
+      role,
+      action: "extend",
+      blockBaseEntirely: true,
     });
-
-    if (clashingBookings?.length > 0) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "Cannot extend booking because the extended period is overlapping with the following bookings:",
-        additionalData: {
-          clashingBookings: [...clashingBookings],
-        },
-        shouldBeCaptured: false,
-      });
-    }
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -2255,19 +2204,53 @@ export async function extendBooking({
       });
     }
 
-    const updatedBooking = await db.booking.update({
-      where: { id: booking.id },
-      data: {
-        /**
-         * If booking is currently OVERDUE we have to make it ONGOING
-         */
-        status:
-          booking.status === BookingStatus.OVERDUE
-            ? BookingStatus.ONGOING
-            : undefined,
-        to: newEndDate,
-      },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
+    /** Wrap conflict detection and update in a transaction to prevent race conditions */
+    const updatedBooking = await db.$transaction(async (tx) => {
+      /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+      const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
+        where: {
+          id: { not: booking.id },
+          organizationId,
+          status: {
+            in: [BookingStatus.RESERVED],
+          },
+          assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+          // Check for bookings that start within the extension period
+          from: {
+            gt: booking.to!,
+            lte: newEndDate,
+          },
+        },
+        select: { id: true, name: true },
+      });
+
+      if (clashingBookings?.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message:
+            "Cannot extend booking because the extended period is overlapping with the following bookings:",
+          additionalData: {
+            clashingBookings: [...clashingBookings],
+          },
+          shouldBeCaptured: false,
+        });
+      }
+
+      return tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          /**
+           * If booking is currently OVERDUE we have to make it ONGOING
+           */
+          status:
+            booking.status === BookingStatus.OVERDUE
+              ? BookingStatus.ONGOING
+              : undefined,
+          to: newEndDate,
+        },
+        include: BOOKING_INCLUDE_FOR_EMAIL,
+      });
     });
 
     // Add activity log for booking extension
