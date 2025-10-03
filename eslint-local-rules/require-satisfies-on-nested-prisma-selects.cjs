@@ -1,21 +1,19 @@
 /**
- * ESLint rule to require `satisfies` operator on getUserByID calls with nested selects.
+ * ESLint rule to require `satisfies` operator on getUserByID calls with select/include.
  *
- * This ensures TypeScript validates nested Prisma select fields at compile time.
+ * This ensures TypeScript validates all Prisma select/include fields at compile time.
+ * TypeScript's generic constraints don't perform strict property checking on wrapper functions,
+ * so we need `satisfies` to force proper validation.
  *
  * ❌ Bad:
  * getUserByID(id, {
- *   select: {
- *     qrCodes: { select: { id: true, invalidField: true } }
- *   }
+ *   select: { id: true, invalidField: true }
  * })
  *
  * ✅ Good:
  * getUserByID(id, {
- *   select: {
- *     qrCodes: { select: { id: true } }
- *   }
- * } satisfies Prisma.UserSelect)
+ *   select: { id: true } satisfies Prisma.UserSelect
+ * })
  */
 
 module.exports = {
@@ -23,14 +21,14 @@ module.exports = {
     type: "problem",
     docs: {
       description:
-        "Require `satisfies Prisma.UserSelect` on getUserByID calls with nested selects for type safety",
+        "Require `satisfies` operator on getUserByID calls with select/include for type safety",
       category: "Best Practices",
       recommended: true,
     },
     messages: {
       missingTypeSafety:
-        "getUserByID with nested select must use 'satisfies Prisma.UserSelect' for deep type validation. " +
-        "Add '} satisfies Prisma.UserSelect)' or '} satisfies Prisma.UserInclude)' after the options object.",
+        "getUserByID with select/include must use 'satisfies Prisma.UserSelect' or 'satisfies Prisma.UserInclude' for type validation. " +
+        "Add the satisfies operator after the options object.",
     },
     schema: [],
   },
@@ -70,21 +68,15 @@ module.exports = {
           return;
         }
 
-        // Check if the select/include has nested properties (relations with their own select)
-        const hasNestedSelect = hasNestedSelectOrInclude(
-          selectOrIncludeProp.value
+        // Check if the select/include VALUE has a satisfies annotation
+        const hasSatisfies = checkForSatisfies(
+          selectOrIncludeProp.value,
+          context
         );
-
-        if (!hasNestedSelect) {
-          return;
-        }
-
-        // Check if the options argument has a satisfies annotation
-        const hasSatisfies = checkForSatisfies(optionsArg, context);
 
         if (!hasSatisfies) {
           context.report({
-            node: optionsArg,
+            node: selectOrIncludeProp.value,
             messageId: "missingTypeSafety",
           });
         }
@@ -94,36 +86,25 @@ module.exports = {
 };
 
 /**
- * Check if an object expression has nested select or include (indicating relations)
- */
-function hasNestedSelectOrInclude(node) {
-  if (node.type !== "ObjectExpression") {
-    return false;
-  }
-
-  return node.properties.some((prop) => {
-    if (prop.type !== "Property" || prop.value.type !== "ObjectExpression") {
-      return false;
-    }
-
-    // Check if this property's value has a 'select' or 'include' property
-    return prop.value.properties.some(
-      (innerProp) =>
-        innerProp.type === "Property" &&
-        innerProp.key.type === "Identifier" &&
-        (innerProp.key.name === "select" || innerProp.key.name === "include")
-    );
-  });
-}
-
-/**
- * Check if the node has a TSTypeAssertion or TSSatisfiesExpression parent
+ * Check if the node is or has a TSTypeAssertion or TSSatisfiesExpression
  */
 function checkForSatisfies(node, context) {
   const sourceCode = context.getSourceCode();
-  let parent = node.parent;
 
-  // Walk up the tree looking for satisfies or as const satisfies
+  // First check if the node itself is a TSSatisfiesExpression
+  if (node.type === "TSSatisfiesExpression") {
+    const typeAnnotation = sourceCode.getText(node.typeAnnotation);
+    if (
+      typeAnnotation.includes("Prisma.UserSelect") ||
+      typeAnnotation.includes("Prisma.UserInclude") ||
+      typeAnnotation.includes("Prisma.UserFindUniqueArgs")
+    ) {
+      return true;
+    }
+  }
+
+  // Then walk up the tree looking for satisfies or as const satisfies
+  let parent = node.parent;
   while (parent) {
     if (parent.type === "TSSatisfiesExpression") {
       // Check if it's satisfies Prisma.UserSelect or Prisma.UserInclude

@@ -53,90 +53,55 @@ import {
 
 const label: ErrorLabel = "User";
 
-type UserSelectOption<TSelect extends Prisma.UserSelect> = {
-  select: TSelect;
-  include?: never;
-};
-
-type UserIncludeOption<TInclude extends Prisma.UserInclude> = {
-  include: TInclude;
-  select?: never;
-};
-
-type UserSelectionOption<TSelect, TInclude> =
-  | UserSelectOption<TSelect & Prisma.UserSelect>
-  | UserIncludeOption<TInclude & Prisma.UserInclude>;
-
-type GetUserByIDReturn<T> = T extends UserSelectOption<infer S>
-  ? Prisma.UserGetPayload<{ select: S }>
-  : T extends UserIncludeOption<infer I>
-  ? Prisma.UserGetPayload<{ include: I }>
-  : Pick<User, "id">;
-
 export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
-  options: UserSelectOption<TSelect>
-): Promise<GetUserByIDReturn<UserSelectOption<TSelect>>>;
+  options: { select: TSelect; include?: never }
+): Promise<Prisma.UserGetPayload<{ select: TSelect }>>;
 
+// Overload 2: With include
 export function getUserByID<TInclude extends Prisma.UserInclude>(
   id: User["id"],
-  options: UserIncludeOption<TInclude>
-): Promise<GetUserByIDReturn<UserIncludeOption<TInclude>>>;
+  options: { include: TInclude; select?: never }
+): Promise<Prisma.UserGetPayload<{ include: TInclude }>>;
 
+// Overload 3: Without options (default)
 export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
 
-export async function getUserByID<
-  TSelect extends Prisma.UserSelect,
-  TInclude extends Prisma.UserInclude,
->(
+// Implementation
+export async function getUserByID(
   id: User["id"],
-  options?: UserSelectionOption<TSelect, TInclude>
-): Promise<
-  | GetUserByIDReturn<UserSelectOption<TSelect>>
-  | GetUserByIDReturn<UserIncludeOption<TInclude>>
-  | Pick<User, "id">
-> {
+  options?: { select?: Prisma.UserSelect; include?: Prisma.UserInclude }
+): Promise<any> {
   try {
-    if (!options) {
-      const user = await db.user.findUniqueOrThrow({
-        where: { id },
-        select: { id: true },
-      });
+    const select = options?.select;
+    const include = options?.include;
 
-      return user;
+    if (select && include) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot use both select and include in getUserByID. Please choose one.",
+        additionalData: { id, select, include },
+        label,
+      });
     }
 
-    if ("select" in options) {
-      const user = await db.user.findUniqueOrThrow({
-        where: { id },
-        select: options.select,
-      });
-
-      return user as GetUserByIDReturn<UserSelectOption<TSelect>>;
-    }
-
-    if ("include" in options) {
-      const user = await db.user.findUniqueOrThrow({
-        where: { id },
-        include: options.include,
-      });
-
-      return user as GetUserByIDReturn<UserIncludeOption<TInclude>>;
-    }
-
-    throw new ShelfError({
-      cause: null,
-      message:
-        "Invalid options provided to getUserByID. Please choose select or include.",
-      additionalData: { id, options },
-      label,
+    const user = await db.user.findUniqueOrThrow({
+      where: { id },
+      ...(select
+        ? { select }
+        : include
+        ? { include }
+        : { select: { id: true } }),
     });
+
+    return user;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "User not found",
       message: "The user you are trying to access does not exist.",
-      additionalData: options ? { id, options } : { id },
+      additionalData: { id, ...options },
       label,
     });
   }
@@ -1068,7 +1033,7 @@ export async function updateProfilePicture({
 }) {
   try {
     const user = await getUserByID(userId, {
-      select: { id: true, profilePicture: true },
+      select: { id: true, profilePicture: true } satisfies Prisma.UserSelect,
     });
     const previousProfilePictureUrl = user.profilePicture || undefined;
 

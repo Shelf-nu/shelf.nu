@@ -1,4 +1,4 @@
-import { AssetStatus, BarcodeType } from "@prisma/client";
+import { AssetStatus, BarcodeType, type Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -244,7 +244,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
 
     const { image } = parseData(

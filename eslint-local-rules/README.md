@@ -6,33 +6,51 @@ This directory contains custom ESLint rules for the Shelf project.
 
 ### `require-satisfies-on-nested-prisma-selects`
 
-**Purpose**: Enforce type safety for nested Prisma selects in `getUserByID` calls.
+**Purpose**: Enforce type safety for all Prisma selects/includes in `getUserByID` calls.
 
-**Problem**: TypeScript's generic constraints (`T extends Prisma.UserSelect`) don't validate nested object fields deeply. This means invalid field names in nested relation selects (like accessing non-existent fields on related models) won't be caught at compile time.
+**Problem**: TypeScript's generic constraints (`T extends Prisma.UserSelect`) don't perform strict property checking on wrapper functions. This means invalid field names in selects won't be caught at compile time, even for flat (non-nested) fields.
 
-**Solution**: This rule requires developers to use the `satisfies` operator when calling `getUserByID` with nested selects. This enables TypeScript's deep type validation.
+**Solution**: This rule requires developers to use the `satisfies` operator when calling `getUserByID` with any select or include. This forces TypeScript to validate all field names before type inference.
 
 #### Examples
 
 ❌ **Bad** (will cause ESLint error):
 
 ```typescript
+// Flat fields - TypeScript won't catch invalid fields without satisfies
+const user = await getUserByID(id, {
+  select: {
+    id: true,
+    invalidField: true, // TypeScript won't catch this!
+  },
+});
+
+// Nested fields - also not validated
 const user = await getUserByID(id, {
   select: {
     id: true,
     qrCodes: {
       select: {
         id: true,
-        invalidField: true, // TypeScript won't catch this!
+        invalidField: true, // TypeScript won't catch this either!
       },
     },
   },
 });
 ```
 
-✅ **Good** (passes ESLint and TypeScript validates deeply):
+✅ **Good** (passes ESLint and TypeScript validates all fields):
 
 ```typescript
+// Flat fields with satisfies
+const user = await getUserByID(id, {
+  select: {
+    id: true,
+    invalidField: true, // TypeScript ERROR! Field doesn't exist ✓
+  },
+} satisfies Prisma.UserSelect);
+
+// Nested fields with satisfies
 const user = await getUserByID(id, {
   select: {
     id: true,
@@ -48,20 +66,12 @@ const user = await getUserByID(id, {
 
 #### When does the rule trigger?
 
-The rule only triggers when:
+The rule triggers when:
 
 1. The function called is `getUserByID`
 2. It has a second argument with `select` or `include` property
-3. The select/include has **nested** relation selects (not just flat field selects)
 
-Simple selects without nesting don't require `satisfies`:
-
-```typescript
-// This is fine without satisfies (no nested selects)
-const user = await getUserByID(id, {
-  select: { id: true, email: true },
-});
-```
+**All** selects and includes must use `satisfies`, whether flat or nested.
 
 #### Accepted patterns
 

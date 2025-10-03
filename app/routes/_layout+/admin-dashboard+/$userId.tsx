@@ -311,7 +311,7 @@ export const action = async ({
             email: true,
             firstName: true,
             lastName: true,
-          },
+          } satisfies Prisma.UserSelect,
         });
         await createStripeCustomer({
           email: user.email,
