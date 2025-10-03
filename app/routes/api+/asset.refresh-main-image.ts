@@ -100,6 +100,7 @@ async function generateThumbnailIfMissing(asset: {
           fit: "cover",
           withoutEnlargement: true,
         },
+        upsert: true,
       });
     } catch (uploadError: any) {
       // Check if it's a duplicate error (file already exists)
