@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { generateBulkSequentialIdsEfficient } from "~/modules/asset/sequential-id.server";
@@ -25,7 +26,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           where: { organizationId },
           select: { roles: true },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     const userRoles = user.userOrganizations[0]?.roles || [];

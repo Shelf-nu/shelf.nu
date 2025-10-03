@@ -193,6 +193,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         fit: "cover",
         withoutEnlargement: true,
       },
+      upsert: true,
     });
 
     // Create signed URL for the thumbnail

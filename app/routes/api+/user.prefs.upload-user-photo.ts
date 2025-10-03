@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "react-router";
 import sharp from "sharp";
@@ -20,7 +21,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     assertIsPost(request);
 
     const user = await getUserByID(userId, {
-      select: { id: true, profilePicture: true },
+      select: { id: true, profilePicture: true } satisfies Prisma.UserSelect,
     });
 
     /** needed for deleting */

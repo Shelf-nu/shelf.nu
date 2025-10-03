@@ -181,7 +181,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { id: custodianId, name: custodianName } = custodian;
 
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
 
     // Validate that the custodian belongs to the same organization

@@ -146,7 +146,11 @@ export async function createStatusTransitionNote({
   if (userId) {
     // User-initiated transition
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     const userLink = wrapUserLinkForNote({
       id: userId,
@@ -554,7 +558,11 @@ export async function updateBasicBooking({
     // Get user data for attribution if userId is provided
     const user = userId
       ? await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         })
       : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
@@ -1343,7 +1351,11 @@ export async function checkinBooking({
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
 
         // Get asset and kit data for consistent formatting
@@ -1500,7 +1512,11 @@ export async function partialCheckinBooking({
 }) {
   try {
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     // First, validate the booking exists and get its current assets
     const bookingFound = await db.booking
@@ -1844,7 +1860,11 @@ export async function updateBookingAssets({
 
       if (userId) {
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
         await createSystemBookingNote({
           bookingId: booking.id,
@@ -1893,7 +1913,11 @@ export async function createKitBookingNote({
 
   if (userId) {
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     await createSystemBookingNote({
       bookingId,
@@ -2272,7 +2296,11 @@ export async function extendBooking({
 
     // Add activity log for booking extension
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
@@ -3402,7 +3430,11 @@ export async function bulkDeleteBookings({
         },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -3629,7 +3661,11 @@ export async function bulkCancelBookings({
         },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -3836,7 +3872,11 @@ export async function addScannedAssetsToBooking({
 
     // Create booking activity notes
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     const userForNotes = {
       firstName: user?.firstName || "",

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
 import type {
   LinksFunction,
@@ -91,7 +92,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             organization: { select: { id: true } },
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     let subscription = null;

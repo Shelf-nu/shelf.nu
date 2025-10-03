@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -237,7 +238,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const ssoDomains = await getConfiguredSSODomains();
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          } satisfies Prisma.UserSelect,
         });
         // Validate the payload using our schema
         const { email: newEmail } = parseData(
@@ -310,7 +316,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         /** Just to make sure the user exists */
         await getUserByID(userId, {
-          select: { id: true },
+          select: { id: true } satisfies Prisma.UserSelect,
         });
 
         // Attempt to verify the OTP

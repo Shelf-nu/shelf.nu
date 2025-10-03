@@ -7,6 +7,7 @@ import {
   type CustomTierLimit,
   OrganizationRoles,
   type UserBusinessIntel,
+  type Prisma,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -97,7 +98,6 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           select: {
             id: true,
             createdAt: true,
-            type: true,
             asset: {
               select: {
                 title: true,
@@ -116,7 +116,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
             timeline: true,
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     const userOrganizations = await db.userOrganization
@@ -311,7 +311,7 @@ export const action = async ({
             email: true,
             firstName: true,
             lastName: true,
-          },
+          } satisfies Prisma.UserSelect,
         });
         await createStripeCustomer({
           email: user.email,
