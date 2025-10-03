@@ -6,6 +6,7 @@ import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
+  newBookingHeader,
 } from "~/routes/_layout+/bookings.new";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -81,6 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        header: newBookingHeader,
         currentOrganization,
         userId,
         showModal: true,
