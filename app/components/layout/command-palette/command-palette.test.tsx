@@ -154,6 +154,7 @@ describe("getTeamMemberCommandValue", () => {
     email: "jane@example.com",
     firstName: "Jane",
     lastName: "Smith",
+    userId: "user-123",
   };
 
   it("includes the primary searchable fields", () => {
