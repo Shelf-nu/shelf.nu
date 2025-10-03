@@ -1,4 +1,9 @@
-import { BookingStatus, TagUseFor, OrganizationRoles } from "@prisma/client";
+import {
+  BookingStatus,
+  TagUseFor,
+  OrganizationRoles,
+  type Prisma,
+} from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -535,7 +540,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
 
     const headers = [

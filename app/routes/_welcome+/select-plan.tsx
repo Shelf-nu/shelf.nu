@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { Prisma } from "@prisma/client";
 import {
   json,
   type LoaderFunctionArgs,
@@ -45,7 +46,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const user = await getUserByID(userId, {
-      select: { id: true, customerId: true },
+      select: { id: true, customerId: true } satisfies Prisma.UserSelect,
     });
 
     /** Get the Stripe customer */

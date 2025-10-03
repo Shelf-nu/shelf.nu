@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -219,7 +220,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             timeline: true,
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
@@ -307,7 +308,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         userOrganizations: {
           select: { organizationId: true },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     const metadata = parseData(

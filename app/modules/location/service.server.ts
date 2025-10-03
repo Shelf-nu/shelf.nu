@@ -1136,7 +1136,11 @@ export async function updateLocationKits({
       // Add notes to the assets that their location was updated via their parent kit
       if (assetIds.length > 0) {
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
         const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
 
@@ -1205,7 +1209,11 @@ export async function updateLocationKits({
       // Add notes to the assets that their location was removed via their parent kit
       if (removedAssetIds.length > 0) {
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
         const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
 

@@ -1,4 +1,4 @@
-import type { Scan } from "@prisma/client";
+import type { Prisma, Scan } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
@@ -172,7 +172,10 @@ export async function createScanNote({
     if (assetId) {
       if (userId && userId != "anonymous") {
         const { firstName, lastName } = await getUserByID(userId, {
-          select: { firstName: true, lastName: true },
+          select: {
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
         const userName =
           (firstName ? firstName.trim() : "") +

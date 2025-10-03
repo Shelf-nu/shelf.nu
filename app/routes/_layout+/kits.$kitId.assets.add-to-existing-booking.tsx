@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
@@ -167,7 +168,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
     const user = await getUserByID(authSession.userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
 
     const booking = await updateBookingAssets({
