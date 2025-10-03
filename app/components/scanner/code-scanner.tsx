@@ -17,7 +17,12 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { handleDetection, processFrame, updateCanvasSize } from "./utils";
+import {
+  getBestBackCamera,
+  handleDetection,
+  processFrame,
+  updateCanvasSize,
+} from "./utils";
 import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/helpers";
 import { ErrorIcon } from "../errors";
 import Input from "../forms/input";
@@ -471,6 +476,69 @@ function CameraMode({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrame = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [videoConstraints, setVideoConstraints] =
+    useState<MediaTrackConstraints>({ facingMode: "environment" });
+  const [hasRetriedConstraints, setHasRetriedConstraints] = useState(false);
+
+  const handleUserMediaError = useCallback(
+    async (cameraError: unknown) => {
+      const errorName =
+        typeof cameraError === "object" && cameraError !== null
+          ? (cameraError as { name?: string }).name
+          : undefined;
+      const shouldAttemptFallback =
+        !hasRetriedConstraints &&
+        (errorName === "OverconstrainedError" ||
+          errorName === "NotAllowedError" ||
+          errorName === "NotFoundError");
+
+      if (shouldAttemptFallback) {
+        setHasRetriedConstraints(true);
+        setError(null);
+
+        const enumerateDevices =
+          typeof navigator !== "undefined" && navigator.mediaDevices
+            ? navigator.mediaDevices.enumerateDevices.bind(
+                navigator.mediaDevices
+              )
+            : undefined;
+
+        if (enumerateDevices) {
+          try {
+            const devices = await enumerateDevices();
+            const bestBackCamera = getBestBackCamera(devices);
+            const fallbackDevice =
+              bestBackCamera ??
+              devices.find((device) => device.kind === "videoinput") ??
+              null;
+
+            if (fallbackDevice) {
+              setIsLoading(true);
+              setVideoConstraints({ deviceId: fallbackDevice.deviceId });
+              return;
+            }
+          } catch {
+            // Ignore enumeration errors and fall back to a generic constraint.
+          }
+        }
+
+        setIsLoading(true);
+        setVideoConstraints({});
+        return;
+      }
+
+      const errorMessage =
+        cameraError instanceof Error
+          ? cameraError.message
+          : typeof cameraError === "object" && cameraError !== null
+          ? (cameraError as { message?: string }).message ?? String(cameraError)
+          : String(cameraError);
+
+      setError(`Camera error: ${errorMessage}`);
+      setIsLoading(false);
+    },
+    [hasRetriedConstraints, setIsLoading]
+  );
 
   // Start the animation loop when the video starts playing
   useEffect(() => {
@@ -556,12 +624,10 @@ function CameraMode({
       <Webcam
         ref={videoRef}
         audio={false}
-        videoConstraints={{ facingMode: "environment" }}
-        onUserMediaError={(e) => {
-          setError(`Camera error: ${e instanceof Error ? e.message : e}`);
-          setIsLoading(false);
-        }}
+        videoConstraints={videoConstraints}
+        onUserMediaError={handleUserMediaError}
         onUserMedia={() => {
+          setError(null);
           const video = videoRef.current?.video;
           const canvas = canvasRef.current;
 
