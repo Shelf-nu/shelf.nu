@@ -1,5 +1,9 @@
+import { useEffect, useRef, type MouseEventHandler } from "react";
 import type { Booking } from "@prisma/client";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import type { BookingPageActionData } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { fireConfettiFromElement } from "~/utils/confetti";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
@@ -33,6 +37,39 @@ export default function CheckoutDialog({
   booking,
   portalContainer,
 }: CheckoutDialogProps) {
+  const navigation = useNavigation();
+  const actionData = useActionData<BookingPageActionData>();
+  const lastClickedButtonRef = useRef<HTMLButtonElement | null>(null);
+  const wasCheckoutSubmissionRef = useRef(false);
+
+  const { state, formData } = navigation;
+
+  useEffect(() => {
+    if (state === "submitting") {
+      const intent = formData?.get("intent");
+      if (intent === "checkOut") {
+        wasCheckoutSubmissionRef.current = true;
+      }
+      return;
+    }
+
+    if (state === "idle" && wasCheckoutSubmissionRef.current) {
+      if (!actionData) {
+        return;
+      }
+
+      wasCheckoutSubmissionRef.current = false;
+
+      if (actionData?.error === null) {
+        void fireConfettiFromElement(lastClickedButtonRef.current);
+      }
+    }
+  }, [actionData, formData, state]);
+
+  const handleCheckoutClick: MouseEventHandler<HTMLButtonElement> = (event) => {
+    lastClickedButtonRef.current = event.currentTarget;
+  };
+
   const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
 
   if (!isEarlyCheckout) {
@@ -44,6 +81,12 @@ export default function CheckoutDialog({
         type="submit"
         name="intent"
         value="checkOut"
+        ref={(node) => {
+          if (node) {
+            lastClickedButtonRef.current = node as HTMLButtonElement;
+          }
+        }}
+        onClick={handleCheckoutClick}
       >
         Check Out
       </Button>
@@ -89,6 +132,12 @@ export default function CheckoutDialog({
             variant="secondary"
             name="checkoutIntentChoice"
             value={CheckoutIntentEnum["without-adjusted-date"]}
+            ref={(node) => {
+              if (!lastClickedButtonRef.current && node) {
+                lastClickedButtonRef.current = node as HTMLButtonElement;
+              }
+            }}
+            onClick={handleCheckoutClick}
           >
             Don't Adjust Date
           </Button>
@@ -99,6 +148,12 @@ export default function CheckoutDialog({
             type="submit"
             name="checkoutIntentChoice"
             value={CheckoutIntentEnum["with-adjusted-date"]}
+            ref={(node) => {
+              if (!lastClickedButtonRef.current && node) {
+                lastClickedButtonRef.current = node as HTMLButtonElement;
+              }
+            }}
+            onClick={handleCheckoutClick}
           >
             Adjust Date
           </Button>
