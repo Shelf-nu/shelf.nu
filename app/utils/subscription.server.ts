@@ -1,4 +1,5 @@
-import { OrganizationType, type Organization } from "@prisma/client";
+import type { Prisma, Organization } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -291,7 +292,7 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
             },
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     }),
     getUserTierLimit(userId),
   ]);

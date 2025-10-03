@@ -1,4 +1,4 @@
-import type { CustomTierLimit } from "@prisma/client";
+import type { CustomTierLimit, Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -53,7 +53,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
           customerId: true,
           tierId: true,
           usedFreeTrial: true,
-        },
+        } satisfies Prisma.UserSelect,
       }),
       getUserTierLimit(userId),
     ]);
@@ -101,7 +101,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     const user = await getUserByID(userId, {
-      select: { customerId: true, firstName: true, lastName: true },
+      select: {
+        customerId: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
 
     const customerId = await getOrCreateCustomerId({

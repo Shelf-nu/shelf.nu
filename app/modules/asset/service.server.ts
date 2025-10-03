@@ -2845,7 +2845,11 @@ export async function bulkCheckOutAssets({
         select: { id: true, title: true, status: true },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -2945,7 +2949,11 @@ export async function bulkCheckInAssets({
         },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -3058,7 +3066,11 @@ export async function bulkUpdateAssetLocation({
         },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -3280,7 +3292,11 @@ export async function relinkQrCode({
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),
     getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     }),
     db.asset.findFirst({
       where: { id: assetId, organizationId },
