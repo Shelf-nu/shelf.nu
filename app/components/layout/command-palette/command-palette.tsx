@@ -397,21 +397,47 @@ export function getTeamMemberCommandValue(member: TeamMemberSearchResult) {
   return [`member-${member.id}`, ...searchableFields].join(" ").trim();
 }
 
+/**
+ * Determines the correct navigation route for a team member in the command palette.
+ *
+ * Team members can be either registered users (with a userId) or Non-Registered Members (NRMs).
+ * This function routes them to their appropriate detail pages:
+ *
+ * - **Registered users**: Routed to `/settings/team/users/:userId` if userId exists
+ * - **NRMs**: Routed to `/settings/team/nrm/:id/edit` if NRM id exists
+ *
+ * @param member - The team member search result from the command palette
+ * @returns The href path to navigate to when the member is selected
+ *
+ * @example
+ * // Registered user with userId
+ * getTeamMemberHref({ userId: "user-123", id: "member-456", ... })
+ * // Returns: "/settings/team/users/user-123"
+ *
+ * @example
+ * // NRM without userId
+ * getTeamMemberHref({ userId: null, id: "member-789", ... })
+ * // Returns: "/settings/team/nrm/member-789/edit"
+ */
 export function getTeamMemberHref(member: TeamMemberSearchResult) {
+  // Registered user with a valid userId - route to their user settings page
   const trimmedUserId = member.userId?.trim();
   if (trimmedUserId) {
     return `/settings/team/users/${trimmedUserId}`;
   }
 
+  // Registered user with empty/whitespace userId - fallback to users list
   if (typeof member.userId === "string") {
     return "/settings/team/users";
   }
 
+  // Non-registered member (userId is null) - route to NRM edit modal
   const trimmedMemberId = member.id?.trim();
   if (trimmedMemberId) {
     return `/settings/team/nrm/${trimmedMemberId}/edit`;
   }
 
+  // NRM with missing/empty id - fallback to NRM list
   return "/settings/team/nrm";
 }
 
