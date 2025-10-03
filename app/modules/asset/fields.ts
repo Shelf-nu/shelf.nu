@@ -189,6 +189,7 @@ export const assetIndexFields = ({
             },
           ],
         },
+        orderBy: { from: "desc" },
         select: {
           from: true,
           to: true,

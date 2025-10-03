@@ -14,6 +14,35 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 
+type BookingForAvailability = Pick<
+  Booking,
+  "id" | "name" | "status" | "from" | "to"
+>;
+
+function getDateValue(date?: Date | string | null) {
+  if (!date) return Number.NEGATIVE_INFINITY;
+  const value = typeof date === "string" ? Date.parse(date) : date.getTime();
+  return Number.isNaN(value) ? Number.NEGATIVE_INFINITY : value;
+}
+
+function getBookingTimestamp(booking: BookingForAvailability) {
+  const fromValue = getDateValue(booking.from);
+  if (fromValue !== Number.NEGATIVE_INFINITY) {
+    return fromValue;
+  }
+
+  return getDateValue(booking.to);
+}
+
+function sortBookingsByRecency(
+  bookings: BookingForAvailability[],
+  currentBookingId: string
+) {
+  return [...bookings]
+    .filter((bookingEntry) => bookingEntry.id !== currentBookingId)
+    .sort((a, b) => getBookingTimestamp(b) - getBookingTimestamp(a));
+}
+
 /**
  * There are 4 reasons an asset can be unavailable:
  * 1. Its marked as not allowed for booking
@@ -37,6 +66,13 @@ export function AvailabilityLabel({
 }) {
   const { booking } = useLoaderData<{ booking: Booking }>();
   const isPartOfKit = !!asset.kitId;
+  const sortedConflictingBookings = sortBookingsByRecency(
+    asset.bookings ?? [],
+    booking.id
+  );
+  const findConflictingBooking = (statuses: BookingStatus[]) =>
+    sortedConflictingBookings.find((b) => statuses.includes(b.status)) ??
+    sortedConflictingBookings[0];
 
   /** User scanned the asset and it is already in booking */
   if (isAlreadyAdded) {
@@ -100,12 +136,11 @@ export function AvailabilityLabel({
     hasAssetBookingConflicts(asset, booking.id) &&
     !["ONGOING", "OVERDUE"].includes(booking.status)
   ) {
-    const conflictingBooking = asset?.bookings?.find(
-      (b) =>
-        b.status === BookingStatus.ONGOING ||
-        b.status === BookingStatus.OVERDUE ||
-        b.status === BookingStatus.RESERVED
-    );
+    const conflictingBooking = findConflictingBooking([
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.RESERVED,
+    ]);
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}
@@ -140,10 +175,10 @@ export function AvailabilityLabel({
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const conflictingBooking = asset?.bookings?.find(
-      (b) =>
-        b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
-    );
+    const conflictingBooking = findConflictingBooking([
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ]);
 
     return (
       <AvailabilityBadge
