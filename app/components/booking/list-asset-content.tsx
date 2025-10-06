@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { Check } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -18,7 +17,7 @@ import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
-import { GrayBadge } from "../shared/gray-badge";
+import { ReturnedBadge } from "../shared/returned-badge";
 import { UserBadge } from "../shared/user-badge";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
@@ -42,8 +41,9 @@ export default function ListAssetContent({
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
-  const { isCompleted, isArchived, isReserved, isDraft } =
-    useBookingStatusHelpers(booking.status);
+  const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
+    booking.status
+  );
   const user = useUserData();
 
   /** Weather the asset is checked out in a booking different than the current one */
@@ -157,11 +157,8 @@ export default function ListAssetContent({
                 </Button>
               </span>
               <div>
-                {isCompleted && !isPartiallyCheckedIn ? (
-                  <GrayBadge>
-                    <Check className="mr-1 h-3.5 w-3.5 text-gray-500" />
-                    Returned
-                  </GrayBadge>
+                {isFinished ? (
+                  <ReturnedBadge />
                 ) : (
                   <AssetStatusBadge
                     id={item.id}
@@ -181,7 +178,7 @@ export default function ListAssetContent({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {!isCompleted && !isArchived ? (
+        {!isFinished ? (
           <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
         ) : null}
       </Td>
