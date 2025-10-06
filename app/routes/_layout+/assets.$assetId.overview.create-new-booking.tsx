@@ -8,7 +8,6 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import NewBooking, {
   action as newBookingAction,
 } from "~/routes/_layout+/bookings.new";
-import { newBookingHeader } from "~/components/booking/booking-header";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   data,
