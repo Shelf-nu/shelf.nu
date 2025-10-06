@@ -1,0 +1,87 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ListAssetContent > shows a returned badge with a check icon when the booking is complete 1`] = `
+<div>
+  <table>
+    <tbody>
+      <tr>
+        <td
+          data-testid="bulk-checkbox"
+        />
+        <td
+          class="max-w-[250px] truncate border-b w-full whitespace-normal p-0 md:p-0"
+        >
+          <div
+            class="flex justify-between gap-3 py-4 md:justify-normal md:pr-6"
+          >
+            <div
+              class="flex items-center gap-3"
+            >
+              <div
+                class="relative flex size-12 shrink-0 items-center justify-center"
+              >
+                <div
+                  data-testid="asset-image"
+                />
+              </div>
+              <div
+                class="min-w-[180px]"
+              >
+                <span
+                  class="word-break mb-1 block"
+                >
+                  <a
+                    href="#"
+                  >
+                    Camera
+                  </a>
+                </span>
+                <div>
+                  <span
+                    class="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700"
+                  >
+                    <svg
+                      class="lucide lucide-check mr-1 h-3.5 w-3.5 text-gray-500"
+                      fill="none"
+                      height="24"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      viewBox="0 0 24 24"
+                      width="24"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        d="M20 6 9 17l-5-5"
+                      />
+                    </svg>
+                    Returned
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </td>
+        <td
+          class="max-w-[250px] truncate whitespace-nowrap border-b p-4 md:px-6"
+        />
+        <td
+          class="max-w-[250px] truncate whitespace-nowrap border-b p-4 md:px-6"
+        >
+          <div
+            data-testid="category-badge"
+          />
+        </td>
+        <td
+          class="max-w-[250px] truncate whitespace-nowrap border-b p-4 md:px-6 pr-4 text-right"
+        >
+          <div
+            data-testid="asset-actions"
+          />
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+`;
