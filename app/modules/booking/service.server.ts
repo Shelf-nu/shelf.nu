@@ -1604,7 +1604,12 @@ export async function partialCheckinBooking({
       });
 
       // Create audit notes for each checked-in asset using createNotes
-      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via partial check-in.`;
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked in via partial check-in.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",

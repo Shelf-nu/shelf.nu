@@ -2,6 +2,7 @@ import type { Scan } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { createNote } from "../note/service.server";
 import { getOrganizationById } from "../organization/service.server";
 import { getQr } from "../qr/service.server";
@@ -172,14 +173,15 @@ export async function createScanNote({
     if (assetId) {
       if (userId && userId != "anonymous") {
         const { firstName, lastName } = await getUserByID(userId);
-        const userName =
-          (firstName ? firstName.trim() : "") +
-          " " +
-          (lastName ? lastName.trim() : "");
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName,
+          lastName,
+        });
         if (manuallyGenerated) {
-          message = `**${userName}** manually updated the GPS coordinates to *${latitude}, ${longitude}*.`;
+          message = `${actor} manually updated the GPS coordinates to *${latitude}, ${longitude}*.`;
         } else {
-          message = `**${userName}** performed a scan of the asset QR code.`;
+          message = `${actor} performed a scan of the asset QR code.`;
         }
         return await createNote({
           content: message,
@@ -192,7 +194,8 @@ export async function createScanNote({
           // If there is an assetId there will always be organization id. This is an extra check for organizationId.
 
           const { userId: ownerId } = await getOrganizationById(organizationId);
-          message = "An unknown user has performed a scan of the asset QR code";
+          message =
+            "An unknown user has performed a scan of the asset QR code.";
 
           /* to create a note we are using user id to track which user created the note
           but in this case where scanner is anonymous, we are using the user id of the owner

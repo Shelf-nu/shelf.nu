@@ -41,9 +41,13 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapCustodianForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import { resolveTeamMemberName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
 import {
@@ -738,16 +742,28 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId, organizationId },
-      select: {
-        id: true,
-        name: true,
-        assets: true,
-        createdBy: { select: { firstName: true, lastName: true } },
-        custody: { select: { custodian: true } },
-      },
+    const [kit, actor] = await Promise.all([
+      db.kit.findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true, title: true } },
+          custody: { select: { custodian: { include: { user: true } } } },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const actorLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: actor?.firstName,
+      lastName: actor?.lastName,
     });
+    const custodianDisplay = kit.custody?.custodian
+      ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
+      : "**Unknown Custodian**";
+    const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
     await Promise.all([
       db.kit.update({
@@ -766,18 +782,18 @@ export async function releaseCustody({
           },
         })
       ),
-      ...kit.assets.map((asset) =>
-        createNote({
-          content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
-            .custody?.custodian
-            .name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
+      ...kit.assets.map((asset) => {
+        const assetLink = wrapLinkForNote(
+          `/assets/${asset.id}`,
+          asset.title.trim()
+        );
+        return createNote({
+          content: `${actorLink} released ${custodianDisplay} custody over ${assetLink} via kit assignment ${kitLink}.`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
-        })
-      ),
+        });
+      }),
     ]);
 
     return kit;
@@ -1015,7 +1031,7 @@ export async function bulkAssignKitCustody({
     /**
      * We have to make notes and assign custody to all assets of a kit so we have to make this query
      */
-    const [kits, user] = await Promise.all([
+    const [kits, user, custodianTeamMember] = await Promise.all([
       db.kit.findMany({
         where,
         select: {
@@ -1033,6 +1049,14 @@ export async function bulkAssignKitCustody({
         },
       }),
       getUserByID(userId),
+      db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: {
+          id: true,
+          name: true,
+          user: { select: { id: true, firstName: true, lastName: true } },
+        },
+      }),
     ]);
 
     const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
@@ -1097,14 +1121,30 @@ export async function bulkAssignKitCustody({
       });
 
       /** Creating notes for all the assets of the kit */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const custodianDisplay = custodianTeamMember
+        ? wrapCustodianForNote({ teamMember: custodianTeamMember })
+        : `**${custodianName.trim()}**`;
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${asset
-            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: allAssetsOfAllKits.map((asset) => {
+          const assetLink = wrapLinkForNote(
+            `/assets/${asset.id}`,
+            asset.title.trim()
+          );
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} granted ${custodianDisplay} custody over ${assetLink} via kit assignment ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
   } catch (cause) {
@@ -1154,7 +1194,9 @@ export async function bulkReleaseKitCustody({
         select: {
           id: true,
           status: true,
-          custody: { select: { id: true, custodian: true } },
+          custody: {
+            select: { id: true, custodian: { include: { user: true } } },
+          },
           assets: {
             select: {
               id: true,
@@ -1223,14 +1265,30 @@ export async function bulkReleaseKitCustody({
       });
 
       /** Creating notes for all the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const custodianDisplay = custodian
+        ? wrapCustodianForNote({ teamMember: custodian })
+        : "**Unknown Custodian**";
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${asset
-            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: allAssetsOfAllKits.map((asset) => {
+          const assetLink = wrapLinkForNote(
+            `/assets/${asset.id}`,
+            asset.title.trim()
+          );
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} released ${custodianDisplay} custody over ${assetLink} via kit assignment ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
   } catch (cause) {
@@ -1685,7 +1743,11 @@ export async function updateKitAssets({
 }) {
   try {
     const user = await getUserByID(userId);
-
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
     const kit = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
@@ -1707,6 +1769,7 @@ export async function updateKitAssets({
                   name: true,
                   user: {
                     select: {
+                      id: true,
                       email: true,
                       firstName: true,
                       lastName: true,
@@ -1728,6 +1791,10 @@ export async function updateKitAssets({
           label: "Kit",
         });
       });
+
+    const kitCustodianDisplay = kit.custody?.custodian
+      ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
+      : undefined;
 
     const removedAssets = kit.assets.filter(
       (asset) => !assetIds.includes(asset.id)
@@ -1926,14 +1993,20 @@ export async function updateKitAssets({
           })
         ),
         db.note.createMany({
-          data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
+          data: assetsToInheritStatus.map((asset) => {
+            const assetLink = wrapLinkForNote(
+              `/assets/${asset.id}`,
+              asset.title.trim()
+            );
+            const custodianDisplay =
+              kitCustodianDisplay ?? "**Unknown Custodian**";
+            return {
+              content: `${actor} granted ${custodianDisplay} custody over ${assetLink}.`,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
         }),
       ]);
     }
@@ -1953,14 +2026,20 @@ export async function updateKitAssets({
           data: { status: AssetStatus.AVAILABLE },
         }),
         db.note.createMany({
-          data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}'s** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
+          data: removedAssets.map((asset) => {
+            const assetLink = wrapLinkForNote(
+              `/assets/${asset.id}`,
+              asset.title.trim()
+            );
+            const custodianDisplay =
+              kitCustodianDisplay ?? "**Unknown Custodian**";
+            return {
+              content: `${actor} released ${custodianDisplay} custody over ${assetLink}.`,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
         }),
       ]);
     }
@@ -2028,6 +2107,11 @@ export async function bulkRemoveAssetsFromKits({
 }) {
   try {
     const user = await getUserByID(userId);
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
 
     /**
      * If user has selected all assets, then we have to get ids of all those assets
@@ -2063,7 +2147,9 @@ export async function bulkRemoveAssetsFromKits({
             custodian: {
               select: {
                 name: true,
-                user: { select: { firstName: true, lastName: true } },
+                user: {
+                  select: { id: true, firstName: true, lastName: true },
+                },
               },
             },
           },
@@ -2096,25 +2182,42 @@ export async function bulkRemoveAssetsFromKits({
 
       /** Create notes for assets released from custody */
       await tx.note.createMany({
-        data: assetsWhoseKitsInCustody.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-            (asset.custody as NonNullable<typeof asset.custody>).custodian
-          )}'s** custody over **${asset.title.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: assetsWhoseKitsInCustody.map((asset) => {
+          const assetLink = wrapLinkForNote(
+            `/assets/${asset.id}`,
+            asset.title.trim()
+          );
+          const custodianDisplay = asset.custody?.custodian
+            ? wrapCustodianForNote({
+                teamMember: asset.custody.custodian,
+              })
+            : "**Unknown Custodian**";
+          return {
+            content: `${actor} released ${custodianDisplay} custody over ${assetLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
 
       /** Create notes for assets removed from kit */
       await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has removed **${asset.title.trim()}** from **[${asset.kit?.name.trim()}](/kits/${asset
-            .kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: assets.map((asset) => {
+          const assetLink = wrapLinkForNote(
+            `/assets/${asset.id}`,
+            asset.title.trim()
+          );
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} removed ${assetLink} from ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
 

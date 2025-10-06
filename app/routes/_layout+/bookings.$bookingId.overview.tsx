@@ -777,10 +777,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           getClientHint(request)
         );
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const deletedBookingLink = wrapLinkForNote(
+          `/bookings/${deletedBooking.id}`,
+          deletedBooking.name.trim()
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
-            deletedBooking.name
-          }**.`,
+          content: `${actor} deleted booking ${deletedBookingLink}.`,
           type: "UPDATE",
           userId: userId,
           assetIds: deletedBooking.assets.map((a) => a.id),
@@ -854,10 +861,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
         });
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const cancelledBookingLink = wrapLinkForNote(
+          `/bookings/${cancelledBooking.id}`,
+          cancelledBooking.name.trim()
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
-            cancelledBooking.name
-          }](/bookings/${cancelledBooking.id})**.`,
+          content: `${actor} cancelled booking ${cancelledBookingLink}.`,
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
