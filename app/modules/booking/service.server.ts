@@ -48,6 +48,7 @@ import {
   wrapKitsWithDataForNote,
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
+  wrapLinkForNote,
   wrapBookingStatusForNote,
   wrapCustodianForNote,
   wrapDescriptionForNote,
@@ -2745,6 +2746,11 @@ export async function removeAssets({
           disconnect: assetIds.map((id) => ({ id })),
         },
       },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
     });
     /** When removing an asset from a booking we need to make sure to set their status back to available
      * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
@@ -2777,10 +2783,11 @@ export async function removeAssets({
 
     const userForNotes = { firstName, lastName, id: userId };
 
+    const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
     await createNotes({
       content: `${wrapUserLinkForNote(
         userForNotes
-      )} removed asset from booking.`,
+      )} removed assets from ${bookingLink}.`,
       type: "UPDATE",
       userId,
       assetIds,

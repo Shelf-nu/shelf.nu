@@ -75,6 +75,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -674,10 +675,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
         });
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const bookingLink = wrapLinkForNote(
+          `/bookings/${booking.id}`,
+          booking.name
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
-            booking.name
-          }](/bookings/${booking.id})**.`,
+          content: `${actor} checked out assets with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
@@ -710,10 +718,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             specificAssetIds.length > 0 ? specificAssetIds : undefined,
         });
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const bookingLink = wrapLinkForNote(
+          `/bookings/${booking.id}`,
+          booking.name
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
-            booking.name
-          }](/bookings/${booking.id})**.`,
+          content: `${actor} checked in assets with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),

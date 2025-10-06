@@ -32,6 +32,7 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -207,18 +208,29 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       senderId: authSession.userId,
     });
 
+    const actor = wrapUserLinkForNote({
+      id: authSession.userId,
+      firstName: asset.user.firstName,
+      lastName: asset.user.lastName,
+    });
     await createNote({
-      content: `Asset was created by **${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}**`,
+      content: `Asset was created by ${actor}.`,
       type: "UPDATE",
       userId: authSession.userId,
       assetId: asset.id,
     });
 
     if (asset.location) {
+      const assetLink = wrapLinkForNote(
+        `/assets/${asset.id}`,
+        asset.title?.trim() ?? "this asset"
+      );
+      const locationLink = wrapLinkForNote(
+        `/locations/${asset.location.id}`,
+        asset.location.name.trim()
+      );
       await createNote({
-        content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to *[${asset.location.name.trim()}](/locations/${
-          asset.location.id
-        })**`,
+        content: `${actor} set the location of ${assetLink} to ${locationLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetId: asset.id,

@@ -75,7 +75,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -377,10 +377,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       /** We create notes for the newly added assets */
+      const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
       await createNotes({
-        content: `${wrapUserLinkForNote(user!)} added asset to booking **[${
-          b.name
-        }](/bookings/${b.id})**.`,
+        content: `${wrapUserLinkForNote(
+          user!
+        )} added assets to ${bookingLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetIds: newAssetIds,

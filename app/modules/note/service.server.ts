@@ -1,6 +1,11 @@
 import type { Asset, Kit, Note, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import {
+  wrapKitsWithDataForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 
 const label = "Note";
 
@@ -177,26 +182,47 @@ export async function createKitChangeNote({
   isRemoving: boolean;
 }) {
   try {
-    const fullName = `${firstName.trim()} ${lastName.trim()}`;
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName,
+      lastName,
+    });
+    const assetLink = wrapLinkForNote(`/assets/${assetId}`, assetName.trim());
     let message = "";
 
     /** User is changing from kit to another */
     if (currentKit && newKit && currentKit.id !== newKit.id) {
-      message = `**${fullName}** changed kit of **${assetName.trim()}** from **[${currentKit.name.trim()}](/kits/${
-        currentKit.id
-      })** to **[${newKit.name.trim()}](/kits/${newKit.id})**`;
+      const currentKitLink = wrapKitsWithDataForNote(
+        { id: currentKit.id, name: currentKit.name.trim() },
+        "updated"
+      );
+      const newKitLink = wrapKitsWithDataForNote(
+        { id: newKit.id, name: newKit.name.trim() },
+        "updated"
+      );
+      message = `${userLink} changed kit of ${assetLink} from ${currentKitLink} to ${newKitLink}.`;
     }
 
     /** User is adding asset to a kit for first time */
     if (newKit && !currentKit) {
-      message = `**${fullName}** added asset to **[${newKit.name.trim()}](/kits/${
-        newKit.id
-      })**`;
+      const newKitLink = wrapKitsWithDataForNote(
+        { id: newKit.id, name: newKit.name.trim() },
+        "added"
+      );
+      message = `${userLink} added ${assetLink} to ${newKitLink}.`;
     }
 
     /** User is removing the asset from kit */
     if (isRemoving && !newKit) {
-      message = `**${fullName}** removed asset from **[${currentKit?.name.trim()}](/kits/${currentKit?.id})**`;
+      if (currentKit) {
+        const currentKitLink = wrapKitsWithDataForNote(
+          { id: currentKit.id, name: currentKit.name.trim() },
+          "removed"
+        );
+        message = `${userLink} removed ${assetLink} from ${currentKitLink}.`;
+      } else {
+        message = `${userLink} removed ${assetLink} from a kit.`;
+      }
     }
 
     if (!message) {

@@ -47,6 +47,7 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
@@ -300,8 +301,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           });
         }
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        });
+        const kitLink = wrapLinkForNote(`/kits/${kitId}`, kit.name.trim());
+
         await createNote({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** removed asset from **[${kit.name.trim()}](/kits/${kitId})**`,
+          content: `${actor} removed the asset from ${kitLink}.`,
           type: "UPDATE",
           userId,
           assetId,
