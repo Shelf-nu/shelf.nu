@@ -1,4 +1,8 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
@@ -21,6 +25,7 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
+import styles from "~/styles/layout/bookings.new.css?url";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
@@ -249,12 +254,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+
 export const handle = {
   name: "bookings.new",
 };
 
 export default function NewBooking() {
-  const { header, isSelfServiceOrBase, teamMembers, assetIds, showModal } =
+  const { header, isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();
   const user = useUserData();
   const dynamicTitle = useAtomValue(dynamicTitleAtom);
@@ -270,13 +277,8 @@ export default function NewBooking() {
 
   return (
     <div className="relative">
-      <Header
-        title={pageTitle}
-        subHeading={header?.subHeading}
-        hideBreadcrumbs={showModal}
-        classNames={showModal ? "[&>div]:border-b-0" : undefined}
-      />
-      <div className={showModal ? "" : "px-4 pb-6 pt-4"}>
+      <Header title={pageTitle} subHeading={header?.subHeading} />
+      <div className="booking-route-form-wrapper">
         <NewBookingForm
           booking={{
             assetIds,
