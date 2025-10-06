@@ -10,6 +10,7 @@ import { DateTime } from "luxon";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
+import { newBookingHeader } from "~/components/booking/new-booking-header";
 import Header from "~/components/layout/header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
@@ -45,12 +46,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export type NewBookingLoaderReturnType = typeof loader;
-
-export const newBookingHeader = {
-  title: "Create new booking",
-  subHeading:
-    "Choose a name for your booking, select a start and end time and choose the custodian. Based on the selected information, asset availability will be determined.",
-};
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
