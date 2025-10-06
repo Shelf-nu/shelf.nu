@@ -261,7 +261,7 @@ export const handle = {
 };
 
 export default function NewBooking() {
-  const { header, isSelfServiceOrBase, teamMembers, assetIds } =
+  const { header, isSelfServiceOrBase, teamMembers, assetIds, showModal } =
     useLoaderData<typeof loader>();
   const user = useUserData();
   const dynamicTitle = useAtomValue(dynamicTitleAtom);
@@ -277,7 +277,12 @@ export default function NewBooking() {
 
   return (
     <div className="relative">
-      <Header title={pageTitle} subHeading={header?.subHeading} />
+      <Header
+        title={pageTitle}
+        subHeading={header?.subHeading}
+        hideBreadcrumbs={showModal}
+        classNames={showModal ? "[&>div]:border-b-0" : undefined}
+      />
       <div className="booking-route-form-wrapper">
         <NewBookingForm
           booking={{
