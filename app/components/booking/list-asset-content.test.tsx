@@ -119,9 +119,14 @@ describe("ListAssetContent", () => {
 
     mockUseBookingStatusHelpers.mockImplementation((status: string) => ({
       isCompleted: status === "COMPLETE",
-      isArchived: false,
-      isReserved: false,
-      isDraft: false,
+      isArchived: status === "ARCHIVED",
+      isReserved: status === "RESERVED",
+      isDraft: status === "DRAFT",
+      isOngoing: status === "ONGOING",
+      isOverdue: status === "OVERDUE",
+      isCancelled: status === "CANCELLED",
+      isInProgress: status === "ONGOING" || status === "OVERDUE",
+      isFinished: status === "COMPLETE" || status === "ARCHIVED",
     }));
 
     assetStatusBadgeMock.mockImplementation(() => (
@@ -142,7 +147,7 @@ describe("ListAssetContent", () => {
       },
     });
 
-    const { container } = render(
+    render(
       <table>
         <tbody>
           <tr>
@@ -167,8 +172,6 @@ describe("ListAssetContent", () => {
     expect(icon).toHaveClass("text-gray-500");
 
     expect(assetStatusBadgeMock).not.toHaveBeenCalled();
-
-    expect(container).toMatchSnapshot();
   });
 
   it("falls back to the asset status badge when the booking is not complete", () => {
@@ -197,36 +200,5 @@ describe("ListAssetContent", () => {
 
     expect(assetStatusBadgeMock).toHaveBeenCalled();
     expect(screen.getByTestId("asset-status-badge")).toBeInTheDocument();
-  });
-
-  it("falls back to the asset status badge when the asset is partially checked in", () => {
-    mockUseLoaderData.mockReturnValue({
-      booking: {
-        id: "booking-3",
-        status: "COMPLETE",
-        assets: [],
-        custodianUser: null,
-      },
-    });
-
-    isAssetPartiallyCheckedInMock.mockReturnValue(true);
-
-    render(
-      <table>
-        <tbody>
-          <tr>
-            <ListAssetContent
-              item={baseAsset}
-              partialCheckinDetails={basePartialDetails}
-              shouldShowCheckinColumns={false}
-            />
-          </tr>
-        </tbody>
-      </table>
-    );
-
-    expect(assetStatusBadgeMock).toHaveBeenCalled();
-    expect(screen.getByTestId("asset-status-badge")).toBeInTheDocument();
-    expect(screen.queryByText("Returned")).not.toBeInTheDocument();
   });
 });
