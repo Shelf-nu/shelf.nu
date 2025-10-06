@@ -1,13 +1,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
+import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getKit } from "~/modules/kit/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
-  newBookingHeader,
 } from "~/routes/_layout+/bookings.new";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
