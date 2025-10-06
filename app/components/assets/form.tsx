@@ -32,7 +32,6 @@ import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
-import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
@@ -180,9 +179,6 @@ export const AssetForm = ({
           }
         }}
       >
-        <AbsolutePositionedHeaderActions className="hidden md:flex">
-          <Actions disabled={disabled} />
-        </AbsolutePositionedHeaderActions>
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
@@ -531,10 +527,8 @@ export const AssetForm = ({
         <AssetCustomFields zo={zo} schema={FormSchema} currency={currency} />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
-          <div className="ml-auto">
-            <Button type="submit" disabled={disabled}>
-              Save
-            </Button>
+          <div className="flex flex-1 justify-end gap-2">
+            <Actions disabled={disabled} />
           </div>
         </FormRow>
       </Form>

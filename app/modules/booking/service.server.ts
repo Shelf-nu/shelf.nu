@@ -8,6 +8,7 @@ import type {
   User,
   UserOrganization,
   Tag,
+  OrganizationRoles,
 } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
@@ -22,6 +23,7 @@ import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/par
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
@@ -143,7 +145,13 @@ export async function createStatusTransitionNote({
 
   if (userId) {
     // User-initiated transition
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     const userLink = wrapUserLinkForNote({
       id: userId,
       firstName: user?.firstName,
@@ -548,7 +556,15 @@ export async function updateBasicBooking({
     // This approach creates individual notes for each field change with proper user attribution
 
     // Get user data for attribution if userId is provided
-    const user = userId ? await getUserByID(userId) : null;
+    const user = userId
+      ? await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        })
+      : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
 
     // Check and log name changes
@@ -1188,10 +1204,19 @@ export async function checkinBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          assets: { select: { id: true, kitId: true, status: true } },
-          partialCheckins: {
+          assets: {
             select: {
-              assetIds: true,
+              id: true,
+              kitId: true,
+              status: true,
+              bookings: {
+                select: { id: true, status: true },
+                where: {
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
             },
           },
         },
@@ -1254,19 +1279,27 @@ export async function checkinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      // Create set of asset IDs that have been partially checked in
-      const partiallyCheckedInAssetIds = new Set(
-        (bookingFound.partialCheckins || []).flatMap((pc) => pc.assetIds)
-      );
-
-      // Only update assets that are CHECKED_OUT in this booking's context
-      // Skip assets that have partial check-ins (they're effectively available in this booking's context)
       const assetsToCheckin = bookingFound.assets
-        .filter(
-          (asset) =>
-            asset.status === AssetStatus.CHECKED_OUT &&
-            !partiallyCheckedInAssetIds.has(asset.id)
-        )
+        .filter((asset) => {
+          if (asset.status !== AssetStatus.CHECKED_OUT) {
+            return false;
+          }
+
+          const hasActiveBookingConflict = (asset.bookings ?? []).some(
+            (linkedBooking) =>
+              linkedBooking.id !== bookingFound.id &&
+              (linkedBooking.status === BookingStatus.ONGOING ||
+                linkedBooking.status === BookingStatus.OVERDUE)
+          );
+
+          if (hasActiveBookingConflict) {
+            return false;
+          }
+
+          // No other active booking is using this asset, so we can safely
+          // reset its status as part of completing the current booking.
+          return true;
+        })
         .map((asset) => asset.id);
 
       if (assetsToCheckin.length > 0) {
@@ -1317,7 +1350,13 @@ export async function checkinBooking({
     if (userId) {
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
 
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
@@ -1472,7 +1511,13 @@ export async function partialCheckinBooking({
   intentChoice?: CheckinIntentEnum;
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     // First, validate the booking exists and get its current assets
     const bookingFound = await db.booking
       .findUniqueOrThrow({
@@ -1814,11 +1859,17 @@ export async function updateBookingAssets({
       const assetContent = wrapAssetsWithDataForNote(assets, "added");
 
       if (userId) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         await createSystemBookingNote({
           bookingId: booking.id,
           content: `${wrapUserLinkForNote(
-            user!
+            user
           )} added ${assetContent} to the booking.`,
         });
       } else {
@@ -1861,11 +1912,17 @@ export async function createKitBookingNote({
       : wrapKitsForNote(kitIds, action);
 
   if (userId) {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     await createSystemBookingNote({
       bookingId,
       content: `${wrapUserLinkForNote(
-        user!
+        user
       )} ${action} ${kitContent} to the booking.`,
     });
   } else {
@@ -2135,10 +2192,12 @@ export async function extendBooking({
   newEndDate,
   hints,
   userId,
+  role,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
+  role: OrganizationRoles;
 }) {
   try {
     const booking = await db.booking
@@ -2151,6 +2210,8 @@ export async function extendBooking({
           activeSchedulerReference: true,
           assets: { select: { id: true } },
           from: true,
+          creatorId: true,
+          custodianUserId: true,
         },
       })
       .catch((cause) => {
@@ -2162,36 +2223,13 @@ export async function extendBooking({
         });
       });
 
-    /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
-    const clashingBookings: ClashingBooking[] = await db.booking.findMany({
-      where: {
-        id: { not: booking.id },
-        organizationId,
-        status: {
-          in: [BookingStatus.RESERVED],
-        },
-        assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
-        // Check for bookings that start within the extension period
-        from: {
-          gt: booking.to!,
-          lte: newEndDate,
-        },
-      },
-      select: { id: true, name: true },
+    validateBookingOwnership({
+      booking,
+      userId,
+      role,
+      action: "extend",
+      blockBaseEntirely: true,
     });
-
-    if (clashingBookings?.length > 0) {
-      throw new ShelfError({
-        cause: null,
-        label,
-        message:
-          "Cannot extend booking because the extended period is overlapping with the following bookings:",
-        additionalData: {
-          clashingBookings: [...clashingBookings],
-        },
-        shouldBeCaptured: false,
-      });
-    }
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -2207,27 +2245,67 @@ export async function extendBooking({
       });
     }
 
-    const updatedBooking = await db.booking.update({
-      where: { id: booking.id },
-      data: {
-        /**
-         * If booking is currently OVERDUE we have to make it ONGOING
-         */
-        status:
-          booking.status === BookingStatus.OVERDUE
-            ? BookingStatus.ONGOING
-            : undefined,
-        to: newEndDate,
-      },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
+    /** Wrap conflict detection and update in a transaction to prevent race conditions */
+    const updatedBooking = await db.$transaction(async (tx) => {
+      /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+      const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
+        where: {
+          id: { not: booking.id },
+          organizationId,
+          status: {
+            in: [BookingStatus.RESERVED],
+          },
+          assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+          // Check for bookings that start within the extension period
+          from: {
+            gt: booking.to!,
+            lte: newEndDate,
+          },
+        },
+        select: { id: true, name: true },
+      });
+
+      if (clashingBookings?.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message:
+            "Cannot extend booking because the extended period is overlapping with the following bookings:",
+          additionalData: {
+            clashingBookings: [...clashingBookings],
+          },
+          shouldBeCaptured: false,
+        });
+      }
+
+      return tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          /**
+           * If booking is currently OVERDUE we have to make it ONGOING
+           */
+          status:
+            booking.status === BookingStatus.OVERDUE
+              ? BookingStatus.ONGOING
+              : undefined,
+          to: newEndDate,
+        },
+        include: BOOKING_INCLUDE_FOR_EMAIL,
+      });
     });
 
     // Add activity log for booking extension
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
       content: `${wrapUserLinkForNote(
-        user!
+        user
       )} extended the booking from **${wrapDateForNote(
         booking.to!
       )}** to **${wrapDateForNote(newEndDate)}**.`,
@@ -3351,7 +3429,13 @@ export async function bulkDeleteBookings({
           assets: { select: { id: true, kitId: true } },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     /** We have to send mails to custodianUsers */
@@ -3576,7 +3660,13 @@ export async function bulkCancelBookings({
           assets: { select: { id: true, kitId: true } },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     /** Bookings with any of these statuses cannot be cancelled */
@@ -3781,7 +3871,13 @@ export async function addScannedAssetsToBooking({
     });
 
     // Create booking activity notes
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     const userForNotes = {
       firstName: user?.firstName || "",
       lastName: user?.lastName || "",

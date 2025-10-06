@@ -18,6 +18,7 @@ import ListAssetContent from "./list-asset-content";
 import { CategoryBadge } from "../assets/category-badge";
 import { KitStatusBadge } from "../kits/kit-status-badge";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
+import { ReturnedBadge } from "../shared/returned-badge";
 import When from "../when/when";
 
 type KitRowProps = {
@@ -45,7 +46,7 @@ export default function KitRow({
   shouldShowCheckinColumns,
 }: KitRowProps) {
   const { isBase } = useUserRoleHelper();
-  const { isDraft, isReserved, isInProgress } =
+  const { isDraft, isReserved, isInProgress, isFinished } =
     useBookingStatusHelpers(bookingStatus);
 
   // Create booking asset IDs set for context-aware status calculation
@@ -85,7 +86,7 @@ export default function KitRow({
               <Button
                 to={`/kits/${kit.id}`}
                 variant="link"
-                className="text-gray-900 hover:text-gray-700"
+                className="font-medium text-gray-900 hover:text-gray-700"
                 target={"_blank"}
                 onlyNewTabIconOnHover={true}
                 aria-label="Go to kit"
@@ -94,10 +95,16 @@ export default function KitRow({
                   {kit.name}
                 </div>
               </Button>
-              <KitStatusBadge
-                status={contextAwareKitStatus}
-                availableToBook={true}
-              />
+              <div>
+                {isFinished ? (
+                  <ReturnedBadge />
+                ) : (
+                  <KitStatusBadge
+                    status={contextAwareKitStatus}
+                    availableToBook={true}
+                  />
+                )}
+              </div>
             </div>
             <div className="ml-auto text-sm text-gray-600">
               {assets.length} assets

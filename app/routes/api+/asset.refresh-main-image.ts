@@ -24,6 +24,7 @@ async function generateThumbnailIfMissing(asset: {
   id: string;
   mainImage: string | null;
   thumbnailImage: string | null;
+  userId: string;
 }): Promise<string | null> {
   if (asset.thumbnailImage || !asset.mainImage) {
     return asset.thumbnailImage;
@@ -99,6 +100,7 @@ async function generateThumbnailIfMissing(asset: {
           fit: "cover",
           withoutEnlargement: true,
         },
+        upsert: true,
       });
     } catch (uploadError: any) {
       // Check if it's a duplicate error (file already exists)
@@ -141,7 +143,7 @@ async function generateThumbnailIfMissing(asset: {
       new ShelfError({
         cause: error,
         message: `Error generating thumbnail for asset ${asset.id}`,
-        additionalData: { assetId: asset.id },
+        additionalData: { assetId: asset.id, userId: asset.userId },
         label: "Assets",
       })
     );
@@ -235,6 +237,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         id: asset.id,
         mainImage: asset.mainImage,
         thumbnailImage: asset.thumbnailImage,
+        userId,
       });
     }
 

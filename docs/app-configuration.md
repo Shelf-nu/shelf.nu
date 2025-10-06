@@ -57,11 +57,35 @@ enablePremiumFeatures: true;
 
 You can set this directly in the config file or use the environment variable to have different configurations on different servers.
 
+### collectBusinessIntel
+
+Controls whether business intelligence fields are collected during user onboarding. When enabled, users are asked to provide:
+
+- How they heard about Shelf (referral source)
+- Their role
+- Team size
+- Company/Organization name (for self-serve signups)
+- Optional customization questions (primary use case, current solution, timeline)
+
+When a user selects "Personal use" as their role, the team size and company name fields are automatically hidden.
+
+**Default value:** `false`
+**Environment variable:** `COLLECT_BUSINESS_INTEL`
+
+```ts
+// Enable business intelligence collection
+collectBusinessIntel: true;
+```
+
+**Backwards Compatibility:** If `COLLECT_BUSINESS_INTEL` is not set, it falls back to `SHOW_HOW_DID_YOU_FIND_US` for compatibility with existing configurations.
+
 ### showHowDidYouFindUs
 
-Choose whether a open field will be shown on the onboarding page, asking the user to provide info how they found out about shelf.
+> **⚠️ Deprecated:** Use `collectBusinessIntel` instead. This option is kept for backwards compatibility.
 
-**Default value:** `false`  
+Choose whether an open field will be shown on the onboarding page, asking the user to provide info on how they found out about Shelf.
+
+**Default value:** `false`
 **Environment variable:** `SHOW_HOW_DID_YOU_FIND_US`
 
 ### freeTrialDays
@@ -150,6 +174,8 @@ ENABLE_PREMIUM_FEATURES=false
 FREE_TRIAL_DAYS=14
 DISABLE_SIGNUP=false
 DISABLE_SSO=false
+COLLECT_BUSINESS_INTEL=true
+# SHOW_HOW_DID_YOU_FIND_US=true  # Deprecated, use COLLECT_BUSINESS_INTEL instead
 ```
 
 ## Notes

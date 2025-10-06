@@ -98,7 +98,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         /** We are going to get the user to make sure it exists and is confirmed
          * this will not allow the user to use the forgot password before they have confirmed their email
          */
-        const user = await db.user.findFirst({ where: { email } });
+        const user = await db.user.findFirst({
+          where: { email },
+          select: {
+            id: true,
+            sso: true,
+          },
+        });
 
         if (!user) {
           throw new ShelfError({

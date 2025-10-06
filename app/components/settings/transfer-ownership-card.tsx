@@ -66,7 +66,7 @@ export default function TransferOwnershipCard({
 
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
 
-  const isShelfAdmin = user?.roles.some((role) => role.name === Roles.ADMIN);
+  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
 
   if (!isOwner && !isShelfAdmin) {
     return null;

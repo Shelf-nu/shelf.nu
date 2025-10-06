@@ -59,7 +59,6 @@ import {
 } from "../asset/utils.server";
 import { createBulkKitChangeNotes, createNote } from "../note/service.server";
 import { getQr } from "../qr/service.server";
-
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -1032,7 +1031,13 @@ export async function bulkAssignKitCustody({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
@@ -1166,7 +1171,13 @@ export async function bulkReleaseKitCustody({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     const custodian = kits[0].custody?.custodian;
@@ -1452,7 +1463,13 @@ export async function updateKitLocation({
 
       // Add notes to assets about location update via parent kit
       if (userId && assetIds.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const location = await db.location.findUnique({
           where: { id: newLocationId },
           select: { name: true, id: true },
@@ -1493,7 +1510,13 @@ export async function updateKitLocation({
 
       // Add notes to assets about location removal via parent kit
       if (userId && assetIds.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const currentLocation = await db.location.findUnique({
           where: { id: currentLocationId },
           select: { name: true, id: true },
@@ -1590,7 +1613,13 @@ export async function bulkUpdateKitLocation({
 
       // Create notes for affected assets
       if (allAssets.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const location = await db.location.findUnique({
           where: { id: newLocationId },
           select: { name: true, id: true },
@@ -1626,7 +1655,13 @@ export async function bulkUpdateKitLocation({
 
       // Also remove location from assets and create notes
       if (allAssets.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
 
         await db.asset.updateMany({
           where: {
@@ -1684,7 +1719,13 @@ export async function updateKitAssets({
   addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const kit = await db.kit
       .findUniqueOrThrow({
@@ -1846,7 +1887,13 @@ export async function updateKitAssets({
         });
 
         // Create notes for assets that had their location changed
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         await Promise.all(
           newlyAddedAssets.map((asset) =>
             createNote({
@@ -1877,7 +1924,13 @@ export async function updateKitAssets({
           });
 
           // Create notes for assets that had their location removed
-          const user = await getUserByID(userId);
+          const user = await getUserByID(userId, {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            } satisfies Prisma.UserSelect,
+          });
           await Promise.all(
             assetsWithLocation.map((asset) =>
               createNote({
@@ -2027,7 +2080,13 @@ export async function bulkRemoveAssetsFromKits({
   request: Request;
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     /**
      * If user has selected all assets, then we have to get ids of all those assets

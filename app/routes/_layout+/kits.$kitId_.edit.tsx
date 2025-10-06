@@ -217,7 +217,6 @@ export default function KitEdit() {
           name={kit.name}
           description={kit.description}
           categoryId={kit.categoryId}
-          saveButtonLabel="Save"
           barcodes={kit.barcodes}
           locationId={kit?.locationId}
         />

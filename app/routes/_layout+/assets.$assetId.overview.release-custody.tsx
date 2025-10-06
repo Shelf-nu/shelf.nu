@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -121,7 +121,13 @@ export const action = async ({
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     if (isSelfService) {
       const custody = await db.custody.findUnique({

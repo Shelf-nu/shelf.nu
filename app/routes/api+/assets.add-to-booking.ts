@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
 import {
@@ -78,7 +79,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     const booking = await updateBookingAssets({
       id,
       organizationId,

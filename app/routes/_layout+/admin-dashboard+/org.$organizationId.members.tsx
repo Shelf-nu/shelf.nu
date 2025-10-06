@@ -26,10 +26,19 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       where: {
         userOrganizations: { some: { organizationId } },
       },
-      include: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        sso: true,
+        createdAt: true,
         userOrganizations: {
           where: {
             organizationId,
+          },
+          select: {
+            roles: true,
           },
         },
       },

@@ -1,4 +1,9 @@
-import { TagUseFor } from "@prisma/client";
+import {
+  BookingStatus,
+  TagUseFor,
+  OrganizationRoles,
+  type Prisma,
+} from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -52,6 +57,7 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sortBookingAssets } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -461,7 +467,7 @@ export const links: LinksFunction = () => [
 
 export const handle = {
   breadcrumb: () => "single",
-  name: "bookings.$bookingId",
+  name: "bookings.$bookingId.overview",
 };
 
 export type BookingPageActionData = typeof action;
@@ -520,7 +526,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
-      "extend-booking": PermissionAction.update,
+      "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
     };
@@ -533,7 +539,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         action: intent2ActionMap[intent],
       });
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
@@ -747,10 +759,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
           const b = await getBooking({ id, organizationId, request });
-          if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
+          validateBookingOwnership({
+            booking: b,
+            userId,
+            role,
+            action: "delete",
+          });
+
+          // BASE users can only delete DRAFT bookings
+          if (
+            role === OrganizationRoles.BASE &&
+            b.status !== BookingStatus.DRAFT
+          ) {
             throw new ShelfError({
               cause: null,
-              message: "You are not authorized to delete this booking",
+              message:
+                "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
               status: 403,
               label: "Booking",
             });
@@ -936,6 +960,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints,
           newEndDate,
           userId,
+          role,
         });
 
         sendNotification({

@@ -18,7 +18,6 @@ import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
-import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import When from "../when/when";
@@ -41,7 +40,6 @@ type KitFormProps = Partial<
   Pick<Kit, "name" | "description" | "categoryId" | "locationId">
 > & {
   className?: string;
-  saveButtonLabel?: string;
   qrId?: string | null;
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
 };
@@ -50,7 +48,6 @@ export default function KitsForm({
   className,
   name,
   description,
-  saveButtonLabel = "Add",
   qrId,
   categoryId,
   barcodes,
@@ -96,11 +93,6 @@ export default function KitsForm({
           }
         }}
       >
-        <AbsolutePositionedHeaderActions className="hidden md:mr-4 md:flex">
-          <Button type="submit" disabled={disabled || nameErrorMessage}>
-            {saveButtonLabel}
-          </Button>
-        </AbsolutePositionedHeaderActions>
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
