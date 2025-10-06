@@ -6,8 +6,8 @@ import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
-  newBookingHeader,
 } from "~/routes/_layout+/bookings.new";
+import { newBookingHeader } from "~/components/booking/booking-header";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   data,
