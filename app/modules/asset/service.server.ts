@@ -2002,8 +2002,10 @@ export async function createCustomFieldChangeNote({
       customFieldName,
       previousValue,
       newValue,
+      userId,
       firstName,
       lastName,
+      assetId,
       assetName,
       isFirstTimeSet,
     });
@@ -3099,8 +3101,10 @@ export async function bulkUpdateAssetLocation({
           const content = getLocationUpdateNoteContent({
             currentLocation: asset.location,
             newLocation,
+            userId,
             firstName: user?.firstName ?? "",
             lastName: user?.lastName ?? "",
+            assetId: asset.id,
             assetName: asset.title,
             isRemoving,
           });

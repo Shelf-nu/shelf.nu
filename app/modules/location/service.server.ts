@@ -726,8 +726,10 @@ export async function createLocationChangeNote({
     const message = getLocationUpdateNoteContent({
       currentLocation,
       newLocation,
+      userId,
       firstName,
       lastName,
+      assetId,
       assetName,
       isRemoving,
     });
@@ -1145,8 +1147,10 @@ export async function updateLocationKits({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location, // Use the asset's current location
                 newLocation: location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: false,
               }),
@@ -1212,8 +1216,10 @@ export async function updateLocationKits({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: location,
                 newLocation: null,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: true,
               }),

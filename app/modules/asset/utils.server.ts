@@ -11,6 +11,7 @@ import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
+import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { parseFilters } from "./query.server";
 import type { AdvancedIndexAsset, ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
@@ -18,33 +19,56 @@ import type { Column } from "../asset-index-settings/helpers";
 export function getLocationUpdateNoteContent({
   currentLocation,
   newLocation,
+  userId,
   firstName,
   lastName,
+  assetId,
   assetName,
   isRemoving,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
   newLocation?: Pick<Location, "id" | "name"> | null;
+  userId: string;
   firstName: string;
   lastName: string;
+  assetId: string;
   assetName: string;
   isRemoving?: boolean;
 }) {
+  const userLink = wrapUserLinkForNote({
+    id: userId,
+    firstName,
+    lastName,
+  });
+  const assetLink = wrapLinkForNote(`/assets/${assetId}`, assetName.trim());
+
   let message = "";
   if (currentLocation && newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
-      currentLocation.id
-    })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
+    const currentLocationLink = wrapLinkForNote(
+      `/locations/${currentLocation.id}`,
+      currentLocation.name.trim()
+    );
+    const newLocationLink = wrapLinkForNote(
+      `/locations/${newLocation.id}`,
+      newLocation.name.trim()
+    );
+    message = `${userLink} updated the location of ${assetLink} from ${currentLocationLink} to ${newLocationLink}.`; // updating location
   }
 
   if (newLocation && !currentLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
-      newLocation.id
-    })**`; // setting to first location
+    const newLocationLink = wrapLinkForNote(
+      `/locations/${newLocation.id}`,
+      newLocation.name.trim()
+    );
+    message = `${userLink} set the location of ${assetLink} to ${newLocationLink}.`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
+    const currentLocationLink = wrapLinkForNote(
+      `/locations/${currentLocation?.id}`,
+      currentLocation?.name.trim() || ""
+    );
+    message = `${userLink} removed ${assetLink} from location ${currentLocationLink}.`; // removing location
   }
 
   return message;
@@ -92,31 +116,40 @@ export function getCustomFieldUpdateNoteContent({
   customFieldName,
   previousValue,
   newValue,
+  userId,
   firstName,
   lastName,
+  assetId,
   assetName,
   isFirstTimeSet,
 }: {
   customFieldName: string;
   previousValue?: string | null;
   newValue?: string | null;
+  userId: string;
   firstName: string;
   lastName: string;
+  assetId: string;
   assetName: string;
   isFirstTimeSet: boolean;
 }) {
-  const fullName = `${firstName.trim()} ${lastName.trim()}`;
+  const userLink = wrapUserLinkForNote({
+    id: userId,
+    firstName,
+    lastName,
+  });
+  const assetLink = wrapLinkForNote(`/assets/${assetId}`, assetName.trim());
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `**${fullName}** set **${customFieldName}** of **${assetName.trim()}** to **${newValue}**`;
+    message = `${userLink} set **${customFieldName}** of ${assetLink} to **${newValue}**.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `**${fullName}** updated **${customFieldName}** of **${assetName.trim()}** from **${previousValue}** to **${newValue}**`;
+    message = `${userLink} updated **${customFieldName}** of ${assetLink} from **${previousValue}** to **${newValue}**.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `**${fullName}** removed **${customFieldName}** value **${previousValue}** from **${assetName.trim()}**`;
+    message = `${userLink} removed **${customFieldName}** value **${previousValue}** from ${assetLink}.`;
   }
 
   return message;
@@ -388,31 +421,37 @@ export function detectCustomFieldChanges(
 export function getKitLocationUpdateNoteContent({
   currentLocation,
   newLocation,
+  userId,
   firstName,
   lastName,
+  assetId,
   assetName,
   isRemoving,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
   newLocation?: Pick<Location, "id" | "name"> | null;
+  userId: string;
   firstName: string;
   lastName: string;
+  assetId: string;
   assetName: string;
   isRemoving?: boolean;
 }) {
   const baseMessage = getLocationUpdateNoteContent({
     currentLocation,
     newLocation,
+    userId,
     firstName,
     lastName,
+    assetId,
     assetName,
     isRemoving,
   });
 
   if (isRemoving) {
-    return `${baseMessage} via parent kit removal`;
+    return `${baseMessage.replace(/\.$/, "")} via parent kit removal.`;
   } else {
-    return `${baseMessage} via parent kit assignment`;
+    return `${baseMessage.replace(/\.$/, "")} via parent kit assignment.`;
   }
 }
 

@@ -1526,8 +1526,10 @@ export async function updateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location, // Use the asset's current location
                 newLocation: location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: false,
               }),
@@ -1567,8 +1569,10 @@ export async function updateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: currentLocation,
                 newLocation: null,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: true,
               }),
@@ -1664,8 +1668,10 @@ export async function bulkUpdateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location,
                 newLocation: location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: false,
               }),
@@ -1705,8 +1711,10 @@ export async function bulkUpdateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location,
                 newLocation: null,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: true,
               }),
@@ -1923,8 +1931,10 @@ export async function updateKitAssets({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location,
                 newLocation: kit.location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
+                assetId: asset.id,
                 assetName: asset.title,
                 isRemoving: false,
               }),
@@ -1954,8 +1964,10 @@ export async function updateKitAssets({
                 content: getKitLocationUpdateNoteContent({
                   currentLocation: asset.location,
                   newLocation: null,
+                  userId,
                   firstName: user?.firstName ?? "",
                   lastName: user?.lastName ?? "",
+                  assetId: asset.id,
                   assetName: asset.title,
                   isRemoving: true,
                 }),
