@@ -83,6 +83,7 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
@@ -3321,9 +3322,13 @@ export async function relinkQrCode({
       assetId,
       userId,
       type: "UPDATE",
-      content: `**${user.firstName?.trim()}** has changed QR code ${
+      content: `${wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })} changed QR code ${
         oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**`,
+      } to **${qrId}**.`,
     }),
   ]);
 }

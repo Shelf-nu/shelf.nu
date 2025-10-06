@@ -5,6 +5,7 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
 import {
   ASSETS_EVENT_TYPE_MAP,
@@ -56,7 +57,11 @@ export async function createAssetReminder({
         assetId,
         userId: createdById,
         type: "UPDATE",
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has created a new reminder **${name.trim()}**.`,
+        content: `${wrapUserLinkForNote({
+          id: createdById,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        })} created a new reminder **${name.trim()}**.`,
       }),
     ]);
 

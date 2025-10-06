@@ -749,6 +749,9 @@ export async function releaseCustody({
           id: true,
           name: true,
           assets: { select: { id: true, title: true } },
+          createdBy: {
+            select: { id: true, firstName: true, lastName: true },
+          },
           custody: { select: { custodian: { include: { user: true } } } },
         },
       }),
@@ -788,7 +791,7 @@ export async function releaseCustody({
           asset.title.trim()
         );
         return createNote({
-          content: `${actorLink} released ${custodianDisplay} custody over ${assetLink} via kit assignment ${kitLink}.`,
+          content: `${actorLink} released ${custodianDisplay}'s custody over ${assetLink} via kit assignment ${kitLink}.`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -1283,7 +1286,7 @@ export async function bulkReleaseKitCustody({
             ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
             : "**Unknown Kit**";
           return {
-            content: `${actor} released ${custodianDisplay} custody over ${assetLink} via kit assignment ${kitLink}.`,
+            content: `${actor} released ${custodianDisplay}'s custody over ${assetLink} via kit assignment ${kitLink}.`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -2034,7 +2037,7 @@ export async function updateKitAssets({
             const custodianDisplay =
               kitCustodianDisplay ?? "**Unknown Custodian**";
             return {
-              content: `${actor} released ${custodianDisplay} custody over ${assetLink}.`,
+              content: `${actor} released ${custodianDisplay}'s custody over ${assetLink}.`,
               type: "UPDATE",
               userId,
               assetId: asset.id,
@@ -2193,7 +2196,7 @@ export async function bulkRemoveAssetsFromKits({
               })
             : "**Unknown Custodian**";
           return {
-            content: `${actor} released ${custodianDisplay} custody over ${assetLink}.`,
+            content: `${actor} released ${custodianDisplay}'s custody over ${assetLink}.`,
             type: "UPDATE",
             userId,
             assetId: asset.id,

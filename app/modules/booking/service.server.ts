@@ -577,9 +577,9 @@ export async function updateBasicBooking({
     if (from && booking.from && from.getTime() !== booking.from.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking start date from **${wrapDateForNote(
+        content: `${userLink} changed booking start date from ${wrapDateForNote(
           booking.from
-        )}** to **${wrapDateForNote(from)}**.`,
+        )} to ${wrapDateForNote(from)}.`,
       });
     }
 
@@ -587,9 +587,9 @@ export async function updateBasicBooking({
     if (to && booking.to && to.getTime() !== booking.to.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking end date from **${wrapDateForNote(
+        content: `${userLink} changed booking end date from ${wrapDateForNote(
           booking.to
-        )}** to **${wrapDateForNote(to)}**.`,
+        )} to ${wrapDateForNote(to)}.`,
       });
     }
 
@@ -1516,7 +1516,12 @@ export async function partialCheckinBooking({
       // Creating the record here would cause checkinBooking to filter out the current assets
 
       // Create notes before complete check-in since this was initiated as explicit check-in
-      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -3662,11 +3667,16 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
       const notesData = bookings
         .map((b) =>
           b.assets.map((asset) => ({
             assetId: asset.id,
-            content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** cancelled booking.`,
+            content: `${actor} cancelled booking.`,
             userId,
             type: "UPDATE" as const,
           }))
