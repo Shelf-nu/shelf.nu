@@ -30,7 +30,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { reminders, totalReminders, page, perPage, totalPages } =
+    const { reminders, totalReminders, page, perPage, totalPages, search } =
       await getPaginatedAndFilterableReminders({
         organizationId,
         request,
@@ -60,6 +60,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         page,
         perPage,
         totalPages,
+        search,
       })
     );
   } catch (cause) {
