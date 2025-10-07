@@ -385,9 +385,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       /** We create notes for the newly added assets */
       const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
       await createNotes({
-        content: `${wrapUserLinkForNote(
-          user!
-        )} added assets to ${bookingLink}.`,
+        content: `${wrapUserLinkForNote(user!)} added asset to ${bookingLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetIds: newAssetIds,

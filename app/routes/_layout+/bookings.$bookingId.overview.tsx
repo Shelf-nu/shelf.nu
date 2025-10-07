@@ -697,7 +697,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking.name
         );
         await createNotes({
-          content: `${actor} checked out assets with ${bookingLink}.`,
+          content: `${actor} checked out asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
@@ -740,7 +740,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking.name
         );
         await createNotes({
-          content: `${actor} checked in assets with ${bookingLink}.`,
+          content: `${actor} checked in asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
