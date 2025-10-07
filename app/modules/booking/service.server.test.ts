@@ -351,7 +351,7 @@ describe("partialCheckinBooking", () => {
     // Verify notes created
     expect(noteService.createNotes).toHaveBeenCalledWith({
       content:
-        "**[Test User](/settings/team/users/user-1)** checked in via partial check-in.",
+        '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in.',
       type: "UPDATE",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -445,6 +445,13 @@ describe("partialCheckinBooking", () => {
 
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithKitAssets);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-3", status: AssetStatus.CHECKED_OUT },
+    ]);
 
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue(updatedBookingWithRemainingAsset);
@@ -807,6 +814,12 @@ describe("updateBookingAssets", () => {
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue(mockBooking);
 
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
     expect(db.booking.update).toHaveBeenCalledWith({
@@ -836,6 +849,12 @@ describe("updateBookingAssets", () => {
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue(mockBooking);
 
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
     expect(db.booking.update).toHaveBeenCalled();
@@ -856,6 +875,12 @@ describe("updateBookingAssets", () => {
     };
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue(mockBooking);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
@@ -908,6 +933,12 @@ describe("updateBookingAssets", () => {
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue(mockBooking);
 
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+
     await updateBookingAssets(mockUpdateBookingAssetsParams);
 
     expect(db.booking.update).toHaveBeenCalled();
@@ -925,6 +956,12 @@ describe("updateBookingAssets", () => {
     };
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue(mockBooking);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -2020,6 +2057,8 @@ describe("removeAssets", () => {
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({
       ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
       assets: [],
     });
 
@@ -2037,6 +2076,11 @@ describe("removeAssets", () => {
         assets: {
           disconnect: [{ id: "asset-1" }, { id: "asset-2" }],
         },
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
       },
     });
   });

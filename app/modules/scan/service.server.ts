@@ -173,25 +173,33 @@ export async function createScanNote({
     if (assetId && organizationId) {
       // Check if user has access to the asset's organization
       let hasAccess = false;
-      if (userId && userId != "anonymous") {
-        const userOrgs = await db.userOrganization.findMany({
-          where: { userId },
-          select: { organizationId: true },
+
+      let authenticatedUserId: string | null = null;
+
+      if (userId && userId !== "anonymous") {
+        authenticatedUserId = userId;
+
+        // Check if user belongs to the asset's organization
+        const userOrgCount = await db.userOrganization.count({
+          where: {
+            userId: authenticatedUserId,
+            organizationId: organizationId,
+          },
         });
-        const userOrgIds = userOrgs.map((uo) => uo.organizationId);
-        hasAccess = userOrgIds.includes(organizationId);
+
+        hasAccess = userOrgCount > 0;
       }
 
-      if (hasAccess) {
+      if (hasAccess && authenticatedUserId) {
         // User has access - log their name
-        const { firstName, lastName } = await getUserByID(userId!, {
+        const { firstName, lastName } = await getUserByID(authenticatedUserId, {
           select: {
             firstName: true,
             lastName: true,
           } satisfies Prisma.UserSelect,
         });
         const actor = wrapUserLinkForNote({
-          id: userId,
+          id: authenticatedUserId,
           firstName,
           lastName,
         });
@@ -200,30 +208,27 @@ export async function createScanNote({
         } else {
           message = `${actor} performed a scan of the asset QR code.`;
         }
+
         return await createNote({
           content: message,
           type: "UPDATE",
-          userId: userId!,
+          userId: authenticatedUserId,
           assetId,
         });
       } else {
-        if (organizationId) {
-          // If there is an assetId there will always be organization id. This is an extra check for organizationId.
-          // User doesn't have access or is anonymous - log as unknown user
-          const { userId: ownerId } = await getOrganizationById(organizationId);
-          message =
-            "An unknown user has performed a scan of the asset QR code.";
+        // User doesn't have access or is anonymous - log as unknown user
+        const { userId: ownerId } = await getOrganizationById(organizationId);
+        message = "An unknown user has performed a scan of the asset QR code.";
 
-          /* to create a note we are using user id to track which user created the note
-          but in this case where scanner is anonymous, we are using the user id of the owner
-          of the organization to which the scanner QR belongs */
-          return await createNote({
-            content: message,
-            type: "UPDATE",
-            userId: ownerId,
-            assetId,
-          });
-        }
+        /* to create a note we are using user id to track which user created the note
+        but in this case where scanner is anonymous, we are using the user id of the owner
+        of the organization to which the scanner QR belongs */
+        return await createNote({
+          content: message,
+          type: "UPDATE",
+          userId: ownerId,
+          assetId,
+        });
       }
     }
   } catch (cause) {

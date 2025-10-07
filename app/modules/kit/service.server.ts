@@ -754,7 +754,12 @@ export async function releaseCustody({
           custody: { select: { custodian: { include: { user: true } } } },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     const actorLink = wrapUserLinkForNote({
@@ -1055,7 +1060,7 @@ export async function bulkAssignKitCustody({
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect
+        } satisfies Prisma.UserSelect,
       }),
       db.teamMember.findUnique({
         where: { id: custodianId },
@@ -1063,8 +1068,7 @@ export async function bulkAssignKitCustody({
           id: true,
           name: true,
           user: { select: { id: true, firstName: true, lastName: true } },
-        } ,
-
+        },
       }),
     ]);
 
@@ -2181,13 +2185,12 @@ export async function bulkRemoveAssetsFromKits({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect
+      } satisfies Prisma.UserSelect,
     });
     const actor = wrapUserLinkForNote({
       id: userId,
       firstName: user?.firstName,
       lastName: user?.lastName,
-
     });
 
     /**

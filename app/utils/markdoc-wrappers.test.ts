@@ -318,7 +318,7 @@ describe("wrapUserLinkForNote", () => {
     };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
-      `{% link to="/settings/team/users/mno" text="John "Johnny" O'Malley" /%}`
+      `{% link to="/settings/team/users/mno" text="John &quot;Johnny&quot; O'Malley" /%}`
     );
   });
 });
@@ -343,7 +343,7 @@ describe("wrapLinkForNote", () => {
   it("should handle links with special characters in text", () => {
     const result = wrapLinkForNote("/bookings/abc", 'Booking "Special Event"');
     expect(result).toBe(
-      `{% link to="/bookings/abc" text="Booking "Special Event"" /%}`
+      `{% link to="/bookings/abc" text="Booking &quot;Special Event&quot;" /%}`
     );
   });
 
