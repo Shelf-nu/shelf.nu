@@ -708,7 +708,6 @@ export async function createLocationChangeNote({
   newLocation,
   firstName,
   lastName,
-  assetName,
   assetId,
   userId,
   isRemoving,
@@ -717,7 +716,6 @@ export async function createLocationChangeNote({
   newLocation: Location | null;
   firstName: string;
   lastName: string;
-  assetName: Asset["title"];
   assetId: Asset["id"];
   userId: User["id"];
   isRemoving: boolean;
@@ -729,8 +727,6 @@ export async function createLocationChangeNote({
       userId,
       firstName,
       lastName,
-      assetId,
-      assetName,
       isRemoving,
     });
 
@@ -817,7 +813,6 @@ async function createBulkLocationChangeNotes({
           newLocation,
           firstName: user.firstName || "",
           lastName: user.lastName || "",
-          assetName: asset.title,
           assetId: asset.id,
           userId,
           isRemoving,
@@ -1156,8 +1151,6 @@ export async function updateLocationKits({
                 userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetId: asset.id,
-                assetName: asset.title,
                 isRemoving: false,
               }),
               type: "UPDATE",
@@ -1231,8 +1224,6 @@ export async function updateLocationKits({
                 userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetId: asset.id,
-                assetName: asset.title,
                 isRemoving: true,
               }),
               type: "UPDATE",

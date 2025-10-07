@@ -87,6 +87,7 @@ vitest.mock("~/modules/user/service.server", () => ({
 
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
+  createNotes: vitest.fn().mockResolvedValue({}),
   createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
 }));
 

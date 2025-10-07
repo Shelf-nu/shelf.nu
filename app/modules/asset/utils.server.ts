@@ -22,8 +22,7 @@ export function getLocationUpdateNoteContent({
   userId,
   firstName,
   lastName,
-  assetId,
-  assetName,
+
   isRemoving,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
@@ -31,8 +30,6 @@ export function getLocationUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
-  assetId: string;
-  assetName: string;
   isRemoving?: boolean;
 }) {
   const userLink = wrapUserLinkForNote({
@@ -40,7 +37,6 @@ export function getLocationUpdateNoteContent({
     firstName,
     lastName,
   });
-  const assetLink = wrapLinkForNote(`/assets/${assetId}`, assetName.trim());
 
   let message = "";
   if (currentLocation && newLocation) {
@@ -52,7 +48,7 @@ export function getLocationUpdateNoteContent({
       `/locations/${newLocation.id}`,
       newLocation.name.trim()
     );
-    message = `${userLink} updated the location of ${assetLink} from ${currentLocationLink} to ${newLocationLink}.`; // updating location
+    message = `${userLink} updated the location from ${currentLocationLink} to ${newLocationLink}.`; // updating location
   }
 
   if (newLocation && !currentLocation) {
@@ -60,7 +56,7 @@ export function getLocationUpdateNoteContent({
       `/locations/${newLocation.id}`,
       newLocation.name.trim()
     );
-    message = `${userLink} set the location of ${assetLink} to ${newLocationLink}.`; // setting to first location
+    message = `${userLink} set the location to ${newLocationLink}.`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
@@ -68,7 +64,7 @@ export function getLocationUpdateNoteContent({
       `/locations/${currentLocation?.id}`,
       currentLocation?.name.trim() || ""
     );
-    message = `${userLink} removed ${assetLink} from location ${currentLocationLink}.`; // removing location
+    message = `${userLink} removed the asset from location ${currentLocationLink}.`; // removing location
   }
 
   return message;
@@ -95,7 +91,6 @@ export function getLocationUpdateNoteContent({
  *   newValue: "SN123456",
  *   firstName: "John",
  *   lastName: "Doe",
- *   assetName: "Laptop",
  *   isFirstTimeSet: true
  * })
  * // Returns: "**John Doe** set **Serial Number** of **Laptop** to **SN123456**"
@@ -107,7 +102,6 @@ export function getLocationUpdateNoteContent({
  *   newValue: "Inactive",
  *   firstName: "Jane",
  *   lastName: "Smith",
- *   assetName: "Camera",
  *   isFirstTimeSet: false
  * })
  * // Returns: "**Jane Smith** updated **Status** of **Camera** from **Active** to **Inactive**"
@@ -119,8 +113,6 @@ export function getCustomFieldUpdateNoteContent({
   userId,
   firstName,
   lastName,
-  assetId,
-  assetName,
   isFirstTimeSet,
 }: {
   customFieldName: string;
@@ -129,8 +121,6 @@ export function getCustomFieldUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
-  assetId: string;
-  assetName: string;
   isFirstTimeSet: boolean;
 }) {
   const userLink = wrapUserLinkForNote({
@@ -138,18 +128,17 @@ export function getCustomFieldUpdateNoteContent({
     firstName,
     lastName,
   });
-  const assetLink = wrapLinkForNote(`/assets/${assetId}`, assetName.trim());
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${customFieldName}** of ${assetLink} to **${newValue}**.`;
+    message = `${userLink} set **${customFieldName}** to **${newValue}**.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${customFieldName}** of ${assetLink} from **${previousValue}** to **${newValue}**.`;
+    message = `${userLink} updated **${customFieldName}** from **${previousValue}** to **${newValue}**.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${customFieldName}** value **${previousValue}** from ${assetLink}.`;
+    message = `${userLink} removed **${customFieldName}** value **${previousValue}**.`;
   }
 
   return message;
@@ -424,8 +413,6 @@ export function getKitLocationUpdateNoteContent({
   userId,
   firstName,
   lastName,
-  assetId,
-  assetName,
   isRemoving,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
@@ -433,8 +420,6 @@ export function getKitLocationUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
-  assetId: string;
-  assetName: string;
   isRemoving?: boolean;
 }) {
   const baseMessage = getLocationUpdateNoteContent({
@@ -443,8 +428,6 @@ export function getKitLocationUpdateNoteContent({
     userId,
     firstName,
     lastName,
-    assetId,
-    assetName,
     isRemoving,
   });
 

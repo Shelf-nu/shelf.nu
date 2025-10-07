@@ -5,7 +5,7 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
 import {
   ASSETS_EVENT_TYPE_MAP,
@@ -44,21 +44,21 @@ export async function createAssetReminder({
         lastName: true,
       } satisfies Prisma.UserSelect,
     });
-
-    const [assetReminder] = await Promise.all([
-      db.assetReminder.create({
-        data: {
-          name,
-          message,
-          alertDateTime,
-          assetId,
-          createdById,
-          organizationId,
-          teamMembers: {
-            connect: teamMembers.map((id) => ({ id })),
-          },
+    const assetReminder = await db.assetReminder.create({
+      data: {
+        name,
+        message,
+        alertDateTime,
+        assetId,
+        createdById,
+        organizationId,
+        teamMembers: {
+          connect: teamMembers.map((id) => ({ id })),
         },
-      }),
+      },
+    });
+
+    await Promise.all([
       createNote({
         assetId,
         userId: createdById,
@@ -67,17 +67,21 @@ export async function createAssetReminder({
           id: createdById,
           firstName: user.firstName,
           lastName: user.lastName,
-        })} created a new reminder **${name.trim()}**.`,
+        })} created a new reminder ${wrapLinkForNote(
+          `/assets/${assetId}/reminders?${new URLSearchParams({
+            s: assetReminder.name,
+          }).toString()}`,
+          assetReminder.name
+        )}.`,
+      }),
+      await scheduleAssetReminder({
+        data: {
+          reminderId: assetReminder.id,
+          eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+        },
+        when: alertDateTime,
       }),
     ]);
-
-    await scheduleAssetReminder({
-      data: {
-        reminderId: assetReminder.id,
-        eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
-      },
-      when: alertDateTime,
-    });
 
     return assetReminder;
   } catch (cause) {
