@@ -174,7 +174,6 @@ export async function createScanNote({
       // Check if user has access to the asset's organization
       let hasAccess = false;
       if (userId && userId != "anonymous") {
-
         const userOrgs = await db.userOrganization.findMany({
           where: { userId },
           select: { organizationId: true },
