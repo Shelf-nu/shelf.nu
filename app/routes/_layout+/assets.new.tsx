@@ -221,16 +221,12 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     });
 
     if (asset.location) {
-      const assetLink = wrapLinkForNote(
-        `/assets/${asset.id}`,
-        asset.title?.trim() ?? "this asset"
-      );
       const locationLink = wrapLinkForNote(
         `/locations/${asset.location.id}`,
         asset.location.name.trim()
       );
       await createNote({
-        content: `${actor} set the location of ${assetLink} to ${locationLink}.`,
+        content: `${actor} set the location  to ${locationLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetId: asset.id,
