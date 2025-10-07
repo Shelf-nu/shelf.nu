@@ -103,7 +103,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       booking.name.trim()
     );
     await createNotes({
-      content: `${actor} added assets to ${bookingLink}.`,
+      content: `${actor} added asset to ${bookingLink}.`,
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,

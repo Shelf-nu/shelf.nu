@@ -2255,7 +2255,7 @@ export async function bulkRemoveAssetsFromKits({
               asset.kit!.name.trim()
             );
             return {
-              content: `${actor} removed from ${kitLink}.`,
+              content: `${actor} removed asset from ${kitLink}.`,
               type: "UPDATE",
               userId,
               assetId: asset.id,
