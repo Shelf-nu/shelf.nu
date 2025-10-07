@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
+import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getKit } from "~/modules/kit/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
@@ -95,6 +96,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        header: newBookingHeader,
         currentOrganization,
         userId,
         showModal: true,

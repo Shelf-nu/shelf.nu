@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import type { Asset, Booking, Category, Custody, Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -275,7 +275,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ];
     }
 
-    const user = await getUserByID(authSession.userId);
+    const user = await getUserByID(authSession.userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const booking = await db.booking
       .findUniqueOrThrow({

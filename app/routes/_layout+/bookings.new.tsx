@@ -5,10 +5,13 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
-import styles from "~/components/booking/styles.new.css?url";
+import { newBookingHeader } from "~/components/booking/new-booking-header";
+import Header from "~/components/layout/header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
 import { createBooking } from "~/modules/booking/service.server";
@@ -23,6 +26,7 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
+import styles from "~/styles/layout/bookings.new.css?url";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
@@ -90,7 +94,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       data({
         userId,
         currentOrganization,
-        showModal: true,
+        header: newBookingHeader,
+        showModal: false,
         isSelfServiceOrBase,
         ...teamMembersData,
         assetIds: assetIds.length ? assetIds : undefined,
@@ -244,35 +249,36 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+
 export const handle = {
   name: "bookings.new",
 };
 
-export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
-
 export default function NewBooking() {
-  const { isSelfServiceOrBase, teamMembers, assetIds } =
+  const { header, isSelfServiceOrBase, teamMembers, assetIds, showModal } =
     useLoaderData<typeof loader>();
-  // const workingHoursData = useWorkingHours(currentOrganization.id);
-
   const user = useUserData();
+  const dynamicTitle = useAtomValue(dynamicTitleAtom);
 
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
   const custodianRef = isSelfServiceOrBase
     ? teamMembers.find((tm) => tm.userId === user!.id)?.id
     : undefined;
 
+  const pageTitle = dynamicTitle?.trim().length
+    ? dynamicTitle
+    : header?.title ?? newBookingHeader.title;
+
   return (
-    <div className="booking-inner-wrapper">
-      <header className="mb-5">
-        <h2>Create new booking</h2>
-        <p>
-          Choose a name for your booking, select a start and end time and choose
-          the custodian. Based on the selected information, asset availability
-          will be determined.
-        </p>
-      </header>
-      <div>
+    <div className="relative">
+      <Header
+        title={pageTitle}
+        subHeading={header?.subHeading}
+        hideBreadcrumbs={showModal}
+        classNames={showModal ? "[&>div]:border-b-0" : undefined}
+      />
+      <div className="booking-route-form-wrapper">
         <NewBookingForm
           booking={{
             assetIds,

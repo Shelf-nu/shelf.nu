@@ -220,7 +220,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(mockAssetUpdate).toHaveBeenCalledWith({
       where: { id: "asset-123", organizationId: "org-1" },
       data: expect.any(Object),
-      include: expect.any(Object),
+      select: { id: true, title: true },
     });
     expect(createNoteMock).not.toHaveBeenCalled();
   });
@@ -324,7 +324,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
           },
         },
       }),
-      include: expect.any(Object),
+      select: { id: true, title: true },
     });
 
     expect(createNoteMock).toHaveBeenCalled();

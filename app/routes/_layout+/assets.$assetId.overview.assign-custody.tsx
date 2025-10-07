@@ -162,7 +162,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     /** We send the data from the form as a json string, so we can easily have both the name and id
      * ID is used to connect the asset to the custodian
@@ -226,13 +232,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
+        select: {
+          id: true,
+          title: true,
         },
       })
       .catch((cause) => {

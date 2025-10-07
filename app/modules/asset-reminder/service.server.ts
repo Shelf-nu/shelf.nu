@@ -37,7 +37,13 @@ export async function createAssetReminder({
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
-    const user = await getUserByID(createdById);
+    const user = await getUserByID(createdById, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const [assetReminder] = await Promise.all([
       db.assetReminder.create({

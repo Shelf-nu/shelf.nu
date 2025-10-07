@@ -1,4 +1,4 @@
-import type { Scan } from "@prisma/client";
+import type { Prisma, Scan } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
@@ -170,9 +170,27 @@ export async function createScanNote({
   try {
     let message = "";
     const { assetId, organizationId } = await getQr({ id: qrId });
-    if (assetId) {
+    if (assetId && organizationId) {
+      // Check if user has access to the asset's organization
+      let hasAccess = false;
       if (userId && userId != "anonymous") {
-        const { firstName, lastName } = await getUserByID(userId);
+
+        const userOrgs = await db.userOrganization.findMany({
+          where: { userId },
+          select: { organizationId: true },
+        });
+        const userOrgIds = userOrgs.map((uo) => uo.organizationId);
+        hasAccess = userOrgIds.includes(organizationId);
+      }
+
+      if (hasAccess) {
+        // User has access - log their name
+        const { firstName, lastName } = await getUserByID(userId!, {
+          select: {
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const actor = wrapUserLinkForNote({
           id: userId,
           firstName,
@@ -186,13 +204,13 @@ export async function createScanNote({
         return await createNote({
           content: message,
           type: "UPDATE",
-          userId,
+          userId: userId!,
           assetId,
         });
       } else {
         if (organizationId) {
           // If there is an assetId there will always be organization id. This is an extra check for organizationId.
-
+          // User doesn't have access or is anonymous - log as unknown user
           const { userId: ownerId } = await getOrganizationById(organizationId);
           message =
             "An unknown user has performed a scan of the asset QR code.";
