@@ -62,11 +62,17 @@ export function wrapAssetsWithDataForNote(
   if (count === 1) {
     // For single asset, use link tag to ensure proper styling and new tab behavior
     const asset = assetArray[0];
-    return `{% link to="/assets/${asset.id}" text="${asset.title}" /%}`;
+    return `{% link to="/assets/${asset.id}" text="${asset.title.replace(
+      /"/g,
+      "&quot;"
+    )}" /%}`;
   } else {
     // For multiple assets, use interactive component
     const idsString = assetArray.map((a) => a.id).join(",");
-    return `{% assets_list count=${count} ids="${idsString}" action="${action}" /%}`;
+    return `{% assets_list count=${count} ids="${idsString}" action="${action.replace(
+      /"/g,
+      "&quot;"
+    )}" /%}`;
   }
 }
 
@@ -87,7 +93,10 @@ export function wrapKitsForNote(
   const count = ids.length;
   const idsString = ids.join(",");
 
-  return `{% kits_list count=${count} ids="${idsString}" action="${action}" /%}`;
+  return `{% kits_list count=${count} ids="${idsString}" action="${action.replace(
+    /"/g,
+    "&quot;"
+  )}" /%}`;
 }
 
 /**
@@ -110,11 +119,17 @@ export function wrapKitsWithDataForNote(
   if (count === 1) {
     // For single kit, use link tag to ensure proper styling and new tab behavior
     const kit = kitArray[0];
-    return `{% link to="/kits/${kit.id}" text="${kit.name}" /%}`;
+    return `{% link to="/kits/${kit.id}" text="${kit.name.replace(
+      /"/g,
+      "&quot;"
+    )}" /%}`;
   } else {
     // For multiple kits, use interactive component
     const idsString = kitArray.map((k) => k.id).join(",");
-    return `{% kits_list count=${count} ids="${idsString}" action="${action}" /%}`;
+    return `{% kits_list count=${count} ids="${idsString}" action="${action.replace(
+      /"/g,
+      "&quot;"
+    )}" /%}`;
   }
 }
 
@@ -136,7 +151,9 @@ export function wrapUserLinkForNote(user: {
     user.lastName?.trim() || ""
   }`.trim();
   const displayName = fullName || "Unknown User";
-  return `{% link to="/settings/team/users/${user.id}" text="${displayName}" /%}`;
+  return `{% link to="/settings/team/users/${
+    user.id
+  }" text="${displayName.replace(/"/g, "&quot;")}" /%}`;
 }
 
 /**
@@ -150,7 +167,7 @@ export function wrapUserLinkForNote(user: {
  * -> "{% link to=\"/bookings/123\" text=\"My Booking\" /%}"
  */
 export function wrapLinkForNote(to: string, text: string): string {
-  return `{% link to="${to}" text="${text}" /%}`;
+  return `{% link to="${to}" text="${text.replace(/"/g, "&quot;")}" /%}`;
 }
 
 /**
@@ -228,8 +245,8 @@ export function wrapCustodianForNote(custodian: {
       lastName: teamMember.user.lastName,
     });
   } else {
-    // Team member without user account, use bold text
-    return `**${teamMember.name}**`;
+    // Team member without user account, use bold text with escaped asterisks
+    return `**${teamMember.name.replace(/\*\*/g, "\\*\\*")}**`;
   }
 }
 

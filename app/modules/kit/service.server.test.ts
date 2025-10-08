@@ -47,6 +47,9 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    teamMember: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
     kitCustody: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -84,6 +87,7 @@ vitest.mock("~/modules/user/service.server", () => ({
 
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
+  createNotes: vitest.fn().mockResolvedValue({}),
   createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
 }));
 
@@ -594,8 +598,19 @@ describe("bulkAssignKitCustody", () => {
     ];
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(availableKits);
+
     //@ts-expect-error missing vitest type
-    db.$transaction.mockResolvedValue(true);
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "custodian-1",
+      name: "John Doe",
+      user: { id: "user-1", firstName: "John", lastName: "Doe" },
+    });
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) =>
+      // Execute the callback with a mock transaction object
+      callback(db)
+    );
 
     await bulkAssignKitCustody({
       kitIds: ["kit-1"],
@@ -647,6 +662,7 @@ describe("bulkReleaseKitCustody", () => {
     const kitsInCustody = [
       {
         id: "kit-1",
+        name: "Kit 1",
         status: KitStatus.IN_CUSTODY,
         custody: { id: "custody-1", custodian: { name: "John Doe" } },
         assets: [
@@ -662,8 +678,12 @@ describe("bulkReleaseKitCustody", () => {
     ];
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(kitsInCustody);
+
     //@ts-expect-error missing vitest type
-    db.$transaction.mockResolvedValue(true);
+    db.$transaction.mockImplementation((callback) =>
+      // Execute the callback with a mock transaction object
+      callback(db)
+    );
 
     await bulkReleaseKitCustody({
       kitIds: ["kit-1"],

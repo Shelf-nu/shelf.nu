@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import type { Asset, Booking, Category, Custody, Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -75,7 +75,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -276,7 +276,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     const user = await getUserByID(authSession.userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
 
     const booking = await db.booking
@@ -379,10 +383,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       /** We create notes for the newly added assets */
+      const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
       await createNotes({
-        content: `${wrapUserLinkForNote(user!)} added asset to booking **[${
-          b.name
-        }](/bookings/${b.id})**.`,
+        content: `${wrapUserLinkForNote(user!)} added asset to ${bookingLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetIds: newAssetIds,

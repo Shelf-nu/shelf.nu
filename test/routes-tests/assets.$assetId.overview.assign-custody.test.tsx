@@ -262,7 +262,18 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     expect(mockAssetUpdate).not.toHaveBeenCalled();
@@ -311,7 +322,18 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     expect(mockAssetUpdate).toHaveBeenCalledWith({

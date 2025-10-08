@@ -11,7 +11,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
@@ -65,7 +64,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         dateStyle: "short",
         timeStyle: "short",
       }).format(note.createdAt),
-      content: parseMarkdownToReact(note.content),
+      content: note.content, // Keep as string for client-side parsing
     }));
 
     return json(data({ asset: { ...asset, notes }, header }));

@@ -6,6 +6,7 @@ import {
   getKitCommandValue,
   getLocationCommandValue,
   getTeamMemberCommandValue,
+  getTeamMemberHref,
   type AssetSearchResult,
   type BookingSearchResult,
   type KitSearchResult,
@@ -153,6 +154,7 @@ describe("getTeamMemberCommandValue", () => {
     email: "jane@example.com",
     firstName: "Jane",
     lastName: "Smith",
+    userId: "user-123",
   };
 
   it("includes the primary searchable fields", () => {
@@ -176,5 +178,55 @@ describe("getTeamMemberCommandValue", () => {
     expect(value).toContain("member-202");
     expect(value).toContain("Jane Smith");
     expect(value).not.toContain("null");
+  });
+});
+
+describe("getTeamMemberHref", () => {
+  const registeredMember: TeamMemberSearchResult = {
+    id: "member-202",
+    name: "Jane Smith",
+    email: "jane@example.com",
+    firstName: "Jane",
+    lastName: "Smith",
+    userId: "user-123",
+  };
+
+  const nrmMember: TeamMemberSearchResult = {
+    id: "member-303",
+    name: "John Appleseed",
+    email: null,
+    firstName: null,
+    lastName: null,
+    userId: null,
+  };
+
+  it("routes registered team members to their user settings page", () => {
+    expect(getTeamMemberHref(registeredMember)).toBe(
+      "/settings/team/users/user-123"
+    );
+  });
+
+  it("routes non-registered members to the NRM edit modal", () => {
+    expect(getTeamMemberHref(nrmMember)).toBe(
+      "/settings/team/nrm/member-303/edit"
+    );
+  });
+
+  it("falls back to the registered list when a user id is missing", () => {
+    expect(
+      getTeamMemberHref({
+        ...registeredMember,
+        userId: "",
+      })
+    ).toBe("/settings/team/users");
+  });
+
+  it("falls back to the NRM list when an NRM id is missing", () => {
+    expect(
+      getTeamMemberHref({
+        ...nrmMember,
+        id: "",
+      })
+    ).toBe("/settings/team/nrm");
   });
 });

@@ -53,7 +53,6 @@ import {
 
 const label: ErrorLabel = "User";
 
-// Overload 1: With select
 export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
   options: { select: TSelect; include?: never }
@@ -1034,7 +1033,7 @@ export async function updateProfilePicture({
 }) {
   try {
     const user = await getUserByID(userId, {
-      select: { id: true, profilePicture: true },
+      select: { id: true, profilePicture: true } satisfies Prisma.UserSelect,
     });
     const previousProfilePictureUrl = user.profilePicture || undefined;
 
@@ -1108,7 +1107,7 @@ export async function softDeleteUser(id: User["id"]) {
             id: true,
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(

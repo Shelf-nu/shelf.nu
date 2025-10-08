@@ -50,6 +50,7 @@ import {
   wrapKitsWithDataForNote,
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
+  wrapLinkForNote,
   wrapBookingStatusForNote,
   wrapCustodianForNote,
   wrapDescriptionForNote,
@@ -146,7 +147,11 @@ export async function createStatusTransitionNote({
   if (userId) {
     // User-initiated transition
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     const userLink = wrapUserLinkForNote({
       id: userId,
@@ -554,7 +559,11 @@ export async function updateBasicBooking({
     // Get user data for attribution if userId is provided
     const user = userId
       ? await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         })
       : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
@@ -584,9 +593,9 @@ export async function updateBasicBooking({
     if (from && booking.from && from.getTime() !== booking.from.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking start date from **${wrapDateForNote(
+        content: `${userLink} changed booking start date from ${wrapDateForNote(
           booking.from
-        )}** to **${wrapDateForNote(from)}**.`,
+        )} to ${wrapDateForNote(from)}.`,
       });
     }
 
@@ -594,9 +603,9 @@ export async function updateBasicBooking({
     if (to && booking.to && to.getTime() !== booking.to.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking end date from **${wrapDateForNote(
+        content: `${userLink} changed booking end date from ${wrapDateForNote(
           booking.to
-        )}** to **${wrapDateForNote(to)}**.`,
+        )} to ${wrapDateForNote(to)}.`,
       });
     }
 
@@ -1343,7 +1352,11 @@ export async function checkinBooking({
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
 
         // Get asset and kit data for consistent formatting
@@ -1500,7 +1513,11 @@ export async function partialCheckinBooking({
 }) {
   try {
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     // First, validate the booking exists and get its current assets
     const bookingFound = await db.booking
@@ -1544,7 +1561,12 @@ export async function partialCheckinBooking({
       // Creating the record here would cause checkinBooking to filter out the current assets
 
       // Create notes before complete check-in since this was initiated as explicit check-in
-      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1632,7 +1654,12 @@ export async function partialCheckinBooking({
       });
 
       // Create audit notes for each checked-in asset using createNotes
-      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via partial check-in.`;
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked in via partial check-in.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1844,7 +1871,11 @@ export async function updateBookingAssets({
 
       if (userId) {
         const user = await getUserByID(userId, {
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
         });
         await createSystemBookingNote({
           bookingId: booking.id,
@@ -1893,7 +1924,11 @@ export async function createKitBookingNote({
 
   if (userId) {
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     await createSystemBookingNote({
       bookingId,
@@ -2272,7 +2307,11 @@ export async function extendBooking({
 
     // Add activity log for booking extension
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
@@ -2795,6 +2834,11 @@ export async function removeAssets({
           disconnect: assetIds.map((id) => ({ id })),
         },
       },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
     });
     /** When removing an asset from a booking we need to make sure to set their status back to available
      * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
@@ -2827,10 +2871,11 @@ export async function removeAssets({
 
     const userForNotes = { firstName, lastName, id: userId };
 
+    const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
     await createNotes({
       content: `${wrapUserLinkForNote(
         userForNotes
-      )} removed asset from booking.`,
+      )} removed assets from ${bookingLink}.`,
       type: "UPDATE",
       userId,
       assetIds,
@@ -3402,7 +3447,11 @@ export async function bulkDeleteBookings({
         },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -3629,7 +3678,11 @@ export async function bulkCancelBookings({
         },
       }),
       getUserByID(userId, {
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
       }),
     ]);
 
@@ -3704,11 +3757,16 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
       const notesData = bookings
         .map((b) =>
           b.assets.map((asset) => ({
             assetId: asset.id,
-            content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** cancelled booking.`,
+            content: `${actor} cancelled booking.`,
             userId,
             type: "UPDATE" as const,
           }))
@@ -3836,7 +3894,11 @@ export async function addScannedAssetsToBooking({
 
     // Create booking activity notes
     const user = await getUserByID(userId, {
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
     });
     const userForNotes = {
       firstName: user?.firstName || "",
