@@ -461,14 +461,14 @@ describe("getCustomFieldUpdateNoteContent", () => {
       customFieldName: "Serial Number",
       previousValue: null,
       newValue: "SN123456",
+      userId: "user-123",
       firstName: "John",
       lastName: "Doe",
-      assetName: "Laptop Asset",
       isFirstTimeSet: true,
     });
 
     expect(result).toBe(
-      "**John Doe** set **Serial Number** of **Laptop Asset** to **SN123456**"
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
     );
   });
 
@@ -477,14 +477,14 @@ describe("getCustomFieldUpdateNoteContent", () => {
       customFieldName: "Warranty Status",
       previousValue: "Active",
       newValue: "Expired",
+      userId: "user-456",
       firstName: "Jane",
       lastName: "Smith",
-      assetName: "Camera Equipment",
       isFirstTimeSet: false,
     });
 
     expect(result).toBe(
-      "**Jane Smith** updated **Warranty Status** of **Camera Equipment** from **Active** to **Expired**"
+      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated **Warranty Status** from **Active** to **Expired**.'
     );
   });
 
@@ -493,14 +493,14 @@ describe("getCustomFieldUpdateNoteContent", () => {
       customFieldName: "Purchase Order",
       previousValue: "PO-2024-001",
       newValue: null,
+      userId: "user-789",
       firstName: "Bob",
       lastName: "Johnson",
-      assetName: "Office Chair",
       isFirstTimeSet: false,
     });
 
     expect(result).toBe(
-      "**Bob Johnson** removed **Purchase Order** value **PO-2024-001** from **Office Chair**"
+      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed **Purchase Order** value **PO-2024-001**.'
     );
   });
 
@@ -509,14 +509,14 @@ describe("getCustomFieldUpdateNoteContent", () => {
       customFieldName: "Serial Number",
       previousValue: null,
       newValue: "SN123456",
+      userId: "user-123",
       firstName: "  John  ",
       lastName: "  Doe  ",
-      assetName: "  Laptop Asset  ",
       isFirstTimeSet: true,
     });
 
     expect(result).toBe(
-      "**John Doe** set **Serial Number** of **Laptop Asset** to **SN123456**"
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
     );
   });
 
@@ -525,9 +525,9 @@ describe("getCustomFieldUpdateNoteContent", () => {
       customFieldName: "Serial Number",
       previousValue: null,
       newValue: null,
+      userId: "user-123",
       firstName: "John",
       lastName: "Doe",
-      assetName: "Laptop Asset",
       isFirstTimeSet: false,
     });
 
@@ -539,9 +539,9 @@ describe("getCustomFieldUpdateNoteContent", () => {
       customFieldName: "Serial Number",
       previousValue: null,
       newValue: null,
+      userId: "user-123",
       firstName: "John",
       lastName: "Doe",
-      assetName: "Laptop Asset",
       isFirstTimeSet: true,
     });
 

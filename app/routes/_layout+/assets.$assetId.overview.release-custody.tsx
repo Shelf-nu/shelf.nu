@@ -17,6 +17,10 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
+  wrapCustodianForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
@@ -129,17 +133,28 @@ export const action = async ({
       } satisfies Prisma.UserSelect,
     });
 
-    if (isSelfService) {
-      const custody = await db.custody.findUnique({
-        where: { assetId },
-        select: {
-          custodian: {
-            select: { id: true, userId: true },
+    const custodyRecord = await db.custody.findUnique({
+      where: { assetId },
+      select: {
+        custodian: {
+          select: {
+            id: true,
+            name: true,
+            userId: true,
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
-      });
+      },
+    });
 
-      if (custody?.custodian?.userId !== user.id) {
+    if (isSelfService) {
+      if (custodyRecord?.custodian?.userId !== user.id) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",
@@ -165,18 +180,41 @@ export const action = async ({
         }
       );
 
+      const custodianDisplayName =
+        custodyRecord?.custodian?.name?.trim() || custodianName.trim();
+      const custodianDisplay = custodyRecord?.custodian
+        ? wrapCustodianForNote({
+            teamMember: {
+              name: custodianDisplayName,
+              user: custodyRecord.custodian.user
+                ? {
+                    id: custodyRecord.custodian.user.id,
+                    firstName: custodyRecord.custodian.user.firstName,
+                    lastName: custodyRecord.custodian.user.lastName,
+                  }
+                : null,
+            },
+          })
+        : `**${custodianDisplayName}**`;
+      const actor = wrapUserLinkForNote({
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+      const content = isSelfService
+        ? `${actor} released their custody.`
+        : `${actor} released ${custodianDisplay}'s custody.`;
+
       /** Once the asset is updated, we create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
-          isSelfService ? "their" : `**${custodianName?.trim()}'s**`
-        } custody over **${asset.title?.trim()}**`,
+        content,
         type: "UPDATE",
         userId: asset.userId,
         assetId: asset.id,
       });
 
       sendNotification({
-        title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+        title: `‘${asset.title}’ is no longer in custody of ‘${custodianDisplayName}’`,
         message: "This asset is available again.",
         icon: { name: "success", variant: "success" },
         senderId: userId,
