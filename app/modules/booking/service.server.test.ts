@@ -31,6 +31,7 @@ import {
   revertBookingToDraft,
   extendBooking,
   removeAssets,
+  getOngoingBookingForAsset,
   // Test helper functions
   getActionTextFromTransition,
   getSystemActionText,
@@ -2245,3 +2246,204 @@ describe("getSystemActionText", () => {
 // Note: createStatusTransitionNote is well-tested through integration tests above
 // The function is used by reserveBooking, checkoutBooking, checkinBooking, cancelBooking,
 // archiveBooking, revertBookingToDraft, and bulkCancelBookings/bulkArchiveBookings
+
+describe("getOngoingBookingForAsset", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should return booking when asset is checked out in an ONGOING booking", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(mockBooking);
+
+    const result = await getOngoingBookingForAsset({
+      assetId: "asset-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-1",
+        assets: { some: { id: "asset-1" } },
+        partialCheckins: { none: { assetIds: { has: "asset-1" } } },
+      },
+    });
+    expect(result).toEqual(mockBooking);
+  });
+
+  it("should return booking when asset is checked out in an OVERDUE booking", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-2",
+      name: "Overdue Booking",
+      status: BookingStatus.OVERDUE,
+      organizationId: "org-1",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(mockBooking);
+
+    const result = await getOngoingBookingForAsset({
+      assetId: "asset-2",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-1",
+        assets: { some: { id: "asset-2" } },
+        partialCheckins: { none: { assetIds: { has: "asset-2" } } },
+      },
+    });
+    expect(result).toEqual(mockBooking);
+  });
+
+  it("should return null when asset is partially checked in", async () => {
+    expect.assertions(2);
+
+    // Mock that no booking is found because the asset is partially checked in
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    const result = await getOngoingBookingForAsset({
+      assetId: "asset-3",
+      organizationId: "org-1",
+    });
+
+    // Verify the query excludes bookings where asset is in partialCheckins
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-1",
+        assets: { some: { id: "asset-3" } },
+        partialCheckins: { none: { assetIds: { has: "asset-3" } } },
+      },
+    });
+    expect(result).toBeNull();
+  });
+
+  it("should return null when asset is not in any ONGOING or OVERDUE booking", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    const result = await getOngoingBookingForAsset({
+      assetId: "asset-4",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-1",
+        assets: { some: { id: "asset-4" } },
+        partialCheckins: { none: { assetIds: { has: "asset-4" } } },
+      },
+    });
+    expect(result).toBeNull();
+  });
+
+  it("should only consider ONGOING and OVERDUE bookings, not RESERVED or DRAFT", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    await getOngoingBookingForAsset({
+      assetId: "asset-5",
+      organizationId: "org-1",
+    });
+
+    // Verify that only ONGOING and OVERDUE statuses are queried
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-1",
+        assets: { some: { id: "asset-5" } },
+        partialCheckins: { none: { assetIds: { has: "asset-5" } } },
+      },
+    });
+  });
+
+  it("should filter by organization ID to ensure org isolation", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    await getOngoingBookingForAsset({
+      assetId: "asset-6",
+      organizationId: "org-2",
+    });
+
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-2",
+        assets: { some: { id: "asset-6" } },
+        partialCheckins: { none: { assetIds: { has: "asset-6" } } },
+      },
+    });
+  });
+
+  it("should throw ShelfError when database query fails", async () => {
+    expect.assertions(1);
+
+    const dbError = new Error("Database connection error");
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockRejectedValue(dbError);
+
+    await expect(
+      getOngoingBookingForAsset({
+        assetId: "asset-7",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("should handle scenario where asset is checked in one booking but checked out in another", async () => {
+    expect.assertions(2);
+
+    // This is the key bug scenario: asset is checked in one booking (has partial checkin)
+    // and checked out in another. The function should return the booking where it's checked out.
+    const checkedOutBooking = {
+      id: "booking-checked-out",
+      name: "Checked Out Booking",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(checkedOutBooking);
+
+    const result = await getOngoingBookingForAsset({
+      assetId: "asset-8",
+      organizationId: "org-1",
+    });
+
+    // The query should exclude bookings where asset has partial checkin
+    // so we get the right booking
+    expect(db.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: "org-1",
+        assets: { some: { id: "asset-8" } },
+        partialCheckins: { none: { assetIds: { has: "asset-8" } } },
+      },
+    });
+    expect(result).toEqual(checkedOutBooking);
+  });
+});
