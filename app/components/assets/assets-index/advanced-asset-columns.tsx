@@ -1,6 +1,6 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { Booking, AssetStatus } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
@@ -203,13 +203,7 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return (
-        <StatusColumn
-          id={item.id}
-          status={item.status}
-          bookings={item.bookings}
-        />
-      );
+      return <StatusColumn id={item.id} status={item.status} />;
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -343,23 +337,10 @@ function TextColumn({
   );
 }
 
-function StatusColumn({
-  id,
-  status,
-  bookings,
-}: {
-  id: string;
-  status: AssetStatus;
-  bookings?: Pick<Booking, "id" | "name" | "status">[];
-}) {
+function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge
-        bookings={bookings}
-        id={id}
-        status={status}
-        availableToBook={true}
-      />
+      <AssetStatusBadge id={id} status={status} availableToBook={true} />
     </Td>
   );
 }
