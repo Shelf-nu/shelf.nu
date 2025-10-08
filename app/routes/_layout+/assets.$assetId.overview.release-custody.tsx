@@ -18,7 +18,6 @@ import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   wrapCustodianForNote,
-  wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import {
@@ -202,14 +201,9 @@ export const action = async ({
         firstName: user.firstName,
         lastName: user.lastName,
       });
-      const assetLink = wrapLinkForNote(
-        `/assets/${asset.id}`,
-        asset.title?.trim() ?? ""
-      );
-
       const content = isSelfService
-        ? `${actor} released their custody of ${assetLink}.`
-        : `${actor} released ${custodianDisplay}'s custody of ${assetLink}.`;
+        ? `${actor} released their custody.`
+        : `${actor} released ${custodianDisplay}'s custody.`;
 
       /** Once the asset is updated, we create the note */
       await createNote({

@@ -35,7 +35,6 @@ import {
 } from "~/utils/http.server";
 import {
   wrapCustodianForNote,
-  wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import {
@@ -253,10 +252,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       firstName: user.firstName,
       lastName: user.lastName,
     });
-    const assetLink = wrapLinkForNote(
-      `/assets/${asset.id}`,
-      asset.title.trim()
-    );
+
     const custodianDisplay = wrapCustodianForNote({
       teamMember: {
         name: custodianDisplayName,
@@ -271,8 +267,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const content = isSelfService
-      ? `${actor} took custody of ${assetLink}.`
-      : `${actor} assigned custody of ${assetLink} to ${custodianDisplay}.`;
+      ? `${actor} took custody.`
+      : `${actor} assigned custody to ${custodianDisplay}.`;
 
     await createNote({
       content,

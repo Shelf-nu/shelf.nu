@@ -3,7 +3,6 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
-  wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
@@ -141,7 +140,6 @@ export async function createBulkKitChangeNotes({
           newKit,
           firstName: user.firstName ?? "",
           lastName: user.lastName ?? "",
-          assetName: asset.title,
           assetId: asset.id,
           userId,
           isRemoving: isAssetRemoved,
@@ -167,7 +165,6 @@ export async function createKitChangeNote({
   newKit,
   firstName,
   lastName,
-  assetName,
   assetId,
   userId,
   isRemoving,
@@ -176,7 +173,6 @@ export async function createKitChangeNote({
   newKit: Pick<Kit, "id" | "name"> | null;
   firstName: string;
   lastName: string;
-  assetName: Asset["title"];
   assetId: Asset["id"];
   userId: User["id"];
   isRemoving: boolean;
@@ -187,7 +183,6 @@ export async function createKitChangeNote({
       firstName,
       lastName,
     });
-    const assetLink = wrapLinkForNote(`/assets/${assetId}`, assetName.trim());
     let message = "";
 
     /** User is changing from kit to another */
@@ -200,7 +195,7 @@ export async function createKitChangeNote({
         { id: newKit.id, name: newKit.name.trim() },
         "updated"
       );
-      message = `${userLink} changed kit of ${assetLink} from ${currentKitLink} to ${newKitLink}.`;
+      message = `${userLink} changed kit  from ${currentKitLink} to ${newKitLink}.`;
     }
 
     /** User is adding asset to a kit for first time */
@@ -209,7 +204,7 @@ export async function createKitChangeNote({
         { id: newKit.id, name: newKit.name.trim() },
         "added"
       );
-      message = `${userLink} added ${assetLink} to ${newKitLink}.`;
+      message = `${userLink} added asset to ${newKitLink}.`;
     }
 
     /** User is removing the asset from kit */
@@ -219,9 +214,9 @@ export async function createKitChangeNote({
           { id: currentKit.id, name: currentKit.name.trim() },
           "removed"
         );
-        message = `${userLink} removed ${assetLink} from ${currentKitLink}.`;
+        message = `${userLink} removed asset from ${currentKitLink}.`;
       } else {
-        message = `${userLink} removed ${assetLink} from a kit.`;
+        message = `${userLink} removed asset from a kit.`;
       }
     }
 
