@@ -142,6 +142,8 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         currentOrganization,
         ...tagsData,
         modelName,
+        isSelfServiceOrBase,
+        userId,
         searchFieldTooltip: {
           title: "Search your bookings",
           text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
