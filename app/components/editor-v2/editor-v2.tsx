@@ -119,6 +119,9 @@ interface SlashCommandItem {
   command: PMCommand;
 }
 
+const EDITOR_BASE_CLASS = "prose prose-sm max-w-none focus:outline-none";
+const EDITOR_DISABLED_CLASS = "pointer-events-none opacity-60";
+
 const placeholderPluginKey = new Plugin({
   props: {
     decorations(state) {
@@ -552,8 +555,8 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
     const schema = useMemo(() => createEditorSchema(), []);
     const editorContainerRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
-  const [markdocValue, setMarkdocValue] = useState(defaultValue);
-  const markdocValueRef = useRef(defaultValue);
+    const [markdocValue, setMarkdocValue] = useState(defaultValue);
+    const markdocValueRef = useRef(defaultValue);
     const [toolbarState, setToolbarState] = useState<ToolbarState>(() => ({
       block: "paragraph",
       bold: false,
@@ -809,9 +812,10 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       if (!editorContainerRef.current) {
         return;
       }
+      const container = editorContainerRef.current;
       const initialDoc = parseMarkdoc(defaultValue, schema);
 
-      const view = new EditorView(editorContainerRef.current, {
+      const view = new EditorView(container, {
         state: EditorState.create({
           schema,
           doc: initialDoc,
@@ -824,27 +828,24 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
           ],
         }) as EditorState & { placeholder?: string },
         attributes: {
-          class: tw(
-            "prose prose-sm max-w-none focus:outline-none",
-            disabled ? "pointer-events-none opacity-60" : ""
-          ),
+          class: tw(EDITOR_BASE_CLASS),
         },
         dispatchTransaction: (tr) => {
           const currentView = (viewRef.current ?? view) as EditorView;
-        const nextState = currentView.state.apply(tr);
-        let nextMarkdoc = markdocValueRef.current;
-        if (tr.docChanged) {
-          nextMarkdoc = serializeMarkdoc(nextState.doc, schema);
-          if (maxLength && nextMarkdoc.length > maxLength) {
-            return;
+          const nextState = currentView.state.apply(tr);
+          let nextMarkdoc = markdocValueRef.current;
+          if (tr.docChanged) {
+            nextMarkdoc = serializeMarkdoc(nextState.doc, schema);
+            if (maxLength && nextMarkdoc.length > maxLength) {
+              return;
+            }
           }
-        }
-        currentView.updateState(nextState);
-        if (tr.docChanged) {
-          setMarkdocValue(nextMarkdoc);
-          markdocValueRef.current = nextMarkdoc;
-          onChange?.(nextMarkdoc);
-          const rawCount = countRawBlocks(nextState.doc);
+          currentView.updateState(nextState);
+          if (tr.docChanged) {
+            setMarkdocValue(nextMarkdoc);
+            markdocValueRef.current = nextMarkdoc;
+            onChange?.(nextMarkdoc);
+            const rawCount = countRawBlocks(nextState.doc);
             if (rawCount > 0 && rawCount !== rawBlockTelemetryRef.current) {
               Logger.info("editor-v2.raw-blocks", { count: rawCount });
             }
@@ -854,7 +855,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
           updateBubble(nextState, currentView);
           updateSlash(nextState, currentView);
         },
-        editable: () => !disabled,
+        editable: () => true,
         nodeViews: {
           raw_block: (node, _view, getPos) => {
             const dom = document.createElement("div");
@@ -897,12 +898,14 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
 
       (view.state as any).placeholder = placeholder;
       viewRef.current = view;
-    const initialValue = serializeMarkdoc(view.state.doc, schema);
-    setMarkdocValue(initialValue);
-    markdocValueRef.current = initialValue;
+      (container as any).__editorView = view;
+
+      const initialValue = serializeMarkdoc(view.state.doc, schema);
+      setMarkdocValue(initialValue);
+      markdocValueRef.current = initialValue;
       applyToolbarState(view.state);
       updateBubble(view.state, view);
-    updateSlash(view.state, view);
+      updateSlash(view.state, view);
 
       const dom = view.dom as HTMLElement;
       const handleFocus = (event: FocusEvent) => onFocus?.(event as any);
@@ -913,24 +916,46 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       return () => {
         dom.removeEventListener("focus", handleFocus);
         dom.removeEventListener("blur", handleBlur);
+        delete (container as any).__editorView;
         view.destroy();
         viewRef.current = null;
       };
-  }, [
-    applyToolbarState,
-    defaultValue,
-    disabled,
-    maxLength,
-    onBlur,
-    onChange,
-    onFocus,
-    openLinkDialog,
-    openRawBlockEditor,
-    placeholder,
-    schema,
-    updateBubble,
-    updateSlash,
-  ]);
+    }, [
+      applyToolbarState,
+      defaultValue,
+      maxLength,
+      onBlur,
+      onChange,
+      onFocus,
+      openLinkDialog,
+      openRawBlockEditor,
+      placeholder,
+      schema,
+      updateBubble,
+      updateSlash,
+    ]);
+
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) {
+        return;
+      }
+      const nextClass = tw(
+        EDITOR_BASE_CLASS,
+        disabled ? EDITOR_DISABLED_CLASS : ""
+      );
+      view.setProps({
+        editable: () => !disabled,
+        attributes: { class: nextClass },
+      });
+      const dom = view.dom as HTMLElement;
+      dom.className = nextClass;
+      if (disabled) {
+        dom.setAttribute("aria-disabled", "true");
+      } else {
+        dom.removeAttribute("aria-disabled");
+      }
+    }, [disabled]);
 
     useEffect(() => {
       const view = viewRef.current;
