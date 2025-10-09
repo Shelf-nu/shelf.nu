@@ -158,7 +158,7 @@ export function AdvancedIndexColumn({
                     thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
                   }}
-                  alt={item.title}
+                  alt={`Image of ${item.title}`}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
                   withPreview={true}
                 />

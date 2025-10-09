@@ -42,6 +42,7 @@ export default function KitQuickActions({
               variant="secondary"
               className={"p-2"}
               to={`/kits/${kit.id}/edit`}
+              aria-label="Edit kit information"
             >
               <PencilIcon className="size-4" />
             </Button>
@@ -70,7 +71,12 @@ export default function KitQuickActions({
             }}
             trigger={
               <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" className="p-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="p-2"
+                  aria-label="Show kit codes"
+                >
                   <QrCodeIcon className="size-4" />
                 </Button>
               </TooltipTrigger>
@@ -95,7 +101,12 @@ export default function KitQuickActions({
             kit={kit}
             trigger={
               <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" className={"p-2"}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={"p-2"}
+                  aria-label="Delete kit"
+                >
                   <Trash2Icon className="size-4" />
                 </Button>
               </TooltipTrigger>

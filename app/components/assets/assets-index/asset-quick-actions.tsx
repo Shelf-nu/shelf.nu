@@ -49,6 +49,7 @@ export default function AssetQuickActions({
               variant="secondary"
               className={"p-2"}
               to={`/assets/${asset.id}/edit`}
+              aria-label="Edit asset information"
             >
               <PencilIcon className="size-4" />
             </Button>
@@ -71,7 +72,12 @@ export default function AssetQuickActions({
           }}
           trigger={
             <TooltipTrigger asChild>
-              <Button size="sm" variant="secondary" className={"p-2"}>
+              <Button
+                size="sm"
+                variant="secondary"
+                className={"p-2"}
+                aria-label="Show asset label"
+              >
                 <QrCodeIcon className="size-4" />
               </Button>
             </TooltipTrigger>
@@ -97,6 +103,7 @@ export default function AssetQuickActions({
               variant="secondary"
               className={"p-2"}
               to={`/assets/${asset.id}/overview/duplicate`}
+              aria-label="Duplicate asset"
             >
               <CopyIcon className="size-4" />
             </Button>
@@ -120,7 +127,12 @@ export default function AssetQuickActions({
             asset={asset}
             trigger={
               <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" className={"p-2"}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={"p-2"}
+                  aria-label="Delete asset"
+                >
                   <Trash2Icon className="size-4" />
                 </Button>
               </TooltipTrigger>
