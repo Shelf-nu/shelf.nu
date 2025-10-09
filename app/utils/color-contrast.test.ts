@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 import { describe, it, expect } from "vitest";
+import { BADGE_COLORS } from "./badge-colors";
 import {
   getContrastRatio,
   meetsWCAG_AA,
@@ -116,90 +117,115 @@ describe("Color Contrast Utilities", () => {
 
   describe("WCAG Compliance Tests", () => {
     describe("Asset Status Badge Colors", () => {
-      // These are the hardcoded colors from asset-status-badge.tsx
-      const statusColors = {
-        inCustody: "#2E90FA", // Blue
-        checkedOut: "#5925DC", // Purple
-        available: "#12B76A", // Green
-      };
-
-      // The Badge component uses 30% opacity for background and darkened text
-      const whiteBackground = "#ffffff";
-
       it("IN_CUSTODY badge should meet WCAG AA", () => {
-        const bgOverlay = overlayColor(
-          statusColors.inCustody,
-          whiteBackground,
-          0.3
-        );
-        const textColor = darkenColor(statusColors.inCustody, 0.5);
-        const ratio = getContrastRatio(textColor, bgOverlay);
-        const meetsAA = meetsWCAG_AA(textColor, bgOverlay);
+        const { bg, text } = BADGE_COLORS.blue;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
 
         console.log(
-          `IN_CUSTODY: ${textColor} on ${bgOverlay} = ${ratio.toFixed(
-            2
-          )}:1 (WCAG AA: ${meetsAA ? "✓" : "✗"})`
+          `IN_CUSTODY: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
         );
         expect(ratio).toBeGreaterThanOrEqual(4.5);
         expect(meetsAA).toBe(true);
       });
 
       it("CHECKED_OUT badge should meet WCAG AA", () => {
-        const bgOverlay = overlayColor(
-          statusColors.checkedOut,
-          whiteBackground,
-          0.3
-        );
-        const textColor = darkenColor(statusColors.checkedOut, 0.5);
-        const ratio = getContrastRatio(textColor, bgOverlay);
-        const meetsAA = meetsWCAG_AA(textColor, bgOverlay);
+        const { bg, text } = BADGE_COLORS.violet;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
 
         console.log(
-          `CHECKED_OUT: ${textColor} on ${bgOverlay} = ${ratio.toFixed(
-            2
-          )}:1 (WCAG AA: ${meetsAA ? "✓" : "✗"})`
+          `CHECKED_OUT: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
         );
         expect(ratio).toBeGreaterThanOrEqual(4.5);
         expect(meetsAA).toBe(true);
       });
 
       it("AVAILABLE badge should meet WCAG AA", () => {
-        const bgOverlay = overlayColor(
-          statusColors.available,
-          whiteBackground,
-          0.3
-        );
-        const textColor = darkenColor(statusColors.available, 0.5);
-        const ratio = getContrastRatio(textColor, bgOverlay);
-        const meetsAA = meetsWCAG_AA(textColor, bgOverlay);
+        const { bg, text } = BADGE_COLORS.green;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
 
         console.log(
-          `AVAILABLE: ${textColor} on ${bgOverlay} = ${ratio.toFixed(
-            2
-          )}:1 (WCAG AA: ${meetsAA ? "✓" : "✗"})`
+          `AVAILABLE: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
         );
         expect(ratio).toBeGreaterThanOrEqual(4.5);
         expect(meetsAA).toBe(true);
       });
     });
 
-    describe("Availability Label (Warning Colors)", () => {
-      // From tailwind.config.ts
-      const warningColors = {
-        bg: "#FFFAEB", // warning-50
-        border: "#FEDF89", // warning-200
-        text: "#B54708", // warning-700
-      };
-
-      it("warning text on warning background should meet WCAG AA", () => {
-        const ratio = getContrastRatio(warningColors.text, warningColors.bg);
-        const meetsAA = meetsWCAG_AA(warningColors.text, warningColors.bg);
+    describe("Booking Status Badge Colors", () => {
+      it("DRAFT badge should meet WCAG AA", () => {
+        const { bg, text } = BADGE_COLORS.gray;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
 
         console.log(
-          `Warning badge: ${warningColors.text} on ${
-            warningColors.bg
-          } = ${ratio.toFixed(2)}:1 (WCAG AA: ${meetsAA ? "✓" : "✗"})`
+          `DRAFT: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
+        );
+        expect(ratio).toBeGreaterThanOrEqual(4.5);
+        expect(meetsAA).toBe(true);
+      });
+
+      it("RESERVED badge should meet WCAG AA", () => {
+        const { bg, text } = BADGE_COLORS.blue;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
+
+        console.log(
+          `RESERVED: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
+        );
+        expect(ratio).toBeGreaterThanOrEqual(4.5);
+        expect(meetsAA).toBe(true);
+      });
+
+      it("ONGOING badge should meet WCAG AA", () => {
+        const { bg, text } = BADGE_COLORS.violet;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
+
+        console.log(
+          `ONGOING: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
+        );
+        expect(ratio).toBeGreaterThanOrEqual(4.5);
+        expect(meetsAA).toBe(true);
+      });
+
+      it("OVERDUE badge should meet WCAG AA", () => {
+        const { bg, text } = BADGE_COLORS.red;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
+
+        console.log(
+          `OVERDUE: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
+        );
+        expect(ratio).toBeGreaterThanOrEqual(4.5);
+        expect(meetsAA).toBe(true);
+      });
+
+      it("COMPLETE badge should meet WCAG AA", () => {
+        const { bg, text } = BADGE_COLORS.green;
+        const ratio = getContrastRatio(text, bg);
+        const meetsAA = meetsWCAG_AA(text, bg);
+
+        console.log(
+          `COMPLETE: ${text} on ${bg} = ${ratio.toFixed(2)}:1 (WCAG AA: ${
+            meetsAA ? "✓" : "✗"
+          })`
         );
         expect(ratio).toBeGreaterThanOrEqual(4.5);
         expect(meetsAA).toBe(true);

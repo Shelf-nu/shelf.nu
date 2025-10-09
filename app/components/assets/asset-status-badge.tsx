@@ -3,6 +3,7 @@ import type { Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
+import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
@@ -31,15 +32,19 @@ export const userFriendlyAssetStatus = (status: ExtendedAssetStatus) => {
   }
 };
 
-export const assetStatusColorMap = (status: ExtendedAssetStatus) => {
+export const assetStatusColorMap = (
+  status: ExtendedAssetStatus
+): BadgeColorScheme => {
   switch (status) {
     case AssetStatus.IN_CUSTODY:
+      return BADGE_COLORS.blue;
     case "PARTIALLY_CHECKED_IN":
-      return "#2E90FA";
+      return BADGE_COLORS.blue;
     case AssetStatus.CHECKED_OUT:
-      return "#5925DC";
+      return BADGE_COLORS.violet;
     default:
-      return "#12B76A";
+      // AVAILABLE
+      return BADGE_COLORS.green;
   }
 };
 
@@ -70,11 +75,12 @@ export function AssetStatusBadge({
 
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
+  const colors = assetStatusColorMap(status);
   return (
     <HoverCard openDelay={0}>
       <HoverCardTrigger asChild>
         <span className="flex items-center gap-1.5">
-          <Badge color={assetStatusColorMap(status)}>
+          <Badge color={colors.bg} textColor={colors.text}>
             {userFriendlyAssetStatus(status)}
           </Badge>
           {!availableToBook && (

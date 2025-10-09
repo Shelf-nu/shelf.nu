@@ -1,5 +1,6 @@
 import { KitStatus } from "@prisma/client";
 import type { ExtendedKitStatus } from "~/utils/booking-assets";
+import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import { Badge } from "../shared/badge";
 import { UnavailableBadge } from "../shared/unavailable-badge";
 
@@ -16,15 +17,19 @@ export function userFriendlyKitStatus(status: ExtendedKitStatus) {
   }
 }
 
-export const assetStatusColorMap = (status: ExtendedKitStatus) => {
+export const kitStatusColorMap = (
+  status: ExtendedKitStatus
+): BadgeColorScheme => {
   switch (status) {
     case KitStatus.IN_CUSTODY:
+      return BADGE_COLORS.blue;
     case "PARTIALLY_CHECKED_IN":
-      return "#2E90FA";
+      return BADGE_COLORS.blue;
     case KitStatus.CHECKED_OUT:
-      return "#5925DC";
+      return BADGE_COLORS.violet;
     default:
-      return "#12B76A";
+      // AVAILABLE
+      return BADGE_COLORS.green;
   }
 };
 
@@ -35,9 +40,10 @@ export function KitStatusBadge({
   status: ExtendedKitStatus;
   availableToBook: boolean;
 }) {
+  const colors = kitStatusColorMap(status);
   return (
     <div className="flex items-center gap-[6px]">
-      <Badge color={assetStatusColorMap(status)}>
+      <Badge color={colors.bg} textColor={colors.text}>
         {userFriendlyKitStatus(status)}
       </Badge>
       {!availableToBook && (
