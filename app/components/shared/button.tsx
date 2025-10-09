@@ -48,9 +48,17 @@ export interface CommonButtonProps {
   hideErrorText?: boolean;
   children?: React.ReactNode;
   disabled?: DisabledProp;
-  label?: string; // Add label here since it's used in BookLink
+  /**
+   * Accessible label for the button. Only required for icon-only buttons.
+   * Buttons with text children automatically use the text as the accessible name.
+   * If both label and text children are present, the text children take precedence.
+   */
+  label?: string;
   id?: string; // Add id as an optional prop since some buttons might need it
-  tooltip?: string; // Tooltip text for the button
+  /**
+   * Tooltip text for the button. Also serves as an accessible name for icon-only buttons.
+   */
+  tooltip?: string;
 }
 
 /**
@@ -187,6 +195,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       error,
       hideErrorText = false,
       tooltip,
+      label,
       ...props
     },
     ref
@@ -205,6 +214,30 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       typeof disabled === "object" ? disabled.reason : undefined;
     const disabledTitle =
       typeof disabled === "object" ? disabled.title : undefined;
+
+    // Check if this is an icon-only button (has icon but no text children)
+    const isIconOnly = icon && !children;
+
+    // Only set aria-label for icon-only buttons or when explicitly provided
+    // Buttons with text children don't need aria-label (text is the accessible name)
+    const explicitAriaLabel =
+      "aria-label" in props
+        ? (props["aria-label" as keyof typeof props] as string)
+        : undefined;
+    const ariaLabel = explicitAriaLabel || (isIconOnly ? label : undefined);
+
+    // Development warning for icon-only buttons without accessible names
+    if (
+      process.env.NODE_ENV === "development" &&
+      isIconOnly &&
+      !ariaLabel &&
+      !tooltip
+    ) {
+      console.warn(
+        "Button: Icon-only button detected without accessible name. " +
+          "Please provide either an aria-label, label prop, or tooltip for accessibility."
+      );
+    }
 
     // Type guard for checking if props has target property
     const hasTarget = (props: ButtonProps): props is LinkButtonProps =>
@@ -261,6 +294,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
             <Component
               {...props}
               className={finalStyles}
+              aria-label={ariaLabel}
               onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
               onClick={(e: React.MouseEvent) => e.preventDefault()}
             >
@@ -285,6 +319,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               <Component
                 {...props}
                 className={finalStyles}
+                aria-label={ariaLabel}
                 prefetch={
                   isLinkProps(props) ? props.prefetch ?? "none" : undefined
                 }
@@ -313,6 +348,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         <Component
           {...props}
           className={finalStyles}
+          aria-label={ariaLabel}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
           ref={ref}
           disabled={isDisabled}
