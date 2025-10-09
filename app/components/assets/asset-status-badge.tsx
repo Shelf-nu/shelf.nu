@@ -73,14 +73,14 @@ export function AssetStatusBadge({
   return (
     <HoverCard openDelay={0}>
       <HoverCardTrigger asChild>
-        <button className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5">
           <Badge color={assetStatusColorMap(status)}>
             {userFriendlyAssetStatus(status)}
           </Badge>
           {!availableToBook && (
             <UnavailableBadge title="This asset is marked as unavailable for bookings" />
           )}
-        </button>
+        </span>
       </HoverCardTrigger>
 
       <When truthy={!!bookingToShow}>

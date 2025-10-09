@@ -71,6 +71,7 @@ export const Toaster = () => {
           className="flex"
           onClick={clearNotification}
           data-test-id="closeToast"
+          aria-label="Close notification"
         >
           {iconsMap["x"]}
         </Toast.Close>
