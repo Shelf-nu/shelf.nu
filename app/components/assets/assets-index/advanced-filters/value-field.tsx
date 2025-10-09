@@ -475,8 +475,44 @@ function BooleanField({
   disabled?: boolean;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const boolValue = value === "" ? true : value === "true" || value === true;
+
+  // Reset selected index when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      // Set to "Yes" (0) if true, "No" (1) if false
+      setSelectedIndex(boolValue ? 0 : 1);
+    }
+  }, [isPopoverOpen, boolValue]);
+
+  const handleSelect = (value: "true" | "false") => {
+    handleBooleanChange(value);
+    setIsPopoverOpen(false);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev < 1 ? prev + 1 : prev));
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ": // Space key
+        event.preventDefault();
+        handleSelect(selectedIndex === 0 ? "true" : "false");
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
 
   return (
     <>
@@ -503,22 +539,23 @@ function BooleanField({
             className={tw(
               "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
+            onKeyDown={handleKeyDown}
           >
             <div
-              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-              onClick={() => {
-                handleBooleanChange("true");
-                setIsPopoverOpen(false);
-              }}
+              className={tw(
+                "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                selectedIndex === 0 && "bg-gray-50"
+              )}
+              onClick={() => handleSelect("true")}
             >
               <span>Yes</span>
             </div>
             <div
-              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-              onClick={() => {
-                handleBooleanChange("false");
-                setIsPopoverOpen(false);
-              }}
+              className={tw(
+                "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                selectedIndex === 1 && "bg-gray-50"
+              )}
+              onClick={() => handleSelect("false")}
             >
               <span>No</span>
             </div>
@@ -555,9 +592,23 @@ function EnumField({
   disabled = false,
 }: EnumFieldProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
+
+  // Reset selected index when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      // For single-select, find the currently selected option
+      if (!multiSelect) {
+        const currentIndex = options.findIndex((opt) => opt.id === value);
+        setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+      } else {
+        setSelectedIndex(0);
+      }
+    }
+  }, [isPopoverOpen, value, options, multiSelect]);
 
   const displayValue = disabled
     ? "Select a column first"
@@ -586,6 +637,44 @@ function EnumField({
     }
   }
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < options.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ": // Space key
+        event.preventDefault();
+        if (options[selectedIndex]) {
+          handleOptionClick(options[selectedIndex].id);
+        }
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (isPopoverOpen) {
+      const selectedElement = document.getElementById(
+        `enum-option-${selectedIndex}`
+      );
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [selectedIndex, isPopoverOpen]);
+
   return (
     <>
       <input
@@ -613,6 +702,7 @@ function EnumField({
             className={tw(
               "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
+            onKeyDown={handleKeyDown}
           >
             {options.length === 0 ? (
               <div className="max-w-[400px] p-4">
@@ -620,12 +710,16 @@ function EnumField({
                 is an error.
               </div>
             ) : (
-              options.map((option) => {
+              options.map((option, index) => {
                 const isSelected = selectedValues.includes(option.id);
                 return (
                   <div
+                    id={`enum-option-${index}`}
                     key={option.id}
-                    className="flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+                    className={tw(
+                      "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                      selectedIndex === index && "bg-gray-50"
+                    )}
                     onClick={() => handleOptionClick(option.id)}
                   >
                     <span>{option.label}</span>
