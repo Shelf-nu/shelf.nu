@@ -34,7 +34,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (!canUseBarcodes) {
       throw new ShelfError({
         cause: null,
-        message: "Barcode scanning is not enabled for this organization.",
+        message:
+          "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code.",
         additionalData: { value, shouldSendNotification: false },
         label: "Barcode",
         shouldBeCaptured: false,
