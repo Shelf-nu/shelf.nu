@@ -142,7 +142,7 @@ const ListItemContent = ({
           <div className="flex size-12 items-center justify-center">
             <ImageWithPreview
               thumbnailUrl={item.thumbnailUrl}
-              alt={item.name}
+              alt={`${item.name} main image`}
               className="size-full"
             />
           </div>

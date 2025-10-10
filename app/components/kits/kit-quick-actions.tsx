@@ -10,7 +10,6 @@ import { tw } from "~/utils/tw";
 import DeleteKit from "./delete-kit";
 import { CodePreviewDialog } from "../code-preview/code-preview-dialog";
 import { Button } from "../shared/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../shared/tooltip";
 import When from "../when/when";
 
 type KitQuickActionsProps = {
@@ -35,22 +34,16 @@ export default function KitQuickActions({
           action: PermissionAction.update,
         })}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={"p-2"}
-              to={`/kits/${kit.id}/edit`}
-            >
-              <PencilIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-
-          <TooltipContent align="center" side="top">
-            Edit kit information
-          </TooltipContent>
-        </Tooltip>
+        <Button
+          size="sm"
+          variant="secondary"
+          className={"p-2"}
+          to={`/kits/${kit.id}/edit`}
+          aria-label="Edit kit information"
+          tooltip="Edit kit information"
+        >
+          <PencilIcon className="size-4" />
+        </Button>
       </When>
 
       <When
@@ -60,27 +53,25 @@ export default function KitQuickActions({
           action: PermissionAction.read,
         })}
       >
-        <Tooltip>
-          <CodePreviewDialog
-            item={{
-              id: kit.id,
-              name: kit.name,
-              qrId: kit.qrId,
-              type: "kit",
-            }}
-            trigger={
-              <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" className="p-2">
-                  <QrCodeIcon className="size-4" />
-                </Button>
-              </TooltipTrigger>
-            }
-          />
-
-          <TooltipContent align="center" side="top">
-            Show kit codes
-          </TooltipContent>
-        </Tooltip>
+        <CodePreviewDialog
+          item={{
+            id: kit.id,
+            name: kit.name,
+            qrId: kit.qrId,
+            type: "kit",
+          }}
+          trigger={
+            <Button
+              size="sm"
+              variant="secondary"
+              className="p-2"
+              aria-label="Show kit codes"
+              tooltip="Show kit codes"
+            >
+              <QrCodeIcon className="size-4" />
+            </Button>
+          }
+        />
       </When>
 
       <When
@@ -90,22 +81,20 @@ export default function KitQuickActions({
           action: PermissionAction.delete,
         })}
       >
-        <Tooltip>
-          <DeleteKit
-            kit={kit}
-            trigger={
-              <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" className={"p-2"}>
-                  <Trash2Icon className="size-4" />
-                </Button>
-              </TooltipTrigger>
-            }
-          />
-
-          <TooltipContent align="center" side="top">
-            Delete kit
-          </TooltipContent>
-        </Tooltip>
+        <DeleteKit
+          kit={kit}
+          trigger={
+            <Button
+              size="sm"
+              variant="secondary"
+              className={"p-2"}
+              aria-label="Delete kit"
+              tooltip="Delete kit"
+            >
+              <Trash2Icon className="size-4" />
+            </Button>
+          }
+        />
       </When>
     </div>
   );

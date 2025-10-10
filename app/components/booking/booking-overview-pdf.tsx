@@ -310,7 +310,7 @@ const BookingPDFPreview = ({
                         thumbnailImage: asset.thumbnailImage,
                         mainImageExpiration: asset.mainImageExpiration,
                       }}
-                      alt={asset.title}
+                      alt={`Image of ${asset.title}`}
                       className="!size-14 object-cover"
                     />
                   </td>

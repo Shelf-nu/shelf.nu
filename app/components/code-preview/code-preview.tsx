@@ -206,6 +206,7 @@ export const CodePreview = ({
         <div className="flex items-center justify-center gap-2">
           <select
             id="code-selector"
+            aria-label="Select code to display"
             value={selectedCodeId}
             onChange={(e) => {
               setSelectedCodeId(e.target.value);
@@ -231,6 +232,7 @@ export const CodePreview = ({
               variant="secondary"
               size="sm"
               onClick={() => setIsAddBarcodeDialogOpen(true)}
+              aria-label="Add code to asset"
               disabled={
                 !canUseBarcodes
                   ? {

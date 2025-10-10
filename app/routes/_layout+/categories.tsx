@@ -8,7 +8,7 @@ import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
-import { DeleteCategory } from "~/components/category/delete-category";
+import CategoryQuickActions from "~/components/category/category-quick-actions";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -209,18 +209,7 @@ const CategoryItem = ({
     </Td>
     <Td>{item._count.assets}</Td>
     <Td>
-      <Button
-        to={`${item.id}/edit`}
-        role="link"
-        aria-label={`edit category`}
-        variant="secondary"
-        size="sm"
-        className=" mx-2 text-[12px]"
-        icon={"write"}
-        title={"Edit"}
-        data-test-id="editCategoryButton"
-      />
-      <DeleteCategory category={item} />
+      <CategoryQuickActions category={item} />
     </Td>
   </>
 );

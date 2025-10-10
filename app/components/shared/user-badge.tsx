@@ -19,10 +19,16 @@ export const UserBadge = ({
       className
     )}
   >
+    {/*
+      Empty alt text is intentional: The profile picture is decorative as the user's
+      name is displayed immediately adjacent to the image. Per WCAG guidelines,
+      decorative images should have empty alt attributes to prevent redundant
+      screen reader announcements (e.g., "John Doe profile picture" followed by "John Doe").
+    */}
     <img
       className={tw("mr-1 size-4 rounded-full", imgClassName)}
       src={img || "/static/images/default_pfp.jpg"}
-      alt={name}
+      alt=""
     />
     <span className="mt-px">{name}</span>
   </span>

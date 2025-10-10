@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import ListAssetContent from "./list-asset-content";
 
 const {
@@ -169,7 +170,7 @@ describe("ListAssetContent", () => {
 
     const icon = badgeWrapper?.querySelector("svg");
     expect(icon).not.toBeNull();
-    expect(icon).toHaveClass("text-gray-500");
+    expect(icon).toHaveStyle({ color: BADGE_COLORS.gray.text });
 
     expect(assetStatusBadgeMock).not.toHaveBeenCalled();
   });

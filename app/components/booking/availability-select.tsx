@@ -36,7 +36,10 @@ export function AvailabilitySelect({ label = "assets" }: { label?: string }) {
       defaultValue={defaultValue}
       onValueChange={handleSelectChange}
     >
-      <SelectTrigger className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit">
+      <SelectTrigger
+        className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit"
+        aria-label="Select availability"
+      >
         <SelectValue placeholder="Select availability" />
       </SelectTrigger>
 

@@ -106,6 +106,7 @@ export default {
         text: "🛠️ Development",
         collapsed: true,
         items: [
+          { text: "Accessibility Guidelines", link: "/accessibility" },
           { text: "Error Handling", link: "/handling-errors" },
           { text: "Utility Hooks", link: "/hooks" },
           {

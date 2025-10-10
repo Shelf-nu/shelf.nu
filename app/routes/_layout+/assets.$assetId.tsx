@@ -350,7 +350,7 @@ export default function AssetDetailsPage() {
                 thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
               }}
-              alt={asset.title}
+              alt={`Image of ${asset.title}`}
               className={tw(
                 "mr-4 size-14 cursor-pointer rounded border object-cover"
               )}

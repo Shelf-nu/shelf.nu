@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import ReactDOM from "react-dom";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
@@ -18,8 +19,23 @@ export const Dialog = ({
   onClose: Function;
   className?: string;
   headerClassName?: string;
-}) =>
-  open ? (
+}) => {
+  // Handle Escape key to close dialog
+  useEffect(() => {
+    if (!open) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [open, onClose]);
+
+  return open ? (
     <div
       className="dialog-backdrop"
       onClick={(event) => {
@@ -41,6 +57,7 @@ export const Dialog = ({
               onClick={onClose}
               variant="link"
               className={"mt-2 leading-none text-gray-500 md:right-6"}
+              aria-label="Close dialog"
             >
               <XIcon />
             </Button>
@@ -50,6 +67,7 @@ export const Dialog = ({
       </dialog>
     </div>
   ) : null;
+};
 
 export const DialogPortal = ({ children }: { children: React.ReactNode }) =>
   ReactDOM.createPortal(children, document.body);

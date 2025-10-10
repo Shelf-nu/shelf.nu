@@ -116,7 +116,7 @@ function AdvancedModeDropdown() {
 
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-      <PopoverTrigger>
+      <PopoverTrigger aria-label="Adjust name column options">
         <ChevronRight className="rotate-90" />
       </PopoverTrigger>
       <PopoverPortal>

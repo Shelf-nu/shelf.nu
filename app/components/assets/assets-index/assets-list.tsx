@@ -144,7 +144,7 @@ export const AssetsList = ({
                         mainImageExpiration:
                           resource.extendedProps?.mainImageExpiration,
                       }}
-                      alt={resource.title}
+                      alt={`Image of ${resource.title}`}
                       className="size-14 rounded border object-cover"
                       withPreview
                     />
@@ -229,7 +229,7 @@ const ListAssetContent = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
                 withPreview
               />
