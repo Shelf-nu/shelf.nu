@@ -23,6 +23,7 @@
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
     "start": "NODE_ENV=production node ./build/server/index.js",
     "start:ci": "dotenv -- npm run start",
+    "commit": "cz",
     "docs:dev": "vitepress dev docs --port 5173",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs --port 5174",
@@ -133,6 +134,8 @@
     "zxing-wasm": "^2.0.1"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
     "@faker-js/faker": "^8.4.1",
     "@playwright/test": "^1.41.2",
     "@remix-run/dev": "2.17.0",
@@ -155,7 +158,9 @@
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.19",
+    "commitizen": "^4.3.1",
     "cross-env": "^7.0.3",
+    "cz-conventional-changelog": "^3.3.0",
     "dotenv-cli": "^7.3.0",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
@@ -185,5 +190,10 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
   }
 }

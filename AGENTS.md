@@ -48,6 +48,7 @@ This repository hosts **Shelf.nu**, an asset management platform built with Remi
 ## Git Practices
 
 - Commit after completing a coherent task using descriptive messages.
+- Always use Conventional Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - Do **not** add "🤖 Generated with Claude Code" or similar co-authored trailers to commits.
 - Ensure the working tree is clean and applicable checks (including `npm run validate` for code changes) pass before requesting review.
 
