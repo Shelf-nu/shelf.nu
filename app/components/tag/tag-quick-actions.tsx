@@ -1,11 +1,6 @@
 import type { Tag } from "@prisma/client";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -38,23 +33,16 @@ export default function TagQuickActions({
           action: PermissionAction.update,
         })}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={"p-2"}
-              to={`${tag.id}/edit`}
-              aria-label="Edit tag"
-            >
-              <PencilIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-
-          <TooltipContent align="center" side="top">
-            Edit tag
-          </TooltipContent>
-        </Tooltip>
+        <Button
+          size="sm"
+          variant="secondary"
+          className={"p-2"}
+          to={`${tag.id}/edit`}
+          aria-label="Edit tag"
+          tooltip="Edit tag"
+        >
+          <PencilIcon className="size-4" />
+        </Button>
       </When>
 
       <When
@@ -64,27 +52,20 @@ export default function TagQuickActions({
           action: PermissionAction.delete,
         })}
       >
-        <Tooltip>
-          <DeleteTag
-            tag={tag}
-            trigger={
-              <TooltipTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className={"p-2"}
-                  aria-label="Delete tag"
-                >
-                  <Trash2Icon className="size-4" />
-                </Button>
-              </TooltipTrigger>
-            }
-          />
-
-          <TooltipContent align="center" side="top">
-            Delete tag
-          </TooltipContent>
-        </Tooltip>
+        <DeleteTag
+          tag={tag}
+          trigger={
+            <Button
+              size="sm"
+              variant="secondary"
+              className={"p-2"}
+              aria-label="Delete tag"
+              tooltip="Delete tag"
+            >
+              <Trash2Icon className="size-4" />
+            </Button>
+          }
+        />
       </When>
     </div>
   );
