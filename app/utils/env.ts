@@ -20,6 +20,7 @@ declare global {
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
       COLLECT_BUSINESS_INTEL: string;
+      EDITOR_V2_WORKSPACES: string;
     };
   }
 }
@@ -60,6 +61,7 @@ declare global {
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
       COLLECT_BUSINESS_INTEL: string;
+      EDITOR_V2_WORKSPACES: string;
     }
   }
 }
@@ -200,6 +202,11 @@ export const FULL_CALENDAR_LICENSE_KEY = getEnv("FULL_CALENDAR_LICENSE_KEY", {
   isSecret: false,
 });
 
+export const EDITOR_V2_WORKSPACES = getEnv("EDITOR_V2_WORKSPACES", {
+  isSecret: false,
+  isRequired: false,
+});
+
 export const MAINTENANCE_MODE =
   getEnv("MAINTENANCE_MODE", {
     isSecret: false,
@@ -268,5 +275,6 @@ export function getBrowserEnv() {
     FREE_TRIAL_DAYS,
     SUPPORT_EMAIL,
     FULL_CALENDAR_LICENSE_KEY,
+    EDITOR_V2_WORKSPACES,
   };
 }

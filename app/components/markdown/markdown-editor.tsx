@@ -1,9 +1,12 @@
 import { useEffect, forwardRef, useState } from "react";
 import type { TextareaHTMLAttributes, ChangeEvent } from "react";
 import { Link, useFetcher } from "@remix-run/react";
+import { useOrganizationId } from "~/hooks/use-organization-id";
+import { isEditorV2Enabled } from "~/modules/editor-v2/feature-flag";
 import type { action } from "~/routes/api+/utils.parse-markdown";
 import { tw } from "~/utils/tw";
 import { MarkdownViewer } from "./markdown-viewer";
+import { EditorV2 } from "../editor-v2/editor-v2";
 import Input from "../forms/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/tabs";
 
@@ -16,7 +19,7 @@ interface Props extends TextareaHTMLAttributes<any> {
   className?: string;
 }
 
-export const MarkdownEditor = forwardRef(function MarkdownEditor(
+const LegacyMarkdownEditor = forwardRef(function LegacyMarkdownEditor(
   {
     label,
     name,
@@ -25,6 +28,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
     defaultValue,
     className,
     maxLength = 5000,
+    onChange,
     ...rest
   }: Props,
   ref
@@ -36,6 +40,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const content = e.currentTarget.value;
     setMarkdown(content);
+    onChange?.(e);
   };
 
   const handlePreviewChange = (value: string) => {
@@ -107,3 +112,32 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
     </Tabs>
   );
 });
+
+export const MarkdownEditor = forwardRef<HTMLTextAreaElement, Props>(
+  function MarkdownEditor(props, ref) {
+    const workspaceId = useOrganizationId();
+    const useEditorV2 = isEditorV2Enabled(workspaceId);
+    const { onChange, ...rest } = props;
+
+    if (useEditorV2) {
+      return (
+        <EditorV2
+          {...rest}
+          ref={ref}
+          onChange={
+            onChange
+              ? (value) => {
+                  onChange({
+                    target: { value },
+                    currentTarget: { value },
+                  } as unknown as ChangeEvent<HTMLTextAreaElement>);
+                }
+              : undefined
+          }
+        />
+      );
+    }
+
+    return <LegacyMarkdownEditor {...props} ref={ref} />;
+  }
+);
