@@ -216,7 +216,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       typeof disabled === "object" ? disabled.title : undefined;
 
     // Check if this is an icon-only button (has icon but no text children)
-    const isIconOnly = icon && !children;
+    // Also handles empty strings and whitespace-only children
+    const isIconOnly =
+      icon && (!children || (typeof children === "string" && !children.trim()));
 
     // Only set aria-label for icon-only buttons or when explicitly provided
     // Buttons with text children don't need aria-label (text is the accessible name)

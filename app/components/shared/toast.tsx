@@ -43,6 +43,8 @@ export const Toaster = () => {
         )}
         open={open}
         onOpenChange={clearNotification}
+        aria-live="polite"
+        aria-atomic="true"
       >
         <div>
           <div
