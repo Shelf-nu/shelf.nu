@@ -205,7 +205,7 @@ const QRScanner = () => {
           if (!canUseBarcodes) {
             setErrorTitle("Barcode scanning disabled");
             setErrorMessage(
-              "Barcode scanning is not enabled for this organization."
+              "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code."
             );
             setScanMessage("");
             isNavigating.current = false;
