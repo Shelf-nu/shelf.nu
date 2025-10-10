@@ -276,14 +276,6 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       </>
     );
 
-    // Determine button type - use explicit type from props, or default to "button" for button elements
-    const buttonType =
-      "type" in props
-        ? (props.type as React.ButtonHTMLAttributes<HTMLButtonElement>["type"])
-        : Component === "button"
-        ? "button"
-        : undefined;
-
     const finalStyles = tw(
       baseButtonClasses,
       variant !== "inherit" && sizes[size as ButtonSize],
@@ -304,7 +296,6 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               {...props}
               className={finalStyles}
               aria-label={ariaLabel}
-              type={buttonType}
               onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
               onClick={(e: React.MouseEvent) => e.preventDefault()}
             >
@@ -330,7 +321,6 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
                 {...props}
                 className={finalStyles}
                 aria-label={ariaLabel}
-                type={buttonType}
                 prefetch={
                   isLinkProps(props) ? props.prefetch ?? "none" : undefined
                 }
@@ -360,7 +350,6 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           {...props}
           className={finalStyles}
           aria-label={ariaLabel}
-          type={buttonType}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
           ref={ref}
           disabled={isDisabled}

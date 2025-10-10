@@ -513,6 +513,7 @@ export default function AddAssetsToNewBooking() {
     <Tabs
       className="flex h-full max-h-full flex-col"
       value="assets"
+      activationMode="manual"
       onValueChange={() => {
         if (hasUnsavedChanges) {
           setIsAlertOpen(true);
@@ -524,7 +525,17 @@ export default function AddAssetsToNewBooking() {
     >
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
-          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+          <TabsTrigger
+            className="flex-1 gap-x-2"
+            value="assets"
+            aria-label={`Assets tab${
+              selectedBulkItemsCount > 0
+                ? ` (${
+                    hasSelectedAllItems ? totalItems : selectedBulkItemsCount
+                  } selected)`
+                : ""
+            }`}
+          >
             Assets{" "}
             {selectedBulkItemsCount > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
@@ -532,7 +543,15 @@ export default function AddAssetsToNewBooking() {
               </GrayBadge>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+          <TabsTrigger
+            className="flex-1 gap-x-2"
+            value="kits"
+            aria-label={`Kits tab${
+              bookingKitIds.length > 0
+                ? ` (${bookingKitIds.length} selected)`
+                : ""
+            }`}
+          >
             Kits
             {bookingKitIds.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
