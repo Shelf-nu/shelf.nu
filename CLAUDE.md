@@ -148,7 +148,8 @@ Always run `npm run validate` before committing - this runs:
 
 ## Git and Version control
 
-- add and commit automatically whenever a task is finished\
+- add and commit automatically whenever a task is finished
+- Always use Conventiopnal Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - use descriptive commit messages that capture the full scope of the changes
 - dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
 
