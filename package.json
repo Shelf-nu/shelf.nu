@@ -23,7 +23,6 @@
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
     "start": "NODE_ENV=production node ./build/server/index.js",
     "start:ci": "dotenv -- npm run start",
-    "commit": "cz",
     "docs:dev": "vitepress dev docs --port 5173",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs --port 5174",
