@@ -43,6 +43,8 @@ export const Toaster = () => {
         )}
         open={open}
         onOpenChange={clearNotification}
+        aria-live="polite"
+        aria-atomic="true"
       >
         <div>
           <div
@@ -71,6 +73,7 @@ export const Toaster = () => {
           className="flex"
           onClick={clearNotification}
           data-test-id="closeToast"
+          aria-label="Close notification"
         >
           {iconsMap["x"]}
         </Toast.Close>
