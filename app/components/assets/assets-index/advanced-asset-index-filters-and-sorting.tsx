@@ -169,10 +169,15 @@ function AdvancedFilter() {
                   ref={zo.ref}
                   onKeyDown={(e) => {
                     /**
-                     * Prevent default behavior of the Enter key.
+                     * Prevent default behavior of the Enter key on input fields.
                      * The form element is only needed for validations, so we don't want it to submit on Enter.
+                     * However, we allow Enter on buttons to support proper keyboard navigation for popovers.
                      */
-                    if (e.key === "Enter") {
+                    if (
+                      e.key === "Enter" &&
+                      e.target instanceof HTMLElement &&
+                      e.target.tagName !== "BUTTON"
+                    ) {
                       e.preventDefault();
                     }
                   }}

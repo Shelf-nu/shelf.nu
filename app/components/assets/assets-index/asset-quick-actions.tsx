@@ -1,10 +1,5 @@
 import { CopyIcon, PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -42,46 +37,38 @@ export default function AssetQuickActions({
           action: PermissionAction.update,
         })}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={"p-2"}
-              to={`/assets/${asset.id}/edit`}
-            >
-              <PencilIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-
-          <TooltipContent align="center" side="top">
-            Edit asset information
-          </TooltipContent>
-        </Tooltip>
+        <Button
+          size="sm"
+          variant="secondary"
+          className={"p-2"}
+          to={`/assets/${asset.id}/edit`}
+          aria-label="Edit asset information"
+          tooltip="Edit asset information"
+        >
+          <PencilIcon className="size-4" />
+        </Button>
       </When>
 
-      <Tooltip>
-        <CodePreviewDialog
-          item={{
-            id: asset.id,
-            title: asset.title,
-            qrId: asset.qrId,
-            type: "asset",
-            sequentialId: asset.sequentialId,
-          }}
-          trigger={
-            <TooltipTrigger asChild>
-              <Button size="sm" variant="secondary" className={"p-2"}>
-                <QrCodeIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-          }
-        />
-
-        <TooltipContent align="center" side="top">
-          Show asset label
-        </TooltipContent>
-      </Tooltip>
+      <CodePreviewDialog
+        item={{
+          id: asset.id,
+          title: asset.title,
+          qrId: asset.qrId,
+          type: "asset",
+          sequentialId: asset.sequentialId,
+        }}
+        trigger={
+          <Button
+            size="sm"
+            variant="secondary"
+            className={"p-2"}
+            aria-label="Show asset label"
+            tooltip="Show asset label"
+          >
+            <QrCodeIcon className="size-4" />
+          </Button>
+        }
+      />
 
       <When
         truthy={userHasPermission({
@@ -90,22 +77,16 @@ export default function AssetQuickActions({
           action: PermissionAction.update,
         })}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={"p-2"}
-              to={`/assets/${asset.id}/overview/duplicate`}
-            >
-              <CopyIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-
-          <TooltipContent align="center" side="top">
-            Duplicate asset
-          </TooltipContent>
-        </Tooltip>
+        <Button
+          size="sm"
+          variant="secondary"
+          className={"p-2"}
+          to={`/assets/${asset.id}/overview/duplicate`}
+          aria-label="Duplicate asset"
+          tooltip="Duplicate asset"
+        >
+          <CopyIcon className="size-4" />
+        </Button>
       </When>
 
       <When
@@ -115,22 +96,20 @@ export default function AssetQuickActions({
           action: PermissionAction.delete,
         })}
       >
-        <Tooltip>
-          <DeleteAsset
-            asset={asset}
-            trigger={
-              <TooltipTrigger asChild>
-                <Button size="sm" variant="secondary" className={"p-2"}>
-                  <Trash2Icon className="size-4" />
-                </Button>
-              </TooltipTrigger>
-            }
-          />
-
-          <TooltipContent align="center" side="top">
-            Delete asset
-          </TooltipContent>
-        </Tooltip>
+        <DeleteAsset
+          asset={asset}
+          trigger={
+            <Button
+              size="sm"
+              variant="secondary"
+              className={"p-2"}
+              aria-label="Delete asset"
+              tooltip="Delete asset"
+            >
+              <Trash2Icon className="size-4" />
+            </Button>
+          }
+        />
       </When>
     </div>
   );

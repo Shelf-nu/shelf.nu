@@ -32,8 +32,9 @@ export function BookingStatusBadge({
     custodianUserId &&
     custodianUserId === user?.id;
 
+  const colors = bookingStatusColorMap[status];
   return (
-    <Badge color={bookingStatusColorMap[status]} withDot={false}>
+    <Badge color={colors.bg} textColor={colors.text} withDot={false}>
       {shouldShowExtraInfo ? (
         <ExtraInfoTooltip>
           <span className="block whitespace-nowrap lowercase first-letter:uppercase">
