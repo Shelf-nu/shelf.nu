@@ -19,7 +19,7 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
-import { DeleteTag } from "~/components/tag/delete-tag";
+import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
@@ -221,18 +221,7 @@ const TagItem = ({
       </div>
     </Td>
     <Td className="text-left">
-      <Button
-        to={`${item.id}/edit`}
-        role="link"
-        aria-label={`edit tags`}
-        variant="secondary"
-        size="sm"
-        className=" mx-2 text-[12px]"
-        icon={"write"}
-        title={"Edit"}
-        data-test-id="editTagsButton"
-      />
-      <DeleteTag tag={item} />
+      <TagQuickActions tag={item} />
     </Td>
   </>
 );

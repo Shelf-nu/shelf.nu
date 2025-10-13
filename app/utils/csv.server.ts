@@ -259,6 +259,7 @@ export async function exportAssetsFromIndexToCsv({
   assetIds,
   settings,
   currentOrganization,
+  assetIndexCurrentSearchParams,
 }: {
   request: Request;
   assetIds: string;
@@ -267,22 +268,31 @@ export async function exportAssetsFromIndexToCsv({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
+  assetIndexCurrentSearchParams: string | null;
 }) {
-  /** Parse filters */
-  const { filters } = await getAdvancedFiltersFromRequest(
-    request,
-    currentOrganization.id,
-    settings
-  );
-
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
   const takeAll = ids.includes(ALL_SELECTED_KEY);
 
+  /**
+   * When taking all with filters (select all button), use the current page's search params
+   * Otherwise, use cookie-based filters from the request
+   */
+  const filtersToUse =
+    takeAll && assetIndexCurrentSearchParams
+      ? assetIndexCurrentSearchParams
+      : (
+          await getAdvancedFiltersFromRequest(
+            request,
+            currentOrganization.id,
+            settings
+          )
+        ).filters;
+
   const { assets } = await getAdvancedPaginatedAndFilterableAssets({
     request,
     organizationId: currentOrganization.id,
-    filters,
+    filters: filtersToUse,
     settings,
     takeAll,
     assetIds: takeAll ? undefined : ids,

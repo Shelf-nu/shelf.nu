@@ -106,7 +106,9 @@ export default {
         text: "🛠️ Development",
         collapsed: true,
         items: [
+          { text: "Accessibility Guidelines", link: "/accessibility" },
           { text: "Error Handling", link: "/handling-errors" },
+          { text: "Select All Pattern", link: "/select-all-pattern" },
           { text: "Utility Hooks", link: "/hooks" },
           {
             text: "Scanner Drawer Development",

@@ -330,10 +330,11 @@ export function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
   for (let asset of assets) {
     let status = asset.status;
     if (!assetsByStatus[status]) {
+      const colors = assetStatusColorMap(status);
       assetsByStatus[status] = {
         status: userFriendlyAssetStatus(status),
         assets: [],
-        color: assetStatusColorMap(status),
+        color: colors.text, // Use text color for charts (more saturated/visible)
       };
     }
     assetsByStatus[status].assets.push(asset);
