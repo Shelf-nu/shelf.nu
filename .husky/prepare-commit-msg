@@ -1,4 +1,8 @@
-# Final validation before commit + cleanup to prevent stale messages
+echo "🔍 prepare-commit-msg running with message:"
+cat "$1"
+echo "---"
+
+# Validate before expensive pre-commit checks run
 npx --no -- commitlint --edit "$1" || {
   echo ""
   echo "❌ Commit message doesn't follow Conventional Commits format"
@@ -27,10 +31,9 @@ npx --no -- commitlint --edit "$1" || {
   echo "  docs: update README with installation steps"
   echo "  chore: bump dependencies to latest versions"
   echo ""
+  echo "💡 Tip: Long body lines are automatically wrapped at 100 characters"
+  echo ""
   echo "Learn more: https://www.conventionalcommits.org"
   echo ""
   exit 1
 }
-
-# Clean up commit message file to prevent stale message issues next time
-rm -f ".git/COMMIT_EDITMSG"
