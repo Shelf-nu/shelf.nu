@@ -37,6 +37,31 @@ This repository hosts **Shelf.nu**, an asset management platform built with Remi
 4. For database changes, update `app/database/schema.prisma`, create migrations with `npm run db:prepare-migration`, and deploy with the setup command.
 5. Maintain documentation and examples in Markdown.
 
+## Bulk Operations & Select All Pattern
+
+When implementing bulk operations that work across multiple pages of filtered data, follow the **ALL_SELECTED_KEY pattern**:
+
+**The Pattern:**
+
+1. **Component Layer** - Pass current search params when "select all" is active
+2. **Route/API Layer** - Extract and forward `currentSearchParams`
+3. **Service Layer** - Use `getAssetsWhereInput` helper to build where clause from params
+
+**Key Implementation Points:**
+
+- Use `isSelectingAllItems()` from `app/utils/list.ts` to detect select all
+- Always pass `currentSearchParams` alongside `assetIds` when ALL_SELECTED_KEY is present
+- Use `getAssetsWhereInput({ organizationId, currentSearchParams })` to build Prisma where clause
+- Set `takeAll: true` to remove pagination limits
+
+**Working Examples:**
+
+- Export assets: `app/components/assets/assets-index/export-assets-button.tsx`
+- Bulk delete: `app/routes/_layout+/assets._index.tsx` (action)
+- QR download: `app/routes/api+/assets.get-assets-for-bulk-qr-download.ts`
+
+**📖 Full Documentation:** See [docs/select-all-pattern.md](./docs/select-all-pattern.md) for detailed implementation guide, code examples, and common pitfalls.
+
 ## Documentation & Research
 
 - Before starting significant feature work or architectural changes, review the guides in the `docs/` directory. They contain
