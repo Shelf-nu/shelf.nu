@@ -1,1 +1,40 @@
+# Validate commit message FIRST (before expensive checks)
+# When using git commit -m, the message is already written to .git/COMMIT_EDITMSG
+COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
+
+if [ -f "$COMMIT_MSG_FILE" ]; then
+  npx --no -- commitlint --edit "$COMMIT_MSG_FILE" || {
+    echo ""
+    echo "❌ Commit message doesn't follow Conventional Commits format"
+    echo ""
+    echo "Required format: type(scope?): description"
+    echo ""
+    echo "┌────────────┬──────────────────────────┬────────────────────────────────────────────────────────────┐"
+    echo "│ Type       │ Meaning                  │ When to Use                                                │"
+    echo "├────────────┼──────────────────────────┼────────────────────────────────────────────────────────────┤"
+    echo "│ feat       │ A new feature            │ Adding something new users can use (e.g., dark mode)       │"
+    echo "│ fix        │ A bug fix                │ Correcting a mistake that broke existing behavior          │"
+    echo "│ chore      │ Maintenance work         │ Dependency bumps, build tweaks, formatting, etc.           │"
+    echo "│ docs       │ Documentation changes    │ Updates to README, comments—just words, no logic           │"
+    echo "│ style      │ Formatting-only changes  │ Whitespace, indentation—no behavior change                 │"
+    echo "│ refactor   │ Code restructuring       │ Changing how code is written without changing what it does │"
+    echo "│ perf       │ Performance improvements │ Optimizations for speed or resources                       │"
+    echo "│ test       │ Adding or updating tests │ Writing, fixing, or reorganizing tests                     │"
+    echo "│ build      │ Build system changes     │ Updates affecting build process or dependencies            │"
+    echo "│ ci         │ CI/CD changes            │ Modifications to CI/CD configuration or workflows          │"
+    echo "│ revert     │ Reverting a commit       │ When you need to undo a previous commit                    │"
+    echo "└────────────┴──────────────────────────┴────────────────────────────────────────────────────────────┘"
+    echo ""
+    echo "Examples:"
+    echo "  feat: add user authentication"
+    echo "  fix(api): resolve database connection issue"
+    echo "  docs: update README with installation steps"
+    echo "  chore: bump dependencies to latest versions"
+    echo ""
+    echo "Learn more: https://www.conventionalcommits.org"
+    echo ""
+    exit 1
+  }
+fi
+
 npm run precommit
