@@ -255,7 +255,7 @@ export function BookingAssetsSidebar({
                                             mainImageExpiration:
                                               asset.mainImageExpiration,
                                           }}
-                                          alt={asset.title}
+                                          alt={`Image of ${asset.title}`}
                                           className="size-full rounded-[4px] border border-gray-300 object-cover"
                                           withPreview
                                         />
@@ -325,7 +325,7 @@ export function BookingAssetsSidebar({
                                     mainImageExpiration:
                                       asset.mainImageExpiration,
                                   }}
-                                  alt={asset.title}
+                                  alt={`Image of ${asset.title}`}
                                   className="size-full rounded-[4px] border object-cover"
                                   withPreview
                                 />

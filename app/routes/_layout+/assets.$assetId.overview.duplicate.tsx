@@ -155,7 +155,7 @@ export default function DuplicateAsset() {
                   thumbnailImage: asset.thumbnailImage,
                   mainImageExpiration: asset.mainImageExpiration,
                 }}
-                alt={asset.title}
+                alt={`Image of ${asset.title}`}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>

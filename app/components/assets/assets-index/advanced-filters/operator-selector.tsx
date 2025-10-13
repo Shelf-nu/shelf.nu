@@ -68,6 +68,7 @@ export function OperatorSelector({
   disabled?: DisabledProp;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const [operator, setOperator] = useState<FilterOperator>();
   useEffect(() => {
@@ -76,6 +77,56 @@ export function OperatorSelector({
 
   /** Get the correct operators, based on the field type */
   const operators = operatorsPerType[filter.type];
+
+  // Reset selected index when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      // Set initial selection to the current operator
+      const currentIndex = operators.findIndex((op) => op === operator);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [isPopoverOpen, operator, operators]);
+
+  const handleSelect = (operatorToSelect: FilterOperator) => {
+    setFilter(operatorToSelect);
+    setIsPopoverOpen(false);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < operators.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ": // Space key
+        event.preventDefault();
+        handleSelect(operators[selectedIndex] as FilterOperator);
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (isPopoverOpen) {
+      const selectedElement = document.getElementById(
+        `operator-option-${selectedIndex}`
+      );
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [selectedIndex, isPopoverOpen]);
 
   return operator ? (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -95,18 +146,20 @@ export function OperatorSelector({
           className={tw(
             "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
           )}
+          onKeyDown={handleKeyDown}
         >
           {operators.map((operator, index) => {
             const k = operator as FilterOperator;
             const v = operatorsMap[k];
             return (
               <div
+                id={`operator-option-${index}`}
                 key={k + index}
-                className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-                onClick={() => {
-                  setFilter(k as FilterOperator);
-                  setIsPopoverOpen(false);
-                }}
+                className={tw(
+                  "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  selectedIndex === index && "bg-gray-50"
+                )}
+                onClick={() => handleSelect(k as FilterOperator)}
               >
                 <FilterOperatorDisplay symbol={v[0]} text={v[1]} />
               </div>
