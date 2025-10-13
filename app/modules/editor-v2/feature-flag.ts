@@ -5,7 +5,8 @@ const workspaceList = (EDITOR_V2_WORKSPACES || "")
   .map((id) => id.trim())
   .filter(Boolean);
 
-const ENABLED_FOR_ALL = workspaceList.includes("*") || workspaceList.includes("all");
+const ENABLED_FOR_ALL =
+  workspaceList.includes("*") || workspaceList.includes("all");
 
 export function isEditorV2Enabled(workspaceId: string | null | undefined) {
   if (!workspaceId) {
