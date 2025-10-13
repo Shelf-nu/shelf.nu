@@ -248,6 +248,50 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
 }
 
 /**
+ * Removes a custom field column from every asset index configuration that belongs to an organization.
+ * Uses a single SQL statement to efficiently filter the JSON columns payload for all matching rows.
+ */
+export async function removeCustomFieldFromAssetIndexSettings({
+  customFieldName,
+  organizationId,
+  prisma,
+}: {
+  customFieldName: string;
+  organizationId: string;
+  prisma?: Pick<Prisma.TransactionClient, "$executeRaw">;
+}) {
+  const client = prisma ?? db;
+
+  try {
+    const columnName = `cf_${customFieldName}`;
+
+    await client.$executeRaw`
+      UPDATE "AssetIndexSettings" AS ais
+      SET "columns" = (
+        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+        FROM jsonb_array_elements(ais."columns") elem
+        WHERE elem->>'name' <> ${columnName}
+      )
+      WHERE ais."organizationId" = ${organizationId}
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(ais."columns") elem
+          WHERE elem->>'name' = ${columnName}
+        );
+    `;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Failed to update asset index settings.",
+      message:
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+      additionalData: { customFieldName, organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Updates the AssetIndexSettings for all users in an organization when new custom fields are created
  * @param newCustomFields - The newly created or updated custom fields
  * @param organizationId - The organization ID

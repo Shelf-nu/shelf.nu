@@ -19,6 +19,7 @@ import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
 import {
+  removeCustomFieldFromAssetIndexSettings,
   updateAssetIndexSettingsAfterCfUpdate,
   updateAssetIndexSettingsWithNewCustomFields,
 } from "../asset-index-settings/service.server";
@@ -289,6 +290,60 @@ export async function updateCustomField(payload: {
       additionalData: {
         id,
       },
+    });
+  }
+}
+
+export async function deleteCustomField({
+  id,
+  organizationId,
+}: Pick<CustomField, "id"> & { organizationId: Organization["id"] }) {
+  try {
+    const customField = await db.$transaction(async (tx) => {
+      const existingCustomField = await tx.customField.findFirst({
+        where: { id, organizationId },
+      });
+
+      if (!existingCustomField) {
+        throw new ShelfError({
+          cause: null,
+          message: "The custom field you are trying to delete does not exist.",
+          additionalData: { id, organizationId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+
+      await tx.assetCustomFieldValue.deleteMany({
+        where: { customFieldId: id },
+      });
+
+      await removeCustomFieldFromAssetIndexSettings({
+        customFieldName: existingCustomField.name,
+        organizationId,
+        prisma: tx,
+      });
+
+      await tx.customField.delete({
+        where: { id },
+      });
+
+      return existingCustomField;
+    });
+
+    return customField;
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while deleting the custom field. Please try again or contact support.",
+      additionalData: { id, organizationId },
+      label,
     });
   }
 }
