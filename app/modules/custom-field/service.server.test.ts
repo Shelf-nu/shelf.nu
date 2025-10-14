@@ -21,8 +21,11 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+const mockRemoveCustomFieldFromAssetIndexSettings = vi.fn();
+
 vi.mock("../asset-index-settings/service.server", () => ({
-  removeCustomFieldFromAssetIndexSettings: vi.fn(),
+  removeCustomFieldFromAssetIndexSettings:
+    mockRemoveCustomFieldFromAssetIndexSettings,
   updateAssetIndexSettingsAfterCfUpdate: vi.fn(),
   updateAssetIndexSettingsWithNewCustomFields: vi.fn(),
 }));
@@ -83,6 +86,13 @@ describe("softDeleteCustomField", () => {
     expect(capturedUpdateData.name).toMatch(/^Serial Number_\d+$/);
     expect(capturedUpdateData.deletedAt).toBeInstanceOf(Date);
     expect(dbTransactionMock).toHaveBeenCalledTimes(1);
+
+    // Verify AssetIndexSettings cleanup was called
+    expect(mockRemoveCustomFieldFromAssetIndexSettings).toHaveBeenCalledWith({
+      customFieldName: "Serial Number",
+      organizationId: "org-123",
+      prisma: expect.any(Object),
+    });
   });
 
   it("throws ShelfError when custom field does not exist or is already deleted", async () => {

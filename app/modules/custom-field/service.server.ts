@@ -19,6 +19,7 @@ import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
 import {
+  removeCustomFieldFromAssetIndexSettings,
   updateAssetIndexSettingsAfterCfUpdate,
   updateAssetIndexSettingsWithNewCustomFields,
 } from "../asset-index-settings/service.server";
@@ -312,8 +313,8 @@ export async function updateCustomField(payload: {
  * This operation:
  * 1. Appends Unix timestamp to the field name (e.g., "Serial Number" → "Serial Number_1234567890")
  * 2. Sets deletedAt to current timestamp (soft delete)
- * 3. Preserves all AssetCustomFieldValue records (no CASCADE deletion)
- * 4. AssetIndexSettings cleanup happens lazily via validateColumns on next access
+ * 3. Immediately removes the column from all users' AssetIndexSettings
+ * 4. Preserves all AssetCustomFieldValue records (no CASCADE deletion)
  * 5. Deleted fields don't count toward premium tier limits
  * 6. Name is freed up for creating a new field with the same name
  *
@@ -355,6 +356,14 @@ export async function softDeleteCustomField({
             name: `${existingCustomField.name}_${timestamp}`,
             deletedAt: new Date(),
           },
+        });
+
+        // 3. Remove column from all users' AssetIndexSettings immediately
+        // This ensures consistency with deactivation behavior
+        await removeCustomFieldFromAssetIndexSettings({
+          customFieldName: existingCustomField.name,
+          organizationId,
+          prisma: tx,
         });
 
         return deletedField;

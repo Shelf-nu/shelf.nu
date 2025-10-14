@@ -62,8 +62,15 @@ export function DeleteCustomFieldDialog({
       }}
     >
       <AlertDialogTrigger asChild>
-        <DropdownMenuItem className="cursor-pointer rounded px-4 py-3 text-left text-sm text-error-600 hover:bg-error-50 hover:text-error-700">
-          Delete
+        <DropdownMenuItem
+          className="cursor-pointer rounded px-4 py-3 text-left text-sm hover:bg-gray-50"
+          onSelect={(e) => {
+            e.preventDefault();
+          }}
+        >
+          <span className="flex items-center gap-2">
+            <TrashIcon /> Delete
+          </span>
         </DropdownMenuItem>
       </AlertDialogTrigger>
 
@@ -74,17 +81,17 @@ export function DeleteCustomFieldDialog({
             <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600 md:mx-0">
               <TrashIcon />
             </div>
-            <AlertDialogTitle>Archive {customField.name}</AlertDialogTitle>
+            <AlertDialogTitle>
+              Delete "{customField.name}" custom field
+            </AlertDialogTitle>
             <AlertDialogDescription className="space-y-2">
               <p>
-                <strong>This field will be archived.</strong> The field and all
-                its values will be hidden from your assets but preserved in the
-                database.
+                <strong>This field will be deleted.</strong> The field and all
+                its values will be removed from your assets.
               </p>
               <p className="text-gray-700">
                 💡 <strong>Note:</strong> The field name will be available for
-                reuse after archiving. Archived data remains in the database for
-                record-keeping.
+                reuse after deleting.
               </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -101,7 +108,6 @@ export function DeleteCustomFieldDialog({
                 setConfirmation(event.target.value);
                 if (formError) setFormError(null);
               }}
-              placeholder={expectedName}
               required
             />
             <p className="text-sm text-gray-500">
@@ -112,7 +118,7 @@ export function DeleteCustomFieldDialog({
             ) : null}
           </div>
 
-          <AlertDialogFooter className="mt-6 flex gap-2">
+          <AlertDialogFooter className="mt-6 flex ">
             <AlertDialogCancel asChild>
               <Button type="button" variant="secondary" disabled={disabled}>
                 Cancel
@@ -125,7 +131,7 @@ export function DeleteCustomFieldDialog({
               name="intent"
               value="delete"
             >
-              {disabled ? "Archiving..." : "Archive"}
+              {disabled ? "Deleting..." : "Delete"}
             </Button>
           </AlertDialogFooter>
         </fetcher.Form>
