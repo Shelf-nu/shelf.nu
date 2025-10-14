@@ -47,7 +47,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canExportAssets } from "~/utils/subscription.server";
+import {
+  canExportAssets,
+  canHideShelfBranding,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -117,11 +120,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: "General",
     };
 
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
     return json(
       data({
         header,
         organization: currentOrganization,
         canExportAssets: canExportAssets(tierLimit),
+        canHideShelfBranding: canHideBranding,
         user,
         curriences: Object.keys(Currency),
         isPersonalWorkspace:
@@ -150,13 +156,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, role } =
+    const { organizationId, currentOrganization, role, organizations } =
       await requirePermission({
         userId: authSession.userId,
         request,
         entity: PermissionEntity.generalSettings,
         action: PermissionAction.update,
       });
+
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    });
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -182,7 +195,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id, qrIdDisplayPreference } = payload;
+        const { name, currency, id, qrIdDisplayPreference, showShelfBranding } =
+          payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -191,6 +205,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
             message: "You are not allowed to edit this organization.",
             label: "Organization",
           });
+        }
+
+        let nextShowShelfBranding =
+          typeof showShelfBranding === "boolean"
+            ? showShelfBranding
+            : currentOrganization.showShelfBranding;
+
+        if (!canHideBranding) {
+          nextShowShelfBranding = true;
         }
 
         const formDataFile = await unstable_parseMultipartFormData(
@@ -209,6 +232,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId: authSession.userId,
           currency,
           qrIdDisplayPreference,
+          showShelfBranding: nextShowShelfBranding,
         });
 
         sendNotification({

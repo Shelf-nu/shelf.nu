@@ -31,6 +31,7 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -48,6 +49,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -61,7 +63,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    await requirePermission({
+    const { organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -100,6 +102,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId: organization.id,
     });
 
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId: organization.id,
+      organizations,
+    });
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
     };
@@ -111,6 +120,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         curriences: Object.keys(Currency),
         isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
         admins,
+        canHideShelfBranding: canHideBranding,
       })
     );
   } catch (cause) {
@@ -142,7 +152,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -179,6 +189,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId: organization.id,
+      organizations,
+    });
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -204,7 +221,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { userId, organizationId: id },
         });
 
-        const { name, currency, qrIdDisplayPreference } = payload;
+        const { name, currency, qrIdDisplayPreference, showShelfBranding } =
+          payload;
+
+        let nextShowShelfBranding =
+          typeof showShelfBranding === "boolean"
+            ? showShelfBranding
+            : organization.showShelfBranding;
+
+        if (!canHideBranding) {
+          nextShowShelfBranding = true;
+        }
 
         const formDataFile = await unstable_parseMultipartFormData(
           request,
@@ -222,6 +249,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: authSession.userId,
           currency,
           qrIdDisplayPreference,
+          showShelfBranding: nextShowShelfBranding,
         });
 
         sendNotification({

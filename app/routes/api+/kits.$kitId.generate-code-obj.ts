@@ -15,12 +15,13 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.qr,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.qr,
+        action: PermissionAction.read,
+      });
 
     const [qrObj, kit] = await Promise.all([
       generateQrObj({
@@ -45,7 +46,13 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    return json(data({ qrObj, barcodes: kit.barcodes }));
+    return json(
+      data({
+        qrObj,
+        barcodes: kit.barcodes,
+        showShelfBranding: currentOrganization.showShelfBranding,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });

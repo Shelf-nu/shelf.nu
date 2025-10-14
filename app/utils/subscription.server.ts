@@ -33,6 +33,15 @@ export const canExportAssets = (
   return tierLimit?.canExportAssets || false;
 };
 
+export const canHideShelfBranding = (
+  tierLimit: { canHideShelfBranding: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  if (tierLimit.canHideShelfBranding === null) return false;
+  return tierLimit.canHideShelfBranding;
+};
+
 export async function assertUserCanExportAssets({
   organizationId,
   organizations,

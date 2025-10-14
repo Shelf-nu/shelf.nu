@@ -243,6 +243,7 @@ export async function updateOrganization({
   ssoDetails,
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
+  showShelfBranding,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
   name?: string;
@@ -255,6 +256,7 @@ export async function updateOrganization({
   };
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
+  showShelfBranding?: Organization["showShelfBranding"];
 }) {
   try {
     const data = {
@@ -263,6 +265,9 @@ export async function updateOrganization({
       ...(qrIdDisplayPreference && { qrIdDisplayPreference }),
       ...(hasSequentialIdsMigrated !== undefined && {
         hasSequentialIdsMigrated,
+      }),
+      ...(typeof showShelfBranding === "boolean" && {
+        showShelfBranding,
       }),
       ...(ssoDetails && {
         ssoDetails: {
@@ -336,6 +341,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   barcodesEnabled: true,
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
+  showShelfBranding: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
