@@ -1,5 +1,5 @@
-import type { SlashCommandItem, SlashState } from "../types";
 import { tw } from "~/utils/tw";
+import type { SlashCommandItem, SlashState } from "../types";
 
 interface SlashCommandMenuProps {
   state: SlashState | null;

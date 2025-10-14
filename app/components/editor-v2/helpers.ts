@@ -10,8 +10,8 @@ import {
 import { keymap } from "prosemirror-keymap";
 import type { MarkType, Schema } from "prosemirror-model";
 import { wrapInList, liftListItem, sinkListItem, splitListItem } from "prosemirror-schema-list";
-import { EditorState, Plugin } from "prosemirror-state";
-import type { Command as PMCommand } from "prosemirror-state";
+import { Plugin } from "prosemirror-state";
+import type { Command as PMCommand, EditorState } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 
 import type { SlashCommandItem, ToolbarBlock } from "./types";

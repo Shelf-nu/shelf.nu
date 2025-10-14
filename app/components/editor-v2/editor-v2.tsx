@@ -25,6 +25,10 @@ import {
 import { Logger } from "~/utils/logger";
 import { tw } from "~/utils/tw";
 
+import { BubbleMenu } from "./components/bubble-menu";
+import { LinkDialog, RawBlockDialog } from "./components/dialogs";
+import { SlashCommandMenu } from "./components/slash-command-menu";
+import { EditorToolbar } from "./components/toolbar";
 import {
   createHorizontalRuleCommand,
   createInputPlugins,
@@ -38,10 +42,6 @@ import {
   placeholderPluginKey,
   sanitizeHref,
 } from "./helpers";
-import { BubbleMenu } from "./components/bubble-menu";
-import { LinkDialog, RawBlockDialog } from "./components/dialogs";
-import { SlashCommandMenu } from "./components/slash-command-menu";
-import { EditorToolbar } from "./components/toolbar";
 import type {
   BubbleState,
   LinkDialogState,
@@ -99,6 +99,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
     const editorContainerRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
     const hiddenTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const disabledRef = useRef(disabled);
 
     const [markdocValue, setMarkdocValue] = useState(defaultValue);
     const markdocValueRef = useRef(defaultValue);
@@ -126,6 +127,8 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       pos: null,
     });
     const rawBlockTelemetryRef = useRef<number>(0);
+
+    disabledRef.current = disabled;
 
     const commands = useMemo(() => createSlashCommands(schema), [schema]);
 
@@ -449,6 +452,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       }
       const container = editorContainerRef.current;
       const initialDoc = parseMarkdoc(defaultValue, schema);
+      const isDisabled = disabledRef.current;
 
       const view = new EditorView(container, {
         state: EditorState.create({
@@ -462,11 +466,11 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
         attributes: {
           class: tw(
             EDITOR_BASE_CLASS,
-            disabled ? EDITOR_DISABLED_CLASS : "",
+            isDisabled ? EDITOR_DISABLED_CLASS : "",
             "cursor-text"
           ),
         },
-        editable: () => !disabled,
+        editable: () => !disabledRef.current,
         dispatchTransaction: (tr) => {
           const currentView = (viewRef.current ?? view) as EditorView;
           const nextState = currentView.state.apply(tr);
