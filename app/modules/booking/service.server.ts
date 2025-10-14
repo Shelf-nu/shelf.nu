@@ -50,6 +50,7 @@ import {
   wrapKitsWithDataForNote,
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
+  wrapLinkForNote,
   wrapBookingStatusForNote,
   wrapCustodianForNote,
   wrapDescriptionForNote,
@@ -592,9 +593,9 @@ export async function updateBasicBooking({
     if (from && booking.from && from.getTime() !== booking.from.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking start date from **${wrapDateForNote(
+        content: `${userLink} changed booking start date from ${wrapDateForNote(
           booking.from
-        )}** to **${wrapDateForNote(from)}**.`,
+        )} to ${wrapDateForNote(from)}.`,
       });
     }
 
@@ -602,9 +603,9 @@ export async function updateBasicBooking({
     if (to && booking.to && to.getTime() !== booking.to.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
-        content: `${userLink} changed booking end date from **${wrapDateForNote(
+        content: `${userLink} changed booking end date from ${wrapDateForNote(
           booking.to
-        )}** to **${wrapDateForNote(to)}**.`,
+        )} to ${wrapDateForNote(to)}.`,
       });
     }
 
@@ -1560,7 +1561,12 @@ export async function partialCheckinBooking({
       // Creating the record here would cause checkinBooking to filter out the current assets
 
       // Create notes before complete check-in since this was initiated as explicit check-in
-      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -1648,7 +1654,12 @@ export async function partialCheckinBooking({
       });
 
       // Create audit notes for each checked-in asset using createNotes
-      const noteContent = `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** checked in via partial check-in.`;
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked in via partial check-in.`;
       await createNotes({
         content: noteContent,
         type: "UPDATE",
@@ -2823,6 +2834,11 @@ export async function removeAssets({
           disconnect: assetIds.map((id) => ({ id })),
         },
       },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
     });
     /** When removing an asset from a booking we need to make sure to set their status back to available
      * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
@@ -2855,10 +2871,11 @@ export async function removeAssets({
 
     const userForNotes = { firstName, lastName, id: userId };
 
+    const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
     await createNotes({
       content: `${wrapUserLinkForNote(
         userForNotes
-      )} removed asset from booking.`,
+      )} removed assets from ${bookingLink}.`,
       type: "UPDATE",
       userId,
       assetIds,
@@ -3740,11 +3757,16 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
       const notesData = bookings
         .map((b) =>
           b.assets.map((asset) => ({
             assetId: asset.id,
-            content: `**[${user?.firstName?.trim()} ${user?.lastName?.trim()}](/settings/team/users/${userId})** cancelled booking.`,
+            content: `${actor} cancelled booking.`,
             userId,
             type: "UPDATE" as const,
           }))
@@ -4384,6 +4406,7 @@ export async function getOngoingBookingForAsset({
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId,
         assets: { some: { id: assetId } },
+        partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
       },
     });
 

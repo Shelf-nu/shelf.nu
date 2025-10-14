@@ -83,6 +83,10 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapUserLinkForNote,
+  wrapCustodianForNote,
+} from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
@@ -1344,7 +1348,6 @@ export async function updateAsset({
         newLocation,
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
-        assetName: asset?.title,
         assetId: asset.id,
         userId,
         isRemoving: newLocationId === null,
@@ -1392,7 +1395,6 @@ export async function updateAsset({
               newValue: change.newValue,
               firstName: user?.firstName || "",
               lastName: user?.lastName || "",
-              assetName: asset.title,
               assetId: asset.id,
               userId,
               isFirstTimeSet: change.isFirstTimeSet,
@@ -1983,7 +1985,6 @@ export async function createCustomFieldChangeNote({
   newValue,
   firstName,
   lastName,
-  assetName,
   assetId,
   userId,
   isFirstTimeSet,
@@ -1993,7 +1994,6 @@ export async function createCustomFieldChangeNote({
   newValue?: string | null;
   firstName: string;
   lastName: string;
-  assetName: Asset["title"];
   assetId: Asset["id"];
   userId: User["id"];
   isFirstTimeSet: boolean;
@@ -2003,9 +2003,9 @@ export async function createCustomFieldChangeNote({
       customFieldName,
       previousValue,
       newValue,
+      userId,
       firstName,
       lastName,
-      assetName,
       isFirstTimeSet,
     });
 
@@ -2841,7 +2841,7 @@ export async function bulkCheckOutAssets({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user] = await Promise.all([
+    const [assets, user, custodianTeamMember] = await Promise.all([
       db.asset.findMany({
         where,
         select: { id: true, title: true, status: true },
@@ -2852,6 +2852,19 @@ export async function bulkCheckOutAssets({
           firstName: true,
           lastName: true,
         } satisfies Prisma.UserSelect,
+      }),
+      db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: {
+          name: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
       }),
     ]);
 
@@ -2891,9 +2904,19 @@ export async function bulkCheckOutAssets({
       });
 
       /** Creating notes for the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+
+      const custodianDisplay = custodianTeamMember
+        ? wrapCustodianForNote({ teamMember: custodianTeamMember })
+        : `**${custodianName.trim()}**`;
+
       await tx.note.createMany({
         data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: `${actor} granted ${custodianDisplay} custody.`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -3118,9 +3141,9 @@ export async function bulkUpdateAssetLocation({
           const content = getLocationUpdateNoteContent({
             currentLocation: asset.location,
             newLocation,
+            userId,
             firstName: user?.firstName ?? "",
             lastName: user?.lastName ?? "",
-            assetName: asset.title,
             isRemoving,
           });
 
@@ -3347,9 +3370,13 @@ export async function relinkQrCode({
       assetId,
       userId,
       type: "UPDATE",
-      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has changed QR code ${
+      content: `${wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })} changed QR code ${
         oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**`,
+      } to **${qrId}**.`,
     }),
   ]);
 }

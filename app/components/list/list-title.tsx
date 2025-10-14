@@ -81,9 +81,14 @@ export default function ListTitle({
 
   return (
     <div>
-      <h5 className={tw("text-left capitalize", titleClassName)}>
+      <div
+        className={tw(
+          "text-left text-text-sm font-semibold capitalize text-gray-900",
+          titleClassName
+        )}
+      >
         {title || plural}
-      </h5>
+      </div>
       <div className="h-7">
         {hasBulkActions && hasSelectedItems ? (
           <div className="flex items-start gap-2">
@@ -91,6 +96,7 @@ export default function ListTitle({
               onClick={clearSelectedItems}
               variant="secondary"
               className="p-[2px] text-[14px]"
+              aria-label="Clear selected items"
             >
               <X size={12} strokeWidth={3} className="text-gray-600" />
             </Button>

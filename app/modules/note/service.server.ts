@@ -1,6 +1,10 @@
 import type { Asset, Kit, Note, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import {
+  wrapKitsWithDataForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 
 const label = "Note";
 
@@ -136,7 +140,6 @@ export async function createBulkKitChangeNotes({
           newKit,
           firstName: user.firstName ?? "",
           lastName: user.lastName ?? "",
-          assetName: asset.title,
           assetId: asset.id,
           userId,
           isRemoving: isAssetRemoved,
@@ -162,7 +165,6 @@ export async function createKitChangeNote({
   newKit,
   firstName,
   lastName,
-  assetName,
   assetId,
   userId,
   isRemoving,
@@ -171,32 +173,51 @@ export async function createKitChangeNote({
   newKit: Pick<Kit, "id" | "name"> | null;
   firstName: string;
   lastName: string;
-  assetName: Asset["title"];
   assetId: Asset["id"];
   userId: User["id"];
   isRemoving: boolean;
 }) {
   try {
-    const fullName = `${firstName.trim()} ${lastName.trim()}`;
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName,
+      lastName,
+    });
     let message = "";
 
     /** User is changing from kit to another */
     if (currentKit && newKit && currentKit.id !== newKit.id) {
-      message = `**${fullName}** changed kit of **${assetName.trim()}** from **[${currentKit.name.trim()}](/kits/${
-        currentKit.id
-      })** to **[${newKit.name.trim()}](/kits/${newKit.id})**`;
+      const currentKitLink = wrapKitsWithDataForNote(
+        { id: currentKit.id, name: currentKit.name.trim() },
+        "updated"
+      );
+      const newKitLink = wrapKitsWithDataForNote(
+        { id: newKit.id, name: newKit.name.trim() },
+        "updated"
+      );
+      message = `${userLink} changed kit  from ${currentKitLink} to ${newKitLink}.`;
     }
 
     /** User is adding asset to a kit for first time */
     if (newKit && !currentKit) {
-      message = `**${fullName}** added asset to **[${newKit.name.trim()}](/kits/${
-        newKit.id
-      })**`;
+      const newKitLink = wrapKitsWithDataForNote(
+        { id: newKit.id, name: newKit.name.trim() },
+        "added"
+      );
+      message = `${userLink} added asset to ${newKitLink}.`;
     }
 
     /** User is removing the asset from kit */
     if (isRemoving && !newKit) {
-      message = `**${fullName}** removed asset from **[${currentKit?.name.trim()}](/kits/${currentKit?.id})**`;
+      if (currentKit) {
+        const currentKitLink = wrapKitsWithDataForNote(
+          { id: currentKit.id, name: currentKit.name.trim() },
+          "removed"
+        );
+        message = `${userLink} removed asset from ${currentKitLink}.`;
+      } else {
+        message = `${userLink} removed asset from a kit.`;
+      }
     }
 
     if (!message) {
