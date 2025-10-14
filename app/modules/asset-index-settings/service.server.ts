@@ -31,7 +31,7 @@ export async function createUserAssetIndexSettings({
   try {
     const org = await getOrganizationById(organizationId, {
       customFields: {
-        where: { active: true },
+        where: { active: true, deletedAt: null },
       },
     });
 
@@ -74,7 +74,7 @@ export async function createUserAssetIndexSettings({
       cause,
       title: "Failed to create asset index settings.",
       message:
-        "We couldn't create the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't create the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId },
       label,
     });
@@ -145,7 +145,7 @@ export async function changeMode({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId, mode },
       label,
     });
@@ -174,7 +174,7 @@ export async function updateColumns({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId, columns },
       label,
     });
@@ -240,7 +240,7 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { newField, oldField },
       label,
     });
@@ -284,7 +284,7 @@ export async function removeCustomFieldFromAssetIndexSettings({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for all users in your organization. This operation affects everyone's column configurations. Please try again. If the issue persists, please contact support.",
       additionalData: { customFieldName, organizationId },
       label,
     });
@@ -457,6 +457,7 @@ async function validateColumns({
         where: {
           organizationId,
           active: true,
+          deletedAt: null,
         },
         select: {
           name: true,

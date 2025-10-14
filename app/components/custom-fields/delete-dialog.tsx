@@ -30,7 +30,8 @@ export function DeleteCustomFieldDialog({
 
   const disabled = isFormProcessing(fetcher.state);
   const expectedName = customField.name;
-  const confirmationMatches = confirmation.trim() === expectedName;
+  const confirmationMatches =
+    confirmation.trim().toLowerCase() === expectedName.toLowerCase();
 
   const resetDialog = () => {
     setFormError(null);
@@ -45,7 +46,7 @@ export function DeleteCustomFieldDialog({
       return;
     }
 
-    resetDialog();
+    // Don't reset here - onOpenChange will handle it when dialog closes
     setOpen(false);
   }, [fetcher.data]);
 
@@ -73,17 +74,24 @@ export function DeleteCustomFieldDialog({
             <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600 md:mx-0">
               <TrashIcon />
             </div>
-            <AlertDialogTitle>Delete {customField.name}</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. All values associated with this
-              custom field will be deleted forever.
+            <AlertDialogTitle>Archive {customField.name}</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>
+                <strong>This field will be archived.</strong> The field and all
+                its values will be hidden from your assets but preserved in the
+                database.
+              </p>
+              <p className="text-gray-700">
+                💡 <strong>Note:</strong> The field name will be available for
+                reuse after archiving. Archived data remains in the database for
+                record-keeping.
+              </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <div className="mt-4 space-y-2">
             <p className="text-sm text-gray-600">
-              To confirm, type the custom field name exactly as it appears
-              below.
+              To confirm, type the custom field name below (case-insensitive).
             </p>
             <Input
               label="Confirmation"
@@ -117,7 +125,7 @@ export function DeleteCustomFieldDialog({
               name="intent"
               value="delete"
             >
-              Delete
+              {disabled ? "Archiving..." : "Archive"}
             </Button>
           </AlertDialogFooter>
         </fetcher.Form>

@@ -1369,6 +1369,8 @@ export async function updateAsset({
           db.customField.findMany({
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+              active: true,
+              deletedAt: null,
             },
             select: { id: true, name: true, type: true },
           }),

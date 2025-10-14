@@ -4,7 +4,7 @@ import { Link, Outlet } from "@remix-run/react";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import {
-  deleteCustomField,
+  softDeleteCustomField,
   getCustomField,
 } from "~/modules/custom-field/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -62,10 +62,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const customField = await getCustomField({ id, organizationId });
 
-    if (customField.name !== confirmation) {
+    // Case-insensitive comparison
+    if (customField.name.toLowerCase() !== confirmation.toLowerCase()) {
       throw new ShelfError({
         cause: null,
-        message: "Confirmation text does not match the custom field name.",
+        message:
+          "Confirmation text does not match the custom field name (case-insensitive).",
         additionalData: {
           userId,
           customFieldId: id,
@@ -78,12 +80,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    const deletedField = await deleteCustomField({ id, organizationId });
+    await softDeleteCustomField({ id, organizationId });
 
     sendNotification({
       title: "Custom field deleted",
-      message: `The custom field "${deletedField.name}" and its values have been deleted successfully.`,
-      icon: { name: "trash", variant: "error" },
+      message: `The custom field "${customField.name}" has been deleted. You can now create a new field with the same name if needed.`,
+      icon: { name: "success", variant: "success" },
       senderId: userId,
     });
 
