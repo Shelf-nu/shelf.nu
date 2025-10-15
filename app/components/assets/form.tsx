@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import {
-  Link,
   useActionData,
   useLoaderData,
   useNavigation,
@@ -31,6 +30,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -72,6 +72,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
+  redirectTo: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -94,6 +95,7 @@ type Props = Partial<
   qrId?: Qr["id"] | null;
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
+  referer?: string | null;
 };
 
 export const AssetForm = ({
@@ -110,6 +112,7 @@ export const AssetForm = ({
   qrId,
   tags,
   barcodes,
+  referer,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -182,6 +185,10 @@ export const AssetForm = ({
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
+        <RefererRedirectInput
+          fieldName={zo.fields.redirectTo()}
+          referer={referer}
+        />
 
         <div className="flex items-start justify-between border-b pb-5">
           <div className=" ">
