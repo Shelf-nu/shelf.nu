@@ -300,6 +300,25 @@ describe("EditorV2", () => {
     });
   });
 
+  it("stops global key handlers from firing when shortcuts are used inside the editor", async () => {
+    const { view } = await setupEditor({ defaultValue: "bold" });
+
+    const globalShortcut = vi.fn();
+    document.addEventListener("keydown", globalShortcut);
+
+    try {
+      act(() => {
+        view.focus();
+      });
+
+      fireEvent.keyDown(view.dom, { key: "b", metaKey: true });
+
+      expect(globalShortcut).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", globalShortcut);
+    }
+  });
+
   it("highlights the selected slash command using neutral styling", () => {
     render(
       <SlashCommandMenu

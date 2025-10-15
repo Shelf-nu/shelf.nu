@@ -543,7 +543,15 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
             onBlur?.(event as unknown as FocusEvent<HTMLTextAreaElement>);
             return false;
           },
-          keydown: (_view, event) => handleSlashKeyDown(event as KeyboardEvent),
+          keydown: (_view, event) => {
+            const keyboardEvent = event as KeyboardEvent;
+            keyboardEvent.stopPropagation();
+            if (handleSlashKeyDown(keyboardEvent)) {
+              keyboardEvent.preventDefault();
+              return true;
+            }
+            return false;
+          },
         },
       });
 
