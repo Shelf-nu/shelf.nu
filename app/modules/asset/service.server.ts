@@ -1729,9 +1729,7 @@ export async function duplicateAsset({
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
         ...payload,
-        title: `${asset.title} (copy ${
-          amountOfDuplicates > 1 ? i : ""
-        } ${Date.now()})`,
+        title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i : ""})`,
         customFieldsValues: extractedCustomFieldValues,
       });
 
