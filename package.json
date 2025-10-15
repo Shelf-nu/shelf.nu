@@ -166,7 +166,7 @@
     "eslint-plugin-local-rules": "^3.0.2",
     "eslint-plugin-no-restricted-imports": "^0.0.0",
     "eslint-plugin-tailwindcss": "^3.14.2",
-    "happy-dom": "^20.0.0",
+    "happy-dom": "^20.0.2",
     "husky": "^9.0.11",
     "msw": "^1.2.0",
     "nodemailer-mock": "^2.0.4",
