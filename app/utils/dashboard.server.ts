@@ -440,6 +440,7 @@ export async function checklistOptions({
       db.customField.count({
         where: {
           organizationId,
+          deletedAt: null,
         },
       }),
     ]);

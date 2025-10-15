@@ -31,7 +31,7 @@ export async function createUserAssetIndexSettings({
   try {
     const org = await getOrganizationById(organizationId, {
       customFields: {
-        where: { active: true },
+        where: { active: true, deletedAt: null },
       },
     });
 
@@ -74,7 +74,7 @@ export async function createUserAssetIndexSettings({
       cause,
       title: "Failed to create asset index settings.",
       message:
-        "We couldn't create the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't create the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId },
       label,
     });
@@ -145,7 +145,7 @@ export async function changeMode({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId, mode },
       label,
     });
@@ -174,7 +174,7 @@ export async function updateColumns({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId, columns },
       label,
     });
@@ -240,8 +240,52 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { newField, oldField },
+      label,
+    });
+  }
+}
+
+/**
+ * Removes a custom field column from every asset index configuration that belongs to an organization.
+ * Uses a single SQL statement to efficiently filter the JSON columns payload for all matching rows.
+ */
+export async function removeCustomFieldFromAssetIndexSettings({
+  customFieldName,
+  organizationId,
+  prisma,
+}: {
+  customFieldName: string;
+  organizationId: string;
+  prisma?: Pick<Prisma.TransactionClient, "$executeRaw">;
+}) {
+  const client = prisma ?? db;
+
+  try {
+    const columnName = `cf_${customFieldName}`;
+
+    await client.$executeRaw`
+      UPDATE "AssetIndexSettings" AS ais
+      SET "columns" = (
+        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+        FROM jsonb_array_elements(ais."columns") elem
+        WHERE elem->>'name' <> ${columnName}
+      )
+      WHERE ais."organizationId" = ${organizationId}
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(ais."columns") elem
+          WHERE elem->>'name' = ${columnName}
+        );
+    `;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Failed to update asset index settings.",
+      message:
+        "We couldn't update the asset index settings for all users in your organization. This operation affects everyone's column configurations. Please try again. If the issue persists, please contact support.",
+      additionalData: { customFieldName, organizationId },
       label,
     });
   }
@@ -413,6 +457,7 @@ async function validateColumns({
         where: {
           organizationId,
           active: true,
+          deletedAt: null,
         },
         select: {
           name: true,
