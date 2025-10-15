@@ -6,17 +6,19 @@ interface RefererRedirectInputProps {
   fieldName: string;
 
   /**
-   * The referer path to redirect back to.
+   * The referer path (pathname + search) to redirect back to.
    * Typically obtained from `getRefererPath(request)` in your loader.
+   * Example: "/assets?search=laptop&status=AVAILABLE"
    */
   referer?: string | null;
 }
 
 /**
  * Hidden input component that handles redirecting users back to the previous page
- * after form submission.
+ * after form submission, preserving their search/filter context.
  *
  * Features:
+ * - Preserves search params (e.g., /assets?search=laptop returns to filtered view)
  * - Automatically detects if page was opened in a new tab (cmd+click/ctrl+click)
  * - If opened in new tab, clears the redirect value so the form action uses its fallback
  * - Works seamlessly with Remix form actions and `safeRedirect`
@@ -26,6 +28,7 @@ interface RefererRedirectInputProps {
  * // In your route loader
  * const referer = getRefererPath(request);
  * return json(data({ referer, ...otherData }));
+ * // referer might be: "/assets?search=laptop&status=AVAILABLE"
  *
  * // In your form component
  * <Form method="post">
@@ -35,7 +38,10 @@ interface RefererRedirectInputProps {
  *
  * // In your route action
  * const { redirectTo } = payload;
- * return redirect(safeRedirect(redirectTo, fallbackPath));
+ * if (redirectTo) {
+ *   return redirect(safeRedirect(redirectTo, fallbackPath));
+ * }
+ * return json(data({ success: true })); // Stay on page
  * ```
  */
 export function RefererRedirectInput({

@@ -76,7 +76,9 @@ describe(getRefererPath.name, () => {
     const request = new Request(BASE_URL, {
       headers: { referer: `${BASE_URL}/assets?search=test&status=AVAILABLE` },
     });
-    expect(getRefererPath(request)).toBe("/assets");
+    expect(getRefererPath(request)).toBe(
+      "/assets?search=test&status=AVAILABLE"
+    );
   });
 
   it("should return pathname with hash from referer", () => {

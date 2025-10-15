@@ -32,18 +32,19 @@ export function getRedirectTo(request: Request, defaultRedirectTo = "/") {
 }
 
 /**
- * Get the pathname from the Referer header.
+ * Get the pathname and search params from the Referer header.
  *
  * This is useful for redirecting users back to the page they came from
- * after completing an action (e.g., editing an entity).
+ * after completing an action (e.g., editing an entity), while preserving
+ * their search/filter context.
  *
  * @param request - The request object
- * @returns The pathname from the referer header, or null if not available or invalid
+ * @returns The pathname + search from the referer header, or null if not available or invalid
  *
  * @example
- * // User navigates from /assets to /assets/123/edit
+ * // User navigates from /assets?search=laptop&status=AVAILABLE to /assets/123/edit
  * const refererPath = getRefererPath(request);
- * // returns "/assets"
+ * // returns "/assets?search=laptop&status=AVAILABLE"
  *
  * redirect(safeRedirect(refererPath, `/assets/${id}`));
  */
@@ -54,7 +55,8 @@ export function getRefererPath(request: Request): string | null {
   }
 
   try {
-    return new URL(referer).pathname;
+    const url = new URL(referer);
+    return `${url.pathname}${url.search}`;
   } catch {
     // Invalid URL in referer header
     return null;
