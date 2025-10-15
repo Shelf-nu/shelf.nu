@@ -62,8 +62,16 @@ export function generateWhereClause(
             WHERE b."assetId" = a.id AND b.value ILIKE ${`%${term}%`}
           ) OR
           EXISTS (
-            SELECT 1 FROM public."AssetCustomFieldValue" acfv 
-            WHERE acfv."assetId" = a.id AND acfv.value#>>'{valueText}' ILIKE ${`%${term}%`}
+            SELECT 1 FROM public."AssetCustomFieldValue" acfv
+            WHERE acfv."assetId" = a.id AND (
+              COALESCE(
+                acfv.value#>>'{valueText}',
+                acfv.value#>>'{valueMultiLineText}',
+                acfv.value#>>'{valueOption}',
+                acfv.value#>>'{raw}',
+                acfv.value#>>'{valueBoolean}'
+              ) ILIKE ${`%${term}%`}
+            )
           )
         )`
       );

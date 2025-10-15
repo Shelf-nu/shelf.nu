@@ -133,6 +133,68 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
 
+const CUSTOM_FIELD_BOOLEAN_LOOKUP: Record<string, boolean> = {
+  true: true,
+  yes: true,
+  "1": true,
+  false: false,
+  no: false,
+  "0": false,
+};
+
+function buildCustomFieldSearchConditions(
+  term: string
+): Prisma.AssetCustomFieldValueWhereInput[] {
+  const normalizedTerm = term.toLowerCase();
+
+  const baseConditions: Prisma.AssetCustomFieldValueWhereInput[] = [
+    {
+      value: {
+        path: ["valueText"],
+        string_contains: normalizedTerm,
+        mode: "insensitive",
+      },
+    },
+    {
+      value: {
+        path: ["valueMultiLineText"],
+        string_contains: normalizedTerm,
+        mode: "insensitive",
+      },
+    },
+    {
+      value: {
+        path: ["valueOption"],
+        string_contains: normalizedTerm,
+        mode: "insensitive",
+      },
+    },
+    {
+      value: {
+        path: ["raw"],
+        string_contains: normalizedTerm,
+        mode: "insensitive",
+      },
+    },
+  ];
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      CUSTOM_FIELD_BOOLEAN_LOOKUP,
+      normalizedTerm
+    )
+  ) {
+    baseConditions.push({
+      value: {
+        path: ["valueBoolean"],
+        equals: CUSTOM_FIELD_BOOLEAN_LOOKUP[normalizedTerm],
+      },
+    });
+  }
+
+  return baseConditions;
+}
+
 /**
  * Sets kit custody for imported assets after all assets have been created
  */
@@ -481,62 +543,69 @@ export async function getAssets(params: {
         .map((term) => term.trim())
         .filter(Boolean);
 
-      where.OR = searchTerms.map((term) => ({
-        OR: [
-          // Search in asset fields
-          { title: { contains: term, mode: "insensitive" } },
-          // Search in asset sequential id
-          { sequentialId: { contains: term, mode: "insensitive" } },
-          // Search in asset description
-          { description: { contains: term, mode: "insensitive" } },
-          // Search in related category
-          { category: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related location
-          { location: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related tags
-          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
-          // Search in custodian names
-          {
-            custody: {
-              custodian: {
-                OR: [
-                  { name: { contains: term, mode: "insensitive" } },
-                  {
-                    user: {
-                      OR: [
-                        { firstName: { contains: term, mode: "insensitive" } },
-                        { lastName: { contains: term, mode: "insensitive" } },
-                      ],
+      where.OR = searchTerms.map((term) => {
+        const customFieldSearchConditions =
+          buildCustomFieldSearchConditions(term);
+
+        return {
+          OR: [
+            // Search in asset fields
+            { title: { contains: term, mode: "insensitive" } },
+            // Search in asset sequential id
+            { sequentialId: { contains: term, mode: "insensitive" } },
+            // Search in asset description
+            { description: { contains: term, mode: "insensitive" } },
+            // Search in related category
+            { category: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related location
+            { location: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related tags
+            {
+              tags: { some: { name: { contains: term, mode: "insensitive" } } },
+            },
+            // Search in custodian names
+            {
+              custody: {
+                custodian: {
+                  OR: [
+                    { name: { contains: term, mode: "insensitive" } },
+                    {
+                      user: {
+                        OR: [
+                          {
+                            firstName: { contains: term, mode: "insensitive" },
+                          },
+                          { lastName: { contains: term, mode: "insensitive" } },
+                        ],
+                      },
                     },
-                  },
-                ],
-              },
-            },
-          },
-          // Search qr code id
-          {
-            qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
-          },
-          // Search barcode values
-          {
-            barcodes: {
-              some: { value: { contains: term, mode: "insensitive" } },
-            },
-          },
-          // Search in custom fields
-          {
-            customFields: {
-              some: {
-                value: {
-                  path: ["valueText"],
-                  string_contains: term,
-                  mode: "insensitive",
+                  ],
                 },
               },
             },
-          },
-        ],
-      }));
+            // Search qr code id
+            {
+              qrCodes: {
+                some: { id: { contains: term, mode: "insensitive" } },
+              },
+            },
+            // Search barcode values
+            {
+              barcodes: {
+                some: { value: { contains: term, mode: "insensitive" } },
+              },
+            },
+            // Search in custom fields
+            {
+              customFields: {
+                some: {
+                  OR: customFieldSearchConditions,
+                },
+              },
+            },
+          ],
+        };
+      });
     }
 
     if (status) {
