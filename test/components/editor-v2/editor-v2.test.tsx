@@ -162,7 +162,7 @@ describe("EditorV2", () => {
       );
     });
 
-    const linkButton = screen.getByRole("button", { name: "Link" });
+    const linkButton = screen.getByRole("button", { name: "Link (⌘⇧K)" });
     await act(async () => {
       await user.click(linkButton);
     });
@@ -194,10 +194,12 @@ describe("EditorV2", () => {
       );
     });
 
-    const linkButton = await screen.findByRole("button", { name: "Link" });
+    const linkButton = await screen.findByRole("button", {
+      name: "Link (⌘⇧K)",
+    });
     await waitFor(() => {
       expect(linkButton).toHaveAttribute("aria-pressed", "true");
-      expect(linkButton.className).toContain("bg-gray-200");
+      expect(linkButton.className).toContain("bg-accent");
     });
   });
 
@@ -209,6 +211,32 @@ describe("EditorV2", () => {
         "Content supports Markdown and Markdoc. Use / to access commands."
       )
     ).toBeInTheDocument();
+  });
+
+  it("renders toolbar buttons with icons and shortcut tooltips", async () => {
+    await setupEditor();
+
+    const toolbar = screen.getByRole("toolbar", {
+      name: "Editor formatting toolbar",
+    });
+
+    const expectedButtons = [
+      "Undo (⌘Z)",
+      "Redo (⌘⇧Z)",
+      "Bold (⌘B)",
+      "Italic (⌘I)",
+      "Link (⌘⇧K)",
+      "Bulleted list (⌘⇧8)",
+      "Numbered list (⌘⇧7)",
+      "Quote (⌘⇧9)",
+      "Divider (---)",
+    ];
+
+    for (const label of expectedButtons) {
+      const button = within(toolbar).getByRole("button", { name: label });
+      expect(button.querySelector("svg")).not.toBeNull();
+      expect(button).toHaveAttribute("title", label);
+    }
   });
 
   it("renders bubble menu buttons as icon-only controls", async () => {

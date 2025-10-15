@@ -1,12 +1,26 @@
 import type { ReactNode } from "react";
 
+import {
+  Bold,
+  Italic,
+  Link2,
+  List,
+  ListOrdered,
+  Minus,
+  Quote,
+  RotateCcw,
+  RotateCw,
+  Type,
+} from "lucide-react";
+
 import { tw } from "~/utils/tw";
 
 import type { ToolbarBlock, ToolbarState } from "../types";
 
 interface ToolbarButtonProps {
   label: string;
-  icon?: ReactNode;
+  tooltip?: string;
+  icon: ReactNode;
   onClick: () => void;
   active?: boolean;
   disabled?: boolean;
@@ -15,6 +29,7 @@ interface ToolbarButtonProps {
 
 export function ToolbarButton({
   label,
+  tooltip,
   icon,
   onClick,
   active = false,
@@ -25,11 +40,14 @@ export function ToolbarButton({
     <button
       type="button"
       className={tw(
-        "inline-flex h-9 items-center justify-center gap-1 rounded px-2 text-sm font-medium transition",
-        active ? "bg-gray-200 text-gray-900" : "text-gray-600 hover:bg-gray-100",
+        "inline-flex size-9 items-center justify-center rounded-md transition",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted",
         disabled ? "cursor-not-allowed opacity-50" : ""
       )}
-      aria-label={label}
+      aria-label={tooltip ?? label}
+      title={tooltip ?? label}
       aria-pressed={isToggle ? active : undefined}
       data-active={active ? "true" : undefined}
       onMouseDown={(event) => event.preventDefault()}
@@ -40,7 +58,7 @@ export function ToolbarButton({
       disabled={disabled}
     >
       {icon}
-      <span className={icon ? "sr-only" : undefined}>{label}</span>
+      <span className="sr-only">{label}</span>
     </button>
   );
 }
@@ -53,11 +71,13 @@ interface ParagraphSelectProps {
 export function ParagraphSelect({ value, onChange }: ParagraphSelectProps) {
   const normalized = value === "raw_block" ? "paragraph" : value;
   return (
-    <label className="inline-flex items-center gap-2 text-sm text-gray-600">
-      <span className="sr-only">Paragraph style</span>
+    <label className="text-muted-foreground inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-2 text-sm">
+      <Type size={18} strokeWidth={1.5} aria-hidden="true" />
+      <span className="sr-only">Text style</span>
       <select
-        className="h-9 rounded border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
-        aria-label="Paragraph style"
+        className="text-foreground h-full bg-transparent text-sm focus:outline-none"
+        aria-label="Text style"
+        title="Text style"
         value={normalized}
         onChange={(event) => onChange(event.target.value as ToolbarBlock)}
         disabled={value === "raw_block"}
@@ -106,52 +126,89 @@ export function EditorToolbar({
 }: EditorToolbarProps) {
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2"
       role="toolbar"
       aria-label="Editor formatting toolbar"
     >
-      <ToolbarButton label="Undo" onClick={onUndo} disabled={!state.canUndo} />
-      <ToolbarButton label="Redo" onClick={onRedo} disabled={!state.canRedo} />
+      <div className="flex items-center gap-2">
+        <ToolbarButton
+          label="Undo"
+          tooltip="Undo (⌘Z)"
+          icon={<RotateCcw size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onUndo}
+          disabled={!state.canUndo}
+        />
+        <ToolbarButton
+          label="Redo"
+          tooltip="Redo (⌘⇧Z)"
+          icon={<RotateCw size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onRedo}
+          disabled={!state.canRedo}
+        />
+      </div>
       <ParagraphSelect value={state.block} onChange={onParagraphChange} />
-      <ToolbarButton
-        label="Bold"
-        onClick={onBold}
-        active={state.bold}
-        isToggle
-      />
-      <ToolbarButton
-        label="Italic"
-        onClick={onItalic}
-        active={state.italic}
-        isToggle
-      />
-      <ToolbarButton
-        label="Link"
-        onClick={onToggleLink}
-        active={state.link}
-        isToggle
-      />
-      <ToolbarButton
-        label="Bulleted list"
-        onClick={onBulletList}
-        active={state.block === "bullet_list"}
-        isToggle
-      />
-      <ToolbarButton
-        label="Numbered list"
-        onClick={onOrderedList}
-        active={state.block === "ordered_list"}
-        isToggle
-      />
-      <ToolbarButton
-        label="Quote"
-        onClick={onQuote}
-        active={state.block === "blockquote"}
-        isToggle
-      />
-      {hasDivider && onDivider ? (
-        <ToolbarButton label="Divider" onClick={onDivider} />
-      ) : null}
+      <div className="flex items-center gap-2">
+        <ToolbarButton
+          label="Bold"
+          tooltip="Bold (⌘B)"
+          icon={<Bold size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onBold}
+          active={state.bold}
+          isToggle
+        />
+        <ToolbarButton
+          label="Italic"
+          tooltip="Italic (⌘I)"
+          icon={<Italic size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onItalic}
+          active={state.italic}
+          isToggle
+        />
+        <ToolbarButton
+          label="Link"
+          tooltip="Link (⌘⇧K)"
+          icon={<Link2 size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onToggleLink}
+          active={state.link}
+          isToggle
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <ToolbarButton
+          label="Bulleted list"
+          tooltip="Bulleted list (⌘⇧8)"
+          icon={<List size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onBulletList}
+          active={state.block === "bullet_list"}
+          isToggle
+        />
+        <ToolbarButton
+          label="Numbered list"
+          tooltip="Numbered list (⌘⇧7)"
+          icon={<ListOrdered size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onOrderedList}
+          active={state.block === "ordered_list"}
+          isToggle
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <ToolbarButton
+          label="Quote"
+          tooltip="Quote (⌘⇧9)"
+          icon={<Quote size={18} strokeWidth={1.5} aria-hidden="true" />}
+          onClick={onQuote}
+          active={state.block === "blockquote"}
+          isToggle
+        />
+        {hasDivider && onDivider ? (
+          <ToolbarButton
+            label="Divider"
+            tooltip="Divider (---)"
+            icon={<Minus size={18} strokeWidth={1.5} aria-hidden="true" />}
+            onClick={onDivider}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
