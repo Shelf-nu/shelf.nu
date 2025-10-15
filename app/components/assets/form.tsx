@@ -334,13 +334,14 @@ export const AssetForm = ({
             <p>
               Make it unique. Each asset can have 1 category. It will show on
               your index.{" "}
-              <Link
+              <Button
                 to="/categories/new"
+                variant="link-gray"
                 className="text-gray-600 underline"
                 target="_blank"
               >
                 Create categories
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -378,13 +379,14 @@ export const AssetForm = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Link
+              <Button
                 to="/tags/new"
                 className="text-gray-600 underline"
                 target="_blank"
+                variant="link-gray"
               >
                 Create tags
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -403,13 +405,14 @@ export const AssetForm = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link
+              <Button
                 to="/locations/new"
                 className="text-gray-600 underline"
                 target="_blank"
+                variant="link-gray"
               >
                 Create locations
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
