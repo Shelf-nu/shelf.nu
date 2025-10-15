@@ -40,6 +40,13 @@ describe("canHideShelfBranding", () => {
     expect(canHideShelfBranding({ canHideShelfBranding: true })).toBe(true);
   });
 
+  it("returns false when premium is enabled but the tier limit is missing", async () => {
+    const { canHideShelfBranding } = await loadSubscriptionModule(true);
+
+    expect(canHideShelfBranding(null)).toBe(false);
+    expect(canHideShelfBranding(undefined)).toBe(false);
+  });
+
   it("always returns true when premium features are disabled", async () => {
     const { canHideShelfBranding } = await loadSubscriptionModule(false);
 

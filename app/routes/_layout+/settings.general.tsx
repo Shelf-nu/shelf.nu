@@ -38,6 +38,7 @@ import {
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -207,10 +208,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        let nextShowShelfBranding =
-          typeof showShelfBranding === "boolean"
-            ? showShelfBranding
-            : currentOrganization.showShelfBranding;
+        let nextShowShelfBranding = resolveShowShelfBranding(
+          showShelfBranding,
+          currentOrganization.showShelfBranding
+        );
 
         if (!canHideBranding) {
           nextShowShelfBranding = true;

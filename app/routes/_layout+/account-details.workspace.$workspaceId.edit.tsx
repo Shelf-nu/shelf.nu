@@ -33,6 +33,7 @@ import {
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -224,10 +225,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const { name, currency, qrIdDisplayPreference, showShelfBranding } =
           payload;
 
-        let nextShowShelfBranding =
-          typeof showShelfBranding === "boolean"
-            ? showShelfBranding
-            : organization.showShelfBranding;
+        let nextShowShelfBranding = resolveShowShelfBranding(
+          showShelfBranding,
+          organization.showShelfBranding
+        );
 
         if (!canHideBranding) {
           nextShowShelfBranding = true;

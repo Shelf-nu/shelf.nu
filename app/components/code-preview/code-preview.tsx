@@ -7,6 +7,7 @@ import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
@@ -79,10 +80,10 @@ export const CodePreview = ({
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService } = useUserRoleHelper();
   const organization = useCurrentOrganization();
-  const resolvedShowShelfBranding =
-    typeof showShelfBranding === "boolean"
-      ? showShelfBranding
-      : organization?.showShelfBranding ?? true;
+  const resolvedShowShelfBranding = resolveShowShelfBranding(
+    showShelfBranding,
+    organization?.showShelfBranding
+  );
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
