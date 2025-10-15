@@ -17,6 +17,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -34,6 +35,7 @@ export const NewKitFormSchema = z.object({
   category: z.string().optional(),
   qrId: z.string().optional(),
   locationId: z.string().optional(),
+  redirectTo: z.string().optional(),
 });
 
 type KitFormProps = Partial<
@@ -42,6 +44,7 @@ type KitFormProps = Partial<
   className?: string;
   qrId?: string | null;
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
+  referer?: string | null;
 };
 
 export default function KitsForm({
@@ -52,6 +55,7 @@ export default function KitsForm({
   categoryId,
   barcodes,
   locationId,
+  referer,
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -96,6 +100,10 @@ export default function KitsForm({
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
+        <RefererRedirectInput
+          fieldName={zo.fields.redirectTo()}
+          referer={referer}
+        />
 
         <FormRow rowLabel="Name" className="border-b-0 pb-[10px]" required>
           <Input

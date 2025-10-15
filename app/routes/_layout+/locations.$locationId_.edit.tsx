@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -23,7 +23,14 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getParams,
+  getRefererPath,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -66,6 +73,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         location,
         header,
+        referer: getRefererPath(request),
       })
     );
   } catch (cause) {
@@ -136,6 +144,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: userId,
     });
 
+    // If redirectTo is provided, redirect back to previous page
+    // Otherwise stay on current page (e.g., when opened in new tab)
+    if (payload.redirectTo) {
+      return redirect(safeRedirect(payload.redirectTo, `/locations/${id}`));
+    }
+
     return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -145,7 +159,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
-  const { location } = useLoaderData<typeof loader>();
+  const { location, referer } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">
@@ -161,6 +175,7 @@ export default function LocationEditPage() {
           name={location.name}
           description={location.description}
           address={location.address}
+          referer={referer}
         />
       </div>
     </div>

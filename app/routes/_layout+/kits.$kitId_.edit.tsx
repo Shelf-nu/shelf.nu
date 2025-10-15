@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -31,7 +31,9 @@ import {
   data,
   error,
   getParams,
+  getRefererPath,
   parseData,
+  safeRedirect,
 } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -100,6 +102,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalCategories,
         locations,
         totalLocations,
+        referer: getRefererPath(request),
       })
     );
   } catch (cause) {
@@ -191,6 +194,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
+    // If redirectTo is provided, redirect back to previous page
+    // Otherwise stay on current page (e.g., when opened in new tab)
+    if (payload.redirectTo) {
+      return redirect(safeRedirect(payload.redirectTo, `/kits/${kitId}`));
+    }
+
     return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
@@ -200,7 +209,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function KitEdit() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, referer } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">
@@ -219,6 +228,7 @@ export default function KitEdit() {
           categoryId={kit.categoryId}
           barcodes={kit.barcodes}
           locationId={kit?.locationId}
+          referer={referer}
         />
       </div>
     </div>
