@@ -158,11 +158,18 @@ export async function createStripeCheckoutSession({
 /** Fetches prices and products from stripe */
 export async function getStripePricesAndProducts() {
   try {
-    if (!premiumIsEnabled || !stripe) {
+    if (!premiumIsEnabled) {
       return {
         month: [],
         year: [],
       };
+    }
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        label,
+      });
     }
 
     const pricesResponse = await stripe.prices.list({
