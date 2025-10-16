@@ -155,7 +155,9 @@ export async function createStripeCheckoutSession({
   }
 }
 
-/** Fetches prices and products from stripe */
+/** 
+ * Fetches prices and products from Stripe. Returns empty arrays when premium features are disabled.
+ */
 export async function getStripePricesAndProducts() {
   try {
     if (!premiumIsEnabled) {
