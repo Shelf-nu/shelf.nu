@@ -155,9 +155,25 @@ export async function createStripeCheckoutSession({
   }
 }
 
-/** Fetches prices and products from stripe */
+/** 
+ * Fetches prices and products from Stripe. Returns empty arrays when premium features are disabled.
+ */
 export async function getStripePricesAndProducts() {
   try {
+    if (!premiumIsEnabled) {
+      return {
+        month: [],
+        year: [],
+      };
+    }
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        label,
+      });
+    }
+
     const pricesResponse = await stripe.prices.list({
       active: true,
       type: "recurring",
