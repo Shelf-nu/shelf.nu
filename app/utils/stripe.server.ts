@@ -158,6 +158,13 @@ export async function createStripeCheckoutSession({
 /** Fetches prices and products from stripe */
 export async function getStripePricesAndProducts() {
   try {
+    if (!premiumIsEnabled || !stripe) {
+      return {
+        month: [],
+        year: [],
+      };
+    }
+
     const pricesResponse = await stripe.prices.list({
       active: true,
       type: "recurring",
