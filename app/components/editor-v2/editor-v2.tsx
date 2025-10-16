@@ -199,28 +199,57 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
           if (prefix && /[^\s]$/.test(prefix)) {
             setSlashState(null);
             slashStateRef.current = null;
+            slashIndexRef.current = 0;
             return;
           }
           query = textBefore.slice(slashIndex + 1);
           if (!/^[\w-]*$/.test(query)) {
             setSlashState(null);
             slashStateRef.current = null;
+            slashIndexRef.current = 0;
             return;
           }
           from = state.selection.from - query.length - 1;
         } else if (slashStateRef.current?.active) {
-          from = slashStateRef.current.from;
-          query = state.doc.textBetween(
-            slashStateRef.current.from + 1,
-            state.selection.from,
+          const previous = slashStateRef.current;
+          const selectionFrom = state.selection.from;
+          const slashChar = state.doc.textBetween(
+            previous.from,
+            previous.from + 1,
             undefined,
             "\ufffc"
           );
+
+          if (
+            selectionFrom < previous.from ||
+            slashChar !== "/"
+          ) {
+            setSlashState(null);
+            slashStateRef.current = null;
+            slashIndexRef.current = 0;
+            return;
+          }
+
+          from = previous.from;
+          query = state.doc.textBetween(
+            previous.from + 1,
+            selectionFrom,
+            undefined,
+            "\ufffc"
+          );
+
+          if (!/^[\w-]*$/.test(query)) {
+            setSlashState(null);
+            slashStateRef.current = null;
+            slashIndexRef.current = 0;
+            return;
+          }
         }
 
         if (from == null || from < 0 || !Number.isFinite(from)) {
           setSlashState(null);
           slashStateRef.current = null;
+          slashIndexRef.current = 0;
           return;
         }
 
@@ -308,7 +337,9 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       const linkMark = schema.marks.link;
       if (!linkMark) return;
 
-      const range = findLinkRange(state, linkMark);
+      const { from, to } = state.selection;
+      const range =
+        from !== to ? { from, to } : findLinkRange(state, linkMark);
       if (!range) {
         return;
       }
@@ -352,21 +383,23 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       view.focus();
     }, [closeLinkDialog, linkDialog.href, linkDialog.range, schema.marks.link]);
 
-    const applySlashCommand = useCallback(
-      (command: SlashCommandItem) => {
-        const view = viewRef.current;
-        if (!view || !slashState) return;
-        const { from, to } = slashState;
-        const { state } = view;
-        const tr = state.tr.delete(from, to);
-        view.dispatch(tr);
-        command.command(view.state, view.dispatch, view);
-        view.focus();
-        setSlashState(null);
-        setSlashIndex(0);
-      },
-      [slashState]
-    );
+    const applySlashCommand = useCallback((command: SlashCommandItem) => {
+      const view = viewRef.current;
+      const currentSlash = slashStateRef.current;
+      if (!view || !currentSlash) return;
+      const { from, to } = currentSlash;
+      const { state } = view;
+
+      slashStateRef.current = null;
+      setSlashState(null);
+      setSlashIndex(0);
+      slashIndexRef.current = 0;
+
+      const tr = state.tr.delete(from, to);
+      view.dispatch(tr);
+      command.command(view.state, view.dispatch, view);
+      view.focus();
+    }, []);
 
     const openRawBlockEditor = useCallback((pos: number, raw: string) => {
       setRawBlockDialog({ open: true, pos, raw });

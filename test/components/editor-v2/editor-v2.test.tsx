@@ -172,6 +172,45 @@ describe("EditorV2", () => {
     expect(screen.getByLabelText("URL")).toHaveValue("https://example.com");
   });
 
+  it("opens the link dialog when selecting plain text", async () => {
+    const user = userEvent.setup();
+    const { view, container } = await setupEditor({
+      defaultValue: "Create link",
+    });
+
+    act(() => {
+      view.dispatch(
+        view.state.tr.setSelection(
+          TextSelection.create(view.state.doc, 1, "Create".length + 1)
+        )
+      );
+      view.focus();
+    });
+
+    const linkButton = screen.getByRole("button", { name: "Link (⌘⇧K)" });
+    await act(async () => {
+      await user.click(linkButton);
+    });
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Edit link" });
+    expect(dialog).toBeInTheDocument();
+
+    const urlInput = screen.getByLabelText("URL");
+    expect(urlInput).toHaveValue("");
+
+    await act(async () => {
+      await user.type(urlInput, "https://shelf.nu");
+    });
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Apply" }));
+    });
+
+    await waitFor(() => {
+      const serialized = serializeMarkdoc(view.state.doc, createEditorSchema());
+      expect(serialized).toContain("[Create](https://shelf.nu)");
+    });
+  });
+
   it("highlights link controls when the selection is on a link", async () => {
     const { view } = await setupEditor({
       defaultValue: "[example](https://example.com)",
@@ -237,6 +276,65 @@ describe("EditorV2", () => {
       expect(button.querySelector("svg")).not.toBeNull();
       expect(button).toHaveAttribute("title", label);
     }
+  });
+
+  it("applies slash commands without corrupting existing content", async () => {
+    const user = userEvent.setup();
+    const { view, container } = await setupEditor({
+      defaultValue: "Existing paragraph",
+    });
+
+    const editable = container.querySelector(
+      '[contenteditable="true"]'
+    ) as HTMLElement;
+
+    act(() => {
+      const endSelection = TextSelection.atEnd(view.state.doc);
+      view.dispatch(view.state.tr.setSelection(endSelection));
+      view.focus();
+    });
+
+    await act(async () => {
+      await user.type(editable, "{enter}");
+    });
+    await act(async () => {
+      await user.type(editable, "/quote");
+    });
+
+    const slashMenu = await screen.findByRole("listbox", {
+      name: "Slash command menu",
+    });
+    expect(slashMenu).toBeInTheDocument();
+
+    await act(async () => {
+      await user.keyboard("{Enter}");
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("listbox", { name: "Slash command menu" })
+      ).not.toBeInTheDocument();
+    });
+
+    let foundBlockquote = false;
+    view.state.doc.descendants((node: PMNode) => {
+      if (node.type.name === "blockquote") {
+        foundBlockquote = true;
+        return false;
+      }
+      return undefined;
+    });
+
+    expect(foundBlockquote).toBe(true);
+    expect(view.state.doc.textContent).toContain("Existing paragraph");
+
+    await act(async () => {
+      await user.type(editable, " more");
+    });
+
+    await waitFor(() => {
+      expect(view.state.doc.textContent).toContain("Existing paragraph more");
+    });
   });
 
   it("renders bubble menu buttons as icon-only controls", async () => {
