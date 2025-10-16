@@ -6,6 +6,7 @@ import { Package } from "lucide-react";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Spinner } from "~/components/shared/spinner";
@@ -200,7 +201,7 @@ export const AssetsList = ({
   );
 };
 
-const ListAssetContent = ({
+export const ListAssetContent = ({
   item,
   bulkActions,
   isUserPage,
@@ -285,12 +286,22 @@ const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={!isUserPage}>
         <Td>
-          <TeamMemberBadge teamMember={custody?.custodian} />
+          {custody?.custodian ? (
+            <TeamMemberBadge teamMember={custody.custodian} />
+          ) : (
+            <EmptyTableValue />
+          )}
         </Td>
       </When>
 
       {/* Location */}
-      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+      <Td>
+        {location?.name ? (
+          <GrayBadge>{location.name}</GrayBadge>
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
 
       {/* Quick Actions */}
       <Td>
@@ -328,7 +339,9 @@ export const ListItemTagsColumn = ({
         </TagBadge>
       ) : null}
     </div>
-  ) : null;
+  ) : (
+    <EmptyTableValue />
+  );
 };
 
 function AdvancedModeMobileFallback() {
