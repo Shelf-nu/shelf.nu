@@ -151,28 +151,28 @@ function buildCustomFieldSearchConditions(
     {
       value: {
         path: ["valueText"],
-        string_contains: normalizedTerm,
+        string_contains: term,
         mode: "insensitive",
       },
     },
     {
       value: {
         path: ["valueMultiLineText"],
-        string_contains: normalizedTerm,
+        string_contains: term,
         mode: "insensitive",
       },
     },
     {
       value: {
         path: ["valueOption"],
-        string_contains: normalizedTerm,
+        string_contains: term,
         mode: "insensitive",
       },
     },
     {
       value: {
         path: ["raw"],
-        string_contains: normalizedTerm,
+        string_contains: term,
         mode: "insensitive",
       },
     },
@@ -537,7 +537,6 @@ export async function getAssets(params: {
 
     if (search) {
       const searchTerms = search
-        .toLowerCase()
         .trim()
         .split(",")
         .map((term) => term.trim())

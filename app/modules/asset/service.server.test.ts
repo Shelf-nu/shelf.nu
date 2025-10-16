@@ -31,7 +31,6 @@ describe("asset service search", () => {
 
   it("searches across all custom field value keys in simple mode", async () => {
     const searchTerm = "Custom Value";
-    const normalizedTerm = searchTerm.toLowerCase();
 
     await getAssets({
       organizationId: "org_123",
@@ -63,28 +62,28 @@ describe("asset service search", () => {
         expect.objectContaining({
           value: {
             path: ["valueText"],
-            string_contains: normalizedTerm,
+            string_contains: searchTerm,
             mode: "insensitive",
           },
         }),
         expect.objectContaining({
           value: {
             path: ["valueMultiLineText"],
-            string_contains: normalizedTerm,
+            string_contains: searchTerm,
             mode: "insensitive",
           },
         }),
         expect.objectContaining({
           value: {
             path: ["valueOption"],
-            string_contains: normalizedTerm,
+            string_contains: searchTerm,
             mode: "insensitive",
           },
         }),
         expect.objectContaining({
           value: {
             path: ["raw"],
-            string_contains: normalizedTerm,
+            string_contains: searchTerm,
             mode: "insensitive",
           },
         }),
