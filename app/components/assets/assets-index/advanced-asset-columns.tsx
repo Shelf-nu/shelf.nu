@@ -63,7 +63,7 @@ import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import AssetQuickActions from "./asset-quick-actions";
 // eslint-disable-next-line import/no-cycle
-import { ListItemTagsColumn } from "./assets-list";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
