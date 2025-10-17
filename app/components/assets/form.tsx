@@ -1,11 +1,6 @@
 import { useRef } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
-import {
-  useActionData,
-  useLoaderData,
-  useNavigation,
-  useParams,
-} from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
@@ -196,7 +191,7 @@ export const AssetForm = ({
             <p>Basic information about your asset.</p>
           </div>
           <div className="hidden flex-1 justify-end gap-2 md:flex">
-            <Actions disabled={disabled} />
+            <Actions disabled={disabled} referer={referer} />
           </div>
         </div>
 
@@ -553,7 +548,7 @@ export const AssetForm = ({
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="flex flex-1 justify-end gap-2">
-            <Actions disabled={disabled} />
+            <Actions disabled={disabled} referer={referer} />
           </div>
         </FormRow>
       </Form>
@@ -561,28 +556,26 @@ export const AssetForm = ({
   );
 };
 
-const Actions = ({ disabled }: { disabled: boolean }) => {
-  const { assetId } = useParams<{ assetId?: string }>();
-
-  return (
-    <>
-      <ButtonGroup>
-        <Button
-          to={assetId ? `/assets/${assetId}/overview` : ".."}
-          variant="secondary"
-          disabled={disabled}
-        >
-          Cancel
-        </Button>
-        <AddAnother disabled={disabled} />
-      </ButtonGroup>
-
-      <Button type="submit" disabled={disabled}>
-        Save
+const Actions = ({
+  disabled,
+  referer,
+}: {
+  disabled: boolean;
+  referer?: string | null;
+}) => (
+  <>
+    <ButtonGroup>
+      <Button to={referer} variant="secondary" disabled={disabled}>
+        Cancel
       </Button>
-    </>
-  );
-};
+      <AddAnother disabled={disabled} />
+    </ButtonGroup>
+
+    <Button type="submit" disabled={disabled}>
+      Save
+    </Button>
+  </>
+);
 
 const AddAnother = ({ disabled }: { disabled: boolean }) => (
   <TooltipProvider delayDuration={100}>
