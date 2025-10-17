@@ -58,6 +58,7 @@ afterAll(() => {
 });
 
 // Mock dependencies
+// why: testing booking service business logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
@@ -106,22 +107,27 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: ensuring predictable ID generation for consistent test assertions
 vitest.mock("~/utils/id/id.server", () => ({
   id: vitest.fn(() => "mock-id"),
 }));
 
+// why: avoiding QR code generation during booking service tests
 vitest.mock("~/modules/qr/service.server", () => ({
   getQr: vitest.fn(),
 }));
 
+// why: testing booking workflows without creating actual asset notes
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn(),
 }));
 
+// why: avoiding actual booking note creation during service tests
 vitest.mock("~/modules/booking-note/service.server", () => ({
   createSystemBookingNote: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: preventing database lookups for user data during booking tests
 vitest.mock("~/modules/user/service.server", () => ({
   getUserByID: vitest.fn().mockResolvedValue({
     id: "user-1",
@@ -131,16 +137,19 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
 }));
 
+// why: avoiding organization admin lookups during booking notification tests
 vitest.mock("~/modules/organization/service.server", () => ({
   getOrganizationAdminsEmails: vitest
     .fn()
     .mockResolvedValue(["admin@example.com"]),
 }));
 
+// why: preventing actual job scheduling and queue operations during tests
 vitest.mock("~/utils/scheduler.server", () => ({
   scheduler: {
     cancel: vitest.fn(),

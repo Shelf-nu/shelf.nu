@@ -5,21 +5,25 @@ import type { action as scanAssetsAction } from "~/routes/_layout+/bookings.$boo
 import { requirePermission } from "~/utils/roles.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 
+// why: preventing fuzzy search library initialization during route import
 vi.mock("fuse.js", () => ({
   __esModule: true,
   default: vi.fn(),
 }));
 
+// why: route file imports header component, mock needed to avoid component rendering during route import
 vi.mock("~/components/layout/header", () => ({
   __esModule: true,
   default: vi.fn(() => null),
 }));
 
+// why: route file imports scanner component, mock needed to avoid component rendering during route import
 vi.mock("~/components/scanner/code-scanner", () => ({
   __esModule: true,
   CodeScanner: vi.fn(() => null),
 }));
 
+// why: route file imports drawer component, mock needed to avoid component rendering during route import
 vi.mock(
   "~/components/scanner/drawer/uses/add-assets-to-booking-drawer",
   async () => {
@@ -34,19 +38,23 @@ vi.mock(
   }
 );
 
+// why: testing authorization logic without executing actual permission checks
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: testing route action logic without executing actual booking service operations
 vi.mock("~/modules/booking/service.server", () => ({
   addScannedAssetsToBooking: vi.fn(),
   getBooking: vi.fn(),
 }));
 
+// why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+// why: mocking redirect and json response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   return {

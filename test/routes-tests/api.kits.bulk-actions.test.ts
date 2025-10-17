@@ -9,6 +9,7 @@ const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
 
+// why: testing route handler without executing actual database operations
 vi.mock("~/database/db.server", () => ({
   db: {
     kitCustody: {
@@ -17,10 +18,12 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: testing authorization logic without executing actual permission checks
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: testing bulk kit operation validation without executing actual kit service operations
 vi.mock("~/modules/kit/service.server", () => ({
   bulkAssignKitCustody: vi.fn().mockResolvedValue(undefined),
   bulkDeleteKits: vi.fn().mockResolvedValue(undefined),
@@ -28,14 +31,17 @@ vi.mock("~/modules/kit/service.server", () => ({
   bulkUpdateKitLocation: vi.fn().mockResolvedValue(undefined),
 }));
 
+// why: testing team member organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
 }));
 
+// why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+// why: controlling form data parsing and response formatting for predictable test behavior
 vi.mock("~/utils/http.server", () => ({
   assertIsPost: vi.fn(),
   parseData: vi.fn().mockImplementation((formData) => {
@@ -50,6 +56,7 @@ vi.mock("~/utils/http.server", () => ({
   error: vi.fn((x) => ({ error: x })),
 }));
 
+// why: mocking json response helper for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   return {

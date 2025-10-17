@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Button } from "./button";
 
+// why: testing button variant styles without triggering actual navigation
 vi.mock("@remix-run/react", async () => {
   const actual = (await vi.importActual("@remix-run/react")) as Record<
     string,

@@ -5,7 +5,7 @@ import {
   getBookingNotes,
 } from "./service.server";
 
-// Mock the database
+// why: testing booking note service logic without executing actual database operations
 vi.mock("~/database/db.server", () => ({
   db: {
     bookingNote: {
@@ -19,7 +19,7 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// Mock ShelfError
+// why: testing error handling behavior without actual ShelfError implementation
 vi.mock("~/utils/error", () => ({
   ShelfError: class ShelfError extends Error {
     constructor(config: any) {
