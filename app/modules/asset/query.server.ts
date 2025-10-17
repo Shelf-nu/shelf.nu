@@ -7,6 +7,15 @@ import type {
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
+export const CUSTOM_FIELD_SEARCH_PATHS = [
+  "valueText",
+  "valueMultiLineText",
+  "valueOption",
+  "valueDate",
+  "valueBoolean",
+  "raw",
+] as const;
+
 /**
  * Generates the SQL WHERE clause for asset filtering
  * @param organizationId - Organization ID to filter by
@@ -63,7 +72,17 @@ export function generateWhereClause(
           ) OR
           EXISTS (
             SELECT 1 FROM public."AssetCustomFieldValue" acfv 
-            WHERE acfv."assetId" = a.id AND acfv.value#>>'{valueText}' ILIKE ${`%${term}%`}
+            WHERE acfv."assetId" = a.id AND (
+              ${Prisma.join(
+                CUSTOM_FIELD_SEARCH_PATHS.map(
+                  (jsonPath) =>
+                    Prisma.sql`acfv.value#>>${Prisma.raw(
+                      `'{${jsonPath}}'`
+                    )} ILIKE ${`%${term}%`}`
+                ),
+                " OR "
+              )}
+            )
           )
         )`
       );
