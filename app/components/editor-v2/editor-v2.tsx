@@ -380,16 +380,45 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       const view = viewRef.current;
       const currentSlash = slashStateRef.current;
       if (!view || !currentSlash) return;
-      const { from, to } = currentSlash;
       const { state } = view;
+
+      // Find the end of the slash command text by scanning forward for word characters
+      // This is more robust than relying on cursor position, which may be stale
+      const deleteFrom = currentSlash.from;
+      let deleteTo = deleteFrom + 1; // Start after the "/"
+
+      // Scan forward while we have word characters (letters, numbers, underscore, hyphen)
+      while (deleteTo < state.doc.content.size) {
+        const char = state.doc.textBetween(
+          deleteTo,
+          deleteTo + 1,
+          undefined,
+          "\ufffc"
+        );
+        if (/[\w-]/.test(char)) {
+          deleteTo++;
+        } else {
+          break;
+        }
+      }
+
+      const slice = state.doc.textBetween(
+        deleteFrom,
+        deleteTo,
+        undefined,
+        "\ufffc"
+      );
 
       slashStateRef.current = null;
       setSlashState(null);
       setSlashIndex(0);
       slashIndexRef.current = 0;
 
-      const tr = state.tr.delete(from, to);
-      view.dispatch(tr);
+      if (slice.startsWith("/")) {
+        const tr = state.tr.delete(deleteFrom, deleteTo);
+        view.dispatch(tr);
+      }
+
       command.command(view.state, view.dispatch, view);
       view.focus();
     }, []);

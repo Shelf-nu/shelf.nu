@@ -247,7 +247,7 @@ describe("EditorV2", () => {
     });
     await waitFor(() => {
       expect(linkButton).toHaveAttribute("aria-pressed", "true");
-      expect(linkButton.className).toContain("bg-accent");
+      expect(linkButton.className).toContain("bg-muted");
     });
   });
 
