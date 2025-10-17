@@ -115,6 +115,7 @@ describe("onboarding action validation", () => {
       jobTitle: "Project Manager",
       teamSize: "Just me (1)",
       companyName: "Acme",
+      referralSource: "Google search",
       ...fields,
     });
 
