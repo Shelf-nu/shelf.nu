@@ -4,6 +4,14 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
+// why: ensuring consistent validation behavior across test environments
+vi.mock("~/config/shelf.config", () => ({
+  config: {
+    collectBusinessIntel: true,
+    sendOnboardingEmail: false,
+  },
+}));
+
 // why: testing form validation logic without executing actual user/org updates
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
