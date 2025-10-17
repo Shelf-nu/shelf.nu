@@ -62,7 +62,6 @@ import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import AssetQuickActions from "./asset-quick-actions";
-// eslint-disable-next-line import/no-cycle
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
