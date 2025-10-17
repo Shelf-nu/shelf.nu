@@ -20,6 +20,7 @@ type WebcamMockProps = {
 
 const webcamMockProps: { current: WebcamMockProps | null } = { current: null };
 
+// why: testing scanner logic without requiring actual camera hardware access
 vi.mock("react-webcam", () => {
   const MockWebcam = forwardRef<HTMLVideoElement, WebcamMockProps>(
     (props, _ref) => {
@@ -37,11 +38,13 @@ vi.mock("react-webcam", () => {
   };
 });
 
+// why: isolating scanner logic from success animation rendering
 vi.mock("~/components/scanner/success-animation", () => ({
   __esModule: true,
   default: () => null,
 }));
 
+// why: testing scanner input parsing separately from QR code detection logic
 vi.mock("~/components/scanner/utils", async (importOriginal) => {
   const actual = await importOriginal();
   return {

@@ -18,6 +18,7 @@ const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
 
+// why: testing route handler without executing actual database operations
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: {
@@ -26,10 +27,12 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: testing authorization logic without executing actual permission checks
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: testing booking creation validation without executing actual booking service operations
 vi.mock("~/modules/booking/service.server", () => ({
   createBooking: vi.fn().mockResolvedValue({
     id: "booking-123",
@@ -38,18 +41,22 @@ vi.mock("~/modules/booking/service.server", () => ({
   }),
 }));
 
+// why: testing custodian organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
 }));
 
+// why: testing booking creation without executing tag building logic
 vi.mock("~/modules/tag/service.server", () => ({
   buildTagsSet: vi.fn().mockReturnValue({ set: [] }),
 }));
 
+// why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+// why: controlling form data parsing and response formatting for predictable test behavior
 vi.mock("~/utils/http.server", () => ({
   assertIsPost: vi.fn(),
   parseData: vi.fn().mockImplementation((formData) => {
@@ -68,27 +75,33 @@ vi.mock("~/utils/http.server", () => ({
   getCurrentSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
+// why: testing booking creation without fetching actual booking settings
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn().mockResolvedValue({}),
 }));
 
+// why: testing booking creation without fetching actual working hours
 vi.mock("~/modules/working-hours/service.server", () => ({
   getWorkingHoursForOrganization: vi.fn().mockResolvedValue({}),
 }));
 
+// why: controlling timezone for consistent booking time handling
 vi.mock("~/utils/client-hints", () => ({
   getHints: vi.fn(() => ({ timeZone: "UTC" })),
   getClientHint: vi.fn(() => ({ timeZone: "UTC" })),
 }));
 
+// why: preventing actual cookie operations during route tests
 vi.mock("~/utils/cookies.server", () => ({
   setCookie: vi.fn(),
 }));
 
+// why: preventing actual organization cookie setting during route tests
 vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn().mockResolvedValue("cookie"),
 }));
 
+// why: mocking redirect and json response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   return {

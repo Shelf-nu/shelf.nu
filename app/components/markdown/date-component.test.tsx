@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DateComponent } from "./date-component";
 
-// Mock the DateS component
+// why: testing that DateComponent wrapper correctly passes props to DateS
 vi.mock("~/components/shared/date", () => ({
   DateS: vi.fn(({ date, includeTime }) => (
     <span data-testid="date-s" data-date={date} data-include-time={includeTime}>
