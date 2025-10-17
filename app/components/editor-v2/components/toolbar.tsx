@@ -40,10 +40,10 @@ export function ToolbarButton({
     <button
       type="button"
       className={tw(
-        "inline-flex size-9 items-center justify-center rounded-md transition",
+        "text-muted-foreground inline-flex size-9 items-center justify-center rounded border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200",
         active
-          ? "bg-accent text-accent-foreground"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted",
+          ? "text-foreground bg-muted"
+          : "hover:text-foreground hover:bg-muted",
         disabled ? "cursor-not-allowed opacity-50" : ""
       )}
       aria-label={tooltip ?? label}
@@ -71,11 +71,11 @@ interface ParagraphSelectProps {
 export function ParagraphSelect({ value, onChange }: ParagraphSelectProps) {
   const normalized = value === "raw_block" ? "paragraph" : value;
   return (
-    <label className="text-muted-foreground inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-2 text-sm">
+    <label className="text-muted-foreground inline-flex h-9 items-center gap-2 rounded border bg-white px-2 text-sm">
       <Type size={18} strokeWidth={1.5} aria-hidden="true" />
       <span className="sr-only">Text style</span>
       <select
-        className="text-foreground h-full bg-transparent text-sm focus:outline-none"
+        className="text-foreground h-full appearance-none border-none bg-transparent pr-4 text-sm focus:outline-none focus-visible:ring-0"
         aria-label="Text style"
         title="Text style"
         value={normalized}

@@ -126,6 +126,18 @@ p {
   @apply font-normal;
 }
 
+.ProseMirror ul {
+  @apply list-disc pl-6;
+}
+
+.ProseMirror ol {
+  @apply list-decimal pl-6;
+}
+
+.ProseMirror li > p {
+  margin: 0 !important;
+}
+
 .dialog-backdrop {
   @apply fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50;
 }
