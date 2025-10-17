@@ -46,7 +46,7 @@ describe("EditorV2 Markdoc round trip", () => {
     const source = [
       "Paragraph before",
       "",
-      "{% callout title=\"Heads up\" %}",
+      '{% callout title="Heads up" %}',
       "Content inside",
       "{% /callout %}",
       "",

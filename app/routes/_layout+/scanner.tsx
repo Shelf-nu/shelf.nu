@@ -29,6 +29,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import {
@@ -139,6 +140,8 @@ const QRScanner = () => {
   // Get action directly from the atom
   const [action] = useAtom(scannerActionAtom);
 
+  const { canUseBarcodes } = useBarcodePermissions();
+
   // Store the current action in a ref that's always up-to-date
   // This is required in order to handle the action correctly, even tho we use global state
   const actionRef = useRef(action);
@@ -199,6 +202,16 @@ const QRScanner = () => {
 
         // Navigate to appropriate route based on code type
         if (type === "barcode") {
+          if (!canUseBarcodes) {
+            setErrorTitle("Barcode scanning disabled");
+            setErrorMessage(
+              "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code."
+            );
+            setScanMessage("");
+            isNavigating.current = false;
+            return;
+          }
+
           navigate(`/barcode/${encodeURIComponent(value)}`);
           return;
         }
@@ -241,7 +254,7 @@ const QRScanner = () => {
         addItem(value, error, type);
       }
     },
-    [addItem, navigate, handleSetPaused]
+    [addItem, navigate, handleSetPaused, canUseBarcodes]
   );
 
   return (

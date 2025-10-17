@@ -4406,6 +4406,7 @@ export async function getOngoingBookingForAsset({
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId,
         assets: { some: { id: assetId } },
+        partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
       },
     });
 

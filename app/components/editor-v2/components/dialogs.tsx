@@ -21,9 +21,17 @@ interface LinkDialogProps {
   onApply: () => void;
 }
 
-export function LinkDialog({ state, onClose, onHrefChange, onApply }: LinkDialogProps) {
+export function LinkDialog({
+  state,
+  onClose,
+  onHrefChange,
+  onApply,
+}: LinkDialogProps) {
   return (
-    <AlertDialog open={state.open} onOpenChange={(open) => (open ? null : onClose())}>
+    <AlertDialog
+      open={state.open}
+      onOpenChange={(open) => (open ? null : onClose())}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Edit link</AlertDialogTitle>
@@ -76,12 +84,16 @@ export function RawBlockDialog({
   onSave,
 }: RawBlockDialogProps) {
   return (
-    <AlertDialog open={state.open} onOpenChange={(open) => (open ? null : onClose())}>
+    <AlertDialog
+      open={state.open}
+      onOpenChange={(open) => (open ? null : onClose())}
+    >
       <AlertDialogContent className="max-w-2xl">
         <AlertDialogHeader>
           <AlertDialogTitle>Edit raw Markdoc block</AlertDialogTitle>
           <AlertDialogDescription>
-            Unsupported Markdoc content is preserved as raw blocks. Updating the source will replace the block contents.
+            Unsupported Markdoc content is preserved as raw blocks. Updating the
+            source will replace the block contents.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-3">

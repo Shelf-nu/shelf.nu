@@ -4,27 +4,27 @@ The Editor V2 ProseMirror schema intentionally mirrors the Markdown/Markdoc node
 
 ## Block Nodes
 
-| ProseMirror Node       | Markdown/Markdoc Equivalent       | Notes |
-| ---------------------- | --------------------------------- | ----- |
-| `doc`                  | document root                     | unchanged |
-| `paragraph`            | paragraph (`<p>`)                 | default block |
-| `heading` (level 1–4)  | `#`–`####`                        | limited to 4 levels to match product needs |
-| `bullet_list`          | unordered list (`-` / `*`)        | child nodes are `list_item` |
-| `ordered_list`         | ordered list (`1.` etc.)          | supports `order` attribute from Markdown |
-| `list_item`            | list item                         | used inside ordered/bullet lists |
-| `blockquote`           | blockquote (`>`)                  | wraps paragraphs or other blocks |
-| `horizontal_rule`      | divider (`---`)                   | serialized as `---` |
-| `code_block` (`fence`) | fenced code block (`\`\`\``)     | optional language attribute preserved |
-| `raw_block`            | unsupported Markdoc nodes         | stores untouched source text |
+| ProseMirror Node       | Markdown/Markdoc Equivalent  | Notes                                      |
+| ---------------------- | ---------------------------- | ------------------------------------------ |
+| `doc`                  | document root                | unchanged                                  |
+| `paragraph`            | paragraph (`<p>`)            | default block                              |
+| `heading` (level 1–4)  | `#`–`####`                   | limited to 4 levels to match product needs |
+| `bullet_list`          | unordered list (`-` / `*`)   | child nodes are `list_item`                |
+| `ordered_list`         | ordered list (`1.` etc.)     | supports `order` attribute from Markdown   |
+| `list_item`            | list item                    | used inside ordered/bullet lists           |
+| `blockquote`           | blockquote (`>`)             | wraps paragraphs or other blocks           |
+| `horizontal_rule`      | divider (`---`)              | serialized as `---`                        |
+| `code_block` (`fence`) | fenced code block (`\`\`\``) | optional language attribute preserved      |
+| `raw_block`            | unsupported Markdoc nodes    | stores untouched source text               |
 
 ## Inline Nodes / Marks
 
-| ProseMirror Mark | Markdown/Markdoc Syntax | Notes |
-| ---------------- | ------------------------ | ----- |
-| `strong`         | `**bold**`               | keyboard shortcut `Cmd/Ctrl+B` |
-| `em`             | `*italic*`               | keyboard shortcut `Cmd/Ctrl+I` |
-| `code`           | `` `inline code` ``      | styled inline node |
-| `link`           | `[text](url)`            | sanitized URL, optional dialog |
+| ProseMirror Mark | Markdown/Markdoc Syntax | Notes                          |
+| ---------------- | ----------------------- | ------------------------------ |
+| `strong`         | `**bold**`              | keyboard shortcut `Cmd/Ctrl+B` |
+| `em`             | `*italic*`              | keyboard shortcut `Cmd/Ctrl+I` |
+| `code`           | `` `inline code` ``     | styled inline node             |
+| `link`           | `[text](url)`           | sanitized URL, optional dialog |
 
 ## Raw Blocks
 

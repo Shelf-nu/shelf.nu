@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
 import { tw } from "~/utils/tw";
@@ -27,6 +27,21 @@ const Dialog = ({
     [prevRoute, navigate]
   );
 
+  // Handle Escape key to close dialog
+  useEffect(() => {
+    if (!open) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        navigate(prevRoute);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [open, navigate, prevRoute]);
+
   return open ? (
     <div className="dialog-backdrop" onClick={handleBackdropClose}>
       <dialog className="dialog" open={true}>
@@ -42,6 +57,7 @@ const Dialog = ({
             className={
               "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
             }
+            aria-label="Close dialog"
           >
             <XIcon />
           </Button>

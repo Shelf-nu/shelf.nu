@@ -91,6 +91,31 @@ app/
 - **Multi-tenancy**: Organization-based data isolation
 - **Authentication**: Supabase Auth with SSO support
 
+### Bulk Operations & Select All Pattern
+
+When implementing bulk operations that work across multiple pages of filtered data, follow the **ALL_SELECTED_KEY pattern**:
+
+**The Pattern:**
+
+1. **Component Layer** - Pass current search params when "select all" is active
+2. **Route/API Layer** - Extract and forward `currentSearchParams`
+3. **Service Layer** - Use `getAssetsWhereInput` helper to build where clause from params
+
+**Key Implementation Points:**
+
+- Use `isSelectingAllItems()` from `app/utils/list.ts` to detect select all
+- Always pass `currentSearchParams` alongside `assetIds` when ALL_SELECTED_KEY is present
+- Use `getAssetsWhereInput({ organizationId, currentSearchParams })` to build Prisma where clause
+- Set `takeAll: true` to remove pagination limits
+
+**Working Examples:**
+
+- Export assets: `app/components/assets/assets-index/export-assets-button.tsx`
+- Bulk delete: `app/routes/_layout+/assets._index.tsx` (action)
+- QR download: `app/routes/api+/assets.get-assets-for-bulk-qr-download.ts`
+
+**📖 Full Documentation:** See [docs/select-all-pattern.md](./docs/select-all-pattern.md) for detailed implementation guide, code examples, and common pitfalls.
+
 ## Testing Approach
 
 ### Unit Tests (Vitest)
@@ -148,8 +173,13 @@ Always run `npm run validate` before committing - this runs:
 
 ## Git and Version control
 
-- add and commit automatically whenever a task is finished\
+- add and commit automatically whenever a task is finished
+- Always use Conventional Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - use descriptive commit messages that capture the full scope of the changes
+- **IMPORTANT: Each line in the commit message body must be ≤ 100 characters**
+  - Wrap long lines to stay within the limit
+  - This is enforced by commitlint pre-commit hook
+  - Subject line can be longer, only body lines are restricted
 - dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
 
 ## Rule Improvement Triggers

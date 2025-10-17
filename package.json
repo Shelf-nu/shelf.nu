@@ -145,6 +145,8 @@
     "prosemirror-view": "^1.41.2"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
     "@faker-js/faker": "^8.4.1",
     "@playwright/test": "^1.41.2",
     "@remix-run/dev": "2.17.0",
@@ -168,14 +170,16 @@
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.19",
+    "commitizen": "^4.3.1",
     "cross-env": "^7.0.3",
+    "cz-conventional-changelog": "^3.3.0",
     "dotenv-cli": "^7.3.0",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-local-rules": "^3.0.2",
     "eslint-plugin-no-restricted-imports": "^0.0.0",
     "eslint-plugin-tailwindcss": "^3.14.2",
-    "happy-dom": "^15.11.0",
+    "happy-dom": "^20.0.2",
     "husky": "^9.0.11",
     "msw": "^1.2.0",
     "nodemailer-mock": "^2.0.4",
@@ -198,5 +202,10 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
   }
 }

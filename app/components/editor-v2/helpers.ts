@@ -1,4 +1,9 @@
-import { toggleMark, setBlockType, wrapIn, baseKeymap } from "prosemirror-commands";
+import {
+  toggleMark,
+  setBlockType,
+  wrapIn,
+  baseKeymap,
+} from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import {
   InputRule,
@@ -9,7 +14,12 @@ import {
 } from "prosemirror-inputrules";
 import { keymap } from "prosemirror-keymap";
 import type { MarkType, Schema } from "prosemirror-model";
-import { wrapInList, liftListItem, sinkListItem, splitListItem } from "prosemirror-schema-list";
+import {
+  wrapInList,
+  liftListItem,
+  sinkListItem,
+  splitListItem,
+} from "prosemirror-schema-list";
 import { Plugin } from "prosemirror-state";
 import type { Command as PMCommand, EditorState } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
@@ -139,7 +149,10 @@ export function sanitizeHref(value: string) {
     if (!allowedProtocols.has(url.protocol)) {
       return "";
     }
-    if (!hasProtocol && (url.protocol === "http:" || url.protocol === "https:")) {
+    if (
+      !hasProtocol &&
+      (url.protocol === "http:" || url.protocol === "https:")
+    ) {
       return url.href;
     }
     return trimmed;

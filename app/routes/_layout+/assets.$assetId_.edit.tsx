@@ -38,7 +38,9 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
+  getRefererPath,
   parseData,
+  safeRedirect,
 } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -124,6 +126,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalLocations,
         currency: currentOrganization?.currency,
         customFields,
+        referer: getRefererPath(request),
       })
     );
   } catch (cause) {
@@ -204,6 +207,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       currentLocationId,
       valuation,
       addAnother,
+      redirectTo,
     } = payload;
 
     /** This checks if tags are passed and build the  */
@@ -240,6 +244,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(`/assets/new`);
     }
 
+    // If redirectTo is provided, redirect back to previous page
+    // Otherwise stay on current page (e.g., when opened in new tab)
+    if (redirectTo) {
+      return redirect(safeRedirect(redirectTo, `/assets/${id}`));
+    }
+
     return json(data({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -249,7 +259,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AssetEditPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, referer } = useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
     [asset.tags]
@@ -282,6 +292,7 @@ export default function AssetEditPage() {
           valuation={asset.valuation}
           tags={tags}
           barcodes={asset.barcodes}
+          referer={referer}
         />
       </div>
     </div>

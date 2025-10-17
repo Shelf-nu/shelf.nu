@@ -171,115 +171,109 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       }
     }, []);
 
-    const updateSlash = useCallback(
-      (state: EditorState, view: EditorView) => {
-        if (!state.selection.empty) {
+    const updateSlash = useCallback((state: EditorState, view: EditorView) => {
+      if (!state.selection.empty) {
+        setSlashState(null);
+        slashStateRef.current = null;
+        return;
+      }
+      const { $from } = state.selection;
+      if (!$from || !$from.parent) {
+        setSlashState(null);
+        slashStateRef.current = null;
+        return;
+      }
+      const textBefore = $from.parent.textBetween(
+        0,
+        $from.parentOffset,
+        undefined,
+        "\ufffc"
+      );
+      const slashIndex = textBefore.lastIndexOf("/");
+      let from: number | null = null;
+      let query = "";
+
+      if (slashIndex !== -1) {
+        const prefix = textBefore.slice(0, slashIndex);
+        if (prefix && /[^\s]$/.test(prefix)) {
           setSlashState(null);
           slashStateRef.current = null;
+          slashIndexRef.current = 0;
           return;
         }
-        const { $from } = state.selection;
-        if (!$from || !$from.parent) {
+        query = textBefore.slice(slashIndex + 1);
+        if (!/^[\w-]*$/.test(query)) {
           setSlashState(null);
           slashStateRef.current = null;
+          slashIndexRef.current = 0;
           return;
         }
-        const textBefore = $from.parent.textBetween(
-          0,
-          $from.parentOffset,
+        from = state.selection.from - query.length - 1;
+      } else if (slashStateRef.current?.active) {
+        const previous = slashStateRef.current;
+        const selectionFrom = state.selection.from;
+        const slashChar = state.doc.textBetween(
+          previous.from,
+          previous.from + 1,
           undefined,
           "\ufffc"
         );
-        const slashIndex = textBefore.lastIndexOf("/");
-        let from: number | null = null;
-        let query = "";
 
-        if (slashIndex !== -1) {
-          const prefix = textBefore.slice(0, slashIndex);
-          if (prefix && /[^\s]$/.test(prefix)) {
-            setSlashState(null);
-            slashStateRef.current = null;
-            slashIndexRef.current = 0;
-            return;
-          }
-          query = textBefore.slice(slashIndex + 1);
-          if (!/^[\w-]*$/.test(query)) {
-            setSlashState(null);
-            slashStateRef.current = null;
-            slashIndexRef.current = 0;
-            return;
-          }
-          from = state.selection.from - query.length - 1;
-        } else if (slashStateRef.current?.active) {
-          const previous = slashStateRef.current;
-          const selectionFrom = state.selection.from;
-          const slashChar = state.doc.textBetween(
-            previous.from,
-            previous.from + 1,
-            undefined,
-            "\ufffc"
-          );
-
-          if (
-            selectionFrom < previous.from ||
-            slashChar !== "/"
-          ) {
-            setSlashState(null);
-            slashStateRef.current = null;
-            slashIndexRef.current = 0;
-            return;
-          }
-
-          from = previous.from;
-          query = state.doc.textBetween(
-            previous.from + 1,
-            selectionFrom,
-            undefined,
-            "\ufffc"
-          );
-
-          if (!/^[\w-]*$/.test(query)) {
-            setSlashState(null);
-            slashStateRef.current = null;
-            slashIndexRef.current = 0;
-            return;
-          }
-        }
-
-        if (from == null || from < 0 || !Number.isFinite(from)) {
+        if (selectionFrom < previous.from || slashChar !== "/") {
           setSlashState(null);
           slashStateRef.current = null;
           slashIndexRef.current = 0;
           return;
         }
 
-        const to = state.selection.from;
-        const nextSlashState: SlashState = {
-          active: true,
-          query,
-          from,
-          to,
-          left: 0,
-          top: 0,
-        };
+        from = previous.from;
+        query = state.doc.textBetween(
+          previous.from + 1,
+          selectionFrom,
+          undefined,
+          "\ufffc"
+        );
 
-        try {
-          const coords = view.coordsAtPos(from);
-          nextSlashState.left = coords.left;
-          nextSlashState.top = coords.bottom + 6;
-        } catch {
-          const fallback = (view.dom as HTMLElement)?.getBoundingClientRect();
-          nextSlashState.left = fallback?.left ?? 0;
-          nextSlashState.top = (fallback?.bottom ?? 0) + 6;
+        if (!/^[\w-]*$/.test(query)) {
+          setSlashState(null);
+          slashStateRef.current = null;
+          slashIndexRef.current = 0;
+          return;
         }
+      }
 
-        setSlashIndex(0);
+      if (from == null || from < 0 || !Number.isFinite(from)) {
+        setSlashState(null);
+        slashStateRef.current = null;
         slashIndexRef.current = 0;
-        slashStateRef.current = nextSlashState;
-        setSlashState(nextSlashState);
-      },
-      []
-    );
+        return;
+      }
+
+      const to = state.selection.from;
+      const nextSlashState: SlashState = {
+        active: true,
+        query,
+        from,
+        to,
+        left: 0,
+        top: 0,
+      };
+
+      try {
+        const coords = view.coordsAtPos(from);
+        nextSlashState.left = coords.left;
+        nextSlashState.top = coords.bottom + 6;
+      } catch {
+        const fallback = (view.dom as HTMLElement)?.getBoundingClientRect();
+        nextSlashState.left = fallback?.left ?? 0;
+        nextSlashState.top = (fallback?.bottom ?? 0) + 6;
+      }
+
+      setSlashIndex(0);
+      slashIndexRef.current = 0;
+      slashStateRef.current = nextSlashState;
+      setSlashState(nextSlashState);
+    }, []);
 
     const runCommand = useCallback((command: any) => {
       const view = viewRef.current;
@@ -338,8 +332,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       if (!linkMark) return;
 
       const { from, to } = state.selection;
-      const range =
-        from !== to ? { from, to } : findLinkRange(state, linkMark);
+      const range = from !== to ? { from, to } : findLinkRange(state, linkMark);
       if (!range) {
         return;
       }
@@ -438,8 +431,8 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
         }
         if (event.key === "ArrowUp") {
           event.preventDefault();
-          setSlashIndex((index) =>
-            (index - 1 + commandsList.length) % commandsList.length
+          setSlashIndex(
+            (index) => (index - 1 + commandsList.length) % commandsList.length
           );
           return true;
         }
@@ -704,7 +697,9 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
               onBold={() => runCommand(toggleMark(schema.marks.strong))}
               onItalic={() => runCommand(toggleMark(schema.marks.em))}
               onToggleLink={openLinkDialog}
-              onBulletList={() => runCommand(wrapInList(schema.nodes.bullet_list))}
+              onBulletList={() =>
+                runCommand(wrapInList(schema.nodes.bullet_list))
+              }
               onOrderedList={() =>
                 runCommand(wrapInList(schema.nodes.ordered_list))
               }
@@ -775,7 +770,9 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
           {...restTextareaProps}
         />
         <div className="flex flex-col gap-1 text-xs text-gray-500">
-          <span>{label} supports Markdown and Markdoc. {HINT_TEXT}</span>
+          <span>
+            {label} supports Markdown and Markdoc. {HINT_TEXT}
+          </span>
           {maxLength ? (
             <span
               className={
@@ -796,12 +793,8 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
         />
         <RawBlockDialog
           state={rawBlockDialog}
-          onClose={() =>
-            setRawBlockDialog({ open: false, raw: "", pos: null })
-          }
-          onChange={(raw) =>
-            setRawBlockDialog((state) => ({ ...state, raw }))
-          }
+          onClose={() => setRawBlockDialog({ open: false, raw: "", pos: null })}
+          onChange={(raw) => setRawBlockDialog((state) => ({ ...state, raw }))}
           onSave={applyRawBlockEdit}
         />
       </div>
