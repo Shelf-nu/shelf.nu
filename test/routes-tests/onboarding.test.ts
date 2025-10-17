@@ -4,82 +4,45 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
-vi.mock("~/config/shelf.config", () => ({
-  config: {
-    showHowDidYouFindUs: false,
-    collectBusinessIntel: true,
-    sendOnboardingEmail: false,
-  },
-}));
-
+// why: testing form validation logic without executing actual user/org updates
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
   updateUser: vi.fn(),
 }));
 
+// why: verifying invited user flow checks organization membership
 vi.mock("~/modules/organization/service.server", () => ({
   getOrganizationById: vi.fn(),
 }));
 
+// why: avoiding database calls for business intelligence data collection
 vi.mock("~/modules/business-intel/service.server", () => ({
   upsertBusinessIntel: vi.fn(),
 }));
 
+// why: preventing actual Stripe API calls during test
+vi.mock("~/utils/stripe.server", () => ({
+  createStripeCustomer: vi.fn(),
+}));
+
+// why: preventing auth service from hitting database when setting password
 vi.mock("~/modules/auth/service.server", () => ({
   signInWithEmail: vi.fn(),
   getAuthUserById: vi.fn(),
 }));
 
-vi.mock("~/utils/stripe.server", () => ({
-  createStripeCustomer: vi.fn(),
-}));
-
-vi.mock("~/utils/cookies.server", () => ({
-  setCookie: vi.fn(),
-}));
-
-vi.mock("~/modules/organization/context.server", () => ({
-  setSelectedOrganizationIdCookie: vi.fn(),
-}));
-
-vi.mock("~/emails/mail.server", () => ({
-  sendEmail: vi.fn(),
-}));
-
-vi.mock("~/emails/onboarding-email", () => ({
-  onboardingEmailText: vi.fn(),
-}));
-
-vi.mock("~/utils/env", () => ({
-  SMTP_FROM: "",
-  SENTRY_DSN: "",
-  NODE_ENV: "test",
-}));
-
-const onboardingModule = await import("../../app/routes/_welcome+/onboarding");
-const userModule = await import("~/modules/user/service.server");
-const businessIntelModule = await import(
-  "~/modules/business-intel/service.server"
+const { action } = await import("../../app/routes/_welcome+/onboarding");
+const { getUserByID, updateUser } = await import(
+  "~/modules/user/service.server"
 );
-const organizationContextModule = await import(
-  "~/modules/organization/context.server"
-);
-const cookiesModule = await import("~/utils/cookies.server");
-const stripeModule = await import("~/utils/stripe.server");
-const mailModule = await import("~/emails/mail.server");
-
-const organizationModule = await import(
+const { getOrganizationById } = await import(
   "~/modules/organization/service.server"
 );
-
-const { action } = onboardingModule;
-const { getUserByID, updateUser } = userModule;
-const { upsertBusinessIntel } = businessIntelModule;
-const { setSelectedOrganizationIdCookie } = organizationContextModule;
-const { setCookie } = cookiesModule;
-const { createStripeCustomer } = stripeModule;
-const { sendEmail } = mailModule;
-const { getOrganizationById } = organizationModule;
+const { upsertBusinessIntel } = await import(
+  "~/modules/business-intel/service.server"
+);
+const { createStripeCustomer } = await import("~/utils/stripe.server");
+const { signInWithEmail } = await import("~/modules/auth/service.server");
 
 function createRequestBody(entries: Record<string, string | undefined>) {
   const params = new URLSearchParams();
@@ -117,6 +80,10 @@ describe("onboarding action validation", () => {
       ...baseUser,
       customerId: "cust_123",
     });
+    vi.mocked(getOrganizationById).mockResolvedValue({
+      id: "org-123",
+      name: "Acme Corporation",
+    } as any);
     vi.mocked(upsertBusinessIntel).mockResolvedValue({
       id: "bi-123",
       userId: baseUser.id,
@@ -130,14 +97,8 @@ describe("onboarding action validation", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    vi.mocked(getOrganizationById).mockResolvedValue({
-      id: "org-123",
-      name: "Acme Corporation",
-    } as any);
-    vi.mocked(setSelectedOrganizationIdCookie).mockResolvedValue("cookie");
-    vi.mocked(setCookie).mockReturnValue(["set-cookie", "cookie=value"]);
     vi.mocked(createStripeCustomer).mockResolvedValue({} as any);
-    vi.mocked(sendEmail).mockResolvedValue();
+    vi.mocked(signInWithEmail).mockResolvedValue(null);
   });
 
   function buildRequest(

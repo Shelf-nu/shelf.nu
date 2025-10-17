@@ -9,7 +9,7 @@ import {
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
-// Mock db
+// why: testing booking settings service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
     bookingSettings: {

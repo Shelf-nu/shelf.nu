@@ -9,7 +9,7 @@ import {
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
-// Mock the custom fields utility to control return values
+// why: controlling display value formatting for different custom field types (boolean, multiline text) in note generation tests
 vitest.mock("~/utils/custom-fields", () => ({
   getCustomFieldDisplayValue: vitest.fn((value: any) => {
     if (!value) return null;
