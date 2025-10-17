@@ -45,6 +45,7 @@ export const CodePreviewDialog = forwardRef<
       value: string;
     }>;
     sequentialId?: string | null;
+    showShelfBranding?: boolean;
   }>({
     api: `/api/${item.type === "asset" ? "assets" : "kits"}/${
       item.id
@@ -116,6 +117,7 @@ export const CodePreviewDialog = forwardRef<
                     sequentialId={
                       item.type === "asset" ? item.sequentialId : undefined
                     }
+                    showShelfBranding={data?.showShelfBranding}
                   />
                 </Card>
               </When>

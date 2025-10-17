@@ -7,6 +7,7 @@ import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
@@ -58,6 +59,7 @@ interface CodePreviewProps {
   selectedBarcodeId?: string;
   onRefetchData?: () => void; // Callback to refetch data when barcode is added
   sequentialId?: string | null;
+  showShelfBranding?: boolean;
 }
 
 export const CodePreview = ({
@@ -71,12 +73,17 @@ export const CodePreview = ({
   selectedBarcodeId,
   onRefetchData,
   sequentialId,
+  showShelfBranding,
 }: CodePreviewProps) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService } = useUserRoleHelper();
   const organization = useCurrentOrganization();
+  const resolvedShowShelfBranding = resolveShowShelfBranding(
+    showShelfBranding,
+    organization?.showShelfBranding
+  );
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
@@ -263,12 +270,14 @@ export const CodePreview = ({
             title={item.name}
             qrIdDisplayPreference={organization?.qrIdDisplayPreference}
             sequentialId={sequentialId}
+            showShelfBranding={resolvedShowShelfBranding}
           />
         ) : selectedCode?.type === "barcode" ? (
           <BarcodeLabel
             ref={captureDivRef}
             data={selectedCode.barcodeData}
             title={item.name}
+            showShelfBranding={resolvedShowShelfBranding}
           />
         ) : null}
       </div>
@@ -320,11 +329,18 @@ interface QrLabelProps {
   title: string;
   qrIdDisplayPreference?: string;
   sequentialId?: string | null;
+  showShelfBranding?: boolean;
 }
 
 export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
   function QrLabel(props, ref) {
-    const { data, title, qrIdDisplayPreference, sequentialId } = props ?? {};
+    const {
+      data,
+      title,
+      qrIdDisplayPreference,
+      sequentialId,
+      showShelfBranding = true,
+    } = props ?? {};
     return (
       <div
         style={{
@@ -368,10 +384,12 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
               ? sequentialId
               : data?.qr?.id}
           </div>
-          <div>
-            Powered by{" "}
-            <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
-          </div>
+          {showShelfBranding ? (
+            <div>
+              Powered by{" "}
+              <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -385,11 +403,12 @@ interface BarcodeLabelProps {
     value: string;
   };
   title: string;
+  showShelfBranding?: boolean;
 }
 
 export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
   function BarcodeLabel(props, ref) {
-    const { data, title } = props ?? {};
+    const { data, title, showShelfBranding = true } = props ?? {};
 
     if (!data) return null;
 
@@ -459,10 +478,12 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
               )}
             </div>
           </div>
-          <div>
-            Powered by{" "}
-            <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
-          </div>
+          {showShelfBranding ? (
+            <div>
+              Powered by{" "}
+              <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );

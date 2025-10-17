@@ -33,6 +33,21 @@ export const canExportAssets = (
   return tierLimit?.canExportAssets || false;
 };
 
+/**
+ * Determines whether the current organization's tier allows hiding Shelf
+ * branding on printable labels.
+ *
+ * @param tierLimit - The tier limits associated with the organization.
+ * @returns `true` if branding can be hidden or premium features are disabled.
+ */
+export const canHideShelfBranding = (
+  tierLimit: { canHideShelfBranding: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canHideShelfBranding;
+};
+
 export async function assertUserCanExportAssets({
   organizationId,
   organizations,
