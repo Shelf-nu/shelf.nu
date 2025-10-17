@@ -9,6 +9,7 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.ove
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import { useLoaderData } from "@remix-run/react";
 
+// why: controlling booking loader data to test availability label for different booking scenarios
 vi.mock("@remix-run/react", async () => {
   const actual =
     await vi.importActual<typeof import("@remix-run/react")>(
@@ -26,6 +27,7 @@ vi.mock("@remix-run/react", async () => {
   };
 });
 
+// why: testing availability label tooltip display without executing booking conflict detection logic
 vi.mock("~/modules/booking/helpers", () => ({
   hasAssetBookingConflicts: vi.fn(),
 }));

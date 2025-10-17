@@ -2,7 +2,7 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import useApiQuery from "./use-api-query";
 
-// Mock fetch globally
+// why: testing hook behavior without making actual network requests
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
