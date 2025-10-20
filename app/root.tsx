@@ -25,6 +25,7 @@ import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
+import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getClientHint } from "./utils/client-hints";
@@ -47,6 +48,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
+  { rel: "stylesheet", href: pmDocStylesheetUrl },
   { rel: "manifest", href: "/static/manifest.json" },
   { rel: "apple-touch-icon", href: config.faviconPath },
   { rel: "icon", href: config.faviconPath },

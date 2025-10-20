@@ -1,4 +1,15 @@
-import type { Config } from "@markdoc/markdoc";
+import Markdoc from "@markdoc/markdoc";
+import type { Config, Node } from "@markdoc/markdoc";
+
+function collectRawContent(node: Node | undefined): string {
+  if (!node) {
+    return "";
+  }
+  if (node.type === "text") {
+    return (node.attributes?.content as string) ?? "";
+  }
+  return (node.children ?? []).map((child) => collectRawContent(child)).join("");
+}
 
 /**
  * Markdoc configuration for Shelf.nu
@@ -15,6 +26,14 @@ import type { Config } from "@markdoc/markdoc";
 
 export const markdocConfig: Config = {
   tags: {
+    raw: {
+      render: "RawBlock",
+      transform(node) {
+        return new Markdoc.Tag("RawBlock", {
+          raw: collectRawContent(node),
+        });
+      },
+    },
     date: {
       render: "DateComponent",
       description:
