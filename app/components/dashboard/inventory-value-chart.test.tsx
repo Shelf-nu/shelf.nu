@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InventoryValueChart from "./inventory-value-chart";
 
+// why: component reads loader data for currency formatting and display
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual("@remix-run/react");
 

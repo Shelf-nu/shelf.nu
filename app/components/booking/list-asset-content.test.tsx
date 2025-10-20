@@ -17,18 +17,22 @@ const {
   isAssetPartiallyCheckedInMock: vi.fn(() => false),
 }));
 
+// why: isolating component from child component rendering to test returned badge logic
 vi.mock("../assets/asset-status-badge", () => ({
   AssetStatusBadge: (props: unknown) => assetStatusBadgeMock(props),
 }));
 
+// why: preventing complex image rendering during component unit tests
 vi.mock("../assets/asset-image", () => ({
   AssetImage: () => <div data-testid="asset-image" />,
 }));
 
+// why: simplifying category badge rendering for focused unit testing
 vi.mock("../assets/category-badge", () => ({
   CategoryBadge: () => <div data-testid="category-badge" />,
 }));
 
+// why: avoiding button component complexity during unit tests
 vi.mock("../shared/button", () => ({
   Button: ({ children }: { children: ReactNode }) => (
     // eslint-disable-next-line jsx-a11y/anchor-is-valid
@@ -36,28 +40,34 @@ vi.mock("../shared/button", () => ({
   ),
 }));
 
+// why: simplifying date rendering for focused component testing
 vi.mock("../shared/date", () => ({
   DateS: ({ date }: { date: string }) => <span>{date}</span>,
 }));
 
+// why: avoiding user badge rendering complexity during component tests
 vi.mock("../shared/user-badge", () => ({
   UserBadge: ({ name }: { name: string }) => <span>{name}</span>,
 }));
 
+// why: isolating list item content from bulk selection checkbox logic
 vi.mock("../list/bulk-actions/bulk-list-item-checkbox", () => ({
   default: () => <td data-testid="bulk-checkbox" />,
 }));
 
+// why: simplifying actions dropdown for focused status badge testing
 vi.mock("./asset-row-actions-dropdown", () => ({
   AssetRowActionsDropdown: () => <div data-testid="asset-actions" />,
 }));
 
+// why: avoiding availability label rendering during returned badge testing
 vi.mock("./availability-label", () => ({
   AvailabilityLabel: () => <div data-testid="availability-label" />,
 }));
 
 const mockUseLoaderData = vi.fn();
 
+// why: controlling booking loader data to test different booking status scenarios
 vi.mock("@remix-run/react", async () => {
   const actual = (await vi.importActual("@remix-run/react")) as Record<
     string,
@@ -77,11 +87,13 @@ vi.mock("@remix-run/react", async () => {
 
 const mockUseBookingStatusHelpers = vi.fn();
 
+// why: mocking booking status helpers to control test scenarios (complete vs ongoing)
 vi.mock("~/hooks/use-booking-status", () => ({
   useBookingStatusHelpers: (status: string) =>
     mockUseBookingStatusHelpers(status),
 }));
 
+// why: providing test user role context without auth dependencies
 vi.mock("~/hooks/user-user-role-helper", () => ({
   useUserRoleHelper: () => ({
     isBase: false,
@@ -90,10 +102,12 @@ vi.mock("~/hooks/user-user-role-helper", () => ({
   }),
 }));
 
+// why: providing test user data without session/auth lookups
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
 
+// why: controlling asset status logic to test returned badge vs status badge behavior
 vi.mock("~/utils/booking-assets", () => ({
   getBookingContextAssetStatus: (
     ...args: Parameters<typeof getBookingContextAssetStatusMock>
