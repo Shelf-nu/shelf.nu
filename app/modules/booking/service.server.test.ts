@@ -1718,7 +1718,15 @@ describe("extendBooking", () => {
   it("should extend booking successfully", async () => {
     expect.assertions(2);
 
-    const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      ],
+      partialCheckins: [],
+    };
     const extendedBooking = {
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
@@ -1777,6 +1785,8 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-1",
       custodianUserId: "user-1",
+      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      partialCheckins: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -1855,6 +1865,8 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different user created it
       custodianUserId: "user-2", // Different user is custodian
+      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      partialCheckins: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -1887,6 +1899,8 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different creator
       custodianUserId: "user-1", // But user is custodian
+      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      partialCheckins: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -1919,6 +1933,8 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-1", // User is creator
       custodianUserId: "user-2", // But different custodian
+      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      partialCheckins: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -1950,7 +1966,11 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [{ id: "asset-1" }, { id: "asset-2" }],
+      assets: [
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      ],
+      partialCheckins: [],
     };
 
     const clashingBooking = {
@@ -1983,7 +2003,8 @@ describe("extendBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [{ id: "asset-1" }],
+      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      partialCheckins: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -2015,6 +2036,8 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.OVERDUE,
       to: new Date("2025-01-01T17:00:00Z"),
+      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      partialCheckins: [],
     };
 
     const extendedBooking = {
@@ -2048,6 +2071,167 @@ describe("extendBooking", () => {
       })
     );
     expect(result.status).toBe(BookingStatus.ONGOING);
+  });
+
+  it("should extend partially returned booking when returned assets have no conflicts", async () => {
+    expect.assertions(3);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      to: new Date("2025-01-01T17:00:00Z"),
+      assets: [
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
+        { id: "asset-3", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      ],
+      partialCheckins: [{ assetIds: ["asset-1"] }],
+    };
+
+    const extendedBooking = {
+      ...mockBooking,
+      to: new Date("2025-01-03T17:00:00Z"),
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]); // No conflicts
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(extendedBooking);
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-03T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    // Should only check conflicts for asset-2 and asset-3 (not asset-1)
+    expect(db.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assets: { some: { id: { in: ["asset-2", "asset-3"] } } },
+        }),
+      })
+    );
+
+    expect(db.booking.update).toHaveBeenCalled();
+    expect(result).toEqual(extendedBooking);
+  });
+
+  it("should extend booking successfully when returned asset has conflict but active assets don't", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      to: new Date("2025-01-01T17:00:00Z"),
+      assets: [
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      ],
+      partialCheckins: [{ assetIds: ["asset-1"] }],
+    };
+
+    const extendedBooking = {
+      ...mockBooking,
+      to: new Date("2025-01-03T17:00:00Z"),
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // asset-1 is booked elsewhere, but it's returned so shouldn't block
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(extendedBooking);
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-03T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    // Should succeed - returned asset conflicts are ignored
+    expect(db.booking.update).toHaveBeenCalled();
+    expect(result).toEqual(extendedBooking);
+  });
+
+  it("should prevent extension when active (non-returned) asset has conflict", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      to: new Date("2025-01-01T17:00:00Z"),
+      assets: [
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out - has conflict
+      ],
+      partialCheckins: [{ assetIds: ["asset-1"] }],
+    };
+
+    const clashingBooking = {
+      id: "booking-2",
+      name: "Conflicting Booking for Asset 2",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // asset-2 (active) has a conflict
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([clashingBooking]);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(
+      "Cannot extend booking because the extended period is overlapping"
+    );
+  });
+
+  it("should prevent extension when all assets are returned", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      to: new Date("2025-01-01T17:00:00Z"),
+      assets: [
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-3", status: AssetStatus.AVAILABLE }, // Returned
+      ],
+      partialCheckins: [{ assetIds: ["asset-1", "asset-2", "asset-3"] }],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(
+      "Cannot extend booking. All assets have been returned. Please complete the booking instead."
+    );
   });
 });
 
