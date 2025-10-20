@@ -1,6 +1,6 @@
 import type { Tag } from "@prisma/client";
-
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { Tag as TagBadge } from "~/components/shared/tag";
 
 export const ListItemTagsColumn = ({
@@ -9,7 +9,7 @@ export const ListItemTagsColumn = ({
   tags: Pick<Tag, "id" | "name">[] | undefined;
 }) => {
   if (!tags || tags.length === 0) {
-    return null;
+    return <EmptyTableValue />;
   }
 
   return (
