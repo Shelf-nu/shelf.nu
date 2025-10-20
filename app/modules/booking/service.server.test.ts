@@ -1383,6 +1383,74 @@ describe("checkinBooking", () => {
     expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 
+  it("should reset asset when it was partially checked in from another ongoing booking", async () => {
+    // why: Mock database queries to simulate the bug scenario where an asset
+    // is partially returned from one booking and then used in another booking
+    expect.assertions(1);
+
+    // Scenario:
+    // - Booking A (booking-a, ONGOING) has Asset 1 and Asset 2
+    // - Asset 2 was partially checked in from Booking A (now AVAILABLE)
+    // - Booking B (booking-b, being checked in) has Asset 2 and Asset 3
+    // - When Booking B is checked in, Asset 2 should become AVAILABLE
+    // - because it's not actively being used in Booking A anymore
+    const mockBooking = {
+      ...mockBookingData,
+      id: "booking-b",
+      status: BookingStatus.ONGOING,
+      assets: [
+        {
+          id: "asset-2",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [
+            { id: "booking-b", status: BookingStatus.ONGOING },
+            { id: "booking-a", status: BookingStatus.ONGOING },
+          ],
+        },
+        {
+          id: "asset-3",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-b", status: BookingStatus.ONGOING }],
+        },
+      ],
+      partialCheckins: [], // No partial check-ins for Booking B
+    };
+
+    // Mock partial check-ins for the linked Booking A
+    // Asset 2 was already checked in from Booking A
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        bookingId: "booking-a",
+        assetIds: ["asset-2"],
+      },
+    ]);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    // Both assets should be reset to AVAILABLE because:
+    // - Asset 2: was already checked in from Booking A, so no conflict
+    // - Asset 3: no other bookings, so no conflict
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ["asset-2", "asset-3"],
+        },
+      },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+  });
+
   it("should reset all assets (kit + singular) even when singular is in partial check-in history", async () => {
     expect.assertions(1);
 
