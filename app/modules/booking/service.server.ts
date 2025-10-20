@@ -2219,10 +2219,11 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
-          assets: { select: { id: true } },
+          assets: { select: { id: true, status: true } },
           from: true,
           creatorId: true,
           custodianUserId: true,
+          partialCheckins: { select: { assetIds: true } },
         },
       })
       .catch((cause) => {
@@ -2256,9 +2257,33 @@ export async function extendBooking({
       });
     }
 
+    /** Get assets that have been returned via partial check-in */
+    const checkedInAssetIds = booking.partialCheckins.flatMap(
+      (checkin) => checkin.assetIds
+    );
+
+    /** Filter to only assets that are actively checked out (not returned) */
+    const activeAssets = booking.assets.filter(
+      (asset) =>
+        (asset.status === AssetStatus.CHECKED_OUT ||
+          asset.status === AssetStatus.IN_CUSTODY) &&
+        !checkedInAssetIds.includes(asset.id)
+    );
+
+    /** Validate that there are still active assets to extend the booking for */
+    if (activeAssets.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Cannot extend booking. All assets have been returned. Please complete the booking instead.",
+        shouldBeCaptured: false,
+      });
+    }
+
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+      /** Checking if the booking period is clashing with any other booking containing the same active asset(s).*/
       const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
         where: {
           id: { not: booking.id },
@@ -2266,7 +2291,7 @@ export async function extendBooking({
           status: {
             in: [BookingStatus.RESERVED],
           },
-          assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+          assets: { some: { id: { in: activeAssets.map((a) => a.id) } } },
           // Check for bookings that start within the extension period
           from: {
             gt: booking.to!,
