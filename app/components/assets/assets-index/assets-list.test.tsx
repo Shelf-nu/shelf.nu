@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import type {
 import { AdvancedIndexColumn } from "./advanced-asset-columns";
 import { ListAssetContent, ListItemTagsColumn } from "./assets-list";
 
+// why: component reads loader data and renders Remix Link elements
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual("@remix-run/react");
 
@@ -24,30 +25,35 @@ vi.mock("@remix-run/react", async () => {
   };
 });
 
+// why: AssetImage triggers Remix fetchers and dialogs not needed for this render
 vi.mock("../asset-image", () => ({
   AssetImage: ({ alt }: { alt: string }) => <div>{alt}</div>,
 }));
 
+// why: AssetStatusBadge fetches booking data we do not exercise here
 vi.mock("../asset-status-badge", () => ({
   AssetStatusBadge: () => <div>status</div>,
 }));
 
-vi.mock("../category-badge", () => ({
-  CategoryBadge: ({ category }: { category: { name: string } | null }) => (
-    <div>{category?.name ?? ""}</div>
-  ),
-}));
-
-vi.mock("../bulk-actions-dropdown", () => ({
-  __esModule: true,
-  default: () => <div>bulk actions</div>,
-}));
-
+// why: AssetQuickActions relies on permission hooks and dialogs
 vi.mock("./asset-quick-actions", () => ({
   __esModule: true,
   default: () => <div>quick actions</div>,
 }));
 
+// why: AvailabilityCalendar pulls in FullCalendar which expects browser APIs
+vi.mock("../../availability-calendar/availability-calendar", () => ({
+  __esModule: true,
+  default: () => <div>availability calendar</div>,
+}));
+
+// why: upstream components import lottie-react which depends on DOM canvas APIs
+vi.mock("lottie-react", () => ({
+  __esModule: true,
+  default: () => null,
+}));
+
+// why: shared Button depends on Remix Link and tooltip portals
 vi.mock("~/components/shared/button", () => ({
   Button: ({ children, ...props }: any) => (
     <button type="button" {...props}>
@@ -56,27 +62,23 @@ vi.mock("~/components/shared/button", () => ({
   ),
 }));
 
-vi.mock("~/components/shared/gray-badge", () => ({
-  GrayBadge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
-}));
-
-vi.mock("~/components/shared/tag", () => ({
-  Tag: ({ children }: { children: ReactNode }) => <span>{children}</span>,
-}));
-
+// why: TeamMemberBadge pulls organization context
 vi.mock("~/components/user/team-member-badge", () => ({
   TeamMemberBadge: ({ teamMember }: { teamMember: unknown }) =>
     teamMember ? <span>team member</span> : null,
 }));
 
+// why: AdvancedIndexColumn reads freeze column configuration
 vi.mock("~/hooks/use-asset-index-freeze-column", () => ({
   useAssetIndexFreezeColumn: () => null,
 }));
 
+// why: AdvancedIndexColumn toggles image visibility by hook
 vi.mock("~/hooks/use-asset-index-show-image", () => ({
   useAssetIndexShowImage: () => false,
 }));
 
+// why: components branch on simple vs advanced view mode
 vi.mock("~/hooks/use-asset-index-view-state", () => ({
   useAssetIndexViewState: () => ({
     modeIsAdvanced: true,
@@ -84,71 +86,12 @@ vi.mock("~/hooks/use-asset-index-view-state", () => ({
   }),
 }));
 
-vi.mock("~/hooks/use-current-organization", () => ({
-  useCurrentOrganization: () => ({ currency: "USD" }),
-}));
-
+// why: custody column checks permissions derived from user roles
 vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: [] }),
-}));
-
-vi.mock("~/utils/permissions/permission.validator.client", () => ({
-  userHasPermission: () => true,
-}));
-
-vi.mock(
-  "~/utils/permissions/custody-and-bookings-permissions.validator.client",
-  () => ({
-    userHasCustodyViewPermission: () => true,
-  })
-);
-
-vi.mock("~/components/calendar/event-card", () => ({
-  EventCardContent: () => <div>event</div>,
-}));
-
-vi.mock("~/components/markdown/markdown-viewer", () => ({
-  MarkdownViewer: ({ content }: { content: ReactNode }) => <div>{content}</div>,
-}));
-
-vi.mock("~/components/shared/date", () => ({
-  DateS: ({ date }: { date: Date | string }) => <time>{String(date)}</time>,
-}));
-
-vi.mock("~/components/shared/tooltip", () => ({
-  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("~/components/shared/hover-card", () => ({
-  HoverCard: ({ children }: { children: ReactNode }) => <>{children}</>,
-  HoverCardTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  HoverCardContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@radix-ui/react-hover-card", () => ({
-  HoverCardPortal: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@radix-ui/react-popover", () => ({
-  Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PopoverPortal: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PopoverContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("~/components/code-preview/code-preview-dialog", () => ({
-  CodePreviewDialog: ({ trigger }: { trigger: ReactNode }) => <>{trigger}</>,
-}));
-
-vi.mock("~/components/shared/info-tooltip", () => ({
-  InfoTooltip: () => <div>info</div>,
-}));
-
-vi.mock("~/components/shared/spinner", () => ({
-  Spinner: () => <div>spinner</div>,
+  useUserRoleHelper: () => ({
+    roles: [OrganizationRoles.ADMIN],
+    isBase: false,
+  }),
 }));
 
 const useLoaderDataMock = vi.mocked(useLoaderData);
