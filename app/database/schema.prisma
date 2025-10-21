@@ -797,12 +797,14 @@ model CustomField {
   // Datetime
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
+  deletedAt               DateTime?
   assetCustomFieldsValues AssetCustomFieldValue[]
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, deletedAt])
 }
 
 enum CustomFieldType {

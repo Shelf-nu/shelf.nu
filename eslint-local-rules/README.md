@@ -82,6 +82,68 @@ The rule accepts:
 - `satisfies Prisma.UserFindUniqueArgs`
 - `as const satisfies Prisma.UserSelect`
 
+### `require-deleted-at-check-on-custom-field-queries`
+
+**Purpose**: Ensure all CustomField queries filter out soft-deleted fields.
+
+**Problem**: CustomField uses soft delete (deletedAt field). Developers might forget to filter out soft-deleted fields, causing deleted fields to appear in queries.
+
+**Solution**: This rule requires all `db.customField` or `tx.customField` queries to include `deletedAt` in the where clause.
+
+#### Examples
+
+❌ **Bad** (will cause ESLint error):
+
+```typescript
+// Missing deletedAt filter
+const fields = await db.customField.findMany({
+  where: { organizationId },
+});
+
+// No where clause at all
+const count = await db.customField.count();
+
+// Ternary with missing deletedAt in one branch
+const fields = await db.customField.findMany({
+  where: selectAll ? { organizationId, deletedAt: null } : { id: { in: ids } }, // ❌ Missing deletedAt!
+});
+```
+
+✅ **Good** (passes ESLint):
+
+```typescript
+// Filtering for active (non-deleted) fields
+const fields = await db.customField.findMany({
+  where: { organizationId, deletedAt: null },
+});
+
+// Querying for deleted fields
+const deleted = await db.customField.findMany({
+  where: { organizationId, deletedAt: { not: null } },
+});
+
+// In transactions
+const field = await tx.customField.findFirst({
+  where: { id, organizationId, deletedAt: null },
+});
+
+// Ternary with deletedAt in both branches
+const fields = await db.customField.findMany({
+  where: selectAll
+    ? { organizationId, deletedAt: null }
+    : { id: { in: ids }, deletedAt: null }, // ✅ Both branches have deletedAt
+});
+```
+
+#### When does the rule trigger?
+
+The rule triggers when:
+
+1. Calling query methods on `db.customField` or `tx.customField`
+2. Query methods: `findMany`, `findFirst`, `findUnique`, `findUniqueOrThrow`, `findFirstOrThrow`, `count`, `aggregate`
+3. The `where` clause doesn't include a `deletedAt` filter
+4. **Ternary operators**: Both branches of a ternary expression are checked independently
+
 ## Development
 
 To add new rules:
@@ -91,6 +153,7 @@ To add new rules:
 3. Add the rule to `eslint-local-rules/index.cjs`
 4. Add the rule to `.eslintrc` rules section
 5. Document the rule in this README
+6. Restart your IDE or ESLint server for changes to take effect
 
 ## Why `.cjs` files?
 
