@@ -89,8 +89,8 @@ export function DeleteCustomFieldDialog({
                 <strong>This field will be deleted.</strong> The field and all
                 its values will be removed from your assets.
               </p>
-              <p className="text-gray-700">
-                💡 <strong>Note:</strong> The field name will be available for
+              <p>
+                <strong>Note:</strong> The field name will be available for
                 reuse after deleting.
               </p>
             </AlertDialogDescription>
@@ -98,7 +98,7 @@ export function DeleteCustomFieldDialog({
 
           <div className="mt-4 space-y-2">
             <p className="text-sm text-gray-600">
-              To confirm, type the custom field name below (case-insensitive).
+              To confirm, type the custom field name below.
             </p>
             <Input
               label="Confirmation"
