@@ -4071,6 +4071,16 @@ async function createNotesForScannedAssetsAndKits({
   }
 }
 
+/**
+ * Adds scanned assets (and optionally kits) to a booking.
+ *
+ * @param {Object} params - The parameters for the function.
+ * @param {string[]} params.assetIds - Array of asset IDs to add to the booking.
+ * @param {string[]} [params.kitIds] - Optional array of kit IDs. Used to differentiate kit vs. standalone asset additions when creating notes. If not provided, only standalone assets are added.
+ * @param {string} params.bookingId - The ID of the booking to update.
+ * @param {string} params.organizationId - The organization ID associated with the booking.
+ * @param {string} params.userId - The ID of the user performing the action.
+ */
 export async function addScannedAssetsToBooking({
   assetIds,
   kitIds = [],
