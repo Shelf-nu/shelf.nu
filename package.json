@@ -136,7 +136,7 @@
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
     "@faker-js/faker": "^8.4.1",
-    "@playwright/test": "^1.41.2",
+    "@playwright/test": "^1.56.1",
     "@remix-run/dev": "2.17.0",
     "@remix-run/eslint-config": "2.17.0",
     "@tailwindcss/aspect-ratio": "^0.4.2",
