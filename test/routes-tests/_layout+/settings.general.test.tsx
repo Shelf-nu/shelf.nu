@@ -222,4 +222,101 @@ describe("settings.general action", () => {
     );
     expect(jsonMock).not.toHaveBeenCalled();
   });
+
+  it("allows hiding branding when tier permits and toggle is off", async () => {
+    // Set up tier that ALLOWS hiding
+    getOrganizationTierLimitMock.mockResolvedValue({
+      id: "tier_2",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      canImportAssets: true,
+      canExportAssets: true,
+      canImportNRM: true,
+      canHideShelfBranding: true, // ✅ Tier allows hiding
+      maxCustomFields: 0,
+      maxOrganizations: 1,
+    } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+
+    const formData = new FormData();
+    formData.append("intent", "general");
+    formData.append("id", "org-1");
+    formData.append("name", "Test Org");
+    formData.append("currency", Currency.USD);
+    formData.append("qrIdDisplayPreference", "QR_ID");
+    // Simulate unchecked switch (hidden input sends "off")
+    formData.append("showShelfBranding", "off");
+
+    const request = new Request("http://localhost/settings/general", {
+      method: "POST",
+      body: formData,
+    });
+
+    await action({ context: mockContext, request, params: {} });
+
+    expect(canHideShelfBrandingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canHideShelfBranding: true,
+      })
+    );
+
+    // Verify branding is actually turned OFF
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ showShelfBranding: false })
+    );
+  });
+
+  it("allows showing branding when tier permits and toggle is on", async () => {
+    // Organization currently has branding hidden
+    const orgWithBrandingOff = {
+      ...baseOrganization(),
+      showShelfBranding: false,
+    };
+
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: orgWithBrandingOff,
+      role: OrganizationRoles.OWNER,
+      organizations: [orgWithBrandingOff],
+      isSelfServiceOrBase: false,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+      canUseBarcodes: false,
+    } as any);
+
+    getOrganizationTierLimitMock.mockResolvedValue({
+      id: "tier_2",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      canImportAssets: true,
+      canExportAssets: true,
+      canImportNRM: true,
+      canHideShelfBranding: true,
+      maxCustomFields: 0,
+      maxOrganizations: 1,
+    } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+
+    const formData = new FormData();
+    formData.append("intent", "general");
+    formData.append("id", "org-1");
+    formData.append("name", "Test Org");
+    formData.append("currency", Currency.USD);
+    formData.append("qrIdDisplayPreference", "QR_ID");
+    // Simulate checked switch (sends "on", overrides hidden "off")
+    formData.append("showShelfBranding", "on");
+
+    const request = new Request("http://localhost/settings/general", {
+      method: "POST",
+      body: formData,
+    });
+
+    await action({ context: mockContext, request, params: {} });
+
+    // Verify branding is turned back ON
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ showShelfBranding: true })
+    );
+  });
 });

@@ -26,7 +26,6 @@ import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
-import When from "../when/when";
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
@@ -191,33 +190,60 @@ const WorkspaceGeneralEditForms = ({
           </FormRow>
         </div>
 
-        <When truthy={canHideShelfBranding}>
-          <FormRow
-            rowLabel={"Label branding"}
-            className={"border-b-0"}
-            subHeading={
+        <FormRow
+          rowLabel={"Label branding"}
+          className={"border-b-0"}
+          subHeading={
+            canHideShelfBranding ? (
               <p>
-                Control whether the “Powered by Shelf.nu” footer appears on QR
+                Control whether the "Powered by Shelf.nu" footer appears on QR
                 and barcode labels.
               </p>
-            }
-          >
-            <div className="flex items-center gap-3">
-              <Switch
-                name={zo.fields.showShelfBranding()}
-                defaultChecked={organization.showShelfBranding ?? true}
-              />
-              <div>
-                <label className="text-base font-medium text-gray-700">
-                  Display Shelf branding on labels
-                </label>
-                <p className="text-[14px] text-gray-600">
-                  Toggle Shelf branding on downloadable QR and barcode labels.
-                </p>
-              </div>
+            ) : (
+              <p>
+                This is a premium feature.{" "}
+                <CrispButton variant="link" className="inline text-xs">
+                  Upgrade your plan
+                </CrispButton>{" "}
+                to hide Shelf branding on labels.
+              </p>
+            )
+          }
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="hidden"
+              name={zo.fields.showShelfBranding()}
+              value="off"
+            />
+            <Switch
+              id="showShelfBranding"
+              name={zo.fields.showShelfBranding()}
+              defaultChecked={organization.showShelfBranding ?? true}
+              disabled={!canHideShelfBranding}
+              aria-labelledby="showShelfBranding-label"
+              aria-describedby="showShelfBranding-desc"
+            />
+            <div>
+              <label
+                id="showShelfBranding-label"
+                htmlFor="showShelfBranding"
+                className={tw(
+                  "cursor-pointer text-base font-medium",
+                  canHideShelfBranding ? "text-gray-700" : "text-gray-400"
+                )}
+              >
+                Display Shelf branding on labels
+              </label>
+              <p
+                id="showShelfBranding-desc"
+                className="text-[14px] text-gray-600"
+              >
+                Toggle Shelf branding on downloadable QR and barcode labels.
+              </p>
             </div>
-          </FormRow>
-        </When>
+          </div>
+        </FormRow>
 
         <div className="text-right">
           <Button
