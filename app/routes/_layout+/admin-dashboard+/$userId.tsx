@@ -31,6 +31,7 @@ import { DeleteUser } from "~/components/user/delete-user";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -259,7 +260,18 @@ export const action = async ({
           })
         );
 
+        // Get current tier before updating
+        const currentUser = await db.user.findUniqueOrThrow({
+          where: { id: shelfUserId },
+          select: { tierId: true },
+        });
+
         const user = await updateUserTierId(shelfUserId, tierId);
+
+        // Reset personal workspace branding when downgrading from Plus to Free
+        if (currentUser.tierId === TierId.tier_1 && tierId === TierId.free) {
+          await resetPersonalWorkspaceBranding(shelfUserId);
+        }
 
         sendNotification({
           title: "Tier updated",

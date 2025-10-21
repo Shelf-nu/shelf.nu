@@ -752,3 +752,32 @@ export async function transferOwnership({
     });
   }
 }
+
+/**
+ * Resets showShelfBranding to true for all personal workspaces owned by a user.
+ * Called when Plus user downgrades to free tier.
+ *
+ * @param userId - The ID of the user whose personal workspaces should be reset
+ * @returns Promise resolving to the update result
+ */
+export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
+  try {
+    return await db.organization.updateMany({
+      where: {
+        userId,
+        type: OrganizationType.PERSONAL,
+      },
+      data: {
+        showShelfBranding: true,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while resetting personal workspace branding.",
+      additionalData: { userId },
+      label,
+    });
+  }
+}

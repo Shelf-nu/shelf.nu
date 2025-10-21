@@ -99,16 +99,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    const admins = await getOrganizationAdmins({
-      organizationId: organization.id,
-    });
-
-    const tierLimit = await getOrganizationTierLimit({
-      organizationId: organization.id,
-      organizations,
-    });
+    const [admins, tierLimit, user] = await Promise.all([
+      getOrganizationAdmins({
+        organizationId: organization.id,
+      }),
+      getOrganizationTierLimit({
+        organizationId: organization.id,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
 
     const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
 
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
@@ -121,7 +132,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         curriences: Object.keys(Currency),
         isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
         admins,
-        canHideShelfBranding: canHideBranding,
+        canHideShelfBranding: canHideBrandingForThisWorkspace,
       })
     );
   } catch (cause) {
@@ -190,12 +201,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
-    const tierLimit = await getOrganizationTierLimit({
-      organizationId: organization.id,
-      organizations,
-    });
+    const [tierLimit, user] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId: organization.id,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
 
     const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
 
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
@@ -230,7 +253,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organization.showShelfBranding
         );
 
-        if (!canHideBranding) {
+        if (!canHideBrandingForThisWorkspace) {
           nextShowShelfBranding = true;
         }
 

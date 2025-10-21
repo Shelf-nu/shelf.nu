@@ -124,6 +124,7 @@ describe("settings.general loader", () => {
 
     dbMock.user.findUniqueOrThrow.mockResolvedValue({
       firstName: "Carlos",
+      tierId: "tier_2",
       userOrganizations: [],
     });
 
@@ -163,6 +164,104 @@ describe("settings.general loader", () => {
       })
     );
   });
+
+  it("prevents Team tier users from hiding branding on personal workspaces", async () => {
+    const personalOrg = {
+      ...baseOrganization(),
+      type: OrganizationType.PERSONAL,
+    };
+
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      organizations: [personalOrg],
+      currentOrganization: personalOrg,
+      role: OrganizationRoles.OWNER,
+      isSelfServiceOrBase: false,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+      canUseBarcodes: false,
+    } as any);
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      firstName: "Carlos",
+      tierId: "tier_2", // Team tier
+      userOrganizations: [],
+    });
+
+    await loader({
+      context: mockContext,
+      request: new Request("http://localhost/settings/general"),
+      params: {},
+    });
+
+    // Even though tier allows hiding, workspace-tier mismatch prevents it
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canHideShelfBranding: false,
+      })
+    );
+  });
+
+  it("allows Plus tier users to hide branding on personal workspaces", async () => {
+    const personalOrg = {
+      ...baseOrganization(),
+      type: OrganizationType.PERSONAL,
+    };
+
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      organizations: [personalOrg],
+      currentOrganization: personalOrg,
+      role: OrganizationRoles.OWNER,
+      isSelfServiceOrBase: false,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+      canUseBarcodes: false,
+    } as any);
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      firstName: "Carlos",
+      tierId: "tier_1", // Plus tier
+      userOrganizations: [],
+    });
+
+    await loader({
+      context: mockContext,
+      request: new Request("http://localhost/settings/general"),
+      params: {},
+    });
+
+    // Plus tier on personal workspace = allowed
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canHideShelfBranding: true,
+      })
+    );
+  });
+
+  it("allows Team tier users to hide branding on team workspaces", async () => {
+    // baseOrganization() defaults to TEAM type
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      firstName: "Carlos",
+      tierId: "tier_2", // Team tier
+      userOrganizations: [],
+    });
+
+    await loader({
+      context: mockContext,
+      request: new Request("http://localhost/settings/general"),
+      params: {},
+    });
+
+    // Team tier on team workspace = allowed
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canHideShelfBranding: true,
+      })
+    );
+  });
 });
 
 describe("settings.general action", () => {
@@ -180,6 +279,10 @@ describe("settings.general action", () => {
       canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      tierId: "tier_2",
+    });
 
     getOrganizationTierLimitMock.mockResolvedValue({
       id: "tier_1",
@@ -317,6 +420,118 @@ describe("settings.general action", () => {
     // Verify branding is turned back ON
     expect(updateOrganizationMock).toHaveBeenCalledWith(
       expect.objectContaining({ showShelfBranding: true })
+    );
+  });
+
+  it("prevents Team tier users from hiding branding on personal workspaces via action", async () => {
+    const personalOrg = {
+      ...baseOrganization(),
+      type: OrganizationType.PERSONAL,
+    };
+
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: personalOrg,
+      role: OrganizationRoles.OWNER,
+      organizations: [personalOrg],
+      isSelfServiceOrBase: false,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+      canUseBarcodes: false,
+    } as any);
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      tierId: "tier_2", // Team tier
+    });
+
+    getOrganizationTierLimitMock.mockResolvedValue({
+      id: "tier_2",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      canImportAssets: true,
+      canExportAssets: true,
+      canImportNRM: true,
+      canHideShelfBranding: true, // Tier allows it
+      maxCustomFields: 0,
+      maxOrganizations: 1,
+    } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+
+    const formData = new FormData();
+    formData.append("intent", "general");
+    formData.append("id", "org-1");
+    formData.append("name", "Test Org");
+    formData.append("currency", Currency.USD);
+    formData.append("qrIdDisplayPreference", "QR_ID");
+    formData.append("showShelfBranding", "off");
+
+    const request = new Request("http://localhost/settings/general", {
+      method: "POST",
+      body: formData,
+    });
+
+    await action({ context: mockContext, request, params: {} });
+
+    // Should force branding to stay on due to workspace-tier mismatch
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ showShelfBranding: true })
+    );
+  });
+
+  it("allows Plus tier users to hide branding on personal workspaces via action", async () => {
+    const personalOrg = {
+      ...baseOrganization(),
+      type: OrganizationType.PERSONAL,
+    };
+
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: personalOrg,
+      role: OrganizationRoles.OWNER,
+      organizations: [personalOrg],
+      isSelfServiceOrBase: false,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+      canUseBarcodes: false,
+    } as any);
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      tierId: "tier_1", // Plus tier
+    });
+
+    getOrganizationTierLimitMock.mockResolvedValue({
+      id: "tier_1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      canImportAssets: true,
+      canExportAssets: true,
+      canImportNRM: true,
+      canHideShelfBranding: true,
+      maxCustomFields: 0,
+      maxOrganizations: 1,
+    } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+
+    const formData = new FormData();
+    formData.append("intent", "general");
+    formData.append("id", "org-1");
+    formData.append("name", "Test Org");
+    formData.append("currency", Currency.USD);
+    formData.append("qrIdDisplayPreference", "QR_ID");
+    formData.append("showShelfBranding", "off");
+
+    const request = new Request("http://localhost/settings/general", {
+      method: "POST",
+      body: formData,
+    });
+
+    await action({ context: mockContext, request, params: {} });
+
+    // Should allow hiding branding (Plus tier on personal workspace)
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ showShelfBranding: false })
     );
   });
 });

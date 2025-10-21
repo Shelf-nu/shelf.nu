@@ -75,6 +75,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
           select: {
             firstName: true,
+            tierId: true,
             userOrganizations: {
               include: {
                 organization: {
@@ -123,12 +124,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const canHideBranding = canHideShelfBranding(tierLimit);
 
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (currentOrganization.type === OrganizationType.TEAM ||
+        user.tierId === "tier_1");
+
     return json(
       data({
         header,
         organization: currentOrganization,
         canExportAssets: canExportAssets(tierLimit),
-        canHideShelfBranding: canHideBranding,
+        canHideShelfBranding: canHideBrandingForThisWorkspace,
         user,
         curriences: Object.keys(Currency),
         isPersonalWorkspace:
@@ -165,12 +173,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
         action: PermissionAction.update,
       });
 
-    const tierLimit = await getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    });
+    const [tierLimit, user] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
 
     const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (currentOrganization.type === OrganizationType.TEAM ||
+        user.tierId === "tier_1");
+
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -213,7 +235,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           currentOrganization.showShelfBranding
         );
 
-        if (!canHideBranding) {
+        if (!canHideBrandingForThisWorkspace) {
           nextShowShelfBranding = true;
         }
 

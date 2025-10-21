@@ -229,7 +229,7 @@ const WorkspaceGeneralEditForms = ({
                 id="showShelfBranding-label"
                 htmlFor="showShelfBranding"
                 className={tw(
-                  "cursor-pointer text-base font-medium",
+                  "cursor-pointer text-[14px] font-medium",
                   canHideShelfBranding ? "text-gray-700" : "text-gray-400"
                 )}
               >
