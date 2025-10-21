@@ -4097,7 +4097,7 @@ export async function addScannedAssetsToBooking({
   try {
     /** Step 1: Add assets to booking */
     const updatedBooking = await db.booking.update({
-      where: { id: bookingId },
+      where: { id: bookingId, organizationId },
       data: {
         assets: {
           connect: assetIds.map((id) => ({ id })),
