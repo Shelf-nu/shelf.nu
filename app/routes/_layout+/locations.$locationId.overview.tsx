@@ -11,7 +11,7 @@ import {
   getLocationTotalValuation,
 } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
@@ -54,13 +54,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
-        location: {
-          ...location,
-          createdAt: getDateTimeFormat(request, {
-            dateStyle: "short",
-            timeStyle: "short",
-          }).format(location.createdAt),
-        },
+        location,
         totalValue,
         locale,
         currentOrganization,
@@ -84,7 +78,6 @@ export const handle = {
 export default function LocationOverview() {
   const { location, totalValue, locale, currentOrganization } =
     useLoaderData<typeof loader>();
-
   return (
     <Card className="mt-0 px-[-4] py-[-5] md:border">
       <ul className="item-information">
@@ -99,7 +92,10 @@ export default function LocationOverview() {
             Created
           </span>
           <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-            <DateS date={location.createdAt} />
+            <DateS
+              date={location.createdAt}
+              options={{ dateStyle: "short", timeStyle: "short" }}
+            />
           </div>
         </li>
         {location.address && (
