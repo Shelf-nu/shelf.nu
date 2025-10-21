@@ -15,6 +15,7 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import {
   HoverCard,
   HoverCardContent,
@@ -62,8 +63,7 @@ import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import AssetQuickActions from "./asset-quick-actions";
-// eslint-disable-next-line import/no-cycle
-import { ListItemTagsColumn } from "./assets-list";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
@@ -90,7 +90,11 @@ export function AdvancedIndexColumn({
       field?.value as unknown as ShelfAssetCustomFieldValueType["value"];
 
     if (!field) {
-      return <Td> </Td>;
+      return (
+        <Td>
+          <EmptyTableValue />
+        </Td>
+      );
     }
 
     const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
@@ -240,7 +244,7 @@ export function AdvancedIndexColumn({
                 {item.location.name}
               </Button>
             ) : (
-              ""
+              <EmptyTableValue />
             )
           }
         />
@@ -259,7 +263,7 @@ export function AdvancedIndexColumn({
                 {item.kit.name}
               </Link>
             ) : (
-              ""
+              <EmptyTableValue />
             )
           }
         />
@@ -297,7 +301,11 @@ export function AdvancedIndexColumn({
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 
     default:
-      return <Td> </Td>;
+      return (
+        <Td>
+          <EmptyTableValue />
+        </Td>
+      );
   }
 }
 
@@ -392,7 +400,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      {tags.length > 0 && <ListItemTagsColumn tags={tags} />}
+      <ListItemTagsColumn tags={tags} />
     </Td>
   );
 }
@@ -413,7 +421,11 @@ function CustodyColumn({
       })}
     >
       <Td>
-        <TeamMemberBadge teamMember={custody?.custodian} />
+        {custody?.custodian ? (
+          <TeamMemberBadge teamMember={custody?.custodian} />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
     </When>
   );
@@ -475,7 +487,11 @@ function BarcodeColumn({
     item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
 
   if (barcodes.length === 0) {
-    return <Td> </Td>;
+    return (
+      <Td>
+        <EmptyTableValue />
+      </Td>
+    );
   }
 
   // If only one barcode, show as a single clickable link

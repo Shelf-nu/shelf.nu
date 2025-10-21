@@ -1,5 +1,5 @@
-import type { Organization, TeamMember } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createTeamMember } from "@factories";
 
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { ShelfError } from "~/utils/error";
@@ -10,6 +10,7 @@ const dbMocks = vi.hoisted(() => ({
   },
 }));
 
+// why: testing service error handling and data transformation without database dependency
 vi.mock("~/database/db.server", () => ({
   db: {
     teamMember: {
@@ -20,15 +21,7 @@ vi.mock("~/database/db.server", () => ({
 
 const mockTeamMemberFindUniqueOrThrow = dbMocks.teamMember.findUniqueOrThrow;
 
-const mockTeamMember: TeamMember = {
-  id: "team-member-123",
-  userId: "user-456",
-  name: "John Doe",
-  organizationId: "org-789" as Organization["id"],
-  deletedAt: null,
-  createdAt: new Date("2023-01-01"),
-  updatedAt: new Date("2023-01-01"),
-};
+const mockTeamMember = createTeamMember();
 
 beforeEach(() => {
   vi.clearAllMocks();

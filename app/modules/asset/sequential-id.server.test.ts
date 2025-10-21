@@ -6,7 +6,7 @@ import {
   extractSequenceNumber,
 } from "./sequential-id.server";
 
-// Mock the database connection to avoid connection errors in unit tests
+// why: testing pure sequential ID formatting functions without database connection errors
 vi.mock("~/database/db.server", () => ({
   db: {
     $executeRaw: vi.fn(),

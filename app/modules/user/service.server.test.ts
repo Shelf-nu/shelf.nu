@@ -27,7 +27,7 @@ import { defaultFields } from "../asset-index-settings/helpers";
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
-// mock db
+// why: testing user account creation logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
