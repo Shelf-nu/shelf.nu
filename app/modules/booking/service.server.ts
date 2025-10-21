@@ -1280,17 +1280,72 @@ export async function checkinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
+      // Collect all linked booking IDs that are ONGOING or OVERDUE (excluding current booking)
+      const linkedActiveBookingIds = new Set<string>();
+      bookingFound.assets.forEach((asset) => {
+        (asset.bookings ?? []).forEach((linkedBooking) => {
+          if (
+            linkedBooking.id !== bookingFound.id &&
+            (linkedBooking.status === BookingStatus.ONGOING ||
+              linkedBooking.status === BookingStatus.OVERDUE)
+          ) {
+            linkedActiveBookingIds.add(linkedBooking.id);
+          }
+        });
+      });
+
+      // Query partial check-ins for all linked active bookings to find which assets were already checked in
+      const partialCheckinsForLinkedBookings =
+        linkedActiveBookingIds.size > 0
+          ? await tx.partialBookingCheckin.findMany({
+              where: { bookingId: { in: Array.from(linkedActiveBookingIds) } },
+              select: { bookingId: true, assetIds: true },
+            })
+          : [];
+
+      // Build a map of bookingId -> Set of asset IDs that were partially checked in
+      const partiallyCheckedInAssetsByBooking = new Map<string, Set<string>>();
+      partialCheckinsForLinkedBookings.forEach((checkin) => {
+        if (!partiallyCheckedInAssetsByBooking.has(checkin.bookingId)) {
+          partiallyCheckedInAssetsByBooking.set(checkin.bookingId, new Set());
+        }
+        checkin.assetIds.forEach((assetId) => {
+          partiallyCheckedInAssetsByBooking
+            .get(checkin.bookingId)!
+            .add(assetId);
+        });
+      });
+
       const assetsToCheckin = bookingFound.assets
         .filter((asset) => {
           if (asset.status !== AssetStatus.CHECKED_OUT) {
             return false;
           }
 
+          // Check if asset has conflicts with other active bookings
+          // An asset has a conflict only if it's in another active booking AND hasn't been checked in from that booking
           const hasActiveBookingConflict = (asset.bookings ?? []).some(
-            (linkedBooking) =>
-              linkedBooking.id !== bookingFound.id &&
-              (linkedBooking.status === BookingStatus.ONGOING ||
-                linkedBooking.status === BookingStatus.OVERDUE)
+            (linkedBooking) => {
+              if (
+                linkedBooking.id === bookingFound.id ||
+                (linkedBooking.status !== BookingStatus.ONGOING &&
+                  linkedBooking.status !== BookingStatus.OVERDUE)
+              ) {
+                return false;
+              }
+
+              // Check if asset was already partially checked in from this linked booking
+              const checkedInAssets = partiallyCheckedInAssetsByBooking.get(
+                linkedBooking.id
+              );
+              if (checkedInAssets && checkedInAssets.has(asset.id)) {
+                // Asset was already checked in from this booking, so no conflict
+                return false;
+              }
+
+              // Asset is still active in this booking, so it's a conflict
+              return true;
+            }
           );
 
           if (hasActiveBookingConflict) {
@@ -2219,10 +2274,11 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
-          assets: { select: { id: true } },
+          assets: { select: { id: true, status: true } },
           from: true,
           creatorId: true,
           custodianUserId: true,
+          partialCheckins: { select: { assetIds: true } },
         },
       })
       .catch((cause) => {
@@ -2256,9 +2312,33 @@ export async function extendBooking({
       });
     }
 
+    /** Get assets that have been returned via partial check-in */
+    const checkedInAssetIds = booking.partialCheckins.flatMap(
+      (checkin) => checkin.assetIds
+    );
+
+    /** Filter to only assets that are actively checked out (not returned) */
+    const activeAssets = booking.assets.filter(
+      (asset) =>
+        (asset.status === AssetStatus.CHECKED_OUT ||
+          asset.status === AssetStatus.IN_CUSTODY) &&
+        !checkedInAssetIds.includes(asset.id)
+    );
+
+    /** Validate that there are still active assets to extend the booking for */
+    if (activeAssets.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Cannot extend booking. All assets have been returned. Please complete the booking instead.",
+        shouldBeCaptured: false,
+      });
+    }
+
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+      /** Checking if the booking period is clashing with any other booking containing the same active asset(s).*/
       const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
         where: {
           id: { not: booking.id },
@@ -2266,7 +2346,7 @@ export async function extendBooking({
           status: {
             in: [BookingStatus.RESERVED],
           },
-          assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+          assets: { some: { id: { in: activeAssets.map((a) => a.id) } } },
           // Check for bookings that start within the extension period
           from: {
             gt: booking.to!,

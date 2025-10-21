@@ -98,6 +98,7 @@ import {
 import { resolveTeamMemberName } from "~/utils/user";
 import { assetIndexFields } from "./fields";
 import {
+  CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
   assetQueryJoins,
   assetReturnFragment,
@@ -527,11 +528,13 @@ export async function getAssets(params: {
           {
             customFields: {
               some: {
-                value: {
-                  path: ["valueText"],
-                  string_contains: term,
-                  mode: "insensitive",
-                },
+                OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                  value: {
+                    path: [jsonPath],
+                    string_contains: term,
+                    mode: "insensitive",
+                  },
+                })),
               },
             },
           },
@@ -1729,9 +1732,7 @@ export async function duplicateAsset({
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
         ...payload,
-        title: `${asset.title} (copy ${
-          amountOfDuplicates > 1 ? i : ""
-        } ${Date.now()})`,
+        title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i + 1 : ""})`,
         customFieldsValues: extractedCustomFieldValues,
       });
 

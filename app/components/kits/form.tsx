@@ -1,13 +1,13 @@
 import { useRef } from "react";
 import type { Barcode, Kit } from "@prisma/client";
-import { Link, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { useDisabled } from "~/hooks/use-disabled";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
-import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
@@ -17,6 +17,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -34,6 +35,7 @@ export const NewKitFormSchema = z.object({
   category: z.string().optional(),
   qrId: z.string().optional(),
   locationId: z.string().optional(),
+  redirectTo: z.string().optional(),
 });
 
 type KitFormProps = Partial<
@@ -42,6 +44,7 @@ type KitFormProps = Partial<
   className?: string;
   qrId?: string | null;
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
+  referer?: string | null;
 };
 
 export default function KitsForm({
@@ -52,9 +55,9 @@ export default function KitsForm({
   categoryId,
   barcodes,
   locationId,
+  referer,
 }: KitFormProps) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
@@ -96,6 +99,10 @@ export default function KitsForm({
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
+        <RefererRedirectInput
+          fieldName={zo.fields.redirectTo()}
+          referer={referer}
+        />
 
         <FormRow rowLabel="Name" className="border-b-0 pb-[10px]" required>
           <Input
@@ -142,7 +149,15 @@ export default function KitsForm({
           subHeading={
             <p>
               Make it unique. Each kit can have 1 category. It will show on your
-              index.
+              index.{" "}
+              <Button
+                to="/categories/new"
+                variant="link-gray"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create categories
+              </Button>
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -181,13 +196,14 @@ export default function KitsForm({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link
+              <Button
                 to="/locations/new"
                 className="text-gray-600 underline"
                 target="_blank"
+                variant="link-gray"
               >
                 Create locations
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -273,9 +289,12 @@ export default function KitsForm({
         </When>
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
-          <div className="ml-auto">
+          <div className="ml-auto flex gap-2">
+            <Button to={referer} variant="secondary" disabled={disabled}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={disabled}>
-              Save
+              {disabled ? "Saving..." : "Save"}
             </Button>
           </div>
         </FormRow>
