@@ -202,9 +202,13 @@ const WorkspaceGeneralEditForms = ({
             ) : (
               <p>
                 This is a premium feature.{" "}
-                <CrispButton variant="link" className="inline text-xs">
+                <Button
+                  variant="link"
+                  className="inline text-xs"
+                  to="/account-details/subscription"
+                >
                   Upgrade your plan
-                </CrispButton>{" "}
+                </Button>{" "}
                 to hide Shelf branding on labels.
               </p>
             )
