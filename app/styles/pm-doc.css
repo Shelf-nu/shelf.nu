@@ -34,12 +34,6 @@
   color: #ef6820;
 }
 
-.pm-doc a:focus-visible,
-.pm-doc button:focus-visible {
-  outline: 2px solid #98a2b3;
-  outline-offset: 2px;
-}
-
 .pm-doc hr {
   margin: 1.5rem 0;
   border: 0;
@@ -150,6 +144,6 @@
 
 .pm-doc.pm--editing:focus,
 .pm-doc.pm--editing:focus-visible {
-  outline: 2px solid #d0d5dd;
+  outline: none;
   outline-offset: 0;
 }
