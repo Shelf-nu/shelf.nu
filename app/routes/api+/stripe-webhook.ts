@@ -6,6 +6,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
@@ -218,6 +219,11 @@ export async function action({ request }: ActionFunctionArgs) {
                 status: 500,
               });
             });
+
+          // Only reset branding when downgrading from Plus (tier_1) to Free
+          if (user.tierId === TierId.tier_1) {
+            await resetPersonalWorkspaceBranding(user.id);
+          }
         }
 
         return new Response(null, { status: 200 });
@@ -299,6 +305,11 @@ export async function action({ request }: ActionFunctionArgs) {
                 status: 500,
               });
             });
+
+          // Only reset branding when downgrading from Plus (tier_1) to Free
+          if (user.tierId === TierId.tier_1) {
+            await resetPersonalWorkspaceBranding(user.id);
+          }
         }
 
         return new Response(null, { status: 200 });

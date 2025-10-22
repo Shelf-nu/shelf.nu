@@ -39,6 +39,9 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const assetIds = searchParams.get("assetIds");
+    const assetIndexCurrentSearchParams = searchParams.get(
+      "assetIndexCurrentSearchParams"
+    );
     const isBackupRequest = assetIds === null;
 
     /** Join the rows with a new line */
@@ -49,6 +52,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
             assetIds,
             settings,
             currentOrganization,
+            assetIndexCurrentSearchParams,
           })
         : await exportAssetsBackupToCsv({ organizationId });
 

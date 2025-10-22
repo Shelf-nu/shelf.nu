@@ -5,6 +5,7 @@ import {
   isGet,
   getCurrentPath,
   getRedirectTo,
+  getRefererPath,
   makeRedirectToFromHere,
   isPost,
   safeRedirect,
@@ -55,6 +56,64 @@ describe(getRedirectTo.name, () => {
     expect(getRedirectTo(new Request(`${BASE_URL}?redirectTo=//profile`))).toBe(
       "/"
     );
+  });
+});
+
+describe(getRefererPath.name, () => {
+  it("should return null if no referer header", () => {
+    const request = new Request(BASE_URL);
+    expect(getRefererPath(request)).toBe(null);
+  });
+
+  it("should return pathname from referer header", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets` },
+    });
+    expect(getRefererPath(request)).toBe("/assets");
+  });
+
+  it("should return pathname with query params from referer", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets?search=test&status=AVAILABLE` },
+    });
+    expect(getRefererPath(request)).toBe(
+      "/assets?search=test&status=AVAILABLE"
+    );
+  });
+
+  it("should return pathname with hash from referer", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets#section` },
+    });
+    expect(getRefererPath(request)).toBe("/assets");
+  });
+
+  it("should return null for invalid referer URL", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: "not-a-valid-url" },
+    });
+    expect(getRefererPath(request)).toBe(null);
+  });
+
+  it("should handle referer from different domain", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: "https://other-domain.com/some-page" },
+    });
+    expect(getRefererPath(request)).toBe("/some-page");
+  });
+
+  it("should return root path for root referer", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: BASE_URL },
+    });
+    expect(getRefererPath(request)).toBe("/");
+  });
+
+  it("should handle nested paths", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets/123/edit` },
+    });
+    expect(getRefererPath(request)).toBe("/assets/123/edit");
   });
 });
 

@@ -1,5 +1,6 @@
 import type { Asset, Booking, Currency } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
 
 export function canUserManageBookingAssets(
@@ -26,14 +27,16 @@ export function canUserManageBookingAssets(
   );
 }
 
-export const bookingStatusColorMap: { [key in BookingStatus]: string } = {
-  DRAFT: "#667085",
-  RESERVED: "#175CD3",
-  ONGOING: "#7A5AF8",
-  OVERDUE: "#B54708",
-  COMPLETE: "#17B26A",
-  ARCHIVED: "#667085",
-  CANCELLED: "#667085",
+export const bookingStatusColorMap: {
+  [key in BookingStatus]: BadgeColorScheme;
+} = {
+  DRAFT: BADGE_COLORS.gray,
+  RESERVED: BADGE_COLORS.blue,
+  ONGOING: BADGE_COLORS.violet,
+  OVERDUE: BADGE_COLORS.red,
+  COMPLETE: BADGE_COLORS.green,
+  ARCHIVED: BADGE_COLORS.gray,
+  CANCELLED: BADGE_COLORS.gray,
 };
 
 /**

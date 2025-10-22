@@ -5,12 +5,14 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { useSearchParams } from "~/hooks/search-params";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
 
 export function ExportAssetsButton() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const { canImportAssets } = useLoaderData<AssetIndexLoaderData>();
+  const [searchParams] = useSearchParams();
   const disabled = selectedAssets.length === 0;
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -24,14 +26,26 @@ export function ExportAssetsButton() {
   const url = `/assets/export/assets-${new Date()
     .toISOString()
     .slice(0, 10)}-${new Date().getTime()}.csv`;
-  const searchParams =
-    assetIds.length > 0 ? `?assetIds=${assetIds.join(",")}` : "";
+
+  /** Build search params including current filters */
+  const exportSearchParams = new URLSearchParams();
+  if (assetIds.length > 0) {
+    exportSearchParams.set("assetIds", assetIds.join(","));
+  }
+
+  /** If all are selected, pass current search params to apply filters */
+  if (allSelected) {
+    exportSearchParams.set(
+      "assetIndexCurrentSearchParams",
+      searchParams.toString()
+    );
+  }
 
   /** Handle the download via fetcher and track state */
   const handleExport = async () => {
     setIsDownloading(true);
     try {
-      const response = await fetch(`${url}${searchParams}`);
+      const response = await fetch(`${url}?${exportSearchParams.toString()}`);
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");

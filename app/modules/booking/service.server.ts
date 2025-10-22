@@ -1280,17 +1280,72 @@ export async function checkinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
+      // Collect all linked booking IDs that are ONGOING or OVERDUE (excluding current booking)
+      const linkedActiveBookingIds = new Set<string>();
+      bookingFound.assets.forEach((asset) => {
+        (asset.bookings ?? []).forEach((linkedBooking) => {
+          if (
+            linkedBooking.id !== bookingFound.id &&
+            (linkedBooking.status === BookingStatus.ONGOING ||
+              linkedBooking.status === BookingStatus.OVERDUE)
+          ) {
+            linkedActiveBookingIds.add(linkedBooking.id);
+          }
+        });
+      });
+
+      // Query partial check-ins for all linked active bookings to find which assets were already checked in
+      const partialCheckinsForLinkedBookings =
+        linkedActiveBookingIds.size > 0
+          ? await tx.partialBookingCheckin.findMany({
+              where: { bookingId: { in: Array.from(linkedActiveBookingIds) } },
+              select: { bookingId: true, assetIds: true },
+            })
+          : [];
+
+      // Build a map of bookingId -> Set of asset IDs that were partially checked in
+      const partiallyCheckedInAssetsByBooking = new Map<string, Set<string>>();
+      partialCheckinsForLinkedBookings.forEach((checkin) => {
+        if (!partiallyCheckedInAssetsByBooking.has(checkin.bookingId)) {
+          partiallyCheckedInAssetsByBooking.set(checkin.bookingId, new Set());
+        }
+        checkin.assetIds.forEach((assetId) => {
+          partiallyCheckedInAssetsByBooking
+            .get(checkin.bookingId)!
+            .add(assetId);
+        });
+      });
+
       const assetsToCheckin = bookingFound.assets
         .filter((asset) => {
           if (asset.status !== AssetStatus.CHECKED_OUT) {
             return false;
           }
 
+          // Check if asset has conflicts with other active bookings
+          // An asset has a conflict only if it's in another active booking AND hasn't been checked in from that booking
           const hasActiveBookingConflict = (asset.bookings ?? []).some(
-            (linkedBooking) =>
-              linkedBooking.id !== bookingFound.id &&
-              (linkedBooking.status === BookingStatus.ONGOING ||
-                linkedBooking.status === BookingStatus.OVERDUE)
+            (linkedBooking) => {
+              if (
+                linkedBooking.id === bookingFound.id ||
+                (linkedBooking.status !== BookingStatus.ONGOING &&
+                  linkedBooking.status !== BookingStatus.OVERDUE)
+              ) {
+                return false;
+              }
+
+              // Check if asset was already partially checked in from this linked booking
+              const checkedInAssets = partiallyCheckedInAssetsByBooking.get(
+                linkedBooking.id
+              );
+              if (checkedInAssets && checkedInAssets.has(asset.id)) {
+                // Asset was already checked in from this booking, so no conflict
+                return false;
+              }
+
+              // Asset is still active in this booking, so it's a conflict
+              return true;
+            }
           );
 
           if (hasActiveBookingConflict) {
@@ -2219,10 +2274,11 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
-          assets: { select: { id: true } },
+          assets: { select: { id: true, status: true } },
           from: true,
           creatorId: true,
           custodianUserId: true,
+          partialCheckins: { select: { assetIds: true } },
         },
       })
       .catch((cause) => {
@@ -2256,9 +2312,33 @@ export async function extendBooking({
       });
     }
 
+    /** Get assets that have been returned via partial check-in */
+    const checkedInAssetIds = booking.partialCheckins.flatMap(
+      (checkin) => checkin.assetIds
+    );
+
+    /** Filter to only assets that are actively checked out (not returned) */
+    const activeAssets = booking.assets.filter(
+      (asset) =>
+        (asset.status === AssetStatus.CHECKED_OUT ||
+          asset.status === AssetStatus.IN_CUSTODY) &&
+        !checkedInAssetIds.includes(asset.id)
+    );
+
+    /** Validate that there are still active assets to extend the booking for */
+    if (activeAssets.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "Cannot extend booking. All assets have been returned. Please complete the booking instead.",
+        shouldBeCaptured: false,
+      });
+    }
+
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /** Checking if the booking period is clashing with any other booking containing the same asset(s).*/
+      /** Checking if the booking period is clashing with any other booking containing the same active asset(s).*/
       const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
         where: {
           id: { not: booking.id },
@@ -2266,7 +2346,7 @@ export async function extendBooking({
           status: {
             in: [BookingStatus.RESERVED],
           },
-          assets: { some: { id: { in: booking.assets.map((a) => a.id) } } },
+          assets: { some: { id: { in: activeAssets.map((a) => a.id) } } },
           // Check for bookings that start within the extension period
           from: {
             gt: booking.to!,
@@ -3839,114 +3919,204 @@ export async function bulkCancelBookings({
   }
 }
 
+/**
+ * Helper function to create booking notes and asset notes for scanned assets and kits
+ */
+async function createNotesForScannedAssetsAndKits({
+  booking,
+  assetIds,
+  kitIds,
+  organizationId,
+  userId,
+}: {
+  booking: { id: string; name: string };
+  assetIds: string[];
+  kitIds: string[];
+  organizationId: string;
+  userId: string;
+}) {
+  // Fetch assets and kits in parallel for better performance
+  const [assets, kits] = await Promise.all([
+    db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, title: true },
+    }),
+    kitIds.length > 0
+      ? db.kit.findMany({
+          where: { id: { in: kitIds }, organizationId },
+          select: { id: true, name: true, assets: { select: { id: true } } },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  // Create a map of asset ID to kit name for assets that came from kits
+  const assetIdToKitName = new Map<string, string>();
+  kits.forEach((kit) => {
+    kit.assets.forEach((asset) => {
+      assetIdToKitName.set(asset.id, kit.name);
+    });
+  });
+
+  // Separate standalone assets from kit assets for booking notes
+  const standaloneAssetIds = assetIds.filter((id) => !assetIdToKitName.has(id));
+  const standaloneAssets = assets.filter((asset) =>
+    standaloneAssetIds.includes(asset.id)
+  );
+
+  // Get user info for note attribution
+  const user = await getUserByID(userId, {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+    } satisfies Prisma.UserSelect,
+  });
+  const userForNotes = {
+    firstName: user?.firstName || "",
+    lastName: user?.lastName || "",
+    id: userId,
+  };
+
+  // Create booking notes
+  const hasKits = kits.length > 0;
+  const hasAssets = standaloneAssets.length > 0;
+
+  if (hasKits && hasAssets) {
+    // Both kits and assets added - create combined booking note
+    const kitContent = wrapKitsWithDataForNote(
+      kits.map((kit) => ({ id: kit.id, name: kit.name })),
+      "added"
+    );
+    const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
+
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `${wrapUserLinkForNote(
+        userForNotes
+      )} added ${kitContent} and ${assetContent} to booking.`,
+    });
+  } else if (hasKits) {
+    // Only kits added - create booking note
+    const kitContent = wrapKitsWithDataForNote(
+      kits.map((kit) => ({ id: kit.id, name: kit.name })),
+      "added"
+    );
+
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `${wrapUserLinkForNote(
+        userForNotes
+      )} added ${kitContent} to booking.`,
+    });
+  } else if (hasAssets) {
+    // Only assets added - create booking note
+    const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
+
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `${wrapUserLinkForNote(
+        userForNotes
+      )} added ${assetContent} to booking.`,
+    });
+  }
+
+  // Create notes on assets themselves with dynamic messages
+  const bookingLink = wrapLinkForNote(`/bookings/${booking.id}`, booking.name);
+
+  // Group assets by whether they came from a kit or not
+  const standaloneAssetIdsSet = new Set(standaloneAssetIds);
+  const kitAssetIds = assetIds.filter((id) => !standaloneAssetIdsSet.has(id));
+
+  // Create notes for standalone assets
+  if (standaloneAssetIds.length > 0) {
+    await createNotes({
+      content: `${wrapUserLinkForNote(
+        userForNotes
+      )} added asset to ${bookingLink}.`,
+      type: "UPDATE",
+      userId,
+      assetIds: standaloneAssetIds,
+    });
+  }
+
+  // Create notes for assets added via kits (grouped by kit)
+  if (kitAssetIds.length > 0) {
+    // Group asset IDs by kit name
+    const assetsByKit = new Map<string, string[]>();
+    kitAssetIds.forEach((assetId) => {
+      const kitName = assetIdToKitName.get(assetId);
+      if (kitName) {
+        if (!assetsByKit.has(kitName)) {
+          assetsByKit.set(kitName, []);
+        }
+        assetsByKit.get(kitName)!.push(assetId);
+      }
+    });
+
+    // Create notes for each kit's assets
+    for (const [kitName, kitAssetIds] of assetsByKit.entries()) {
+      const kit = kits.find((k) => k.name === kitName);
+      if (kit) {
+        const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
+        await createNotes({
+          content: `${wrapUserLinkForNote(
+            userForNotes
+          )} added asset via ${kitLink} to ${bookingLink}.`,
+          type: "UPDATE",
+          userId,
+          assetIds: kitAssetIds,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Adds scanned assets (and optionally kits) to a booking.
+ *
+ * @param {Object} params - The parameters for the function.
+ * @param {string[]} params.assetIds - Array of asset IDs to add to the booking.
+ * @param {string[]} [params.kitIds] - Optional array of kit IDs. Used to differentiate kit vs. standalone asset additions when creating notes. If not provided, only standalone assets are added.
+ * @param {string} params.bookingId - The ID of the booking to update.
+ * @param {string} params.organizationId - The organization ID associated with the booking.
+ * @param {string} params.userId - The ID of the user performing the action.
+ */
 export async function addScannedAssetsToBooking({
   assetIds,
+  kitIds = [],
   bookingId,
   organizationId,
   userId,
 }: {
   assetIds: Asset["id"][];
+  kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
 }) {
   try {
-    const booking = await db.booking.findFirstOrThrow({
-      where: { id: bookingId, organizationId },
-    });
-
-    // Separate assets and kits from the scanned IDs
-    const assets = await db.asset.findMany({
-      where: { id: { in: assetIds }, organizationId },
-      select: { id: true, title: true },
-    });
-
-    const kits = await db.kit.findMany({
-      where: { id: { in: assetIds }, organizationId },
-      select: { id: true, name: true, assets: { select: { id: true } } },
-    });
-
-    // Get asset IDs that belong to the selected kits to avoid double-connecting
-    const kitAssetIds = kits.flatMap((kit) =>
-      kit.assets.map((asset) => asset.id)
-    );
-
-    // Filter out assets that belong to the selected kits
-    const standaloneAssets = assets.filter(
-      (asset) => !kitAssetIds.includes(asset.id)
-    );
-
-    /** Adding assets to booking (both standalone and from kits) */
-    // Collect all asset IDs to connect (standalone assets + kit assets)
-    const allAssetIdsToConnect = [
-      ...standaloneAssets.map((asset) => asset.id),
-      ...kitAssetIds,
-    ];
-
+    /** Step 1: Add assets to booking */
     const updatedBooking = await db.booking.update({
-      where: { id: booking.id },
+      where: { id: bookingId, organizationId },
       data: {
         assets: {
-          connect: allAssetIdsToConnect.map((id) => ({ id })),
+          connect: assetIds.map((id) => ({ id })),
         },
+      },
+      select: {
+        id: true,
+        name: true,
       },
     });
 
-    // Create booking activity notes
-    const user = await getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      } satisfies Prisma.UserSelect,
+    /** Step 2: Create activity notes */
+    await createNotesForScannedAssetsAndKits({
+      booking: updatedBooking,
+      assetIds,
+      kitIds,
+      organizationId,
+      userId,
     });
-    const userForNotes = {
-      firstName: user?.firstName || "",
-      lastName: user?.lastName || "",
-      id: userId,
-    };
-
-    const hasKits = kits.length > 0;
-    const hasAssets = standaloneAssets.length > 0;
-
-    if (hasKits && hasAssets) {
-      // Both kits and assets added - create combined note
-      const kitContent = wrapKitsWithDataForNote(
-        kits.map((kit) => ({ id: kit.id, name: kit.name })),
-        "added"
-      );
-      const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
-
-      await createSystemBookingNote({
-        bookingId: booking.id,
-        content: `${wrapUserLinkForNote(
-          userForNotes
-        )} added ${kitContent} and ${assetContent} to booking.`,
-      });
-    } else if (hasKits) {
-      // Only kits added
-      const kitContent = wrapKitsWithDataForNote(
-        kits.map((kit) => ({ id: kit.id, name: kit.name })),
-        "added"
-      );
-
-      await createSystemBookingNote({
-        bookingId: booking.id,
-        content: `${wrapUserLinkForNote(
-          userForNotes
-        )} added ${kitContent} to booking.`,
-      });
-    } else if (hasAssets) {
-      // Only assets added
-      const assetContent = wrapAssetsWithDataForNote(standaloneAssets, "added");
-
-      await createSystemBookingNote({
-        bookingId: booking.id,
-        content: `${wrapUserLinkForNote(
-          userForNotes
-        )} added ${assetContent} to booking.`,
-      });
-    }
 
     return updatedBooking;
   } catch (cause) {
@@ -3958,7 +4128,7 @@ export async function addScannedAssetsToBooking({
     throw new ShelfError({
       cause,
       message,
-      additionalData: { assetIds, bookingId, organizationId, userId },
+      additionalData: { assetIds, kitIds, bookingId, organizationId, userId },
       label,
     });
   }
@@ -4406,6 +4576,7 @@ export async function getOngoingBookingForAsset({
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId,
         assets: { some: { id: assetId } },
+        partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
       },
     });
 

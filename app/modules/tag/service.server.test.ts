@@ -1,9 +1,10 @@
 import { TagUseFor } from "@prisma/client";
 import { describe, vitest } from "vitest";
-import { ORGANIZATION_ID, USER_ID } from "mocks/user";
+import { USER_ID, ORGANIZATION_ID } from "@factories";
 import { db } from "~/database/db.server";
 import { createTag, updateTag } from "~/modules/tag/service.server";
 
+// why: avoid database dependency and test tag service business logic in isolation
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),

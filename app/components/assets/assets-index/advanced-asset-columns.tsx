@@ -1,6 +1,6 @@
 import React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { Booking, AssetStatus } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
@@ -15,6 +15,7 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import {
   HoverCard,
   HoverCardContent,
@@ -62,8 +63,7 @@ import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import AssetQuickActions from "./asset-quick-actions";
-// eslint-disable-next-line import/no-cycle
-import { ListItemTagsColumn } from "./assets-list";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
@@ -90,7 +90,11 @@ export function AdvancedIndexColumn({
       field?.value as unknown as ShelfAssetCustomFieldValueType["value"];
 
     if (!field) {
-      return <Td> </Td>;
+      return (
+        <Td>
+          <EmptyTableValue />
+        </Td>
+      );
     }
 
     const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
@@ -158,7 +162,7 @@ export function AdvancedIndexColumn({
                     thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
                   }}
-                  alt={item.title}
+                  alt={`Image of ${item.title}`}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
                   withPreview={true}
                 />
@@ -203,13 +207,7 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return (
-        <StatusColumn
-          id={item.id}
-          status={item.status}
-          bookings={item.bookings}
-        />
-      );
+      return <StatusColumn id={item.id} status={item.status} />;
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -246,7 +244,7 @@ export function AdvancedIndexColumn({
                 {item.location.name}
               </Button>
             ) : (
-              ""
+              <EmptyTableValue />
             )
           }
         />
@@ -265,7 +263,7 @@ export function AdvancedIndexColumn({
                 {item.kit.name}
               </Link>
             ) : (
-              ""
+              <EmptyTableValue />
             )
           }
         />
@@ -303,7 +301,11 @@ export function AdvancedIndexColumn({
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 
     default:
-      return <Td> </Td>;
+      return (
+        <Td>
+          <EmptyTableValue />
+        </Td>
+      );
   }
 }
 
@@ -343,23 +345,10 @@ function TextColumn({
   );
 }
 
-function StatusColumn({
-  id,
-  status,
-  bookings,
-}: {
-  id: string;
-  status: AssetStatus;
-  bookings?: Pick<Booking, "id" | "name" | "status">[];
-}) {
+function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge
-        bookings={bookings}
-        id={id}
-        status={status}
-        availableToBook={true}
-      />
+      <AssetStatusBadge id={id} status={status} availableToBook={true} />
     </Td>
   );
 }
@@ -411,7 +400,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      {tags.length > 0 && <ListItemTagsColumn tags={tags} />}
+      <ListItemTagsColumn tags={tags} />
     </Td>
   );
 }
@@ -432,7 +421,11 @@ function CustodyColumn({
       })}
     >
       <Td>
-        <TeamMemberBadge teamMember={custody?.custodian} />
+        {custody?.custodian ? (
+          <TeamMemberBadge teamMember={custody?.custodian} />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
     </When>
   );
@@ -494,7 +487,11 @@ function BarcodeColumn({
     item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
 
   if (barcodes.length === 0) {
-    return <Td> </Td>;
+    return (
+      <Td>
+        <EmptyTableValue />
+      </Td>
+    );
   }
 
   // If only one barcode, show as a single clickable link
@@ -536,7 +533,7 @@ function BarcodeColumn({
             trigger={<Button variant="link-gray">{barcode.value}</Button>}
           />
           {index < barcodes.length - 1 && (
-            <span className="text-gray-400">, </span>
+            <span className="text-gray-600">, </span>
           )}
         </span>
       ))}

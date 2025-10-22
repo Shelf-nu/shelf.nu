@@ -28,8 +28,10 @@ import { Spinner } from "~/components/shared/spinner";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -68,6 +70,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     z.object({ userId: z.string() }),
     { additionalData: { userId } }
   );
+  const premiumIsEnabled = config.enablePremiumFeatures;
 
   try {
     await requireAdmin(userId);
@@ -191,9 +194,11 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     );
 
     /** Get the Stripe customer */
-    const customer = (await getStripeCustomer(
-      await getOrCreateCustomerId(user)
-    )) as CustomerWithSubscriptions;
+    const customer = premiumIsEnabled
+      ? ((await getStripeCustomer(
+          await getOrCreateCustomerId(user)
+        )) as CustomerWithSubscriptions)
+      : null;
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
@@ -204,6 +209,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         ssoUsersByDomain,
         customer,
         prices,
+        premiumIsEnabled,
       })
     );
   } catch (cause) {
@@ -254,7 +260,18 @@ export const action = async ({
           })
         );
 
+        // Get current tier before updating
+        const currentUser = await db.user.findUniqueOrThrow({
+          where: { id: shelfUserId },
+          select: { tierId: true },
+        });
+
         const user = await updateUserTierId(shelfUserId, tierId);
+
+        // Reset personal workspace branding when downgrading from Plus to Free
+        if (currentUser.tierId === TierId.tier_1 && tierId === TierId.free) {
+          await resetPersonalWorkspaceBranding(shelfUserId);
+        }
 
         sendNotification({
           title: "Tier updated",
@@ -357,8 +374,14 @@ export default function Area51UserPage() {
   // Get the loader data type
   type LoaderData = SerializeFrom<typeof loader>;
 
-  const { user, organizations, ssoUsersByDomain, customer, prices } =
-    useLoaderData<LoaderData>();
+  const {
+    user,
+    organizations,
+    ssoUsersByDomain,
+    customer,
+    prices,
+    premiumIsEnabled,
+  } = useLoaderData<LoaderData>();
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
@@ -379,6 +402,7 @@ export default function Area51UserPage() {
       case "tierId":
         return <TierUpdateForm tierId={user.tierId} />;
       case "customerId":
+        if (!premiumIsEnabled) return null;
         return !value ? (
           <Form className="inline-block" method="POST">
             <input type="hidden" name="intent" value="createCustomerId" />

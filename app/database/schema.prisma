@@ -670,6 +670,9 @@ model Organization {
   // QR code display preference - which ID to show on QR code labels
   qrIdDisplayPreference QrIdDisplayPreference @default(QR_ID)
 
+  // Branding preference for downloadable labels
+  showShelfBranding Boolean @default(true)
+
   // Indexes for foreign keys
   @@index([userId])
   @@index([ssoDetailsId])
@@ -754,6 +757,7 @@ model TierLimit {
   canImportAssets  Boolean  @default(false)
   canExportAssets  Boolean  @default(false)
   canImportNRM     Boolean  @default(false)
+  canHideShelfBranding Boolean @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
   createdAt        DateTime @default(now())
@@ -768,6 +772,7 @@ model CustomTierLimit {
   canImportAssets  Boolean  @default(true)
   canExportAssets  Boolean  @default(true)
   canImportNRM     Boolean  @default(true)
+  canHideShelfBranding Boolean @default(true)
   maxCustomFields  Int      @default(1000)
   maxOrganizations Int      @default(1)
   isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -797,12 +802,14 @@ model CustomField {
   // Datetime
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
+  deletedAt               DateTime?
   assetCustomFieldsValues AssetCustomFieldValue[]
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, deletedAt])
 }
 
 enum CustomFieldType {

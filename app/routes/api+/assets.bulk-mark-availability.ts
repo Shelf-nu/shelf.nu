@@ -2,6 +2,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkMarkAvailabilitySchema } from "~/components/assets/bulk-mark-availability-dialog";
 import { bulkMarkAvailability } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, parseData } from "~/utils/http.server";
@@ -18,11 +19,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
     });
 
     const formData = await request.formData();
@@ -37,6 +45,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       type,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({

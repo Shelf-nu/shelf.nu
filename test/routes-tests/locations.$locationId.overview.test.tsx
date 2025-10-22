@@ -122,20 +122,14 @@ describe("locations.$locationId.overview loader", () => {
     });
 
     expect(getClientHintMock).toHaveBeenCalledWith(args.request);
-    expect(getDateTimeFormatMock).toHaveBeenCalledWith(args.request, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-    expect(mockDateFormatter).toHaveBeenCalledWith(
-      new Date("2024-01-01T12:34:56Z")
-    );
 
     expect(result).toEqual(
       expect.objectContaining({
         error: null,
         location: expect.objectContaining({
           id: "loc-123",
-          createdAt: "formatted-date",
+          // Date is serialized to ISO string by Remix json()
+          createdAt: "2024-01-01T12:34:56.000Z",
         }),
         totalValue: 9876.54,
         locale: "en-GB",
@@ -154,7 +148,7 @@ describe("LocationOverview component", () => {
     useLoaderDataMock.mockReturnValue({
       location: {
         id: "loc-123",
-        createdAt: "formatted-date",
+        createdAt: new Date("2024-01-01T12:34:56Z"),
       },
       totalValue: 12345.6,
       currentOrganization: { currency: "USD" as Currency },
@@ -166,6 +160,7 @@ describe("LocationOverview component", () => {
     expect(screen.getByText("ID")).toBeInTheDocument();
     expect(screen.getByText("loc-123")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
+    // DateS component formats the date client-side
     expect(screen.getByText("formatted-date")).toBeInTheDocument();
 
     const formattedValue = formatCurrency({
