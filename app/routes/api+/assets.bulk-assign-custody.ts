@@ -3,6 +3,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -20,11 +21,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, role, canUseBarcodes } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
       action: PermissionAction.custody,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
     });
 
     const formData = await request.formData();
@@ -70,6 +78,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       custodianName: custodian.name,
       organizationId,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({

@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -21,11 +22,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
     });
 
     const { assetIds, newLocationId, currentSearchParams } = parseData(
@@ -39,6 +47,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       newLocationId,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({
