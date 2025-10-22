@@ -1,5 +1,6 @@
 import type {
   Asset,
+  AssetIndexSettings,
   Barcode,
   Booking,
   Kit,
@@ -57,6 +58,7 @@ import {
   KITS_INCLUDE_FIELDS,
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
+import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
@@ -2137,11 +2139,13 @@ export async function bulkRemoveAssetsFromKits({
   organizationId,
   userId,
   request,
+  settings,
 }: {
   assetIds: Asset["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
+  settings: AssetIndexSettings;
 }) {
   try {
     const user = await getUserByID(userId, {
@@ -2157,28 +2161,17 @@ export async function bulkRemoveAssetsFromKits({
       lastName: user?.lastName,
     });
 
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-
-      assetIds = allAssets.map((asset) => asset.id);
-    }
+    // Resolve IDs (works for both simple and advanced mode)
+    const searchParams = getCurrentSearchParams(request);
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams: searchParams.toString(),
+      settings,
+    });
 
     const assets = await db.asset.findMany({
-      where: { id: { in: assetIds }, organizationId },
+      where: { id: { in: resolvedIds }, organizationId },
       select: {
         id: true,
         title: true,

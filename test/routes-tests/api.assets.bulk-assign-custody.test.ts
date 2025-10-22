@@ -41,10 +41,18 @@ vi.mock("~/utils/http.server", () => ({
   parseData: vi.fn().mockImplementation((formData) => {
     const assetIds = JSON.parse(formData.get("assetIds") || "[]");
     const custodian = JSON.parse(formData.get("custodian") || "{}");
-    return { assetIds, custodian };
+    const currentSearchParams = formData.get("currentSearchParams") || null;
+    return { assetIds, custodian, currentSearchParams };
   }),
   data: vi.fn((x) => ({ success: true, ...x })),
   error: vi.fn((x) => ({ error: x })),
+}));
+
+// why: mocking asset index settings without database lookups
+vi.mock("~/modules/asset-index-settings/service.server", () => ({
+  getAssetIndexSettings: vi.fn().mockResolvedValue({
+    mode: "SIMPLE",
+  }),
 }));
 
 // why: mocking json response helper for testing route handler status codes
@@ -91,6 +99,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      canUseBarcodes: false,
     } as any);
 
     // Custodian not found due to org filter
@@ -130,6 +139,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      canUseBarcodes: false,
     } as any);
 
     // Valid team member from same org
@@ -172,6 +182,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      canUseBarcodes: false,
     } as any);
 
     // Valid team member from same org, but different user
@@ -208,6 +219,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      canUseBarcodes: false,
     } as any);
 
     // Valid team member from same org, same user

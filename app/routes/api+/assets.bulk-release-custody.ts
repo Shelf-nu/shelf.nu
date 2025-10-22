@@ -4,6 +4,7 @@ import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custo
 import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -20,11 +21,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, role, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.custody,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
     });
 
     const formData = await request.formData();
@@ -57,6 +65,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assetIds,
       organizationId,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({

@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { BulkRemoveFromKitsSchema } from "~/components/assets/bulk-remove-from-kits";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { bulkRemoveAssetsFromKits } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -17,11 +18,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
     });
 
     const { assetIds } = parseData(
@@ -37,6 +45,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       request,
+      settings,
     });
 
     sendNotification({
