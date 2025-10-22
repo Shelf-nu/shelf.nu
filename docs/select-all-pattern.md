@@ -226,18 +226,6 @@ export async function bulkMarkAvailability({
 }
 ```
 
-**Important: No Dynamic Imports**
-
-```typescript
-// ❌ WRONG - Do not use dynamic imports
-const { resolveAssetIdsForBulkOperation } = await import(
-  "./bulk-operations-helper.server"
-);
-
-// ✅ CORRECT - Import at top of file
-import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
-```
-
 ## Helper Functions
 
 ### resolveAssetIdsForBulkOperation
