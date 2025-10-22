@@ -31,9 +31,8 @@ export const addScannedAssetsToBookingSchema = z
     assetIds: z.array(z.string()),
     kitIds: z.array(z.string()).optional().default([]),
   })
-  .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {
+  .refine((data) => data.assetIds.length > 0, {
     message: "At least one asset or kit must be selected",
-
     path: ["assetIds"],
   });
 
@@ -73,7 +72,13 @@ export default function AddAssetsToBookingDrawer({
     .map((item) => item?.data as KitFromQr);
 
   // Separate asset IDs and kit IDs for the form
-  const assetIdsForBooking = Array.from(new Set(assetIds));
+  // Extract asset IDs from kits and flatten with directly scanned assets
+  const assetIdsFromKits = kits.flatMap((kit) =>
+    kit.assets.map((asset) => asset.id)
+  );
+  const assetIdsForBooking = Array.from(
+    new Set([...assetIds, ...assetIdsFromKits])
+  );
   const kitIdsForBooking = kits.map((k) => k.id);
 
   // Setup blockers

@@ -127,6 +127,7 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
     expect(addScannedAssetsToBookingMock).toHaveBeenCalledWith({
       bookingId: "booking-123",
       assetIds: ["asset-123"],
+      kitIds: [],
       organizationId: "org-1",
       userId: "user-123",
     });
