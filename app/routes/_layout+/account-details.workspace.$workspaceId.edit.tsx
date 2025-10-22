@@ -31,7 +31,9 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -48,6 +50,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -61,7 +64,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    await requirePermission({
+    const { organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -96,9 +99,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    const admins = await getOrganizationAdmins({
-      organizationId: organization.id,
-    });
+    const [admins, tierLimit, user] = await Promise.all([
+      getOrganizationAdmins({
+        organizationId: organization.id,
+      }),
+      getOrganizationTierLimit({
+        organizationId: organization.id,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
 
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
@@ -111,6 +132,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         curriences: Object.keys(Currency),
         isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
         admins,
+        canHideShelfBranding: canHideBrandingForThisWorkspace,
       })
     );
   } catch (cause) {
@@ -142,7 +164,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -179,6 +201,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
+    const [tierLimit, user] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId: organization.id,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
+
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -204,7 +245,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { userId, organizationId: id },
         });
 
-        const { name, currency, qrIdDisplayPreference } = payload;
+        const { name, currency, qrIdDisplayPreference, showShelfBranding } =
+          payload;
+
+        let nextShowShelfBranding = resolveShowShelfBranding(
+          showShelfBranding,
+          organization.showShelfBranding
+        );
+
+        if (!canHideBrandingForThisWorkspace) {
+          nextShowShelfBranding = true;
+        }
 
         const formDataFile = await unstable_parseMultipartFormData(
           request,
@@ -222,6 +273,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: authSession.userId,
           currency,
           qrIdDisplayPreference,
+          showShelfBranding: nextShowShelfBranding,
         });
 
         sendNotification({
