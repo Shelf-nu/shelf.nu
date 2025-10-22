@@ -6,7 +6,12 @@ import {
   MarkdownParser,
   MarkdownSerializer,
 } from "prosemirror-markdown";
-import { Fragment, Schema, type Node as ProseMirrorNode, type NodeSpec } from "prosemirror-model";
+import {
+  Fragment,
+  Schema,
+  type Node as ProseMirrorNode,
+  type NodeSpec,
+} from "prosemirror-model";
 import { schema as basicSchema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
 
@@ -106,15 +111,21 @@ function getSerializer(schema: Schema): MarkdownSerializer {
         state.closeBlock(node);
       },
     },
-    defaultMarkdownSerializer.marks,
+    defaultMarkdownSerializer.marks
   );
 
   serializerCache.set(schema, serializer);
   return serializer;
 }
 
-function createMarkdownParser(schema: Schema, _rawBlocks: RawBlock[]): MarkdownParser {
-  const tokenizer = new MarkdownIt("commonmark", { html: false, breaks: false });
+function createMarkdownParser(
+  schema: Schema,
+  _rawBlocks: RawBlock[]
+): MarkdownParser {
+  const tokenizer = new MarkdownIt("commonmark", {
+    html: false,
+    breaks: false,
+  });
   const tokens = {
     ...defaultMarkdownParser.tokens,
   } satisfies MarkdownParser["tokens"];
@@ -184,7 +195,10 @@ function toSegments(markdoc: string): RawSegment[] {
   return deduped;
 }
 
-function normalizeRawBlocks(markdoc: string): { text: string; rawBlocks: RawBlock[] } {
+function normalizeRawBlocks(markdoc: string): {
+  text: string;
+  rawBlocks: RawBlock[];
+} {
   const segments = toSegments(markdoc);
   if (segments.length === 0) {
     return { text: markdoc, rawBlocks: [] };
@@ -221,7 +235,7 @@ function normalizeRawBlocks(markdoc: string): { text: string; rawBlocks: RawBloc
 function replaceRawPlaceholders(
   node: ProseMirrorNode,
   schema: Schema,
-  rawBlocks: RawBlock[],
+  rawBlocks: RawBlock[]
 ): ProseMirrorNode {
   let changed = false;
   const children: ProseMirrorNode[] = [];

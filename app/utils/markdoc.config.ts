@@ -8,7 +8,9 @@ function collectRawContent(node: Node | undefined): string {
   if (node.type === "text") {
     return (node.attributes?.content as string) ?? "";
   }
-  return (node.children ?? []).map((child) => collectRawContent(child)).join("");
+  return (node.children ?? [])
+    .map((child) => collectRawContent(child))
+    .join("");
 }
 
 /**

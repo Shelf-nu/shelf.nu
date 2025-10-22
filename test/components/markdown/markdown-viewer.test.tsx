@@ -12,9 +12,7 @@ describe("MarkdownViewer", () => {
   });
 
   it("wraps rendered content with the shared pm-doc class", () => {
-    const { container } = render(
-      <MarkdownViewer content={PM_DOC_FIXTURE} />
-    );
+    const { container } = render(<MarkdownViewer content={PM_DOC_FIXTURE} />);
 
     const wrapper = container.firstElementChild as HTMLElement;
     expect(wrapper.classList.contains("pm-doc")).toBe(true);
@@ -22,9 +20,7 @@ describe("MarkdownViewer", () => {
   });
 
   it("applies the pm-doc spacing rules in read-only mode", () => {
-    const { container } = render(
-      <MarkdownViewer content={PM_DOC_FIXTURE} />
-    );
+    const { container } = render(<MarkdownViewer content={PM_DOC_FIXTURE} />);
 
     const wrapper = container.firstElementChild as HTMLElement;
     const heading = wrapper.querySelector("h1") as HTMLElement;

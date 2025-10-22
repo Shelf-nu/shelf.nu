@@ -14,7 +14,10 @@ import type { Mark, Node as PMNode } from "prosemirror-model";
 
 import { EditorV2 } from "~/components/editor-v2/editor-v2";
 import { SlashCommandMenu } from "~/components/editor-v2/components/slash-command-menu";
-import { createEditorSchema, serializeMarkdoc } from "~/modules/editor-v2/markdoc-utils";
+import {
+  createEditorSchema,
+  serializeMarkdoc,
+} from "~/modules/editor-v2/markdoc-utils";
 import { PM_DOC_FIXTURE } from "../../fixtures/pm-doc-content";
 import { ensurePmDocStyles } from "../../utils/inject-pm-doc-styles";
 
@@ -23,7 +26,9 @@ describe("EditorV2", () => {
     ensurePmDocStyles();
   });
 
-  async function setupEditor(props: Partial<ComponentProps<typeof EditorV2>> = {}) {
+  async function setupEditor(
+    props: Partial<ComponentProps<typeof EditorV2>> = {}
+  ) {
     const handleChange = vi.fn();
 
     const utils = render(
@@ -67,7 +72,6 @@ describe("EditorV2", () => {
       handleChange,
     };
   }
-
 
   it("retains unsaved content when toggling disabled", async () => {
     const { view, rerender, handleChange, getView } = await setupEditor({
@@ -174,7 +178,9 @@ describe("EditorV2", () => {
       await user.click(linkButton);
     });
 
-    const dialog = await screen.findByRole("alertdialog", { name: "Edit link" });
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Edit link",
+    });
     expect(dialog).toBeInTheDocument();
     expect(screen.getByLabelText("URL")).toHaveValue("https://example.com");
   });
@@ -199,7 +205,9 @@ describe("EditorV2", () => {
       await user.click(linkButton);
     });
 
-    const dialog = await screen.findByRole("alertdialog", { name: "Edit link" });
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Edit link",
+    });
     expect(dialog).toBeInTheDocument();
 
     const urlInput = screen.getByLabelText("URL");

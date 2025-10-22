@@ -13,7 +13,7 @@ import { LinkComponent } from "./link-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
   <div className="raw-block rounded border border-dashed border-gray-300 bg-gray-50">
-    <pre className="overflow-x-auto whitespace-pre-wrap p-3 text-xs font-mono text-gray-700">
+    <pre className="overflow-x-auto whitespace-pre-wrap p-3 font-mono text-xs text-gray-700">
       {raw}
     </pre>
   </div>
