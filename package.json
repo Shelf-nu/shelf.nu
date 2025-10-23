@@ -116,7 +116,7 @@
     "react-dom": "18.2.0",
     "react-dropzone": "^14.2.3",
     "react-microsoft-clarity": "^1.2.0",
-    "react-router-hono-server": "^1.0.0",
+    "react-router-hono-server": "^1.2.0",
     "react-tag-autocomplete": "^7.1.0",
     "react-to-print": "^2.15.1",
     "react-webcam": "^7.2.0",
