@@ -98,20 +98,44 @@ export default function SelectPlan() {
   const activePrice = selectedPlan ? planPrices[selectedPlan] : null;
   const disabled = isFormProcessing(navigation.state) || !activePrice;
 
-  const planCopy: Record<
-    BillingInterval,
-    { label: string; price: string; footnote: string }
-  > = {
-    month: {
-      label: "Monthly",
-      price: "$67/mo",
-      footnote: "Billed monthly per workspace",
-    },
-    year: {
-      label: "Annual",
-      price: "$37/mo",
-      footnote: "Billed annually $370 per workspace",
-    },
+  // Generate dynamic plan copy from Stripe prices
+  const getPlanCopy = (
+    price: (typeof prices)[number]
+  ): { label: string; price: string; footnote: string } => {
+    const interval = price.recurring?.interval;
+    const amount =
+      price.unit_amount != null
+        ? interval === "year"
+          ? price.unit_amount / 10
+          : price.unit_amount
+        : 0;
+
+    const formattedPrice =
+      amount > 0
+        ? (amount / 100).toLocaleString("en-US", {
+            style: "currency",
+            currency: price.currency,
+            maximumFractionDigits: 0,
+          })
+        : "$0";
+
+    let footnote = "";
+    if (interval === "year") {
+      const annualTotal = (amount / 10).toLocaleString("en-US", {
+        style: "currency",
+        currency: price.currency,
+        maximumFractionDigits: 0,
+      });
+      footnote = `Billed annually ${annualTotal} per workspace`;
+    } else if (interval === "month") {
+      footnote = "Billed monthly per workspace";
+    }
+
+    return {
+      label: interval === "year" ? "Annual" : "Monthly",
+      price: `${formattedPrice}/mo`,
+      footnote,
+    };
   };
 
   const addOns = [
@@ -140,7 +164,7 @@ export default function SelectPlan() {
           Select your payment plan
         </h3>
         <p className="mt-3 text-base text-gray-600">
-          No credit card or payment required to start your 7-day trial.
+          No credit card or payment required to start your 7-day trial.{" "}
         </p>
       </div>
 
@@ -151,10 +175,10 @@ export default function SelectPlan() {
       >
         <fieldset className="space-y-4" aria-label="Billing interval">
           <legend className="sr-only">Choose billing interval</legend>
-          {(Object.keys(planCopy) as BillingInterval[]).map((interval) => {
+          {(Object.keys(planPrices) as BillingInterval[]).map((interval) => {
             const price = planPrices[interval];
             if (!price) return null;
-            const display = planCopy[interval];
+            const display = getPlanCopy(price);
             const id = `billing-${interval}`;
             const isSelected = selectedPlan === interval;
             return (
@@ -197,18 +221,23 @@ export default function SelectPlan() {
               Optional add-ons
             </h3>
             <p className="mt-1 text-sm text-gray-600">
-              Advanced capabilities for migrations & IT environments.
+              Advanced capabilities for migrations & IT environments.{" "}
+              <strong>Enable any time by contacting our team.</strong>
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {addOns.map((addOn) => (
               <article key={addOn.title} className="h-full">
                 <Card className="flex h-full flex-col gap-3">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="">
                     <h4 className="text-base font-semibold text-gray-900">
                       {addOn.title}
                     </h4>
-                    <GrayBadge>{addOn.badge}</GrayBadge>
+                    <div>
+                      <GrayBadge className="whitespace-nowrap">
+                        {addOn.badge}
+                      </GrayBadge>
+                    </div>
                   </div>
                   <p className="text-sm text-gray-600">{addOn.description}</p>
                   <p className="text-xs text-gray-500">{addOn.footnote}</p>
@@ -218,7 +247,7 @@ export default function SelectPlan() {
           </div>
         </section>
 
-        <p className="text-sm text-gray-600">
+        <p className="text-center text-sm text-gray-600">
           You won’t be charged during the trial. After 7 days, continue on Team
           or change plans.
         </p>
