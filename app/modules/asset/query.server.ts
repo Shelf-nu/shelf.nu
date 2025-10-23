@@ -906,17 +906,34 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
    */
   switch (filter.operator) {
     case "contains": {
+      // Handle "untagged" special case
+      if (filter.value === "untagged") {
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM "_AssetToTag" att
+          WHERE att."A" = a.id
+        )`;
+      }
       // Single tag filtering using the existing join
       return Prisma.sql`${whereClause} AND t.id = ${filter.value}`;
     }
     case "containsAll": {
       // ALL tags must be present
       const values = (filter.value as string).split(",").map((v) => v.trim());
+
+      // If "untagged" is included, return assets with no tags
+      // (an asset can't be both untagged and have tags)
+      if (values.includes("untagged")) {
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM "_AssetToTag" att
+          WHERE att."A" = a.id
+        )`;
+      }
+
       return Prisma.sql`${whereClause} AND NOT EXISTS (
         SELECT unnest(${values}::text[]) AS required_tag
         EXCEPT
         SELECT t.id
-        FROM "_AssetToTag" att 
+        FROM "_AssetToTag" att
         JOIN "Tag" t ON t.id = att."B"
         WHERE att."A" = a.id
       )`;
@@ -924,6 +941,29 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     case "containsAny": {
       // ANY of the tags must be present
       const values = (filter.value as string).split(",").map((v) => v.trim());
+
+      // If "untagged" is included, we need OR logic:
+      // Either the asset has no tags OR it has one of the other specified tags
+      if (values.includes("untagged")) {
+        // Remove "untagged" from the values array
+        const tagIds = values.filter((v) => v !== "untagged");
+
+        if (tagIds.length === 0) {
+          // Only "untagged" was selected - return assets with no tags
+          return Prisma.sql`${whereClause} AND NOT EXISTS (
+            SELECT 1 FROM "_AssetToTag" att
+            WHERE att."A" = a.id
+          )`;
+        }
+
+        // Return assets that are either untagged OR have one of the specified tags
+        const valuesArray = `{${tagIds.map((v) => `"${v}"`).join(",")}}`;
+        return Prisma.sql`${whereClause} AND (
+          NOT EXISTS (SELECT 1 FROM "_AssetToTag" att WHERE att."A" = a.id)
+          OR t.id = ANY(ARRAY(SELECT unnest(${valuesArray}::text[])))
+        )`;
+      }
+
       const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
       return Prisma.sql`${whereClause} AND t.id = ANY(ARRAY(SELECT unnest(${valuesArray}::text[])))`;
     }
