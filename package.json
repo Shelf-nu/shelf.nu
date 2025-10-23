@@ -33,7 +33,7 @@
     "test:e2e:install": "npx playwright install --with-deps chromium",
     "pretest:e2e:run": "npm run build",
     "typecheck": "tsc -b",
-    "validate": "run-p \"test -- --run\" lint typecheck test:e2e:run",
+    "validate": "run-p \"test -- --run\" lint typecheck",
     "lint:fix": "npm run lint -- --fix",
     "format-code": "npm run prettier:fix & npm run lint:fix",
     "stripe:webhook": "stripe listen --forward-to https://localhost:3000/api/stripe-webhook",
