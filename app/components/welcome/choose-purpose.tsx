@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigation } from "@remix-run/react";
+import { config } from "~/config/shelf.config";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { ShelfSymbolLogo } from "../marketing/logos";
@@ -35,9 +36,8 @@ const PLAN_DETAILS: Record<
   },
   team: {
     title: "Team",
-    description:
-      "For organizations and labs. Includes collaboration features with a 7-day free trial. No credit card required.",
-    chip: "7-day trial",
+    description: `For organizations and labs. Includes collaboration features with a ${config.freeTrialDays}-day free trial. No credit card required.`,
+    chip: `${config.freeTrialDays}-day trial`,
     badge: "Recommended",
     analytics: "cta-next-team",
     ctaLabel: "Next: Select a plan",
@@ -56,7 +56,7 @@ export function ChoosePurpose() {
     <>
       <div className="flex flex-col items-center p-4 sm:p-6">
         <ShelfSymbolLogo className="mb-4 size-8" />
-        <div className="mb-8 max-w-2xl text-center">
+        <div className="mb-4 max-w-2xl text-center">
           <h3 className="text-2xl font-semibold text-gray-900">
             How would you like to get started with Shelf?
           </h3>
@@ -69,12 +69,12 @@ export function ChoosePurpose() {
             new workspace — look for your email invite or sign in instead.
           </p>
         </div>
-        <div className="flex w-full max-w-3xl flex-col gap-4">
+        <div className="flex w-full gap-4">
           {(Object.keys(PLAN_DETAILS) as Array<SignupPlan>).map((planKey) => {
             const plan = PLAN_DETAILS[planKey];
             const isSelected = selectedPlan === planKey;
             return (
-              <div key={planKey} className="space-y-2">
+              <div key={planKey} className="h-full flex-1">
                 <PlanCard
                   planKey={planKey}
                   onSelect={setSelectedPlan}
@@ -85,7 +85,7 @@ export function ChoosePurpose() {
                   badgeLabel={plan.badge}
                 />
                 {plan.helper ? (
-                  <p className="pl-6 text-sm text-gray-500">{plan.helper}</p>
+                  <p className="text-sm text-gray-500">{plan.helper}</p>
                 ) : null}
               </div>
             );
@@ -127,34 +127,29 @@ function PlanCard({
       className={tw(
         "p-0",
         "transition-shadow",
-        selected ? "shadow-lg" : "hover:shadow-md"
+        selected ? "" : "hover:border-gray-300"
       )}
     >
       <button
         type="button"
         onClick={() => onSelect(planKey)}
         className={tw(
-          "flex w-full items-start justify-between gap-4 rounded border-2 border-transparent bg-white px-6 py-5 text-left",
-          selected ? "border-primary-300 bg-primary-50" : "border-transparent"
+          " relative w-full rounded border border-transparent bg-white px-4 py-5 text-left",
+          selected ? "border-primary-400 bg-primary-50" : "border-transparent"
         )}
       >
-        <div className="flex flex-col gap-3">
-          <Tag
-            className={tw(
-              "w-max",
-              planKey === "team"
-                ? "bg-orange-100 text-orange-700"
-                : "bg-primary-50 text-primary-700"
-            )}
-          >
-            {chipLabel}
-          </Tag>
-          <div>
-            <h4 className="text-lg font-semibold text-gray-900">{title}</h4>
-            <p className="mt-2 text-sm text-gray-600">{description}</p>
-          </div>
+        <div className="absolute right-1.5 top-1.5">
+          {badgeLabel ? (
+            <Tag className={tw("w-max", " bg-orange-100 text-orange-700")}>
+              {badgeLabel}
+            </Tag>
+          ) : null}
         </div>
-        {badgeLabel ? <GrayBadge>{badgeLabel}</GrayBadge> : null}
+        <div>
+          <h4 className="text-lg font-semibold text-gray-900">{title}</h4>
+          <p className="mt-2 text-sm text-gray-600">{description}</p>
+          <GrayBadge className="mt-4">{chipLabel}</GrayBadge>
+        </div>
       </button>
     </Card>
   );

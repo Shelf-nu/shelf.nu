@@ -11,6 +11,8 @@ import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { Tag } from "~/components/shared/tag";
+import { config } from "~/config/shelf.config";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -75,7 +77,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 export default function SelectPlan() {
   const { prices } = useLoaderData<typeof loader>();
-
   type BillingInterval = "month" | "year";
 
   const planPrices = useMemo(() => {
@@ -141,9 +142,9 @@ export default function SelectPlan() {
   const addOns = [
     {
       title: "Alternative Barcodes",
-      badge: "Paid add-on ($14/mo or $170/yr)",
+      badge: "$14/mo or $170/yr",
       description:
-        "Keep your existing labels. Supports Code128, Code39, EAN-13, DataMatrix — ideal for migrations.",
+        "Keep your existing labels. Supports Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for migrations.",
       footnote: "Enable any time by contacting our team.",
     },
     {
@@ -173,7 +174,10 @@ export default function SelectPlan() {
         className="w-full max-w-3xl space-y-8"
         action="/account-details/subscription"
       >
-        <fieldset className="space-y-4" aria-label="Billing interval">
+        <fieldset
+          className="flex items-center justify-between gap-2"
+          aria-label="Billing interval"
+        >
           <legend className="sr-only">Choose billing interval</legend>
           {(Object.keys(planPrices) as BillingInterval[]).map((interval) => {
             const price = planPrices[interval];
@@ -182,7 +186,11 @@ export default function SelectPlan() {
             const id = `billing-${interval}`;
             const isSelected = selectedPlan === interval;
             return (
-              <label key={interval} htmlFor={id} className="block">
+              <label
+                key={interval}
+                htmlFor={id}
+                className="flex-1 cursor-pointer"
+              >
                 <input
                   id={id}
                   type="radio"
@@ -194,12 +202,22 @@ export default function SelectPlan() {
                 />
                 <div
                   className={tw(
-                    "flex flex-col gap-2 rounded-2xl border px-6 py-5 transition",
+                    "relative flex flex-col gap-2 rounded border px-6 py-5 transition",
                     isSelected
                       ? "border-primary-400 bg-primary-50"
                       : "border-gray-200 bg-white hover:border-gray-300"
                   )}
                 >
+                  {interval === "year" ? (
+                    <Tag
+                      className={tw(
+                        "w-max",
+                        " absolute right-2 top-2 bg-orange-100 text-orange-700"
+                      )}
+                    >
+                      Save 54%
+                    </Tag>
+                  ) : null}
                   <span className="text-sm font-semibold text-primary-700">
                     {display.label}
                   </span>
@@ -233,7 +251,7 @@ export default function SelectPlan() {
                     <h4 className="text-base font-semibold text-gray-900">
                       {addOn.title}
                     </h4>
-                    <div>
+                    <div className="mt-1">
                       <GrayBadge className="whitespace-nowrap">
                         {addOn.badge}
                       </GrayBadge>
@@ -248,8 +266,8 @@ export default function SelectPlan() {
         </section>
 
         <p className="text-center text-sm text-gray-600">
-          You won’t be charged during the trial. After 7 days, continue on Team
-          or change plans.
+          You won’t be charged during the trial. After {config.freeTrialDays}{" "}
+          days, continue on Team or change plans.
         </p>
 
         <input type="hidden" name="priceId" value={activePrice?.id ?? ""} />
@@ -267,7 +285,7 @@ export default function SelectPlan() {
           disabled={disabled}
           data-analytics="cta-start-trial"
         >
-          Start 7-day free trial
+          Start {config.freeTrialDays}-day free trial
         </Button>
       </Form>
 
