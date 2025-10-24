@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SortBy } from "./sort-by";
 
-const useIsMobileMock = vi.hoisted(() => vi.fn());
-const searchParamsState = vi.hoisted(() => ({
-  initial: "",
-}));
+const popoverEvents = vi.hoisted(
+  () => [] as Array<{ preventDefault: ReturnType<typeof vi.fn> }>
+);
+const searchParamsState = vi.hoisted(() => ({ value: "" }));
+const setSearchParamsMock = vi.hoisted(() => vi.fn());
 
-// why: provide deterministic navigation state for the component under test
+// why: keep navigation idle so the component stays enabled during the test
 vi.mock("@remix-run/react", async () => {
   const actual = (await vi.importActual("@remix-run/react")) as Record<
     string,
@@ -21,7 +22,7 @@ vi.mock("@remix-run/react", async () => {
   };
 });
 
-// why: avoid Radix portal/focus behaviour during component rendering
+// why: capture onOpenAutoFocus so we can assert the focus trap is disabled
 vi.mock("@radix-ui/react-popover", () => ({
   Popover: ({ children }: any) => <div data-testid="popover">{children}</div>,
   PopoverTrigger: ({ children, asChild, ...props }: any) => (
@@ -29,78 +30,40 @@ vi.mock("@radix-ui/react-popover", () => ({
       {children}
     </div>
   ),
-  PopoverContent: ({ children, ...props }: any) => (
-    <div data-testid="popover-content" {...props}>
-      {children}
-    </div>
-  ),
   PopoverPortal: ({ children }: any) => (
     <div data-testid="popover-portal">{children}</div>
   ),
+  PopoverContent: ({ children, onOpenAutoFocus, ...props }: any) => {
+    if (typeof onOpenAutoFocus === "function") {
+      const event = { preventDefault: vi.fn() };
+      onOpenAutoFocus(event as any);
+      popoverEvents.push(event as any);
+    }
+
+    return (
+      <div data-testid="popover-content" {...props}>
+        {children}
+      </div>
+    );
+  },
 }));
 
-// why: control responsive behaviour for test scenarios
-vi.mock("~/hooks/use-mobile", () => ({
-  useIsMobile: () => useIsMobileMock(),
+// why: provide deterministic search params for assertions
+vi.mock("~/hooks/search-params", () => ({
+  useSearchParams: () => [
+    new URLSearchParams(searchParamsState.value),
+    setSearchParamsMock,
+  ] as const,
 }));
-
-// why: emulate Remix search param hook with in-memory state
-vi.mock("~/hooks/search-params", async () => {
-  const React = (await vi.importActual("react")) as any;
-
-  return {
-    useSearchParams: () => {
-      const [params, setParams] = React.useState(
-        () => new URLSearchParams(searchParamsState.initial)
-      );
-
-      const setSearchParams = (
-        nextInit:
-          | URLSearchParams
-          | string
-          | ((prev: URLSearchParams) => URLSearchParams)
-      ) => {
-        if (typeof nextInit === "function") {
-          setParams((prev: URLSearchParams) => {
-            const clonedPrev = new URLSearchParams(prev);
-            const result = nextInit(clonedPrev);
-            const next =
-              result instanceof URLSearchParams
-                ? result
-                : new URLSearchParams(result as string);
-            searchParamsState.initial = next.toString();
-            return next;
-          });
-          return;
-        }
-
-        const next =
-          nextInit instanceof URLSearchParams
-            ? new URLSearchParams(nextInit)
-            : new URLSearchParams(nextInit);
-        searchParamsState.initial = next.toString();
-        setParams(next);
-      };
-
-      return [params, setSearchParams] as const;
-    },
-  };
-});
-
-function setInitialSearchParams(value: string) {
-  searchParamsState.initial = value;
-}
 
 describe("SortBy", () => {
   beforeEach(() => {
-    useIsMobileMock.mockReset();
-    useIsMobileMock.mockReturnValue(false);
-    setInitialSearchParams("");
+    popoverEvents.length = 0;
+    searchParamsState.value = "orderBy=createdAt&orderDirection=desc";
+    setSearchParamsMock.mockReset();
   });
 
-  it("renders inline selects on mobile and keeps them in sync with search params", () => {
-    useIsMobileMock.mockReturnValue(true);
-
+  it("prevents the popover content from auto focusing the first select", () => {
     render(
       <SortBy
         sortingOptions={{ createdAt: "Date created", name: "Name" }}
@@ -109,37 +72,35 @@ describe("SortBy", () => {
       />
     );
 
-    const orderBySelect = screen.getByLabelText("Sort column");
-    const directionSelect = screen.getByLabelText("Sort direction");
-
-    expect(orderBySelect).toHaveValue("createdAt");
-    expect(directionSelect).toHaveValue("desc");
-
-    fireEvent.change(orderBySelect, { target: { value: "name" } });
-    fireEvent.change(directionSelect, { target: { value: "asc" } });
-
-    expect(orderBySelect).toHaveValue("name");
-    expect(directionSelect).toHaveValue("asc");
-    expect(screen.queryByTestId("popover-trigger")).not.toBeInTheDocument();
+    expect(popoverEvents).toHaveLength(1);
+    expect(popoverEvents[0]?.preventDefault).toHaveBeenCalledTimes(1);
   });
 
-  it("shows popover trigger on desktop with label reflecting current search params", () => {
-    useIsMobileMock.mockReturnValue(false);
-    setInitialSearchParams("orderBy=name&orderDirection=asc");
+  it("updates search params immutably when a new column is selected", () => {
+    setSearchParamsMock.mockImplementation((updater: any) => {
+      if (typeof updater !== "function") {
+        throw new Error("expected function updater");
+      }
 
-    render(
-      <SortBy
-        sortingOptions={{ createdAt: "Date created", name: "Name" }}
-        defaultSortingBy="createdAt"
-        defaultSortingDirection="desc"
-      />
-    );
+      const prev = new URLSearchParams(searchParamsState.value);
+      const next = updater(prev);
 
-    const trigger = screen.getByRole("button", {
-      name: "Sorted by: Name",
+      expect(prev.get("orderBy")).toBe("createdAt");
+      expect(next.get("orderBy")).toBe("name");
+      expect(next).not.toBe(prev);
     });
 
-    expect(trigger).toBeInTheDocument();
-    expect(screen.getByTestId("popover-content")).toBeInTheDocument();
+    render(
+      <SortBy
+        sortingOptions={{ createdAt: "Date created", name: "Name" }}
+        defaultSortingBy="createdAt"
+        defaultSortingDirection="desc"
+      />
+    );
+
+    const [orderBySelect] = screen.getAllByRole("combobox");
+    fireEvent.change(orderBySelect, { target: { value: "name" } });
+
+    expect(setSearchParamsMock).toHaveBeenCalledTimes(1);
   });
 });
