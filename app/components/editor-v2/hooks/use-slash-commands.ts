@@ -105,12 +105,14 @@ export function useSlashCommands(
 
     try {
       const coords = view.coordsAtPos(from);
-      nextSlashState.left = coords.left;
-      nextSlashState.top = coords.bottom + 6;
+      // Get the editor container's position to convert viewport coords to container-relative
+      const containerRect = (view.dom as HTMLElement).getBoundingClientRect();
+      nextSlashState.left = coords.left - containerRect.left;
+      nextSlashState.top = coords.bottom + 6 - containerRect.top;
     } catch {
-      const fallback = (view.dom as HTMLElement)?.getBoundingClientRect();
-      nextSlashState.left = fallback?.left ?? 0;
-      nextSlashState.top = (fallback?.bottom ?? 0) + 6;
+      // Fallback to top-left of container if coordinate calculation fails
+      nextSlashState.left = 0;
+      nextSlashState.top = 0;
     }
 
     setSlashIndex(0);

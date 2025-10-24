@@ -22,8 +22,10 @@ export function useBubbleMenu() {
     try {
       const start = view.coordsAtPos(from);
       const end = view.coordsAtPos(to);
-      const left = (start.left + end.right) / 2 - 60;
-      const top = Math.min(start.top, end.top) - 44;
+      // Get the editor container's position to convert viewport coords to container-relative
+      const containerRect = (view.dom as HTMLElement).getBoundingClientRect();
+      const left = (start.left + end.right) / 2 - 60 - containerRect.left;
+      const top = Math.min(start.top, end.top) - 44 - containerRect.top;
       setBubbleState({ visible: true, left, top });
     } catch {
       setBubbleState((prev) =>

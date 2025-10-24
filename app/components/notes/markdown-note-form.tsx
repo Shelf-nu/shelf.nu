@@ -163,7 +163,6 @@ export function MarkdownNoteForm({
         onSubmit={handleSubmit}
       >
         {isEditing ? (
-          // Expanded editor mode: Full markdown editor with submit/cancel buttons
           <div className="relative flex flex-col pb-12 xl:pb-0">
             <MarkdownEditor
               label={editorLabel}
