@@ -224,6 +224,9 @@ export function AdvancedIndexColumn({
     case "createdAt":
       return <DateColumn value={item.createdAt} />;
 
+    case "updatedAt":
+      return <DateColumn value={item.updatedAt} includeTime />;
+
     case "category":
       return <CategoryColumn category={item.category} />;
 
@@ -377,10 +380,16 @@ function DescriptionColumn({ value }: { value: string }) {
   );
 }
 
-function DateColumn({ value }: { value: string | Date }) {
+function DateColumn({
+  value,
+  includeTime = false,
+}: {
+  value: string | Date;
+  includeTime?: boolean;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <DateS date={value} />
+      <DateS date={value} includeTime={includeTime} />
     </Td>
   );
 }
