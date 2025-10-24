@@ -74,56 +74,8 @@ p {
   animation: spinner 0.6s linear infinite;
 }
 
-.markdown-viewer ul {
-  @apply list-inside list-disc;
-}
-
-.markdown-viewer ol {
-  @apply list-inside list-decimal;
-}
-
-.markdown-viewer a {
-  text-decoration: underline;
-}
-.markdown-viewer a:hover {
-  @apply text-primary;
-}
-
-.markdown-viewer blockquote {
-  @apply border-l-4 border-primary-500 pl-4;
-}
-
-.markdown-viewer h1,
-.markdown-viewer h2,
-.markdown-viewer h3,
-.markdown-viewer h4,
-.markdown-viewer h5,
-.markdown-viewer h6 {
-  @apply mb-1;
-}
-
-.markdown-viewer p:not(:last-child) {
-  @apply mb-4;
-}
-
 .maplibregl-ctrl-bottom-right {
   display: none;
-}
-
-.markdown-viewer table {
-  @apply w-full border-collapse rounded text-xs;
-}
-.markdown-viewer table td,
-.markdown-viewer table th {
-  @apply border border-gray-200 px-6 py-3 text-gray-600;
-}
-
-.markdown-viewer table th {
-  @apply bg-gray-50 font-medium text-gray-600;
-}
-
-.markdown-viewer table th {
-  @apply font-normal;
 }
 
 .dialog-backdrop {

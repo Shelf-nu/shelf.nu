@@ -6,10 +6,10 @@ import type {
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";
-import { NewBookingNoteSchema } from "~/components/booking/notes/new";
 import { ErrorContent } from "~/components/errors";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
+import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBooking } from "~/modules/booking/service.server";
@@ -105,7 +105,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "POST": {
         const payload = parseData(
           await request.formData(),
-          NewBookingNoteSchema,
+          MarkdownNoteSchema,
           {
             additionalData: { userId, bookingId },
           }

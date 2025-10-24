@@ -158,6 +158,7 @@ describe("markdoc.config", () => {
   describe("tag completeness", () => {
     it("should have all expected tags", () => {
       const expectedTags = [
+        "raw",
         "date",
         "assets_list",
         "kits_list",
@@ -174,6 +175,7 @@ describe("markdoc.config", () => {
 
     it("should not have unexpected tags", () => {
       const expectedTags = [
+        "raw",
         "date",
         "assets_list",
         "kits_list",

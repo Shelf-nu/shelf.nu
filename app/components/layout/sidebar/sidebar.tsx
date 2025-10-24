@@ -301,7 +301,7 @@ const SidebarTrigger = forwardRef<
       ref={ref}
       data-sidebar="trigger"
       variant="secondary"
-      className={tw("border-none p-0", className)}
+      className={tw("size-[21px] border-none p-0", className)}
       onClick={(event: any) => {
         onClick?.(event);
         toggleSidebar();
