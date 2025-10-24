@@ -165,20 +165,6 @@ export function MarkdownNoteForm({
         {isEditing ? (
           // Expanded editor mode: Full markdown editor with submit/cancel buttons
           <div className="relative flex flex-col pb-12 xl:pb-0">
-            {/* Action buttons positioned in top-right corner */}
-            <div className="absolute right-2 top-2 flex gap-1">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsEditing(false)}
-                disabled={disabled}
-              >
-                {cancelLabel}
-              </Button>
-              <Button type="submit" size="sm" disabled={disabled}>
-                {submitLabel}
-              </Button>
-            </div>
             <MarkdownEditor
               label={editorLabel}
               defaultValue=""
@@ -191,6 +177,20 @@ export function MarkdownNoteForm({
               onKeyDown={handleKeyDown}
               disabled={disabled}
             />
+            {/* Action buttons positioned in top-right corner */}
+            <div className="flex justify-end gap-1 md:absolute md:right-2 md:top-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsEditing(false)}
+                disabled={disabled}
+              >
+                {cancelLabel}
+              </Button>
+              <Button type="submit" size="sm" disabled={disabled}>
+                {submitLabel}
+              </Button>
+            </div>
           </div>
         ) : (
           // Collapsed mode: Simple input that expands on focus

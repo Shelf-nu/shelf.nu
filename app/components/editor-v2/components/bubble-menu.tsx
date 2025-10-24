@@ -28,8 +28,11 @@ export function BubbleMenu({
 
   return (
     <div
-      className="fixed z-50 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 shadow-lg"
-      style={{ left: state.left, top: state.top }}
+      className="absolute z-50 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 shadow-lg"
+      style={{
+        left: `${state.left}px`,
+        top: `${state.top}px`,
+      }}
       role="toolbar"
       aria-label="Inline formatting"
     >

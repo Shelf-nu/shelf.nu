@@ -22,8 +22,11 @@ export function SlashCommandMenu({
 
   return (
     <div
-      className="fixed z-50 w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-xl"
-      style={{ left: state.left, top: state.top }}
+      className="absolute z-50 w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-xl"
+      style={{
+        left: `${state.left}px`,
+        top: `${state.top}px`,
+      }}
       role="listbox"
       aria-label="Slash command menu"
     >
