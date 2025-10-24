@@ -5,7 +5,7 @@ import { columnsLabelsMap, defaultFields, fixedFields } from "./helpers";
 describe("asset index column metadata", () => {
   it("registers last updated as a fixed field with a label", () => {
     expect(fixedFields).toContain("updatedAt");
-    expect(columnsLabelsMap.updatedAt).toBe("Last updated at");
+    expect(columnsLabelsMap.updatedAt).toBe("Updated at");
   });
 
   it("enables the last updated column by default after the created column", () => {

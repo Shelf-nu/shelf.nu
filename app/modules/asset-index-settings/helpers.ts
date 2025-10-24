@@ -61,7 +61,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   valuation: "Value",
   availableToBook: "Available to book",
   createdAt: "Created at",
-  updatedAt: "Last updated at",
+  updatedAt: "Updated at",
   category: "Category",
   tags: "Tags",
   location: "Location",

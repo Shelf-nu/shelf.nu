@@ -222,7 +222,7 @@ export function AdvancedIndexColumn({
       return <TextColumn value={value ?? ""} />;
 
     case "createdAt":
-      return <DateColumn value={item.createdAt} />;
+      return <DateColumn value={item.createdAt} includeTime />;
 
     case "updatedAt":
       return <DateColumn value={item.updatedAt} includeTime />;
