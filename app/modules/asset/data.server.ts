@@ -75,6 +75,25 @@ export async function simpleModeLoader({
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+  // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
+  // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
+  const urlSearchParams = getCurrentSearchParams(request);
+  let hasAdvancedSyntax = false;
+
+  for (const value of urlSearchParams.values()) {
+    if (/(is|contains|gt|lt|gte|lte|eq|ne|startsWith|endsWith):/.test(value)) {
+      hasAdvancedSyntax = true;
+      break;
+    }
+  }
+
+  if (hasAdvancedSyntax) {
+    // URL has advanced syntax but we're in simple mode - redirect to clean URL
+    // This handles browser back button after mode switch
+    return redirect("/assets");
+  }
+
   /** Parse filters */
   const {
     filters,

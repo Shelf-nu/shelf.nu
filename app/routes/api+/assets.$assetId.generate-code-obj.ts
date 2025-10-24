@@ -19,12 +19,13 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.qr,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.qr,
+        action: PermissionAction.read,
+      });
 
     const [qrObj, asset] = await Promise.all([
       generateQrObj({
@@ -54,6 +55,7 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         qrObj,
         barcodes: asset.barcodes,
         sequentialId: asset.sequentialId,
+        showShelfBranding: currentOrganization.showShelfBranding,
       })
     );
   } catch (cause) {

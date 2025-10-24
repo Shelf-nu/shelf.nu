@@ -157,11 +157,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "bulk-delete": PermissionAction.delete,
     };
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: intent2ActionMap[intent],
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
     });
 
     switch (intent) {
@@ -178,6 +185,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           organizationId,
           userId,
           currentSearchParams,
+          settings,
         });
 
         sendNotification({
