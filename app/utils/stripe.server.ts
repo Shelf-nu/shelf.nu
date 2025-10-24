@@ -207,10 +207,13 @@ export async function getStripePricesForTrialPlanSelection() {
       active: true,
       type: "recurring",
       expand: ["data.product"],
+      limit: 100, // Increase limit to see more results
     });
+
     const groupedPrices = groupPricesByInterval(
       pricesResponse.data as PriceWithProduct[]
     );
+    // console.log("groupedPrices", groupedPrices.year);
     return [
       ...groupedPrices.month.filter(
         (price) =>
