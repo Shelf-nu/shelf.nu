@@ -105,12 +105,11 @@ export function useSlashCommands(
 
     try {
       const coords = view.coordsAtPos(from);
-      // Get the editor container's position to convert viewport coords to container-relative
-      const containerRect = (view.dom as HTMLElement).getBoundingClientRect();
-      nextSlashState.left = coords.left - containerRect.left;
-      nextSlashState.top = coords.bottom + 6 - containerRect.top;
+      // Use viewport coordinates directly since menu is rendered via portal with fixed positioning
+      nextSlashState.left = coords.left;
+      nextSlashState.top = coords.bottom + 6;
     } catch {
-      // Fallback to top-left of container if coordinate calculation fails
+      // Fallback to top-left of viewport if coordinate calculation fails
       nextSlashState.left = 0;
       nextSlashState.top = 0;
     }

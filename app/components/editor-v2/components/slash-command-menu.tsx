@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { tw } from "~/utils/tw";
 import type { SlashCommandItem, SlashState } from "../types";
 
@@ -20,9 +21,9 @@ export function SlashCommandMenu({
     return null;
   }
 
-  return (
+  const menu = (
     <div
-      className="absolute z-50 w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-xl"
+      className="fixed z-50 w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-xl"
       style={{
         left: `${state.left}px`,
         top: `${state.top}px`,
@@ -55,4 +56,7 @@ export function SlashCommandMenu({
       </ul>
     </div>
   );
+
+  // Render the menu using a portal so it's not clipped by overflow-hidden containers
+  return createPortal(menu, document.body);
 }
