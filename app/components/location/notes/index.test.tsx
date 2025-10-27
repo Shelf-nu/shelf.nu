@@ -1,49 +1,66 @@
+import { forwardRef } from "react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LocationNotes } from "./index";
 
-const mockFetcher = {
-  Form: ({ children, ...props }: any) => <form {...props}>{children}</form>,
-  submit: vi.fn(),
-  load: vi.fn(),
-  data: undefined,
-  state: "idle" as "idle" | "submitting" | "loading",
-  formData: undefined as FormData | undefined,
-};
+const { mockFetcher, useLoaderDataMock, useFetcherMock, useParamsMock } =
+  vi.hoisted(() => {
+    const mockFetcher = {
+      Form: (() => null) as any,
+      submit: vi.fn(),
+      load: vi.fn(),
+      data: undefined,
+      state: "idle" as "idle" | "submitting" | "loading",
+      formData: undefined as FormData | undefined,
+    };
 
-const useLoaderDataMock = vi.fn();
-const useFetcherMock = vi.fn(() => mockFetcher);
-const useParamsMock = vi.fn(() => ({ locationId: "loc-1" }));
+    const useLoaderDataMock = vi.fn();
+    const useFetcherMock = vi.fn(() => mockFetcher);
+    const useParamsMock = vi.fn(() => ({ locationId: "loc-1" }));
 
-vi.mock("@remix-run/react", async () => {
-  const actual = await vi.importActual("@remix-run/react");
-  return {
-    ...actual,
-    useLoaderData: useLoaderDataMock,
-    useFetcher: useFetcherMock,
-    useParams: useParamsMock,
-  };
-});
+    return { mockFetcher, useLoaderDataMock, useFetcherMock, useParamsMock };
+  });
 
+// why: component relies on Remix hooks which pull browser-only code; provide lightweight stubs
+vi.mock("@remix-run/react", () => ({
+  useLoaderData: useLoaderDataMock,
+  useFetcher: useFetcherMock,
+  useParams: useParamsMock,
+}));
+
+mockFetcher.Form = forwardRef<HTMLFormElement, any>(
+  ({ children, ...props }, ref) => (
+    <form ref={ref} {...props}>
+      {children}
+    </form>
+  )
+);
+mockFetcher.Form.displayName = "MockFetcherForm";
+
+// why: isolate user identity data for deterministic optimistic rendering assertions
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ firstName: "Ada", lastName: "Lovelace" }),
 }));
 
+// why: avoid full markdown rendering in a focused component test
 vi.mock("~/components/markdown/markdown-viewer", () => ({
   MarkdownViewer: ({ content }: { content: string }) => (
     <div data-testid="markdown">{content}</div>
   ),
 }));
 
+// why: keep editor interactions lightweight for unit coverage
 vi.mock("~/components/markdown/markdown-editor", () => ({
   MarkdownEditor: (props: any) => <textarea {...props} />,
 }));
 
+// why: simplify controlled input rendering during tests
 vi.mock("~/components/forms/input", () => ({
   default: (props: any) => <input {...props} />,
 }));
 
+// why: reuse minimal button implementation to avoid styling dependencies
 vi.mock("~/components/shared/button", () => ({
   Button: (props: any) => <button {...props} />,
 }));

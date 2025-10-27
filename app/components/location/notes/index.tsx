@@ -27,12 +27,16 @@ export const LocationNotes = ({
     }
   }
 
+  const isProcessing = isFormProcessing(fetcher.state);
+  const shouldShowNotesList = hasNotes || (canCreate && isProcessing);
+  const resolvedNotes = (notes ?? []) as LocationNoteWithDate[];
+
   return (
     <div>
       {canCreate ? <NewLocationNote fetcher={fetcher} /> : null}
-      {hasNotes ? (
+      {shouldShowNotesList ? (
         <ul className="notes-list mt-8 w-full">
-          {canCreate && isFormProcessing(fetcher.state) ? (
+          {canCreate && isProcessing ? (
             <li className="note mb-2 rounded border bg-white md:mb-8">
               <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
                 <div>
@@ -47,7 +51,7 @@ export const LocationNotes = ({
               </div>
             </li>
           ) : null}
-          {(notes as LocationNoteWithDate[]).map((note) => (
+          {resolvedNotes.map((note) => (
             <LocationNoteItem key={note.id} note={note} canDelete={canDelete} />
           ))}
         </ul>
