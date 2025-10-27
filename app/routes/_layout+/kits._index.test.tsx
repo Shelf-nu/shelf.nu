@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -78,29 +79,51 @@ describe("kits index list row layout", () => {
       5
     );
 
-  it("maintains thumbnail sizing and wraps description for narrow viewports", () => {
+  type ListContentProps = Parameters<typeof ListContent>[0];
+  type KitListItem = ListContentProps["item"];
+
+  const buildKit = (): KitListItem => ({
+    id: "kit_1",
+    name: "Production Kit",
+    description: longDescription,
+    image: null,
+    imageExpiration: null,
+    status: KitStatus.AVAILABLE,
+    organizationId: "org_1",
+    createdById: "user_admin",
+    categoryId: "category_1",
+    locationId: null,
+    createdAt: new Date("2024-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2024-01-01T00:00:00.000Z"),
+    assets: [
+      {
+        id: "asset_1",
+        availableToBook: true,
+        status: AssetStatus.AVAILABLE,
+      },
+    ],
+    category: {
+      id: "category_1",
+      name: "Cameras",
+      description: null,
+      color: "#000000",
+      createdAt: new Date("2024-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2024-01-01T00:00:00.000Z"),
+      userId: "user_admin",
+      organizationId: "org_1",
+    },
+    location: null,
+    qrCodes: [],
+    custody: null,
+    _count: { assets: 1 },
+  });
+
+  it("maintains thumbnail sizing and clamps description lines on narrow viewports", () => {
     render(
       <table>
         <tbody>
           <tr>
-            <ListContent
-              item={{
-                id: "kit_1",
-                name: "Production Kit",
-                description: longDescription,
-                image: null,
-                imageExpiration: null,
-                status: "AVAILABLE",
-                assets: [
-                  { id: "asset_1", availableToBook: true, status: "AVAILABLE" },
-                ],
-                category: { id: "category_1", name: "Cameras", color: "#000000" },
-                location: { id: "location_1", name: "Studio" } as any,
-                qrCodes: [],
-                custody: { custodian: null },
-                _count: { assets: 1 },
-              }}
-            />
+            <ListContent item={buildKit()} />
           </tr>
         </tbody>
       </table>
@@ -113,8 +136,8 @@ describe("kits index list row layout", () => {
 
     const descriptionCell = screen
       .getAllByRole("cell")
-      .find((cell) =>
-        cell.textContent?.includes("This portable production kit")
+      .find(
+        (cell) => cell.textContent?.includes("This portable production kit")
       ) as HTMLTableCellElement;
 
     expect(descriptionCell).toHaveClass("min-w-0");
@@ -125,8 +148,8 @@ describe("kits index list row layout", () => {
     expect(descriptionParagraph).toHaveClass("w-full");
     expect(descriptionParagraph).toHaveClass("md:w-60");
 
-    const spans = descriptionParagraph?.querySelectorAll("span");
-    expect(spans?.length).toBe(3);
-    expect(spans?.[spans.length - 1]?.textContent?.endsWith("...")).toBe(true);
+    expect(descriptionParagraph?.dataset.lineBreakTextLines).toBe("3");
+    expect(descriptionParagraph?.style.overflow).toBe("hidden");
+    expect(descriptionParagraph?.querySelectorAll("span").length).toBe(0);
   });
 });

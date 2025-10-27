@@ -1,5 +1,5 @@
 import type { HTMLAttributes } from "react";
-import { createElement, useMemo } from "react";
+import { createElement } from "react";
 import { tw } from "~/utils/tw";
 
 type LineBreakTextProps = HTMLAttributes<HTMLParagraphElement> & {
@@ -24,30 +24,26 @@ export default function LineBreakText({
   style,
   as = "p",
   numberOfLines = 2,
-  charactersPerLine = 30,
+  charactersPerLine: _charactersPerLine = 30,
   text,
+  ...rest
 }: LineBreakTextProps) {
-  const lines = useMemo(() => {
-    const lines = [];
-    let startIndex = 0;
-
-    for (let i = 0; i < numberOfLines; i++) {
-      const endIndex = startIndex + charactersPerLine;
-
-      if (startIndex >= text.length) break;
-
-      const textToPush = text.slice(startIndex, endIndex);
-      lines.push(i === numberOfLines - 1 ? `${textToPush}...` : textToPush);
-
-      startIndex = endIndex;
-    }
-
-    return lines;
-  }, [charactersPerLine, numberOfLines, text]);
+  const clampStyles = numberOfLines
+    ? ({
+        display: "-webkit-box" as const,
+        WebkitLineClamp: `${numberOfLines}`,
+        WebkitBoxOrient: "vertical" as const,
+        overflow: "hidden",
+      } satisfies React.CSSProperties)
+    : undefined;
 
   return createElement(as, {
     className: tw("w-full whitespace-pre-wrap md:w-60", className),
-    style,
-    children: lines.map((line, i) => <span key={i}>{line}</span>),
+    style: clampStyles ? { ...clampStyles, ...style } : style,
+    children: text,
+    ...(numberOfLines
+      ? { "data-line-break-text-lines": String(numberOfLines) }
+      : {}),
+    ...rest,
   });
 }
