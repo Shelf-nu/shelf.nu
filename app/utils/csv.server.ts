@@ -392,6 +392,11 @@ export const buildCsvExportDataFromAssets = ({
               ? new Date(asset.createdAt).toISOString()
               : "";
             break;
+          case "updatedAt":
+            value = asset.updatedAt
+              ? new Date(asset.updatedAt).toISOString()
+              : "";
+            break;
           case "valuation":
             value = asset.valuation
               ? formatCurrency({
