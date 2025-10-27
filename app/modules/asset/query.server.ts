@@ -1200,6 +1200,7 @@ type DirectAssetField =
   | "status"
   | "description"
   | "createdAt"
+  | "updatedAt"
   | "availableToBook";
 
 const directAssetFields: Record<DirectAssetField, string> = {
@@ -1210,6 +1211,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   status: "assetStatus",
   description: "assetDescription",
   createdAt: "assetCreatedAt",
+  updatedAt: "assetUpdatedAt",
   availableToBook: "assetAvailableToBook",
 };
 

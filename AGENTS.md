@@ -12,104 +12,108 @@ This repository hosts **Shelf.nu**, an asset management platform built with Remi
 ### Quality & Testing
 
 - `npm run test` – Execute the Vitest unit test suite.
-- `npm run validate` – Run the full validation pipeline (Prisma generation, ESLint, Prettier, TypeScript, unit tests, and E2E tests). Run this before committing substantive code changes.
+- `npm run test:cov` – Run tests with coverage reporting.
+- `npm run validate` – Run the full validation pipeline (Prisma generation, ESLint, Prettier, TypeScript, unit tests). Run this before committing substantive code changes.
 - `npm run lint` / `npm run lint:fix` – Perform ESLint checks or auto-fixes.
 - `npm run typecheck` – Run the TypeScript compiler in type-check mode.
 
-### Writing & Organizing Tests
+### Testing Approach
 
-Our tests are written with **Vitest** and **React Testing Library**. Follow these conventions to keep tests fast, readable, and useful.
+#### Unit Tests (Vitest)
+
+- Tests co-located with source files
+- Happy DOM environment for React component testing
+- Run with `npm run test` or `npm run test:cov` for coverage
+
+#### Validation Pipeline
+
+Always run `npm run validate` before committing - this runs:
+
+1. Prisma type generation
+2. ESLint with auto-fix
+3. Prettier formatting
+4. TypeScript checking
+5. Unit tests
+
+### Writing & Organizing Tests
 
 #### Test Philosophy
 
-- Validate **observable behavior** and public APIs, not internal implementation details.
-- Keep tests **short, focused, and readable**. One test checks one behavior.
-- Prefer **integration-style** component tests that render real code paths over deeply mocked unit tests.
+- Write behavior-driven tests focusing on observable outcomes rather than implementation details.
+- Tests should describe what the system does, not how it does it.
+- Avoid testing internal private methods or state; instead, test public interfaces and user-visible effects.
 
 #### When to Mock
 
-Mock **only** when necessary to run tests realistically or quickly:
-
-- ✅ Network requests (use MSW or fetch stubs)
-- ✅ Time/date and randomness
-- ✅ Feature flags / environment variables
-- ✅ Expensive external services (analytics, storage)
-- ✅ Heavy portals or context providers when rendering fails otherwise
-
-Avoid mocking simple UI primitives (buttons, badges, tooltips, icons) unless they break rendering.
+- Mock only external network calls, time-based functions, feature flags, or heavy dependencies that are impractical or slow to run in tests.
+- Avoid mocking internal business logic or utility functions to keep tests realistic and maintainable.
+- Prefer using real implementations where possible to catch integration issues early.
 
 #### Mock Justification Rule
 
-Every `vi.mock()` must include a short `// why:` comment explaining its purpose.  
-If the reason disappears, delete the mock.
-
-Example:
-
-```ts
-// why: component reads loader data for locale/currency
-vi.mock("@remix-run/react", async () => {
-  const actual = await vi.importActual("@remix-run/react");
-  return { ...actual, useLoaderData: vi.fn() };
-});
-```
+- Every mock must be accompanied by a `// why:` comment explaining the reason for mocking.
+- This encourages thoughtful use of mocks and helps reviewers understand test design choices.
 
 #### Organizing Mocks and Factories
 
-Place shared mocks and factories under `./test`:
+- **Test files**: Co-located with source files (e.g., `app/modules/user/service.server.test.ts`)
+- **Shared mocks**: Place in `test/mocks/` directory, organized by domain (remix.tsx, database.ts)
+- **Factories**: Place in `test/factories/` directory for generating test data
+- **MSW handlers**: Keep in root `mocks/` directory for API mocking
+
+Example directory structure:
 
 ```
+app/
+├── modules/
+│   └── user/
+│       ├── service.server.ts
+│       └── service.server.test.ts  # Co-located test
 test/
-  mocks/
-    remix.ts
-    components.tsx
-    hooks.ts
-    utils.ts
-  factories/
-    asset.ts
-    user.ts
-  unit/
-    asset/
-      AssetList.test.tsx
+├── mocks/
+│   ├── remix.tsx          # Remix hook mocks
+│   └── database.ts        # Database/Prisma mocks
+└── factories/
+    ├── user.ts            # User factory
+    ├── asset.ts           # Asset factory
+    └── index.ts           # Export all
+mocks/                      # MSW API handlers (kept at root)
+├── handlers.ts
+└── index.ts
 ```
 
-**Conventions**
+#### Path Aliases (Configured)
 
-- **Tests are co-located** with source files (e.g., `app/modules/user/service.server.test.ts`)
-- Group shared mocks **by domain** (remix, database, etc.) in `test/mocks/`
-- Prefer importing shared mocks instead of redefining inline per test
-- Keep MSW API handlers in root `mocks/` directory (separate from vitest mocks)
+Path aliases are configured in `vitest.config.ts` for easy imports:
 
-**Path aliases** (configured in `vitest.config.ts`):
-
-```ts
-import { createUser } from "@factories"; // → test/factories/
-import { createRemixMocks } from "@mocks/remix"; // → test/mocks/
+```typescript
+import { createUser } from "@factories"; // → test/factories/index.ts
+import { createRemixMocks } from "@mocks/remix"; // → test/mocks/remix.tsx
 ```
 
 #### Factories & Test Data
 
-Use small domain factories instead of large inline objects:
+- Use factories to generate consistent and realistic test data.
+- Factories should allow overrides for specific fields to tailor data for each test case.
+- Avoid hardcoding data within tests; use factories to keep tests clean and maintainable.
 
-```ts
-// test/factories/asset.ts
-export function createAsset(overrides: Partial<Asset> = {}): Asset {
-  return {
-    id: "asset-1",
-    title: "Camera",
-    status: "AVAILABLE",
-    availableToBook: true,
-    ...overrides,
-  } as Asset;
-}
+Example factory usage:
+
+```typescript
+import { userFactory } from "@factories/userFactory";
+
+const testUser = userFactory.build({ role: "admin" });
 ```
 
-#### Pre-Commit Checklist (tests)
+#### Pre-Commit Checklist
 
-- [ ] Each `vi.mock()` has a `// why:` comment
-- [ ] No mocks for unused modules
-- [ ] Only architectural boundaries are mocked
-- [ ] Assertions target behavior, not implementation details
-- [ ] Shared mocks live in `test/mocks/`; factories in `test/factories/`
+Before committing tests:
+
+- Ensure tests are behavior-driven and do not rely heavily on implementation details.
+- Confirm mocks have `// why:` comments explaining their necessity.
+- Verify tests run quickly and reliably without flaky behavior.
+- Check that test data is generated via factories or well-structured mocks.
+- Review test readability and maintainability.
 
 ### Build & Production
 
