@@ -362,7 +362,7 @@ export default function KitsIndexPage() {
   );
 }
 
-function ListContent({
+export function ListContent({
   item,
   bulkActions,
 }: {
@@ -428,10 +428,9 @@ function ListContent({
         ) : null}
       </Td>
 
-      <Td className="max-w-62 md:max-w-96">
+      <Td className="min-w-0 break-words">
         {item.description ? (
           <LineBreakText
-            className="md:max-w-96"
             text={item.description}
             numberOfLines={3}
             charactersPerLine={60}
