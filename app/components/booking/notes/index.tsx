@@ -1,5 +1,6 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
+import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { isFormProcessing } from "~/utils/form";
@@ -27,6 +28,18 @@ export const BookingNotes = () => {
 
   return (
     <div>
+      {hasNotes ? (
+        <div className="mb-4 flex justify-end">
+          <Button
+            to={`/bookings/${booking.id}/activity.csv`}
+            variant="secondary"
+            download
+            reloadDocument
+          >
+            Export activity CSV
+          </Button>
+        </div>
+      ) : null}
       <NewBookingNote fetcher={fetcher} />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
