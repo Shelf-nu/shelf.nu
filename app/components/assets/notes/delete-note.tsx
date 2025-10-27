@@ -12,17 +12,19 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { useDisabled } from "~/hooks/use-disabled";
 
 export const DeleteNote = ({ noteId }: { noteId: string }) => {
   const fetcher = useFetcher();
   const params = useParams();
+  const disabled = useDisabled(fetcher);
   return (
     <AlertDialog>
       <div className="w-full">
         <AlertDialogTrigger asChild>
           <Button
             variant="link"
-            className="w-full cursor-default justify-start text-gray-800 hover:text-gray-800"
+            className="w-full cursor-pointer items-center justify-start text-gray-800 hover:text-gray-800"
             data-test-id="deleteNoteButton"
             icon="trash"
             width="full"
@@ -45,7 +47,9 @@ export const DeleteNote = ({ noteId }: { noteId: string }) => {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button variant="secondary">Cancel</Button>
+            <Button variant="secondary" disabled={disabled}>
+              Cancel
+            </Button>
           </AlertDialogCancel>
 
           <fetcher.Form
@@ -57,6 +61,7 @@ export const DeleteNote = ({ noteId }: { noteId: string }) => {
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"
               data-test-id="confirmDeleteNoteButton"
+              disabled={disabled}
             >
               Delete
             </Button>

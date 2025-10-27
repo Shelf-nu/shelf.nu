@@ -53,15 +53,23 @@ export function MarkdownNoteForm({
   const hasError = zo.errors.content()?.message;
   const [isEditing, setIsEditing] = useAtom(editingAtom);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
   const isDone = fetcher.state === "idle" && fetcher.data != null;
 
   // Tracks whether form controls should be disabled during submission
   const [disabled, setDisabled] = useState(false);
 
   /**
-   * Disables form controls when user submits to prevent double submissions
+   * Handles form submission with optimistic UI updates.
+   *
+   * Immediately:
+   * - Closes the editor (optimistic UX)
+   * - Disables form controls to prevent double submissions
+   *
+   * The editor will be re-enabled when fetcher completes (see useEffect below)
    */
   const handleSubmit = () => {
+    setIsEditing(false); // Close editor optimistically
     setDisabled(true);
   };
 
@@ -99,21 +107,25 @@ export function MarkdownNoteForm({
    * Keyboard shortcut handler for quick submission.
    *
    * Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) submits the form
-   * Only works when content is not empty
+   * Returns true when the event is handled to prevent default behavior
    */
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      const content = event.currentTarget.value;
-      if (
-        content !== "" &&
-        event.key === "Enter" &&
-        (event.metaKey || event.ctrlKey)
-      ) {
-        event.preventDefault();
-        fetcher.submit(event.currentTarget.form);
+    (event: KeyboardEvent): boolean => {
+      // Check for Cmd+Enter or Ctrl+Enter
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        // Optimistically close the editor
+        setIsEditing(false);
+        // Disable form to prevent double submissions
+        setDisabled(true);
+        // Submit the form
+        if (formElement) {
+          fetcher.submit(formElement);
+        }
+        return true; // Event handled, prevent default
       }
+      return false; // Event not handled
     },
-    [fetcher]
+    [fetcher, formElement, setIsEditing]
   );
 
   /**
@@ -133,13 +145,16 @@ export function MarkdownNoteForm({
   }, [isEditing]);
 
   /**
-   * Auto-collapse editor when form submission completes successfully.
+   * Ensure editor is closed when form submission completes successfully.
    *
+   * This acts as a backup to the optimistic close in handleSubmit.
    * isDone is true when fetcher returns to idle state with data,
    * indicating the note was created successfully.
    */
   useEffect(() => {
-    setIsEditing(false);
+    if (isDone) {
+      setIsEditing(false);
+    }
   }, [isDone, setIsEditing]);
 
   /**
@@ -154,12 +169,21 @@ export function MarkdownNoteForm({
     }
   }, [fetcher.state]);
 
+  // Combine refs for both Zorm and our form state
+  const combinedFormRef = useCallback(
+    (node: HTMLFormElement | null) => {
+      setFormElement(node);
+      zo.ref(node);
+    },
+    [zo]
+  );
+
   return (
     <div>
       <fetcher.Form
         action={action}
         method="post"
-        ref={zo.ref}
+        ref={combinedFormRef}
         onSubmit={handleSubmit}
       >
         {isEditing ? (
@@ -173,7 +197,7 @@ export function MarkdownNoteForm({
               ref={editorRef}
               className="rounded-b-none"
               onBlur={handleBlur}
-              onKeyDown={handleKeyDown}
+              onKeyDown={handleKeyDown as any}
               disabled={disabled}
             />
             {/* Action buttons positioned in top-right corner */}

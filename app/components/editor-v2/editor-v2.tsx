@@ -105,6 +105,11 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       viewRef
     );
 
+    // Extract onKeyDown from restTextareaProps if it exists
+    const parentOnKeyDown = restTextareaProps.onKeyDown as
+      | ((event: KeyboardEvent) => boolean)
+      | undefined;
+
     const { markdocValue } = useEditorView(editorContainerRef, viewRef, {
       schema,
       defaultValue,
@@ -120,7 +125,14 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
         updateBubble(state, view);
         updateSlash(state, view);
       },
-      onKeyDown: handleSlashKeyDown,
+      onKeyDown: (event: KeyboardEvent) => {
+        // First, let parent handle the event (e.g., Cmd+Enter to submit)
+        if (parentOnKeyDown?.(event)) {
+          return true;
+        }
+        // Then handle slash commands
+        return handleSlashKeyDown(event);
+      },
       openLinkDialog,
       openRawBlockEditor,
     });
