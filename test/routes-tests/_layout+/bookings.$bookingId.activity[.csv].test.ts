@@ -1,4 +1,8 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
@@ -97,6 +101,25 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
       ),
       params: { bookingId: "booking-789" },
     } as LoaderFunctionArgs);
+
+    expect(requirePermissionMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        userId: "user-456",
+        request: expect.any(Request),
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      })
+    );
+    expect(requirePermissionMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        userId: "user-456",
+        request: expect.any(Request),
+        entity: PermissionEntity.bookingNote,
+        action: PermissionAction.read,
+      })
+    );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/csv");
