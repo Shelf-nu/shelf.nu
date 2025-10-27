@@ -167,6 +167,7 @@ export default function LocationPage() {
 
   const items = [
     { to: "overview", content: "Overview" },
+    { to: "activity", content: "Activity" },
     { to: "assets", content: "Assets" },
     { to: "kits", content: "Kits" },
   ];

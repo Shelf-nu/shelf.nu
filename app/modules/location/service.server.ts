@@ -24,6 +24,12 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
+  wrapAssetsWithDataForNote,
+  wrapKitsWithDataForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   getFileUploadPath,
   parseFileFormData,
   removePublicFile,
@@ -31,14 +37,96 @@ import {
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
-  getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
+  getLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
+import {
+  createLocationNote as createLocationActivityNote,
+  createSystemLocationNote as createSystemLocationActivityNote,
+} from "../location-note/service.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
+
+function safeDisplay(value?: string | null) {
+  return value?.trim() || "—";
+}
+
+function formatLocationLink(location: Pick<Location, "id" | "name">) {
+  const name = safeDisplay(location.name);
+  return wrapLinkForNote(`/locations/${location.id}`, name);
+}
+
+function buildLocationDetailUpdateMessage({
+  userId,
+  firstName,
+  lastName,
+  changes,
+}: {
+  userId: User["id"];
+  firstName?: string | null;
+  lastName?: string | null;
+  changes: Array<{
+    label: string;
+    previous?: string | null;
+    next?: string | null;
+  }>;
+}) {
+  const userLink = wrapUserLinkForNote({ id: userId, firstName, lastName });
+  const lines = changes
+    .map(({ label, previous, next }) => {
+      if (previous === next) {
+        return null;
+      }
+
+      if (!previous && next) {
+        return `- **${label}** set to **${safeDisplay(next)}**`;
+      }
+
+      if (previous && !next) {
+        return `- **${label}** was cleared`;
+      }
+
+      return `- **${label}** changed from **${safeDisplay(
+        previous
+      )}** to **${safeDisplay(next)}**`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return `${userLink} updated location details:\n${lines.join("\n")}`;
+}
+
+function buildAssetListMarkup(
+  assets: Array<{ id: string; title: string }>,
+  action: "added" | "removed"
+) {
+  return wrapAssetsWithDataForNote(
+    assets.map((asset) => ({
+      id: asset.id,
+      title: safeDisplay(asset.title),
+    })),
+    action
+  );
+}
+
+function buildKitListMarkup(
+  kits: Array<{ id: string; name: string }>,
+  action: "added" | "removed"
+) {
+  return wrapKitsWithDataForNote(
+    kits.map((kit) => ({
+      id: kit.id,
+      name: safeDisplay(kit.name),
+    })),
+    action
+  );
+}
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
@@ -335,7 +423,13 @@ export async function updateLocation(payload: {
     // Get the current location to check if address changed
     const currentLocation = await db.location.findUniqueOrThrow({
       where: { id, organizationId },
-      select: { address: true, latitude: true, longitude: true },
+      select: {
+        address: true,
+        latitude: true,
+        longitude: true,
+        name: true,
+        description: true,
+      },
     });
 
     // Check if address has changed and geocode if necessary
@@ -352,7 +446,7 @@ export async function updateLocation(payload: {
       }
     }
 
-    return await db.location.update({
+    const updatedLocation = await db.location.update({
       where: { id, organizationId },
       data: {
         name,
@@ -364,6 +458,64 @@ export async function updateLocation(payload: {
         }),
       },
     });
+
+    const changes: Array<{
+      label: string;
+      previous?: string | null;
+      next?: string | null;
+    }> = [];
+
+    if (typeof name !== "undefined" && name !== currentLocation.name) {
+      changes.push({
+        label: "Name",
+        previous: currentLocation.name,
+        next: name,
+      });
+    }
+
+    if (
+      typeof description !== "undefined" &&
+      description !== currentLocation.description
+    ) {
+      changes.push({
+        label: "Description",
+        previous: currentLocation.description,
+        next: description ?? null,
+      });
+    }
+
+    if (typeof address !== "undefined" && address !== currentLocation.address) {
+      changes.push({
+        label: "Address",
+        previous: currentLocation.address,
+        next: address ?? null,
+      });
+    }
+
+    if (changes.length > 0) {
+      const user = await getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      const noteContent = buildLocationDetailUpdateMessage({
+        userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+        changes,
+      });
+
+      if (noteContent) {
+        await createSystemLocationActivityNote({
+          locationId: id,
+          content: noteContent,
+        });
+      }
+    }
+
+    return updatedLocation;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: {
@@ -497,12 +649,14 @@ export async function updateLocationImage({
   locationId,
   prevImageUrl,
   prevThumbnailUrl,
+  userId,
 }: {
   organizationId: Organization["id"];
   request: Request;
   locationId: Location["id"];
   prevImageUrl?: string | null;
   prevThumbnailUrl?: string | null;
+  userId: User["id"];
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -561,6 +715,24 @@ export async function updateLocationImage({
         imageUrl: imagePublicUrl,
         thumbnailUrl: thumbnailPublicUrl ? thumbnailPublicUrl : undefined,
       },
+    });
+
+    const user = await getUserByID(userId, {
+      select: {
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+
+    await createSystemLocationActivityNote({
+      locationId,
+      content: `${userLink} updated the location photo.`,
     });
 
     if (prevImageUrl) {
@@ -709,14 +881,16 @@ export async function createLocationChangeNote({
   firstName,
   lastName,
   assetId,
+  assetTitle,
   userId,
   isRemoving,
 }: {
   currentLocation: Pick<Location, "id" | "name"> | null;
-  newLocation: Location | null;
+  newLocation: Pick<Location, "id" | "name"> | null;
   firstName: string;
   lastName: string;
   assetId: Asset["id"];
+  assetTitle: Asset["title"];
   userId: User["id"];
   isRemoving: boolean;
 }) {
@@ -736,6 +910,54 @@ export async function createLocationChangeNote({
       userId,
       assetId,
     });
+
+    const userLink = wrapUserLinkForNote({ id: userId, firstName, lastName });
+    const assetAddedMarkup = wrapAssetsWithDataForNote(
+      { id: assetId, title: safeDisplay(assetTitle) },
+      "added"
+    );
+    const assetRemovedMarkup = wrapAssetsWithDataForNote(
+      { id: assetId, title: safeDisplay(assetTitle) },
+      "removed"
+    );
+
+    if (newLocation) {
+      const destinationLink = formatLocationLink(newLocation);
+      const arrivalMessage =
+        currentLocation && currentLocation.id !== newLocation.id
+          ? `${userLink} moved ${assetAddedMarkup} from ${formatLocationLink(
+              currentLocation
+            )} to ${destinationLink}.`
+          : `${userLink} set ${assetAddedMarkup} to ${destinationLink}.`;
+
+      await createLocationActivityNote({
+        content: arrivalMessage,
+        type: "UPDATE",
+        userId,
+        locationId: newLocation.id,
+      });
+    }
+
+    if (
+      currentLocation &&
+      (isRemoving || !newLocation || currentLocation.id !== newLocation.id)
+    ) {
+      const removalMessage =
+        newLocation && currentLocation.id !== newLocation.id && !isRemoving
+          ? `${userLink} moved ${assetRemovedMarkup} to ${formatLocationLink(
+              newLocation
+            )}.`
+          : `${userLink} removed ${assetRemovedMarkup} from ${formatLocationLink(
+              currentLocation
+            )}.`;
+
+      await createLocationActivityNote({
+        content: removalMessage,
+        type: "UPDATE",
+        userId,
+        locationId: currentLocation.id,
+      });
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -776,7 +998,7 @@ async function createBulkLocationChangeNotes({
   assetIds: Asset["id"][];
   removedAssetIds: Asset["id"][];
   userId: User["id"];
-  location: Location;
+  location: Pick<Location, "id" | "name">;
 }) {
   try {
     const user = await db.user
@@ -798,6 +1020,9 @@ async function createBulkLocationChangeNotes({
         });
       });
 
+    const addedAssets: Array<{ id: string; title: string }> = [];
+    const removedAssetsSummary: Array<{ id: string; title: string }> = [];
+
     // Iterate over the modified assets
     for (const asset of modifiedAssets) {
       const isRemoving = removedAssetIds.includes(asset.id);
@@ -814,10 +1039,47 @@ async function createBulkLocationChangeNotes({
           firstName: user.firstName || "",
           lastName: user.lastName || "",
           assetId: asset.id,
+          assetTitle: asset.title,
           userId,
           isRemoving,
         });
+
+        if (isNew && newLocation) {
+          addedAssets.push({ id: asset.id, title: asset.title });
+        }
+
+        if (isRemoving && currentLocation) {
+          removedAssetsSummary.push({ id: asset.id, title: asset.title });
+        }
       }
+    }
+
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    if (addedAssets.length > 0) {
+      const content = `${userLink} added ${buildAssetListMarkup(
+        addedAssets,
+        "added"
+      )} to ${formatLocationLink(location)}.`;
+      await createSystemLocationActivityNote({
+        locationId: location.id,
+        content,
+      });
+    }
+
+    if (removedAssetsSummary.length > 0) {
+      const content = `${userLink} removed ${buildAssetListMarkup(
+        removedAssetsSummary,
+        "removed"
+      )} from ${formatLocationLink(location)}.`;
+      await createSystemLocationActivityNote({
+        locationId: location.id,
+        content,
+      });
     }
   } catch (cause) {
     throw new ShelfError({
@@ -851,8 +1113,12 @@ export async function updateLocationAssets({
           id: locationId,
           organizationId,
         },
-        include: {
-          assets: true,
+        select: {
+          id: true,
+          name: true,
+          assets: {
+            select: { id: true },
+          },
         },
       })
       .catch((cause) => {
@@ -1027,7 +1293,9 @@ export async function updateLocationKits({
     const location = await db.location
       .findUniqueOrThrow({
         where: { id: locationId, organizationId },
-        include: {
+        select: {
+          id: true,
+          name: true,
           kits: {
             select: {
               id: true,
@@ -1086,6 +1354,7 @@ export async function updateLocationKits({
         where: { id: { in: kitIds }, organizationId },
         select: {
           id: true,
+          name: true,
           assets: {
             select: {
               id: true,
@@ -1130,15 +1399,36 @@ export async function updateLocationKits({
           });
         });
 
+      const user = await getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      const kitsSummary = kitsToAdd.map((kit) => ({
+        id: kit.id,
+        name: kit.name ?? "",
+      }));
+
+      if (kitsSummary.length > 0) {
+        const userLink = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+
+        await createSystemLocationActivityNote({
+          locationId,
+          content: `${userLink} added ${buildKitListMarkup(
+            kitsSummary,
+            "added"
+          )} to ${formatLocationLink(location)}.`,
+        });
+      }
+
       // Add notes to the assets that their location was updated via their parent kit
       if (assetIds.length > 0) {
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          } satisfies Prisma.UserSelect,
-        });
         const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
 
         // Create individual notes for each asset
@@ -1167,7 +1457,11 @@ export async function updateLocationKits({
       // Get asset IDs from the kits being removed
       const kitsBeingRemoved = await db.kit.findMany({
         where: { id: { in: removedKitIds }, organizationId },
-        select: { id: true, assets: { select: { id: true, title: true } } },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true, title: true } },
+        },
       });
 
       const removedAssetIds = kitsBeingRemoved.flatMap((kit) =>
@@ -1203,15 +1497,36 @@ export async function updateLocationKits({
           });
         });
 
+      const user = await getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      const kitsSummary = kitsBeingRemoved.map((kit) => ({
+        id: kit.id,
+        name: kit.name ?? "",
+      }));
+
+      if (kitsSummary.length > 0) {
+        const userLink = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+
+        await createSystemLocationActivityNote({
+          locationId,
+          content: `${userLink} removed ${buildKitListMarkup(
+            kitsSummary,
+            "removed"
+          )} from ${formatLocationLink(location)}.`,
+        });
+      }
+
       // Add notes to the assets that their location was removed via their parent kit
       if (removedAssetIds.length > 0) {
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          } satisfies Prisma.UserSelect,
-        });
         const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
 
         // Create individual notes for each asset

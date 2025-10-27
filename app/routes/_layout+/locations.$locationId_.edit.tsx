@@ -135,6 +135,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       prevImageUrl: location.imageUrl,
       prevThumbnailUrl: location.thumbnailUrl,
+      userId: authSession.userId,
     });
 
     sendNotification({
