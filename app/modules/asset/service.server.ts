@@ -2209,11 +2209,28 @@ export async function createAssetsFromContentImport({
               definition.type === "AMOUNT" || definition.type === "NUMBER";
 
             if (isNumericField) {
-              const message = formatInvalidNumericCustomFieldMessage(
-                definition.name,
-                asset[key],
-                { assetTitle: asset.title }
-              );
+              // If the error is already a ShelfError with a specific message from sanitizeNumericInput,
+              // enhance it with asset context. Otherwise, create a generic message.
+              let message: string;
+
+              if (isLikeShelfError(error)) {
+                // Check if asset context is already in the message
+                if (error.message.includes("(asset: '")) {
+                  message = error.message;
+                } else {
+                  // Add asset context after the field name
+                  message = error.message.replace(
+                    `: Invalid value`,
+                    ` (asset: '${asset.title}'): Invalid value`
+                  );
+                }
+              } else {
+                message = formatInvalidNumericCustomFieldMessage(
+                  definition.name,
+                  asset[key],
+                  { assetTitle: asset.title }
+                );
+              }
 
               throw new ShelfError({
                 cause: error,
@@ -2224,6 +2241,7 @@ export async function createAssetsFromContentImport({
                   customFieldId: definition.id,
                   customFieldType: definition.type,
                   rawValue: asset[key],
+                  ...(isLikeShelfError(error) && error.additionalData),
                 },
                 shouldBeCaptured: false,
               });

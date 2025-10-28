@@ -168,11 +168,9 @@ export const extractCustomFieldValuesFromPayload = ({
  * @returns Formatted custom field value or undefined if no valid value
  */
 const NUMERIC_VALUE_GUIDANCE =
-  "Please use plain numbers without currency symbols or letters (e.g., 600.00).";
+  "Expected format: Plain numbers with optional decimal separator (e.g., 600, 600.50, or 600,50). Currency symbols will be automatically removed.";
 
 const CURRENCY_SYMBOLS_REGEX = /[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]/g;
-const THOUSAND_SEPARATOR_REGEX =
-  /[\s\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000_'’]/g;
 
 function formatInvalidNumericMessage(
   fieldName: string,
@@ -186,20 +184,47 @@ function formatInvalidNumericMessage(
       ? ""
       : String(rawValue);
   const assetPart = options?.assetTitle
-    ? ` on asset '${options.assetTitle}'`
+    ? ` (asset: '${options.assetTitle}')`
     : "";
-  return `Custom field '${fieldName}' has invalid numeric value '${value}'${assetPart}. ${NUMERIC_VALUE_GUIDANCE}`;
+  return `Custom field '${fieldName}'${assetPart}: Invalid value '${value}'.`;
 }
 
+/**
+ * Sanitizes and validates numeric input for AMOUNT and NUMBER custom fields.
+ *
+ * Accepted formats:
+ * - Plain numbers: 600, 1234
+ * - Decimal numbers with dot: 600.50
+ * - Decimal numbers with comma: 600,50 (converted to dot)
+ * - Negative numbers: -600, (600), 600-
+ * - Currency symbols are stripped: $600, €1234
+ *
+ * Rejected formats:
+ * - Thousand separators: 1,234 or 1.234.567
+ * - Multiple decimal separators: 1.2.3
+ * - Non-numeric characters: abc, 12abc
+ * - Special numeric values: NaN, Infinity
+ * - Scientific notation: 1e10
+ *
+ * @param raw - The raw input value (string or number)
+ * @param def - The custom field definition
+ * @returns Object with numericValue (number) and normalizedText (string representation)
+ * @throws {ShelfError} If the value cannot be parsed as a valid finite number
+ */
 function sanitizeNumericInput(
   raw: unknown,
   def: CustomField
 ): { numericValue: number; normalizedText: string } {
-  const throwInvalid = (): never => {
+  const throwInvalid = (reason?: string): never => {
+    const baseMessage = formatInvalidNumericMessage(def.name, raw);
+    const message = reason
+      ? `${baseMessage} ${reason} ${NUMERIC_VALUE_GUIDANCE}`
+      : `${baseMessage} ${NUMERIC_VALUE_GUIDANCE}`;
+
     throw new ShelfError({
       cause: null,
       label: "Custom fields",
-      message: formatInvalidNumericMessage(def.name, raw),
+      message,
       shouldBeCaptured: false,
       additionalData: {
         customFieldId: def.id,
@@ -234,7 +259,6 @@ function sanitizeNumericInput(
     }
 
     value = value.replace(CURRENCY_SYMBOLS_REGEX, "");
-    value = value.replace(THOUSAND_SEPARATOR_REGEX, "");
 
     if (value.endsWith("-")) {
       isNegative = true;
@@ -250,33 +274,49 @@ function sanitizeNumericInput(
       value = value.slice(1);
     }
 
-    const hasComma = value.includes(",");
-    const hasDot = value.includes(".");
+    // Count separators to detect thousand separators
+    const dotCount = (value.match(/\./g) || []).length;
+    const commaCount = (value.match(/,/g) || []).length;
 
-    if (hasComma && hasDot) {
-      if (value.lastIndexOf(",") > value.lastIndexOf(".")) {
-        value = value.replace(/\./g, "");
-        value = value.replace(/,/g, ".");
-      } else {
-        value = value.replace(/,/g, "");
+    // Reject if multiple separators are present (indicates thousand separators)
+    if (dotCount > 1 || commaCount > 1 || (dotCount > 0 && commaCount > 0)) {
+      throwInvalid(
+        "Contains thousand separator format (multiple dots/commas or mixed separators)."
+      );
+    }
+
+    // Check for single separator used as thousand separator
+    // Thousand separators typically have exactly 3 digits after them (e.g., 1,234 or 1.234)
+    // Decimals typically have 0-2 digits after them (e.g., 600.5 or 600.50)
+    if (commaCount === 1) {
+      const parts = value.split(",");
+      const afterComma = parts[1];
+      // If exactly 3 digits after comma and more than 1 digit before, likely thousand separator
+      if (afterComma.length === 3 && parts[0].length > 0) {
+        throwInvalid(
+          "Contains thousand separator format (comma with 3 digits after it)."
+        );
       }
-    } else if (hasComma) {
-      value = value.replace(/,/g, ".");
-    } else if (hasDot) {
-      const dotMatches = value.match(/\./g) ?? [];
-      if (dotMatches.length > 1) {
-        value = value.replace(/\./g, "");
+      value = value.replace(",", ".");
+    } else if (dotCount === 1) {
+      const parts = value.split(".");
+      const afterDot = parts[1];
+      // If exactly 3 digits after dot and more than 1 digit before, likely thousand separator
+      if (afterDot.length === 3 && parts[0].length > 0) {
+        throwInvalid(
+          "Contains thousand separator format (dot with 3 digits after it)."
+        );
       }
     }
 
     if (!/^[0-9]+(?:\.[0-9]+)?$/.test(value)) {
-      throwInvalid();
+      throwInvalid("Contains non-numeric characters.");
     }
 
     const numericValue = Number(value);
 
     if (!Number.isFinite(numericValue)) {
-      throwInvalid();
+      throwInvalid("Value is not a finite number.");
     }
 
     const finalValue = isNegative ? -numericValue : numericValue;
