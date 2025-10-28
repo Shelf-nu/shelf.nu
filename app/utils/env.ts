@@ -202,6 +202,7 @@ export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
 
 export const SUPPORT_EMAIL = getEnv("SUPPORT_EMAIL", {
   isSecret: false,
+  isRequired: false,
 });
 
 export const GEOCODING_USER_AGENT = getEnv("GEOCODING_USER_AGENT", {
@@ -211,6 +212,7 @@ export const GEOCODING_USER_AGENT = getEnv("GEOCODING_USER_AGENT", {
 
 export const FULL_CALENDAR_LICENSE_KEY = getEnv("FULL_CALENDAR_LICENSE_KEY", {
   isSecret: false,
+  isRequired: false,
 });
 
 export const MAINTENANCE_MODE =
