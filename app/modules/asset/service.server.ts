@@ -2214,14 +2214,17 @@ export async function createAssetsFromContentImport({
               let message: string;
 
               if (isLikeShelfError(error)) {
-                // Check if asset context is already in the message
-                if (error.message.includes("(asset: '")) {
+                // Check if asset context has already been added by checking additionalData
+                const hasAssetContext =
+                  error.additionalData && "assetKey" in error.additionalData;
+
+                if (hasAssetContext) {
                   message = error.message;
                 } else {
-                  // Add asset context after the field name
+                  // Add asset context after the field name using regex to be precise
                   message = error.message.replace(
-                    `: Invalid value`,
-                    ` (asset: '${asset.title}'): Invalid value`
+                    /^(Custom field '[^']+')(:)/,
+                    `$1 (asset: '${asset.title}')$2`
                   );
                 }
               } else {

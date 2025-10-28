@@ -4,9 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildCustomFieldValue } from "~/utils/custom-fields";
 import { ShelfError } from "~/utils/error";
 
-const baseCustomField: Omit<CustomField, "type"> & {
-  type: CustomField["type"];
-} = {
+const baseCustomField: CustomField = {
   id: "cf_1",
   name: "Budget",
   helpText: null,

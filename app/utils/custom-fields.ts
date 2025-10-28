@@ -340,7 +340,9 @@ export const buildCustomFieldValue = (
     /** We handle boolean different because it returns false */
     if (
       def.type !== "BOOLEAN" &&
-      (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === ""))
+      (raw === undefined ||
+        raw === null ||
+        (typeof raw === "string" && raw.trim() === ""))
     ) {
       return undefined;
     }
