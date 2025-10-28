@@ -1,5 +1,5 @@
 import { BarcodeType } from "@prisma/client";
-import { readBarcodes, type ReadResult } from "zxing-wasm";
+import { readBarcodes, type ReadResult } from "zxing-wasm/reader";
 import {
   validateBarcodeValue,
   normalizeBarcodeValue,
