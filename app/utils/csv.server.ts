@@ -1,6 +1,7 @@
 import type {
   Asset,
   AssetIndexSettings,
+  Note,
   Organization,
   Prisma,
   Tag,
@@ -41,6 +42,7 @@ import {
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
@@ -655,6 +657,132 @@ export async function exportBookingsFromIndexToCsv({
       label: "Booking",
     });
   }
+}
+
+const ACTIVITY_HEADER = "Date,Author,Type,Content";
+
+type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+};
+
+const sanitizeCsvValue = (value: string | null | undefined) =>
+  formatValueForCsv((value ?? "").replace(/\r?\n/g, "\\n"));
+
+const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
+  const rows = notes.map((note) => {
+    const author = note.user
+      ? [note.user.firstName, note.user.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim()
+      : "";
+
+    return [
+      sanitizeCsvValue(formatter.format(note.createdAt)),
+      sanitizeCsvValue(author),
+      sanitizeCsvValue(note.type),
+      sanitizeCsvValue(note.content ?? ""),
+    ].join(",");
+  });
+
+  return [ACTIVITY_HEADER, ...rows].join("\n");
+};
+
+export async function exportAssetNotesToCsv({
+  request,
+  assetId,
+  organizationId,
+}: {
+  request: Request;
+  assetId: string;
+  organizationId: string;
+}) {
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  const notes = await db.note.findMany({
+    where: {
+      assetId,
+      asset: { organizationId },
+    },
+    include: {
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  const activityNotes = notes.map<ActivityNote>((note) => ({
+    content: note.content,
+    createdAt: note.createdAt,
+    type: note.type,
+    user: note.user
+      ? {
+          firstName: note.user.firstName,
+          lastName: note.user.lastName,
+        }
+      : null,
+  }));
+
+  return notesToCsv(activityNotes, formatter);
+}
+
+export async function exportBookingNotesToCsv({
+  request,
+  bookingId,
+  organizationId,
+}: {
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+}) {
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  const notes = await db.bookingNote.findMany({
+    where: {
+      bookingId,
+      booking: { organizationId },
+    },
+    include: {
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  const activityNotes = notes.map<ActivityNote>((note) => ({
+    content: note.content,
+    createdAt: note.createdAt,
+    type: note.type,
+    user: note.user
+      ? {
+          firstName: note.user.firstName,
+          lastName: note.user.lastName,
+        }
+      : null,
+  }));
+
+  return notesToCsv(activityNotes, formatter);
 }
 
 /** Define some types to use for normalizing bookings across the different fetches */
