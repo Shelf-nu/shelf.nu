@@ -9,7 +9,7 @@ import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
 } from "./client-hints";
-import { ShelfError } from "./error";
+import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
@@ -167,6 +167,130 @@ export const extractCustomFieldValuesFromPayload = ({
  * @param def - The custom field definition
  * @returns Formatted custom field value or undefined if no valid value
  */
+const NUMERIC_VALUE_GUIDANCE =
+  "Please use plain numbers without currency symbols or letters (e.g., 600.00).";
+
+const CURRENCY_SYMBOLS_REGEX = /[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]/g;
+const THOUSAND_SEPARATOR_REGEX =
+  /[\s\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000_'’]/g;
+
+function formatInvalidNumericMessage(
+  fieldName: string,
+  rawValue: unknown,
+  options?: { assetTitle?: string }
+) {
+  const value =
+    typeof rawValue === "string"
+      ? rawValue.trim()
+      : rawValue === undefined || rawValue === null
+      ? ""
+      : String(rawValue);
+  const assetPart = options?.assetTitle
+    ? ` on asset '${options.assetTitle}'`
+    : "";
+  return `Custom field '${fieldName}' has invalid numeric value '${value}'${assetPart}. ${NUMERIC_VALUE_GUIDANCE}`;
+}
+
+function sanitizeNumericInput(
+  raw: unknown,
+  def: CustomField
+): { numericValue: number; normalizedText: string } {
+  const throwInvalid = (): never => {
+    throw new ShelfError({
+      cause: null,
+      label: "Custom fields",
+      message: formatInvalidNumericMessage(def.name, raw),
+      shouldBeCaptured: false,
+      additionalData: {
+        customFieldId: def.id,
+        customFieldType: def.type,
+        rawValue: raw == null ? raw : String(raw),
+      },
+    });
+  };
+
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) {
+      throwInvalid();
+    }
+    return {
+      numericValue: raw,
+      normalizedText: raw.toString(),
+    };
+  }
+
+  if (typeof raw === "string") {
+    let value = raw.trim();
+
+    if (!value) {
+      throwInvalid();
+    }
+
+    let isNegative = false;
+
+    if (value.startsWith("(") && value.endsWith(")")) {
+      isNegative = true;
+      value = value.slice(1, -1);
+    }
+
+    value = value.replace(CURRENCY_SYMBOLS_REGEX, "");
+    value = value.replace(THOUSAND_SEPARATOR_REGEX, "");
+
+    if (value.endsWith("-")) {
+      isNegative = true;
+      value = value.slice(0, -1);
+    }
+
+    if (value.startsWith("-")) {
+      isNegative = true;
+      value = value.slice(1);
+    }
+
+    if (value.startsWith("+")) {
+      value = value.slice(1);
+    }
+
+    const hasComma = value.includes(",");
+    const hasDot = value.includes(".");
+
+    if (hasComma && hasDot) {
+      if (value.lastIndexOf(",") > value.lastIndexOf(".")) {
+        value = value.replace(/\./g, "");
+        value = value.replace(/,/g, ".");
+      } else {
+        value = value.replace(/,/g, "");
+      }
+    } else if (hasComma) {
+      value = value.replace(/,/g, ".");
+    } else if (hasDot) {
+      const dotMatches = value.match(/\./g) ?? [];
+      if (dotMatches.length > 1) {
+        value = value.replace(/\./g, "");
+      }
+    }
+
+    if (!/^[0-9]+(?:\.[0-9]+)?$/.test(value)) {
+      throwInvalid();
+    }
+
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+      throwInvalid();
+    }
+
+    const finalValue = isNegative ? -numericValue : numericValue;
+    const normalizedText = `${isNegative ? "-" : ""}${value}`;
+
+    return {
+      numericValue: finalValue,
+      normalizedText,
+    };
+  }
+
+  return throwInvalid();
+}
+
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
@@ -174,7 +298,10 @@ export const buildCustomFieldValue = (
   try {
     const { raw } = value;
     /** We handle boolean different because it returns false */
-    if (def.type !== "BOOLEAN" && !raw) {
+    if (
+      def.type !== "BOOLEAN" &&
+      (raw === undefined || raw === null || raw === "")
+    ) {
       return undefined;
     }
 
@@ -204,27 +331,41 @@ export const buildCustomFieldValue = (
       case "MULTILINE_TEXT":
         return { raw, valueMultiLineText: String(raw) };
       case "AMOUNT": {
-        return { raw: Number(raw), valueText: String(raw) };
+        const { numericValue, normalizedText } = sanitizeNumericInput(raw, def);
+        return { raw: numericValue, valueText: normalizedText };
       }
       case "NUMBER": {
-        return { raw: Number(raw), valueText: String(raw) };
+        const { numericValue, normalizedText } = sanitizeNumericInput(raw, def);
+        return { raw: numericValue, valueText: normalizedText };
       }
     }
 
     return { raw, valueText: String(raw) };
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause: cause,
       title:
         cause instanceof RangeError
           ? cause?.message
           : "Invalid custom field value",
-      message: `Failed to read/process custom field value for '${def.name}' with type '${def.type}'. The value we found is: '${value.raw}'. Make sure to format your dates using the format: YYYY-MM-DD`,
+      message: `Failed to read/process custom field value for '${
+        def.name
+      }' with type '${def.type}'. The value we found is: '${value.raw}'. ${
+        def.type === "DATE"
+          ? "Make sure to format your dates using the format: YYYY-MM-DD"
+          : "Please verify the provided value matches the expected format"
+      }`,
       label: "Custom fields",
       shouldBeCaptured: false,
     });
   }
 };
+
+export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage };
 
 /**
  * Returns a display value for a custom field based on its type
