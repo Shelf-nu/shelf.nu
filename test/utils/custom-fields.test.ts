@@ -16,6 +16,7 @@ const baseCustomField: CustomField = {
   userId: "user_1",
   createdAt: new Date("2023-01-01T00:00:00.000Z"),
   updatedAt: new Date("2023-01-01T00:00:00.000Z"),
+  deletedAt: null,
 };
 
 describe("buildCustomFieldValue", () => {
