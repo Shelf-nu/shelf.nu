@@ -1,49 +1,76 @@
-import type { Note as NoteType } from "@prisma/client";
+import type { ReactNode } from "react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
+import { DateS } from "~/components/shared/date";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
-import type { WithDateFields } from "~/modules/types";
 import { timeAgo } from "~/utils/time-ago";
-import { ActionsDopdown } from "./actions-dropdown";
 
-export type NoteWithDate = WithDateFields<NoteType, string> & {
-  dateDisplay: string;
+/**
+ * Generic note type that works for both asset notes and booking notes
+ */
+export type NoteWithUser = {
+  id: string;
+  content: string;
+  type: "COMMENT" | "UPDATE";
+  createdAt: string | Date;
   user?: {
     firstName: string;
     lastName: string;
   };
 };
 
-export const Note = ({ note }: { note: NoteWithDate }) => (
+interface NoteProps {
+  note: NoteWithUser;
+  /** Optional actions dropdown component to render in the comment header */
+  actionsDropdown?: ReactNode;
+}
+
+export const Note = ({ note, actionsDropdown }: NoteProps) => (
   <li key={note.id} className="note mb-2 rounded border bg-white md:mb-4">
     <Switch>
-      <Comment when={note.type === "COMMENT"} note={note} />
+      <Comment
+        when={note.type === "COMMENT"}
+        note={note}
+        actionsDropdown={actionsDropdown}
+      />
       <Update when={note.type === "UPDATE"} note={note} />
     </Switch>
   </li>
 );
 
-const Update = ({ note }: { note: NoteWithDate; when?: boolean }) => (
+const Update = ({ note }: { note: NoteWithUser; when?: boolean }) => (
   <div className="flex px-3.5 py-3">
     <div className="message flex flex-1 items-start gap-2">
-      <Tag>{note.dateDisplay}</Tag> <MarkdownViewer content={note.content} />
+      <Tag>
+        <DateS date={note.createdAt} includeTime />
+      </Tag>{" "}
+      <MarkdownViewer content={note.content} />
     </div>
   </div>
 );
 
-export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => (
+const Comment = ({
+  note,
+  actionsDropdown,
+}: {
+  note: NoteWithUser;
+  actionsDropdown?: ReactNode;
+  when?: boolean;
+}) => (
   <>
     <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
       <div>
-        <Tag>{note.dateDisplay}</Tag>{" "}
+        <Tag>
+          <DateS date={note.createdAt} includeTime />
+        </Tag>{" "}
         <span className="commentator font-medium text-gray-900">
           {note.user
-            ? `${note.user?.firstName} ${note.user?.lastName}`
+            ? `${note.user.firstName} ${note.user.lastName}`
             : "Unknown"}
         </span>{" "}
         <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
       </div>
-      <ActionsDopdown noteId={note.id} />
+      {actionsDropdown}
     </header>
     <div className="message px-3.5 py-3">
       <MarkdownViewer content={note.content} />

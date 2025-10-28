@@ -6,10 +6,10 @@ import type {
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";
-import { NewBookingNoteSchema } from "~/components/booking/notes/new";
 import { ErrorContent } from "~/components/errors";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
+import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBooking } from "~/modules/booking/service.server";
@@ -19,7 +19,6 @@ import {
   deleteBookingNote,
 } from "~/modules/booking-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
@@ -68,16 +67,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `${booking.name}'s activity`,
     };
-    const notes = bookingNotes.map((note) => ({
-      ...note,
-      dateDisplay: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(note.createdAt),
-      content: note.content, // Keep as string for client-side parsing
-    }));
 
-    return json(data({ booking: { ...booking, notes }, header }));
+    return json(data({ booking: { ...booking, notes: bookingNotes }, header }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason));
@@ -105,7 +96,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "POST": {
         const payload = parseData(
           await request.formData(),
-          NewBookingNoteSchema,
+          MarkdownNoteSchema,
           {
             additionalData: { userId, bookingId },
           }
