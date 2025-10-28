@@ -865,11 +865,12 @@ function CustodyEnumField({
                   selectedIds.length <= 0 && "text-gray-500"
                 )}
               >
-                {value === "without-custody"
-                  ? "Without custody"
-                  : selectedIds.length > 0
+                {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "without-custody") {
+                          return "Without custody";
+                        }
                         const teamMember = data.teamMembers.find(
                           (tm) => tm.id === id
                         );
@@ -989,12 +990,13 @@ function CategoryEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "uncategorized") {
+                          return "Uncategorized";
+                        }
                         const category = data.categories?.find(
                           (cat) => cat.id === id
                         );
-                        return id === "uncategorized"
-                          ? "Uncategorized"
-                          : category?.name || "";
+                        return category?.name || "";
                       })
                       .join(", ")
                   : "Select category"}
@@ -1101,12 +1103,13 @@ function LocationEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "without-location") {
+                          return "Without location";
+                        }
                         const location = data.locations?.find(
                           (loc) => loc.id === id
                         );
-                        return id === "without-location"
-                          ? "Without location"
-                          : location?.name || "";
+                        return location?.name || "";
                       })
                       .join(", ")
                   : "Select location"}
@@ -1213,10 +1216,11 @@ function KitEnumField({
                   : selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "without-kit") {
+                          return "Without kit";
+                        }
                         const kit = data.kits?.find((kit) => kit.id === id);
-                        return id === "without-kit"
-                          ? "Without kit"
-                          : kit?.name || "";
+                        return kit?.name || "";
                       })
                       .join(", ")
                   : "Select kit"}
@@ -1319,8 +1323,11 @@ function TagsField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "untagged") {
+                          return "Untagged";
+                        }
                         const tag = data.tags?.find((t) => t.id === id);
-                        return id === "untagged" ? "Untagged" : tag?.name || "";
+                        return tag?.name || "";
                       })
                       .join(", ")
                   : "Select Tag"}

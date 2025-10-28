@@ -50,10 +50,19 @@ Every bulk operation using `ALL_SELECTED_KEY` follows this pattern:
 1. Component Layer (Button/Form)
    ↓ Passes: assetIds + currentSearchParams
 2. Route/API Layer (Loader/Action)
-   ↓ Extracts and forwards parameters
+   ↓ Fetches settings + Extracts and forwards parameters
 3. Service Layer (Business Logic)
-   ↓ Builds where clause with getAssetsWhereInput
+   ↓ Uses resolveAssetIdsForBulkOperation helper (handles both simple & advanced mode)
 ```
+
+### Important: Simple vs Advanced Mode
+
+Shelf has two index modes that require different filtering approaches:
+
+- **Simple Mode**: Uses Prisma where clauses (`Prisma.AssetWhereInput`)
+- **Advanced Mode**: Uses raw SQL queries with filter parsing
+
+The `resolveAssetIdsForBulkOperation` helper (see below) handles both modes automatically, ensuring consistent behavior across all bulk operations.
 
 ### 1. Component Layer: Pass Search Params
 
@@ -105,122 +114,189 @@ export function ExportAssetsButton() {
 **Key Requirements:**
 
 - Extract both `assetIds` and `currentSearchParams` from request
-- Pass both to service layer functions
-- Use a descriptive parameter name (e.g., `assetIndexCurrentSearchParams`)
+- **Fetch asset index settings** using `getAssetIndexSettings`
+- Use `canUseBarcodes` from `requirePermission` (don't access `currentOrganization.barcodesEnabled`)
+- Pass settings to service layer functions
+- Use a descriptive parameter name (e.g., `currentSearchParams`)
 
-**Example:** `app/routes/_layout+/assets.export.$fileName[.csv].tsx`
+**Example:** `app/routes/api+/assets.bulk-mark-availability.ts`
 
 ```typescript
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const searchParams = getCurrentSearchParams(request);
-  const assetIds = searchParams.get("assetIds");
-  const assetIndexCurrentSearchParams = searchParams.get(
-    "assetIndexCurrentSearchParams"
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+
+  // Get canUseBarcodes directly from requirePermission
+  const { organizationId, canUseBarcodes } = await requirePermission({
+    request,
+    userId,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+
+  // Fetch asset index settings to determine mode (SIMPLE or ADVANCED)
+  const settings = await getAssetIndexSettings({
+    userId,
+    organizationId,
+    canUseBarcodes, // Use from requirePermission, not currentOrganization.barcodesEnabled
+  });
+
+  const { assetIds, type, currentSearchParams } = parseData(
+    await request.formData(),
+    BulkMarkAvailabilitySchema.and(CurrentSearchParamsSchema)
   );
 
-  const csvString = await exportAssetsFromIndexToCsv({
-    request,
+  await bulkMarkAvailability({
+    organizationId,
     assetIds,
-    settings,
-    currentOrganization,
-    assetIndexCurrentSearchParams, // Pass filter context
+    type,
+    currentSearchParams, // Pass filter context
+    settings, // Pass settings for mode detection
   });
 
-  return new Response(csvString, {
-    status: 200,
-    headers: { "content-type": "text/csv" },
-  });
-};
-```
-
-### 3. Service Layer: Build Where Clause
-
-**Key Requirements:**
-
-- Check if `assetIds` includes `ALL_SELECTED_KEY`
-- When true, use `currentSearchParams` to build filter where clause
-- Use `getAssetsWhereInput` helper (or equivalent for other entities)
-- When false, use specific IDs only
-
-**Example:** `app/utils/csv.server.ts`
-
-```typescript
-import { ALL_SELECTED_KEY } from "./list";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
-
-export async function exportAssetsFromIndexToCsv({
-  request,
-  assetIds,
-  settings,
-  currentOrganization,
-  assetIndexCurrentSearchParams,
-}: {
-  request: Request;
-  assetIds: string;
-  settings: AssetIndexSettings;
-  currentOrganization: Pick<
-    Organization,
-    "id" | "barcodesEnabled" | "currency"
-  >;
-  assetIndexCurrentSearchParams: string | null;
-}) {
-  // Make an array of the ids and check if we have to take all
-  const ids = assetIds.split(",");
-  const takeAll = ids.includes(ALL_SELECTED_KEY);
-
-  /**
-   * When taking all with filters (select all button), use the current page's search params
-   * Otherwise, use cookie-based filters from the request
-   */
-  const filtersToUse =
-    takeAll && assetIndexCurrentSearchParams
-      ? assetIndexCurrentSearchParams
-      : (
-          await getAdvancedFiltersFromRequest(
-            request,
-            currentOrganization.id,
-            settings
-          )
-        ).filters;
-
-  const { assets } = await getAdvancedPaginatedAndFilterableAssets({
-    request,
-    organizationId: currentOrganization.id,
-    filters: filtersToUse,
-    settings,
-    takeAll,
-    assetIds: takeAll ? undefined : ids,
-    canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-  });
-
-  // ... build and return CSV
+  return json(data({ success: true }));
 }
 ```
 
-**Alternative Pattern (for simpler cases):**
+**Important Notes:**
 
-When not using advanced filters, directly use `getAssetsWhereInput`:
+- ✅ Always use `canUseBarcodes` from `requirePermission`
+- ❌ Never use `currentOrganization.barcodesEnabled`
+- ✅ Fetch settings in every route that does bulk operations
+- ✅ Pass `settings` to service functions for mode detection
+
+### 3. Service Layer: Use the Helper Function
+
+**Key Requirements:**
+
+- Use `resolveAssetIdsForBulkOperation` helper to resolve IDs
+- Import the helper at the **top of the file** (no dynamic imports)
+- Pass `assetIds`, `organizationId`, `currentSearchParams`, and `settings`
+- The helper automatically handles both Simple and Advanced modes
+- Use resolved IDs in your bulk operations
+
+**Example:** `app/modules/asset/service.server.ts`
 
 ```typescript
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+// ✅ Import at top of file
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 
-// In your service function
-const assetIds = searchParams.getAll("assetIds");
-
-// Build where clause based on ALL_SELECTED_KEY
-const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-  ? getAssetsWhereInput({
+export async function bulkMarkAvailability({
+  organizationId,
+  assetIds,
+  type,
+  currentSearchParams,
+  settings,
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  type: "available" | "unavailable";
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+}) {
+  try {
+    // Step 1: Resolve IDs using the helper (handles both modes)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
       organizationId,
-      currentSearchParams: searchParams.toString(),
-    })
-  : { id: { in: assetIds }, organizationId };
+      currentSearchParams,
+      settings,
+    });
 
-const assets = await db.asset.findMany({ where });
+    // Step 2: Use resolved IDs in your bulk operation
+    await db.asset.updateMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        availableToBook: type === "unavailable",
+      },
+      data: { availableToBook: type === "available" },
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update asset availability",
+      additionalData: { assetIds, organizationId, type },
+      label: "Assets",
+    });
+  }
+}
 ```
 
-## Helper Function: getAssetsWhereInput
+## Helper Functions
 
-Located in `app/modules/asset/utils.server.ts`, this function builds a Prisma where clause from URL search parameters:
+### resolveAssetIdsForBulkOperation
+
+**Location:** `app/modules/asset/bulk-operations-helper.server.ts`
+
+This is the **main helper** for all bulk operations. It automatically handles both Simple and Advanced modes.
+
+```typescript
+export async function resolveAssetIdsForBulkOperation({
+  assetIds,
+  organizationId,
+  currentSearchParams,
+  settings,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+}): Promise<string[]> {
+  // Case 1: Specific selection - return IDs as-is
+  if (!assetIds.includes(ALL_SELECTED_KEY)) {
+    return assetIds;
+  }
+
+  // Case 2: Select all - resolve based on mode
+  const isAdvancedMode = settings.mode === "ADVANCED";
+
+  if (isAdvancedMode && currentSearchParams) {
+    // Advanced mode: Use raw SQL with filter parsing
+    return getAdvancedFilteredAssetIds({
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
+  } else {
+    // Simple mode: Use Prisma where clause
+    const where = getAssetsWhereInput({
+      organizationId,
+      currentSearchParams,
+    });
+
+    const assets = await db.asset.findMany({
+      where,
+      select: { id: true },
+    });
+
+    return assets.map((a) => a.id);
+  }
+}
+```
+
+**How it works:**
+
+1. If `ALL_SELECTED_KEY` is **not** present → returns the provided IDs directly
+2. If `ALL_SELECTED_KEY` **is** present → resolves all matching IDs:
+   - **Advanced mode**: Uses `getAdvancedFilteredAssetIds` with raw SQL
+   - **Simple mode**: Uses `getAssetsWhereInput` with Prisma
+
+**Benefits:**
+
+- ✅ Single source of truth for ID resolution
+- ✅ Handles both modes automatically
+- ✅ Compatible with `updateMany`, `deleteMany`, etc.
+- ✅ Consistent behavior across all bulk operations
+
+### getAssetsWhereInput
+
+**Location:** `app/modules/asset/utils.server.ts`
+
+This function builds a Prisma where clause from URL search parameters (used in **Simple mode**):
 
 ```typescript
 export function getAssetsWhereInput({
@@ -270,33 +346,74 @@ export function getAssetsWhereInput({
 
 ## Existing Implementations
 
-Reference these working examples in the codebase:
+All asset bulk operations now use the `resolveAssetIdsForBulkOperation` helper pattern:
 
-### 1. Export Assets (Advanced Mode)
+### Asset Bulk Operations (Using Helper)
 
-- **Button:** `app/components/assets/assets-index/export-assets-button.tsx`
-- **Route:** `app/routes/_layout+/assets.export.$fileName[.csv].tsx`
-- **Service:** `app/utils/csv.server.ts` → `exportAssetsFromIndexToCsv`
+All these operations follow the same pattern shown above:
 
-### 2. Bulk Delete Assets
+1. **bulkMarkAvailability** - Mark assets as available/unavailable
 
-- **Action:** `app/routes/_layout+/assets._index.tsx` (action function)
-- **Service:** `app/modules/asset/service.server.ts` → `bulkDeleteAssets`
+   - Route: `app/routes/api+/assets.bulk-mark-availability.ts`
+   - Service: `app/modules/asset/service.server.ts`
 
-### 3. Bulk QR Code Download
+2. **bulkUpdateAssetLocation** - Update location for multiple assets
 
-- **API:** `app/routes/api+/assets.get-assets-for-bulk-qr-download.ts`
-- Uses `getAssetsWhereInput` directly
+   - Route: `app/routes/api+/assets.bulk-update-location.ts`
+   - Service: `app/modules/asset/service.server.ts`
 
-### 4. Export Bookings
+3. **bulkUpdateAssetCategory** - Update category for multiple assets
 
-- **Button:** `app/components/booking/export-bookings-button.tsx`
-- **Service:** `app/utils/csv.server.ts` → `exportBookingsFromIndexToCsv`
+   - Route: `app/routes/api+/assets.bulk-update-category.ts`
+   - Service: `app/modules/asset/service.server.ts`
 
-### 5. Export Team Members (NRMs)
+4. **bulkAssignAssetTags** - Assign/remove tags for multiple assets
 
-- **Button:** `app/components/nrm/export-nrm-button.tsx`
-- **Service:** `app/utils/csv.server.ts` → `exportNRMsToCsv`
+   - Route: `app/routes/api+/assets.bulk-assign-tags.ts`
+   - Service: `app/modules/asset/service.server.ts`
+
+5. **bulkCheckOutAssets** (bulkAssignCustody) - Assign custody
+
+   - Route: `app/routes/api+/assets.bulk-assign-custody.ts`
+   - Service: `app/modules/asset/service.server.ts`
+
+6. **bulkCheckInAssets** (bulkReleaseCustody) - Release custody
+
+   - Route: `app/routes/api+/assets.bulk-release-custody.ts`
+   - Service: `app/modules/asset/service.server.ts`
+
+7. **bulkRemoveAssetsFromKits** - Remove assets from kits
+
+   - Route: `app/routes/api+/assets.bulk-remove-from-kits.ts`
+   - Service: `app/modules/kit/service.server.ts`
+
+8. **bulkDeleteAssets** - Delete multiple assets
+   - Route: `app/routes/_layout+/assets._index.tsx` (action)
+   - Route: `app/routes/_layout+/admin-dashboard+/org.$organizationId.assets.tsx` (action)
+   - Service: `app/modules/asset/service.server.ts`
+
+### Other Select All Implementations
+
+These use different patterns appropriate to their use case:
+
+- **Export Assets** - Uses advanced filtering directly
+
+  - Button: `app/components/assets/assets-index/export-assets-button.tsx`
+  - Route: `app/routes/_layout+/assets.export.$fileName[.csv].tsx`
+  - Service: `app/utils/csv.server.ts` → `exportAssetsFromIndexToCsv`
+
+- **Bulk QR Code Download** - Uses `getAssetsWhereInput` directly
+
+  - API: `app/routes/api+/assets.get-assets-for-bulk-qr-download.ts`
+
+- **Export Bookings**
+
+  - Button: `app/components/booking/export-bookings-button.tsx`
+  - Service: `app/utils/csv.server.ts` → `exportBookingsFromIndexToCsv`
+
+- **Export Team Members (NRMs)**
+  - Button: `app/components/nrm/export-nrm-button.tsx`
+  - Service: `app/utils/csv.server.ts` → `exportNRMsToCsv`
 
 ## Common Pitfalls
 
@@ -403,17 +520,50 @@ if (allSelected) {
 **2. Route/API:**
 
 ```typescript
-const currentSearchParams = searchParams.get("currentSearchParams");
-// Pass to service layer
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+
+// Get canUseBarcodes from requirePermission
+const { organizationId, canUseBarcodes } = await requirePermission({...});
+
+// Fetch settings
+const settings = await getAssetIndexSettings({
+  userId,
+  organizationId,
+  canUseBarcodes,
+});
+
+// Extract params
+const { assetIds, currentSearchParams } = parseData(formData, schema);
+
+// Pass to service
+await bulkOperation({
+  assetIds,
+  organizationId,
+  currentSearchParams,
+  settings,
+});
 ```
 
 **3. Service:**
 
 ```typescript
-const takeAll = ids.includes(ALL_SELECTED_KEY);
-const where = takeAll
-  ? getAssetsWhereInput({ organizationId, currentSearchParams })
-  : { id: { in: ids }, organizationId };
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+
+// Resolve IDs (handles both Simple and Advanced mode)
+const resolvedIds = await resolveAssetIdsForBulkOperation({
+  assetIds,
+  organizationId,
+  currentSearchParams,
+  settings,
+});
+
+// Use resolved IDs in your operation
+await db.asset.updateMany({
+  where: { id: { in: resolvedIds }, organizationId },
+  data: {
+    /* your updates */
+  },
+});
 ```
 
 ## Related Documentation

@@ -82,7 +82,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapUserLinkForNote,
@@ -97,8 +97,10 @@ import {
 } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
 import {
+  CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
   assetQueryJoins,
   assetReturnFragment,
@@ -118,7 +120,6 @@ import type {
 } from "./types";
 import {
   formatAssetsRemindersDates,
-  getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
@@ -528,11 +529,13 @@ export async function getAssets(params: {
           {
             customFields: {
               some: {
-                value: {
-                  path: ["valueText"],
-                  string_contains: term,
-                  mode: "insensitive",
-                },
+                OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                  value: {
+                    path: [jsonPath],
+                    string_contains: term,
+                    mode: "insensitive",
+                  },
+                })),
               },
             },
           },
@@ -1373,6 +1376,8 @@ export async function updateAsset({
           db.customField.findMany({
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+              active: true,
+              deletedAt: null,
             },
             select: { id: true, name: true, type: true },
           }),
@@ -2850,25 +2855,31 @@ export async function bulkDeleteAssets({
   organizationId,
   userId,
   currentSearchParams,
+  settings,
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /**
      * We have to remove the images of assets so we have to make this query first
      */
     const assets = await db.asset.findMany({
-      where,
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+      },
       select: { id: true, mainImage: true },
     });
 
@@ -2918,6 +2929,7 @@ export async function bulkCheckOutAssets({
   custodianName,
   organizationId,
   currentSearchParams,
+  settings,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -2925,21 +2937,26 @@ export async function bulkCheckOutAssets({
   custodianName: TeamMember["name"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
     const [assets, user, custodianTeamMember] = await Promise.all([
       db.asset.findMany({
-        where,
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
         select: { id: true, title: true, status: true },
       }),
       getUserByID(userId, {
@@ -3041,26 +3058,32 @@ export async function bulkCheckInAssets({
   assetIds,
   organizationId,
   currentSearchParams,
+  settings,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where,
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
         select: {
           id: true,
           title: true,
@@ -3160,25 +3183,31 @@ export async function bulkUpdateAssetLocation({
   organizationId,
   newLocationId,
   currentSearchParams,
+  settings,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where,
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
         select: {
           id: true,
           title: true,
@@ -3274,23 +3303,29 @@ export async function bulkUpdateAssetCategory({
   organizationId,
   categoryId,
   currentSearchParams,
+  settings,
 }: {
   userId: string;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     await db.asset.updateMany({
-      where,
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+      },
       data: {
         /** If nothing is selected then we have to remove the relation and set category to null */
         categoryId: !categoryId ? null : categoryId,
@@ -3315,6 +3350,7 @@ export async function bulkAssignAssetTags({
   tagsIds,
   currentSearchParams,
   remove,
+  settings,
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -3322,20 +3358,18 @@ export async function bulkAssignAssetTags({
   tagsIds: string[];
   currentSearchParams?: string | null;
   remove: boolean;
+  settings: AssetIndexSettings;
 }) {
   try {
-    const shouldUpdateAll = assetIds.includes(ALL_SELECTED_KEY);
-    let _assetIds = assetIds;
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
-    if (shouldUpdateAll) {
-      const allOrgAssetIds = await db.asset.findMany({
-        where: getAssetsWhereInput({ organizationId, currentSearchParams }),
-        select: { id: true },
-      });
-      _assetIds = allOrgAssetIds.map((a) => a.id);
-    }
-
-    const updatePromises = _assetIds.map((id) =>
+    const updatePromises = resolvedIds.map((id) =>
       db.asset.update({
         where: { id, organizationId },
         data: {
@@ -3368,21 +3402,28 @@ export async function bulkMarkAvailability({
   assetIds,
   type,
   currentSearchParams,
+  settings,
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /* If we are selecting all assets in list then we have to consider other filters too */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
+    // Simple, consistent where clause
     await db.asset.updateMany({
       where: {
-        ...where,
+        id: { in: resolvedIds },
+        organizationId,
         availableToBook: type === "unavailable",
       },
       data: { availableToBook: type === "available" },

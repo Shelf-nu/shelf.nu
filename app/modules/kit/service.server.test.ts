@@ -26,6 +26,7 @@ import {
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 // Mock dependencies
+// why: testing kit service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
@@ -64,19 +65,23 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: ensuring predictable ID generation for consistent test assertions
 vitest.mock("~/utils/id/id.server", () => ({
   id: vitest.fn(() => "mock-id"),
 }));
 
+// why: avoiding QR code generation during kit service tests
 vitest.mock("~/modules/qr/service.server", () => ({
   getQr: vitest.fn(),
 }));
 
+// why: testing kit barcode operations without triggering barcode validation and updates
 vitest.mock("~/modules/barcode/service.server", () => ({
   updateBarcodes: vitest.fn(),
   validateBarcodeUniqueness: vitest.fn(),
 }));
 
+// why: preventing database lookups for user data during kit tests
 vitest.mock("~/modules/user/service.server", () => ({
   getUserByID: vitest.fn().mockResolvedValue({
     id: "user-1",
@@ -85,12 +90,14 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: testing kit custody operations without creating actual notes
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
   createNotes: vitest.fn().mockResolvedValue({}),
   createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: isolating kit service logic from asset utility dependencies
 vitest.mock("~/modules/asset/utils.server", () => ({
   getKitLocationUpdateNoteContent: vitest
     .fn()

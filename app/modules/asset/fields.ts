@@ -49,6 +49,7 @@ export const getAssetOverviewFields = (
       where: {
         customField: {
           active: true,
+          deletedAt: null,
         },
       },
       include: {
@@ -150,6 +151,7 @@ export const assetIndexFields = ({
       where: {
         customField: {
           active: true,
+          deletedAt: null,
         },
       },
       include: {
@@ -234,6 +236,7 @@ export const advancedAssetIndexFields = () => {
       where: {
         customField: {
           active: true,
+          deletedAt: null,
         },
       },
       include: {
