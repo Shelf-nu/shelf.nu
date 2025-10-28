@@ -71,7 +71,11 @@ export default function KitRow({
       <ListItem item={kit} className="relative bg-gray-50">
         <BulkListItemCheckbox item={kit} bulkItems={assets} />
 
-        <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
+        <Td
+          className={tw(
+            "w-full min-w-[300px] max-w-[400px] whitespace-normal p-0 md:p-0"
+          )}
+        >
           <div className="flex items-center gap-3 py-4 md:justify-normal md:pr-6">
             <KitImage
               kit={{
@@ -80,9 +84,9 @@ export default function KitRow({
                 alt: kit.name,
                 kitId: kit.id,
               }}
-              className="size-12 rounded-[4px] border object-cover"
+              className="size-12 shrink-0 rounded-[4px] border object-cover"
             />
-            <div>
+            <div className="">
               <Button
                 to={`/kits/${kit.id}`}
                 variant="link"
@@ -91,9 +95,7 @@ export default function KitRow({
                 onlyNewTabIconOnHover={true}
                 aria-label="Go to kit"
               >
-                <div className="max-w-[200px] truncate sm:max-w-[250px] md:max-w-[350px] lg:max-w-[450px]">
-                  {kit.name}
-                </div>
+                <div className="">{kit.name}</div>
               </Button>
               <div>
                 {isFinished ? (
@@ -106,21 +108,19 @@ export default function KitRow({
                 )}
               </div>
             </div>
-            <div className="ml-auto text-sm text-gray-600">
-              {assets.length} assets
-            </div>
           </div>
         </Td>
 
-        <When truthy={isOverlapping && !isInProgress} fallback={<Td> </Td>}>
-          <Td>
+        <Td>
+          <When truthy={isOverlapping && !isInProgress}>
             <AvailabilityBadge
               badgeText="Already booked"
               tooltipTitle="Kit is already booked"
               tooltipContent="This kit is already added to a booking that is overlapping the selected time period."
             />
-          </Td>
-        </When>
+          </When>
+          <div className="text-sm text-gray-600">{assets.length} assets</div>
+        </Td>
 
         <Td>
           <CategoryBadge category={kit.category} />
