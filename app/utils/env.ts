@@ -67,11 +67,16 @@ declare global {
 type EnvOptions = {
   isSecret?: boolean;
   isRequired?: boolean;
+  allowEmpty?: boolean;
 };
 
 function getEnv<K extends keyof NodeJS.ProcessEnv>(
   name: K,
-  { isRequired, isSecret }: EnvOptions = { isSecret: true, isRequired: true }
+  { isRequired, isSecret, allowEmpty }: EnvOptions = {
+    isSecret: true,
+    isRequired: true,
+    allowEmpty: false,
+  }
 ): NodeJS.ProcessEnv[K] {
   if (isBrowser && isSecret) return "";
 
@@ -79,12 +84,24 @@ function getEnv<K extends keyof NodeJS.ProcessEnv>(
 
   const value = (source as NodeJS.ProcessEnv)[name];
 
-  if (!value && isRequired) {
-    throw new ShelfError({
-      message: `${name} is not set`,
-      cause: null,
-      label: "Environment",
-    });
+  // If allowEmpty is true, only check for undefined/null
+  // Otherwise, keep current behavior (treats empty string as "not set")
+  if (allowEmpty) {
+    if ((value === undefined || value === null) && isRequired) {
+      throw new ShelfError({
+        message: `${name} is not set`,
+        cause: null,
+        label: "Environment",
+      });
+    }
+  } else {
+    if (!value && isRequired) {
+      throw new ShelfError({
+        message: `${name} is not set`,
+        cause: null,
+        label: "Environment",
+      });
+    }
   }
 
   return value as NodeJS.ProcessEnv[K] | undefined;
@@ -131,12 +148,12 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
   isSecret: true,
   isRequired: false,
 });
-export const SMTP_PWD = getEnv("SMTP_PWD");
+export const SMTP_PWD = getEnv("SMTP_PWD", { allowEmpty: true });
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_PORT = getEnv("SMTP_PORT", {
   isRequired: false,
 });
-export const SMTP_USER = getEnv("SMTP_USER");
+export const SMTP_USER = getEnv("SMTP_USER", { allowEmpty: true });
 export const SMTP_FROM = getEnv("SMTP_FROM", {
   isRequired: false,
 });
