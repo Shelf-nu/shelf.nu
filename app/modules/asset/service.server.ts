@@ -65,6 +65,7 @@ import {
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
+  formatInvalidNumericCustomFieldMessage,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -2177,18 +2178,86 @@ export async function createAssetsFromContentImport({
 
       const customFieldsValues: ShelfAssetCustomFieldValueType[] =
         Object.entries(asset).reduce((res, [key, val]) => {
-          if (key.startsWith("cf:") && val) {
-            const { name } = getDefinitionFromCsvHeader(key);
-            if (customFields[name].id) {
+          if (!key.startsWith("cf:")) {
+            return res;
+          }
+
+          if (
+            val === undefined ||
+            val === null ||
+            (typeof val === "string" && val.trim() === "")
+          ) {
+            return res;
+          }
+
+          const { name } = getDefinitionFromCsvHeader(key);
+          const definition = customFields[name];
+
+          if (!definition?.id) {
+            return res;
+          }
+
+          try {
+            const value = buildCustomFieldValue(
+              { raw: asset[key] },
+              definition
+            );
+
+            if (value) {
               res.push({
-                id: customFields[name].id,
-                value: buildCustomFieldValue(
-                  { raw: asset[key] },
-                  customFields[name]
-                ),
+                id: definition.id,
+                value,
               } as ShelfAssetCustomFieldValueType);
             }
+          } catch (error) {
+            const isNumericField =
+              definition.type === "AMOUNT" || definition.type === "NUMBER";
+
+            if (isNumericField) {
+              // If the error is already a ShelfError with a specific message from sanitizeNumericInput,
+              // enhance it with asset context. Otherwise, create a generic message.
+              let message: string;
+
+              if (isLikeShelfError(error)) {
+                // Check if asset context has already been added by checking additionalData
+                const hasAssetContext =
+                  error.additionalData && "assetKey" in error.additionalData;
+
+                if (hasAssetContext) {
+                  message = error.message;
+                } else {
+                  // Add asset context after the field name using regex to be precise
+                  message = error.message.replace(
+                    /^(Custom field '[^']+')(:)/,
+                    `$1 (asset: '${asset.title}')$2`
+                  );
+                }
+              } else {
+                message = formatInvalidNumericCustomFieldMessage(
+                  definition.name,
+                  asset[key],
+                  { assetTitle: asset.title }
+                );
+              }
+
+              throw new ShelfError({
+                cause: error,
+                label,
+                message,
+                additionalData: {
+                  assetKey: asset.key,
+                  customFieldId: definition.id,
+                  customFieldType: definition.type,
+                  rawValue: asset[key],
+                  ...(isLikeShelfError(error) && error.additionalData),
+                },
+                shouldBeCaptured: false,
+              });
+            }
+
+            throw error;
           }
+
           return res;
         }, [] as ShelfAssetCustomFieldValueType[]);
 
@@ -2296,6 +2365,37 @@ export async function createAssetsFromContentImport({
     return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
+    const rawConstraintMessage = (() => {
+      if (isShelfError && cause.cause instanceof Error) {
+        return cause.cause.message;
+      }
+
+      if (cause instanceof Error) {
+        return cause.message;
+      }
+
+      return undefined;
+    })();
+
+    if (
+      rawConstraintMessage &&
+      rawConstraintMessage.includes("AssetCustomFieldValue") &&
+      rawConstraintMessage.includes("ensure_value_structure_and_types")
+    ) {
+      throw new ShelfError({
+        cause,
+        label,
+        message:
+          "We were unable to save numeric custom field values. Please ensure AMOUNT and NUMBER fields use plain numbers without currency symbols or letters (e.g., 600.00).",
+        additionalData: {
+          userId,
+          organizationId,
+          ...(isShelfError && cause.additionalData),
+        },
+        shouldBeCaptured: false,
+      });
+    }
+
     throw new ShelfError({
       cause,
       message: isShelfError
