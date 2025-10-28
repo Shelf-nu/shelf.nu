@@ -156,7 +156,7 @@ export default function IndexLoginForm() {
             autoFocus={true}
             name={zo.fields.email()}
             type="email"
-            autoComplete="email"
+            autoComplete="username"
             disabled={disabled}
             inputClassName="w-full"
             error={zo.errors.email()?.message || data?.error.message}
@@ -167,7 +167,7 @@ export default function IndexLoginForm() {
           placeholder="**********"
           data-test-id="password"
           name={zo.fields.password()}
-          autoComplete="new-password"
+          autoComplete="current-password"
           disabled={disabled}
           inputClassName="w-full"
           error={zo.errors.password()?.message || data?.error.message}
