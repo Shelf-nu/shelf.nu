@@ -48,19 +48,19 @@ export function LinkDialog({
               onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 onHrefChange(event.target.value)
               }
-              className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-[16px] focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-200"
               placeholder="https://example.com"
             />
           </label>
         </div>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="gap-2">
           <AlertDialogCancel asChild>
             <Button variant="secondary" type="button">
               Cancel
             </Button>
           </AlertDialogCancel>
           <AlertDialogAction asChild>
-            <Button type="button" onClick={onApply}>
+            <Button type="button" onClick={onApply} className={"ml-0"}>
               Apply
             </Button>
           </AlertDialogAction>
