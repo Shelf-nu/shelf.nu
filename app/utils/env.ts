@@ -70,7 +70,7 @@ type EnvOptions = {
   allowEmpty?: boolean;
 };
 
-function getEnv<K extends keyof NodeJS.ProcessEnv>(
+export function getEnv<K extends keyof NodeJS.ProcessEnv>(
   name: K,
   { isRequired, isSecret, allowEmpty }: EnvOptions = {
     isSecret: true,
