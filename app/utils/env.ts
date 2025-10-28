@@ -72,11 +72,7 @@ type EnvOptions = {
 
 export function getEnv<K extends keyof NodeJS.ProcessEnv>(
   name: K,
-  { isRequired, isSecret, allowEmpty }: EnvOptions = {
-    isSecret: true,
-    isRequired: true,
-    allowEmpty: false,
-  }
+  { isRequired = true, isSecret = true, allowEmpty = false }: EnvOptions = {}
 ): NodeJS.ProcessEnv[K] {
   if (isBrowser && isSecret) return "";
 

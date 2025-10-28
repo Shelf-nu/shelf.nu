@@ -21,7 +21,7 @@ describe("getEnv", () => {
   describe("default behavior (isRequired=true, allowEmpty=false)", () => {
     it("should throw error when env var is not set", () => {
       // why: Explicitly stub as undefined to test missing var case
-      vi.stubEnv("ADMIN_EMAIL", undefined as any);
+      vi.stubEnv("ADMIN_EMAIL", undefined);
 
       expect(() => {
         getEnv("ADMIN_EMAIL");
@@ -47,13 +47,13 @@ describe("getEnv", () => {
 
   describe("with allowEmpty=true", () => {
     it("should throw error when env var is not set", () => {
-      // why: Use a var that's in the type but not exported as constant
-      vi.stubEnv("STRIPE_WEBHOOK_ENDPOINT_SECRET", undefined as any);
+      // why: Test that isRequired defaults to true even with partial options
+      vi.stubEnv("STRIPE_WEBHOOK_ENDPOINT_SECRET", undefined);
 
       expect(() => {
         getEnv("STRIPE_WEBHOOK_ENDPOINT_SECRET", {
           allowEmpty: true,
-          isRequired: true,
+          // Note: NOT passing isRequired - should default to true
         });
       }).toThrow(ShelfError);
     });
@@ -82,7 +82,7 @@ describe("getEnv", () => {
   describe("with isRequired=false", () => {
     it("should return undefined when env var is not set", () => {
       // why: Explicitly stub as undefined to test missing var case
-      vi.stubEnv("DIRECT_URL", undefined as any);
+      vi.stubEnv("DIRECT_URL", undefined);
 
       const result = getEnv("DIRECT_URL", { isRequired: false });
 
@@ -109,7 +109,7 @@ describe("getEnv", () => {
   describe("with allowEmpty=true and isRequired=false", () => {
     it("should return undefined when env var is not set", () => {
       // why: Explicitly stub as undefined to test missing var case
-      vi.stubEnv("SMTP_PORT", undefined as any);
+      vi.stubEnv("SMTP_PORT", undefined);
 
       const result = getEnv("SMTP_PORT", {
         isRequired: false,
@@ -144,14 +144,14 @@ describe("getEnv", () => {
 
   describe("SMTP credentials use case", () => {
     it("should throw error when required var with allowEmpty is missing", () => {
-      // why: Test the SMTP pattern - var must be present but can be empty
-      vi.stubEnv("DISABLE_SSO", undefined as any);
+      // why: Matches real usage - only passing allowEmpty, isRequired defaults
+      vi.stubEnv("DISABLE_SSO", undefined);
 
       expect(() => {
-        getEnv("DISABLE_SSO", { allowEmpty: true, isRequired: true });
+        getEnv("DISABLE_SSO", { allowEmpty: true });
       }).toThrow(ShelfError);
       expect(() => {
-        getEnv("DISABLE_SSO", { allowEmpty: true, isRequired: true });
+        getEnv("DISABLE_SSO", { allowEmpty: true });
       }).toThrow("DISABLE_SSO is not set");
     });
 
