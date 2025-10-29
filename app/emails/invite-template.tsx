@@ -89,6 +89,10 @@ export function InvitationEmailTemplate({
           >
             Accept the invite
           </Button>
+          <Text style={{ ...styles.p, margin: "16px 0" }}>
+            Or paste this link into your browser:{" "}
+            {`${SERVER_URL}/accept-invite/${invite.id}?token=${token}`}
+          </Text>
           <Text style={{ ...styles.p, marginBottom: "24px" }}>
             Once you’re done setting up your account, you'll be able to access
             the workspace and start exploring features like Asset Explorer,
