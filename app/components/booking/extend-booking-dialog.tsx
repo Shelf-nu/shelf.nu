@@ -129,6 +129,9 @@ export default function ExtendBookingDialog({
               />
 
               <When truthy={!!fetcher?.data?.error}>
+                <div className="text-sm text-error-500">
+                  {fetcher?.data?.error?.message}
+                </div>
                 {fetcher.data?.error?.additionalData?.clashingBookings && (
                   <ul className="mb-4 mt-1 list-inside list-disc pl-4">
                     {(

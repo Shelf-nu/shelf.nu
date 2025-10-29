@@ -3,6 +3,7 @@ import {
   AssetStatus,
   BookingStatus,
   KitStatus,
+  NoteType,
   OrganizationRoles,
 } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
@@ -24,6 +25,7 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -38,6 +40,11 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
+import {
+  wrapUserLinkForNote,
+  wrapCustodianForNote,
+  wrapLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -180,13 +187,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { id: custodianId, name: custodianName } = custodian;
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     // Validate that the custodian belongs to the same organization
     const custodianTeamMember = await getTeamMember({
       id: custodianId,
       organizationId,
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -219,11 +243,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    await Promise.all([
-      /**
-       * Assign custody to all assets of kit
-       */
-      ...kit.assets.map((asset) =>
+    // Update custody for all assets
+    await Promise.all(
+      kit.assets.map((asset) =>
         db.asset.update({
           where: { id: asset.id, organizationId },
           data: {
@@ -233,21 +255,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         })
-      ),
-      /**
-       * Create note for each asset
-       */
-      db.note.createMany({
-        data: kit.assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      }),
-    ]);
+      )
+    );
+
+    // Create notes for all assets using markdoc wrappers
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    const custodianDisplay = wrapCustodianForNote({
+      teamMember: custodianTeamMember,
+    });
+
+    const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
+
+    await createNotes({
+      content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
+      type: NoteType.UPDATE,
+      userId,
+      assetIds: kit.assets.map((asset) => asset.id),
+    });
 
     sendNotification({
       title: `‘${kit.name}’ is now in custody of ${custodianName}`,

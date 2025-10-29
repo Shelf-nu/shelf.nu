@@ -16,7 +16,7 @@ import {
 } from "mocks/user";
 import { db } from "~/database/db.server";
 
-import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
+import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
   createUserAccountForTesting,
   defaultUserCategories,
@@ -27,7 +27,7 @@ import { defaultFields } from "../asset-index-settings/helpers";
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
-// mock db
+// why: testing user account creation logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
@@ -270,9 +270,11 @@ describe(createUserAccountForTesting.name, () => {
           },
         },
       },
-      include: {
-        organizations: true,
-        ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+      select: {
+        organizations: {
+          select: { id: true },
+        },
+        ...USER_WITH_SSO_DETAILS_SELECT,
       },
     });
     expect(result).toEqual(authSession);

@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
+// why: testing location valuation aggregation logic without database dependency
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {

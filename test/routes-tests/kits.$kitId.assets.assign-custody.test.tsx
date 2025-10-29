@@ -54,6 +54,7 @@ vi.mock("~/modules/team-member/service.server", () => ({
 
 vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(),
+  createNotes: vi.fn(),
 }));
 
 vi.mock("~/utils/emitter/send-notification.server", () => ({
@@ -165,7 +166,18 @@ describe("kits/$kitId/assets/assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     expect(mockKitUpdate).not.toHaveBeenCalled();
@@ -181,6 +193,12 @@ describe("kits/$kitId/assets/assign-custody", () => {
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-456",
+      name: "Valid Team Member",
+      user: {
+        id: "user-456",
+        firstName: "Valid",
+        lastName: "Member",
+      },
     });
 
     mockKitUpdate.mockResolvedValue({
@@ -213,7 +231,18 @@ describe("kits/$kitId/assets/assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     expect(mockKitUpdate).toHaveBeenCalled();
@@ -229,6 +258,12 @@ describe("kits/$kitId/assets/assign-custody", () => {
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
+      name: "Other Team Member",
+      user: {
+        id: "other-user-456",
+        firstName: "Other",
+        lastName: "Member",
+      },
     });
 
     const formData = new FormData();
@@ -265,6 +300,12 @@ describe("kits/$kitId/assets/assign-custody", () => {
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
       userId: "user-123", // Same as current user
+      name: "Self User",
+      user: {
+        id: "user-123",
+        firstName: "Self",
+        lastName: "User",
+      },
     });
 
     mockKitUpdate.mockResolvedValue({

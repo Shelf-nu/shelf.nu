@@ -1,11 +1,11 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
-import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
+import type { NoteWithUser } from "~/components/assets/notes/note";
+import { Note } from "~/components/assets/notes/note";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { isFormProcessing } from "~/utils/form";
+import { BookingActionsDropdown } from "./actions-dropdown";
 import { NewBookingNote } from "./new";
-import type { BookingNoteWithDate } from "./note";
-import { BookingNote } from "./note";
 
 export const BookingNotes = () => {
   const { booking } = useLoaderData<typeof loader>();
@@ -16,7 +16,7 @@ export const BookingNotes = () => {
   const hasNotes = booking?.notes && booking?.notes.length > 0;
 
   /* Importing fetcher here in the parent file such that we can use fetcher's states to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
-  const fetcher = useFetcher();
+  const fetcher = useFetcher({ key: "add-note" });
   let onSubmissionContent = "";
   /* Getting the form data using fetcher and storing the content of form in onSubmissionContent Variable */
   if (fetcher.formData) {
@@ -25,29 +25,45 @@ export const BookingNotes = () => {
     }
   }
 
+  // Create optimistic note data that matches the NoteWithUser shape
+  const optimisticNote: NoteWithUser | null =
+    isFormProcessing(fetcher.state) && onSubmissionContent
+      ? {
+          id: "optimistic-note", // Temporary ID for optimistic UI
+          content: onSubmissionContent,
+          type: "COMMENT",
+          createdAt: new Date().toISOString(),
+          user: user
+            ? {
+                firstName: user.firstName || "",
+                lastName: user.lastName || "",
+              }
+            : undefined,
+        }
+      : null;
+
   return (
     <div>
       <NewBookingNote fetcher={fetcher} />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
-          {isFormProcessing(fetcher.state) ? (
-            <li className="note mb-2 rounded border bg-white md:mb-8">
-              <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
-                <div>
-                  <span className="commentator font-medium text-gray-900">
-                    {/* Here we just take the current user because this is just handling optimistic UI */}
-                    {user?.firstName} {user?.lastName}
-                  </span>{" "}
-                  <span className="text-gray-600">Just Now</span>
-                </div>
-              </header>
-              <div className="message px-3.5 py-3">
-                <MarkdownViewer content={onSubmissionContent} />
-              </div>
-            </li>
-          ) : null}
-          {(booking.notes as BookingNoteWithDate[]).map((note) => (
-            <BookingNote key={note.id} note={note} />
+          {/* Render optimistic note using the same Note component */}
+          {optimisticNote && (
+            <Note
+              key={optimisticNote.id}
+              note={optimisticNote}
+              actionsDropdown={
+                <BookingActionsDropdown noteId={optimisticNote.id} />
+              }
+            />
+          )}
+          {/* Render all existing notes */}
+          {(booking.notes as NoteWithUser[]).map((note) => (
+            <Note
+              key={note.id}
+              note={note}
+              actionsDropdown={<BookingActionsDropdown noteId={note.id} />}
+            />
           ))}
         </ul>
       ) : (

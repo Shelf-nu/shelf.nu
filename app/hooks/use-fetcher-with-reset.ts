@@ -6,7 +6,7 @@ export type FetcherWithComponentsReset<T> = FetcherWithComponents<T> & {
 };
 
 export default function useFetcherWithReset<T>() {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<T>();
   const [data, setData] = useState(fetcher.data);
 
   useEffect(() => {

@@ -86,9 +86,11 @@ export async function uploadFile(
     resizeOptions,
     generateThumbnail = false,
     thumbnailSize = 108, // Default thumbnail size
+    upsert = false,
   }: UploadOptions & {
     generateThumbnail?: boolean;
     thumbnailSize?: number;
+    upsert?: boolean;
   }
 ): Promise<string | { originalPath: string; thumbnailPath: string }> {
   try {
@@ -98,7 +100,7 @@ export async function uploadFile(
     // Upload original file
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
-      .upload(filename, file, { contentType });
+      .upload(filename, file, { contentType, upsert });
 
     if (error) {
       throw error;
@@ -166,6 +168,7 @@ export interface UploadOptions {
   filename: string;
   contentType: string;
   resizeOptions?: ResizeOptions;
+  upsert?: boolean;
 }
 
 export async function parseFileFormData({

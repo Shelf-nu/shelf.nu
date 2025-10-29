@@ -25,6 +25,7 @@ export type BulkQrDownloadLoaderData = {
     };
   }>;
   qrIdDisplayPreference: string;
+  showShelfBranding: boolean;
 };
 
 /**
@@ -99,6 +100,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       data({
         assets: assetsWithQrObj,
         qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+        showShelfBranding: currentOrganization.showShelfBranding,
       })
     );
   } catch (cause) {

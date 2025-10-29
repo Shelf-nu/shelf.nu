@@ -1,4 +1,9 @@
-import { TagUseFor } from "@prisma/client";
+import {
+  BookingStatus,
+  TagUseFor,
+  OrganizationRoles,
+  type Prisma,
+} from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -52,6 +57,7 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sortBookingAssets } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -75,6 +81,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -520,7 +527,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.update,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
-      "extend-booking": PermissionAction.update,
+      "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
     };
@@ -533,7 +540,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         action: intent2ActionMap[intent],
       });
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
@@ -674,10 +687,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
         });
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const bookingLink = wrapLinkForNote(
+          `/bookings/${booking.id}`,
+          booking.name
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
-            booking.name
-          }](/bookings/${booking.id})**.`,
+          content: `${actor} checked out asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
@@ -710,10 +730,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             specificAssetIds.length > 0 ? specificAssetIds : undefined,
         });
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const bookingLink = wrapLinkForNote(
+          `/bookings/${booking.id}`,
+          booking.name
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
-            booking.name
-          }](/bookings/${booking.id})**.`,
+          content: `${actor} checked in asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
@@ -747,10 +774,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * Practically they should not be able to even view/access another booking but this is just an extra security measure
            */
           const b = await getBooking({ id, organizationId, request });
-          if (b?.creatorId !== userId && b?.custodianUserId !== userId) {
+          validateBookingOwnership({
+            booking: b,
+            userId,
+            role,
+            action: "delete",
+          });
+
+          // BASE users can only delete DRAFT bookings
+          if (
+            role === OrganizationRoles.BASE &&
+            b.status !== BookingStatus.DRAFT
+          ) {
             throw new ShelfError({
               cause: null,
-              message: "You are not authorized to delete this booking",
+              message:
+                "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
               status: 403,
               label: "Booking",
             });
@@ -762,10 +801,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           getClientHint(request)
         );
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const deletedBookingLink = wrapLinkForNote(
+          `/bookings/${deletedBooking.id}`,
+          deletedBooking.name.trim()
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
-            deletedBooking.name
-          }**.`,
+          content: `${actor} deleted booking ${deletedBookingLink}.`,
           type: "UPDATE",
           userId: userId,
           assetIds: deletedBooking.assets.map((a) => a.id),
@@ -839,10 +885,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
         });
 
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        const cancelledBookingLink = wrapLinkForNote(
+          `/bookings/${cancelledBooking.id}`,
+          cancelledBooking.name.trim()
+        );
         await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
-            cancelledBooking.name
-          }](/bookings/${cancelledBooking.id})**.`,
+          content: `${actor} cancelled booking ${cancelledBookingLink}.`,
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
@@ -936,6 +989,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints,
           newEndDate,
           userId,
+          role,
         });
 
         sendNotification({

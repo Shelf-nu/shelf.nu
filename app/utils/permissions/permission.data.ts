@@ -11,6 +11,7 @@ export enum PermissionAction {
   import = "import",
   archive = "archive",
   cancel = "cancel",
+  extend = "extend",
   manageAssets = "manage-assets",
   custody = "custody",
   manageKits = "manage-kits",
@@ -100,6 +101,7 @@ export const Role2PermissionMap: {
       PermissionAction.manageAssets,
       PermissionAction.manageKits,
       PermissionAction.cancel,
+      PermissionAction.extend,
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [
@@ -155,6 +157,7 @@ export const Role2PermissionMap: {
       PermissionAction.manageAssets,
       PermissionAction.manageKits,
       PermissionAction.cancel,
+      PermissionAction.extend,
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [
@@ -265,6 +268,7 @@ export const Role2PermissionMap: {
       PermissionAction.manageAssets,
       PermissionAction.manageKits,
       PermissionAction.cancel,
+      PermissionAction.extend,
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [

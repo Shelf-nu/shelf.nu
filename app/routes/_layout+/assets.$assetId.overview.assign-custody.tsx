@@ -34,6 +34,10 @@ import {
   parseData,
 } from "~/utils/http.server";
 import {
+  wrapCustodianForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
@@ -157,7 +161,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     /** We send the data from the form as a json string, so we can easily have both the name and id
      * ID is used to connect the asset to the custodian
@@ -169,7 +179,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const custodianTeamMember = await getTeamMember({
       id: custodianId,
       organizationId,
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -180,6 +201,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         status: 404,
       });
     });
+
+    const custodianDisplayName =
+      custodianTeamMember.name?.trim() || custodianName.trim();
 
     if (isSelfService && custodianTeamMember.userId !== user.id) {
       throw new ShelfError({
@@ -207,13 +231,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
+        select: {
+          id: true,
+          title: true,
         },
       })
       .catch((cause) => {
@@ -227,17 +247,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
     /** Once the asset is updated, we create the note */
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    const custodianDisplay = wrapCustodianForNote({
+      teamMember: {
+        name: custodianDisplayName,
+        user: custodianTeamMember.user
+          ? {
+              id: custodianTeamMember.user.id,
+              firstName: custodianTeamMember.user.firstName,
+              lastName: custodianTeamMember.user.lastName,
+            }
+          : null,
+      },
+    });
+
+    const content = isSelfService
+      ? `${actor} took custody.`
+      : `${actor} assigned custody to ${custodianDisplay}.`;
+
     await createNote({
-      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
-        isSelfService ? "taken" : `given **${custodianName.trim()}**`
-      } custody over **${asset.title.trim()}**`,
+      content,
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
     });
 
     sendNotification({
-      title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+      title: `‘${asset.title}’ is now in custody of ${custodianDisplayName}`,
       message:
         "Remember, this asset will be unavailable until custody is manually released.",
       icon: { name: "success", variant: "success" },

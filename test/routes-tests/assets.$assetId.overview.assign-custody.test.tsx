@@ -30,6 +30,7 @@ const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
 
+// why: testing route handler without executing actual database operations
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
@@ -43,30 +44,37 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: testing authorization logic without executing actual permission checks
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: testing custody assignment without executing actual asset service operations
 vi.mock("~/modules/asset/service.server", () => ({
   getAsset: vi.fn(),
 }));
 
+// why: testing custody assignment without fetching actual user data
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
 }));
 
+// why: testing team member organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
 }));
 
+// why: testing custody assignment without creating actual notes
 vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(),
 }));
 
+// why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+// why: mocking redirect and json response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   return {
@@ -220,7 +228,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(mockAssetUpdate).toHaveBeenCalledWith({
       where: { id: "asset-123", organizationId: "org-1" },
       data: expect.any(Object),
-      include: expect.any(Object),
+      select: { id: true, title: true },
     });
     expect(createNoteMock).not.toHaveBeenCalled();
   });
@@ -262,7 +270,18 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     expect(mockAssetUpdate).not.toHaveBeenCalled();
@@ -311,7 +330,18 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     expect(mockAssetUpdate).toHaveBeenCalledWith({
@@ -324,7 +354,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
           },
         },
       }),
-      include: expect.any(Object),
+      select: { id: true, title: true },
     });
 
     expect(createNoteMock).toHaveBeenCalled();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import type { Asset, Booking, Category, Custody, Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -25,7 +25,7 @@ import {
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
@@ -75,7 +75,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -275,7 +275,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ];
     }
 
-    const user = await getUserByID(authSession.userId);
+    const user = await getUserByID(authSession.userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const booking = await db.booking
       .findUniqueOrThrow({
@@ -377,10 +383,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       /** We create notes for the newly added assets */
+      const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
       await createNotes({
-        content: `${wrapUserLinkForNote(user!)} added asset to booking **[${
-          b.name
-        }](/bookings/${b.id})**.`,
+        content: `${wrapUserLinkForNote(user!)} added asset to ${bookingLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetIds: newAssetIds,
@@ -508,6 +513,7 @@ export default function AddAssetsToNewBooking() {
     <Tabs
       className="flex h-full max-h-full flex-col"
       value="assets"
+      activationMode="manual"
       onValueChange={() => {
         if (hasUnsavedChanges) {
           setIsAlertOpen(true);
@@ -519,7 +525,17 @@ export default function AddAssetsToNewBooking() {
     >
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
-          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+          <TabsTrigger
+            className="flex-1 gap-x-2"
+            value="assets"
+            aria-label={`Assets tab${
+              selectedBulkItemsCount > 0
+                ? ` (${
+                    hasSelectedAllItems ? totalItems : selectedBulkItemsCount
+                  } selected)`
+                : ""
+            }`}
+          >
             Assets{" "}
             {selectedBulkItemsCount > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
@@ -527,7 +543,15 @@ export default function AddAssetsToNewBooking() {
               </GrayBadge>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+          <TabsTrigger
+            className="flex-1 gap-x-2"
+            value="kits"
+            aria-label={`Kits tab${
+              bookingKitIds.length > 0
+                ? ` (${bookingKitIds.length} selected)`
+                : ""
+            }`}
+          >
             Kits
             {bookingKitIds.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
@@ -709,7 +733,7 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>

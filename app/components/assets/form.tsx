@@ -1,12 +1,6 @@
 import { useRef } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
-import {
-  Link,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-  useParams,
-} from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
@@ -31,6 +25,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -72,6 +67,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
+  redirectTo: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -94,6 +90,7 @@ type Props = Partial<
   qrId?: Qr["id"] | null;
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
+  referer?: string | null;
 };
 
 export const AssetForm = ({
@@ -110,6 +107,7 @@ export const AssetForm = ({
   qrId,
   tags,
   barcodes,
+  referer,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -182,6 +180,10 @@ export const AssetForm = ({
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
+        <RefererRedirectInput
+          fieldName={zo.fields.redirectTo()}
+          referer={referer}
+        />
 
         <div className="flex items-start justify-between border-b pb-5">
           <div className=" ">
@@ -189,7 +191,7 @@ export const AssetForm = ({
             <p>Basic information about your asset.</p>
           </div>
           <div className="hidden flex-1 justify-end gap-2 md:flex">
-            <Actions disabled={disabled} />
+            <Actions disabled={disabled} referer={referer} />
           </div>
         </div>
 
@@ -333,7 +335,15 @@ export const AssetForm = ({
           subHeading={
             <p>
               Make it unique. Each asset can have 1 category. It will show on
-              your index.
+              your index.{" "}
+              <Button
+                to="/categories/new"
+                variant="link-gray"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create categories
+              </Button>
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -371,9 +381,14 @@ export const AssetForm = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Link to="/tags/new" className="text-gray-600 underline">
+              <Button
+                to="/tags/new"
+                className="text-gray-600 underline"
+                target="_blank"
+                variant="link-gray"
+              >
                 Create tags
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -392,9 +407,14 @@ export const AssetForm = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link to="/locations/new" className="text-gray-600 underline">
+              <Button
+                to="/locations/new"
+                className="text-gray-600 underline"
+                target="_blank"
+                variant="link-gray"
+              >
                 Create locations
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -528,7 +548,7 @@ export const AssetForm = ({
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="flex flex-1 justify-end gap-2">
-            <Actions disabled={disabled} />
+            <Actions disabled={disabled} referer={referer} />
           </div>
         </FormRow>
       </Form>
@@ -536,28 +556,26 @@ export const AssetForm = ({
   );
 };
 
-const Actions = ({ disabled }: { disabled: boolean }) => {
-  const { assetId } = useParams<{ assetId?: string }>();
-
-  return (
-    <>
-      <ButtonGroup>
-        <Button
-          to={assetId ? `/assets/${assetId}/overview` : ".."}
-          variant="secondary"
-          disabled={disabled}
-        >
-          Cancel
-        </Button>
-        <AddAnother disabled={disabled} />
-      </ButtonGroup>
-
-      <Button type="submit" disabled={disabled}>
-        Save
+const Actions = ({
+  disabled,
+  referer,
+}: {
+  disabled: boolean;
+  referer?: string | null;
+}) => (
+  <>
+    <ButtonGroup>
+      <Button to={referer} variant="secondary" disabled={disabled}>
+        Cancel
       </Button>
-    </>
-  );
-};
+      <AddAnother disabled={disabled} />
+    </ButtonGroup>
+
+    <Button type="submit" disabled={disabled}>
+      Save
+    </Button>
+  </>
+);
 
 const AddAnother = ({ disabled }: { disabled: boolean }) => (
   <TooltipProvider delayDuration={100}>

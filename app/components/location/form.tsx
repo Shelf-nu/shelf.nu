@@ -13,6 +13,7 @@ import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
@@ -25,6 +26,7 @@ export const NewLocationFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
+  redirectTo: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -32,9 +34,15 @@ interface Props {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
+  referer?: string | null;
 }
 
-export const LocationForm = ({ name, address, description }: Props) => {
+export const LocationForm = ({
+  name,
+  address,
+  description,
+  referer,
+}: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -54,6 +62,10 @@ export const LocationForm = ({ name, address, description }: Props) => {
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
       >
+        <RefererRedirectInput
+          fieldName={zo.fields.redirectTo()}
+          referer={referer}
+        />
         <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px] pt-0"

@@ -1,4 +1,5 @@
-import { OrganizationType, type Organization } from "@prisma/client";
+import type { Prisma, Organization } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -30,6 +31,21 @@ export const canExportAssets = (
   if (!premiumIsEnabled) return true;
   if (tierLimit?.canExportAssets === null) return false;
   return tierLimit?.canExportAssets || false;
+};
+
+/**
+ * Determines whether the current organization's tier allows hiding Shelf
+ * branding on printable labels.
+ *
+ * @param tierLimit - The tier limits associated with the organization.
+ * @returns `true` if branding can be hidden or premium features are disabled.
+ */
+export const canHideShelfBranding = (
+  tierLimit: { canHideShelfBranding: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canHideShelfBranding;
 };
 
 export async function assertUserCanExportAssets({
@@ -280,15 +296,18 @@ export const canCreateMoreOrganizations = ({
 export async function assertUserCanCreateMoreOrganizations(userId: string) {
   const [user, tierLimit] = await Promise.all([
     await getUserByID(userId, {
-      userOrganizations: {
-        include: {
-          organization: {
-            select: {
-              userId: true,
+      select: {
+        id: true,
+        userOrganizations: {
+          include: {
+            organization: {
+              select: {
+                userId: true,
+              },
             },
           },
         },
-      },
+      } satisfies Prisma.UserSelect,
     }),
     getUserTierLimit(userId),
   ]);

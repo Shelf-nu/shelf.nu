@@ -11,6 +11,14 @@ import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
 
+const RawBlockComponent = ({ raw }: { raw: string }) => (
+  <div className="raw-block rounded border border-dashed border-gray-300 bg-gray-50">
+    <pre className="overflow-x-auto whitespace-pre-wrap p-3 font-mono text-xs text-gray-700">
+      {raw}
+    </pre>
+  </div>
+);
+
 /**
  * MarkdownViewer that supports both string content and RenderableTreeNodes
  *
@@ -34,6 +42,7 @@ const defaultComponents = {
   LinkComponent,
   BookingStatusComponent,
   DescriptionComponent,
+  RawBlock: RawBlockComponent,
 };
 
 export const MarkdownViewer = ({
@@ -42,7 +51,7 @@ export const MarkdownViewer = ({
   pre,
   className,
 }: Props) => {
-  const styles = tw("markdown-viewer", className);
+  const styles = tw("pm-doc", className);
 
   // Merge custom components with defaults
   const allComponents = { ...defaultComponents, ...components };

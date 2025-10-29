@@ -65,6 +65,7 @@ import {
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
+  formatInvalidNumericCustomFieldMessage,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -81,8 +82,12 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapUserLinkForNote,
+  wrapCustodianForNote,
+} from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
@@ -92,8 +97,10 @@ import {
 } from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
 import {
+  CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
   assetQueryJoins,
   assetReturnFragment,
@@ -113,7 +120,6 @@ import type {
 } from "./types";
 import {
   formatAssetsRemindersDates,
-  getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
@@ -523,11 +529,13 @@ export async function getAssets(params: {
           {
             customFields: {
               some: {
-                value: {
-                  path: ["valueText"],
-                  string_contains: term,
-                  mode: "insensitive",
-                },
+                OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                  value: {
+                    path: [jsonPath],
+                    string_contains: term,
+                    mode: "insensitive",
+                  },
+                })),
               },
             },
           },
@@ -1344,7 +1352,6 @@ export async function updateAsset({
         newLocation,
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
-        assetName: asset?.title,
         assetId: asset.id,
         userId,
         isRemoving: newLocationId === null,
@@ -1369,6 +1376,8 @@ export async function updateAsset({
           db.customField.findMany({
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+              active: true,
+              deletedAt: null,
             },
             select: { id: true, name: true, type: true },
           }),
@@ -1390,7 +1399,6 @@ export async function updateAsset({
               newValue: change.newValue,
               firstName: user?.firstName || "",
               lastName: user?.lastName || "",
-              assetName: asset.title,
               assetId: asset.id,
               userId,
               isFirstTimeSet: change.isFirstTimeSet,
@@ -1727,9 +1735,7 @@ export async function duplicateAsset({
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
         ...payload,
-        title: `${asset.title} (copy ${
-          amountOfDuplicates > 1 ? i : ""
-        } ${Date.now()})`,
+        title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i + 1 : ""})`,
         customFieldsValues: extractedCustomFieldValues,
       });
 
@@ -1981,7 +1987,6 @@ export async function createCustomFieldChangeNote({
   newValue,
   firstName,
   lastName,
-  assetName,
   assetId,
   userId,
   isFirstTimeSet,
@@ -1991,7 +1996,6 @@ export async function createCustomFieldChangeNote({
   newValue?: string | null;
   firstName: string;
   lastName: string;
-  assetName: Asset["title"];
   assetId: Asset["id"];
   userId: User["id"];
   isFirstTimeSet: boolean;
@@ -2001,9 +2005,9 @@ export async function createCustomFieldChangeNote({
       customFieldName,
       previousValue,
       newValue,
+      userId,
       firstName,
       lastName,
-      assetName,
       isFirstTimeSet,
     });
 
@@ -2174,18 +2178,86 @@ export async function createAssetsFromContentImport({
 
       const customFieldsValues: ShelfAssetCustomFieldValueType[] =
         Object.entries(asset).reduce((res, [key, val]) => {
-          if (key.startsWith("cf:") && val) {
-            const { name } = getDefinitionFromCsvHeader(key);
-            if (customFields[name].id) {
+          if (!key.startsWith("cf:")) {
+            return res;
+          }
+
+          if (
+            val === undefined ||
+            val === null ||
+            (typeof val === "string" && val.trim() === "")
+          ) {
+            return res;
+          }
+
+          const { name } = getDefinitionFromCsvHeader(key);
+          const definition = customFields[name];
+
+          if (!definition?.id) {
+            return res;
+          }
+
+          try {
+            const value = buildCustomFieldValue(
+              { raw: asset[key] },
+              definition
+            );
+
+            if (value) {
               res.push({
-                id: customFields[name].id,
-                value: buildCustomFieldValue(
-                  { raw: asset[key] },
-                  customFields[name]
-                ),
+                id: definition.id,
+                value,
               } as ShelfAssetCustomFieldValueType);
             }
+          } catch (error) {
+            const isNumericField =
+              definition.type === "AMOUNT" || definition.type === "NUMBER";
+
+            if (isNumericField) {
+              // If the error is already a ShelfError with a specific message from sanitizeNumericInput,
+              // enhance it with asset context. Otherwise, create a generic message.
+              let message: string;
+
+              if (isLikeShelfError(error)) {
+                // Check if asset context has already been added by checking additionalData
+                const hasAssetContext =
+                  error.additionalData && "assetKey" in error.additionalData;
+
+                if (hasAssetContext) {
+                  message = error.message;
+                } else {
+                  // Add asset context after the field name using regex to be precise
+                  message = error.message.replace(
+                    /^(Custom field '[^']+')(:)/,
+                    `$1 (asset: '${asset.title}')$2`
+                  );
+                }
+              } else {
+                message = formatInvalidNumericCustomFieldMessage(
+                  definition.name,
+                  asset[key],
+                  { assetTitle: asset.title }
+                );
+              }
+
+              throw new ShelfError({
+                cause: error,
+                label,
+                message,
+                additionalData: {
+                  assetKey: asset.key,
+                  customFieldId: definition.id,
+                  customFieldType: definition.type,
+                  rawValue: asset[key],
+                  ...(isLikeShelfError(error) && error.additionalData),
+                },
+                shouldBeCaptured: false,
+              });
+            }
+
+            throw error;
           }
+
           return res;
         }, [] as ShelfAssetCustomFieldValueType[]);
 
@@ -2293,6 +2365,37 @@ export async function createAssetsFromContentImport({
     return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
+    const rawConstraintMessage = (() => {
+      if (isShelfError && cause.cause instanceof Error) {
+        return cause.cause.message;
+      }
+
+      if (cause instanceof Error) {
+        return cause.message;
+      }
+
+      return undefined;
+    })();
+
+    if (
+      rawConstraintMessage &&
+      rawConstraintMessage.includes("AssetCustomFieldValue") &&
+      rawConstraintMessage.includes("ensure_value_structure_and_types")
+    ) {
+      throw new ShelfError({
+        cause,
+        label,
+        message:
+          "We were unable to save numeric custom field values. Please ensure AMOUNT and NUMBER fields use plain numbers without currency symbols or letters (e.g., 600.00).",
+        additionalData: {
+          userId,
+          organizationId,
+          ...(isShelfError && cause.additionalData),
+        },
+        shouldBeCaptured: false,
+      });
+    }
+
     throw new ShelfError({
       cause,
       message: isShelfError
@@ -2752,25 +2855,31 @@ export async function bulkDeleteAssets({
   organizationId,
   userId,
   currentSearchParams,
+  settings,
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /**
      * We have to remove the images of assets so we have to make this query first
      */
     const assets = await db.asset.findMany({
-      where,
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+      },
       select: { id: true, mainImage: true },
     });
 
@@ -2820,6 +2929,7 @@ export async function bulkCheckOutAssets({
   custodianName,
   organizationId,
   currentSearchParams,
+  settings,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -2827,24 +2937,48 @@ export async function bulkCheckOutAssets({
   custodianName: TeamMember["name"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user] = await Promise.all([
+    const [assets, user, custodianTeamMember] = await Promise.all([
       db.asset.findMany({
-        where,
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
         select: { id: true, title: true, status: true },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+      db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: {
+          name: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+      }),
     ]);
 
     const assetsNotAvailable = assets.some(
@@ -2883,9 +3017,19 @@ export async function bulkCheckOutAssets({
       });
 
       /** Creating notes for the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+
+      const custodianDisplay = custodianTeamMember
+        ? wrapCustodianForNote({ teamMember: custodianTeamMember })
+        : `**${custodianName.trim()}**`;
+
       await tx.note.createMany({
         data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: `${actor} granted ${custodianDisplay} custody.`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -2914,26 +3058,32 @@ export async function bulkCheckInAssets({
   assetIds,
   organizationId,
   currentSearchParams,
+  settings,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where,
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
         select: {
           id: true,
           title: true,
@@ -2942,7 +3092,13 @@ export async function bulkCheckInAssets({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     const hasAssetsWithoutCustody = assets.some((asset) => !asset.custody);
@@ -3027,25 +3183,31 @@ export async function bulkUpdateAssetLocation({
   organizationId,
   newLocationId,
   currentSearchParams,
+  settings,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where,
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
         select: {
           id: true,
           title: true,
@@ -3053,7 +3215,13 @@ export async function bulkUpdateAssetLocation({
           kit: { select: { id: true, name: true } },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     // Check if any assets belong to kits and prevent bulk location updates
@@ -3098,9 +3266,9 @@ export async function bulkUpdateAssetLocation({
           const content = getLocationUpdateNoteContent({
             currentLocation: asset.location,
             newLocation,
+            userId,
             firstName: user?.firstName ?? "",
             lastName: user?.lastName ?? "",
-            assetName: asset.title,
             isRemoving,
           });
 
@@ -3135,23 +3303,29 @@ export async function bulkUpdateAssetCategory({
   organizationId,
   categoryId,
   currentSearchParams,
+  settings,
 }: {
   userId: string;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /**
-     * If we are selecting all assets in list then we have to consider other filters too
-     */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
     await db.asset.updateMany({
-      where,
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+      },
       data: {
         /** If nothing is selected then we have to remove the relation and set category to null */
         categoryId: !categoryId ? null : categoryId,
@@ -3176,6 +3350,7 @@ export async function bulkAssignAssetTags({
   tagsIds,
   currentSearchParams,
   remove,
+  settings,
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -3183,20 +3358,18 @@ export async function bulkAssignAssetTags({
   tagsIds: string[];
   currentSearchParams?: string | null;
   remove: boolean;
+  settings: AssetIndexSettings;
 }) {
   try {
-    const shouldUpdateAll = assetIds.includes(ALL_SELECTED_KEY);
-    let _assetIds = assetIds;
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
-    if (shouldUpdateAll) {
-      const allOrgAssetIds = await db.asset.findMany({
-        where: getAssetsWhereInput({ organizationId, currentSearchParams }),
-        select: { id: true },
-      });
-      _assetIds = allOrgAssetIds.map((a) => a.id);
-    }
-
-    const updatePromises = _assetIds.map((id) =>
+    const updatePromises = resolvedIds.map((id) =>
       db.asset.update({
         where: { id, organizationId },
         data: {
@@ -3229,21 +3402,28 @@ export async function bulkMarkAvailability({
   assetIds,
   type,
   currentSearchParams,
+  settings,
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
 }) {
   try {
-    /* If we are selecting all assets in list then we have to consider other filters too */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
-      ? getAssetsWhereInput({ organizationId, currentSearchParams })
-      : { id: { in: assetIds }, organizationId };
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+    });
 
+    // Simple, consistent where clause
     await db.asset.updateMany({
       where: {
-        ...where,
+        id: { in: resolvedIds },
+        organizationId,
         availableToBook: type === "unavailable",
       },
       data: { availableToBook: type === "available" },
@@ -3273,7 +3453,13 @@ export async function relinkQrCode({
 }) {
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),
-    getUserByID(userId),
+    getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    }),
     db.asset.findFirst({
       where: { id: assetId, organizationId },
       select: { qrCodes: { select: { id: true } } },
@@ -3321,9 +3507,13 @@ export async function relinkQrCode({
       assetId,
       userId,
       type: "UPDATE",
-      content: `**${user.firstName?.trim()}** has changed QR code ${
+      content: `${wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })} changed QR code ${
         oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**`,
+      } to **${qrId}**.`,
     }),
   ]);
 }

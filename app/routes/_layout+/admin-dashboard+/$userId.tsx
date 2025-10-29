@@ -6,6 +6,8 @@ import {
   type User,
   type CustomTierLimit,
   OrganizationRoles,
+  type UserBusinessIntel,
+  type Prisma,
 } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -26,8 +28,10 @@ import { Spinner } from "~/components/shared/spinner";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -66,23 +70,56 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     z.object({ userId: z.string() }),
     { additionalData: { userId } }
   );
+  const premiumIsEnabled = config.enablePremiumFeatures;
 
   try {
     await requireAdmin(userId);
 
     const user = await getUserByID(shelfUserId, {
-      qrCodes: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          asset: {
-            select: {
-              title: true,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        profilePicture: true,
+        createdAt: true,
+        updatedAt: true,
+        tierId: true,
+        skipSubscriptionCheck: true,
+        customerId: true,
+        usedFreeTrial: true,
+        sso: true,
+        customTierLimit: {
+          select: {
+            maxOrganizations: true,
+            isEnterprise: true,
+          },
+        },
+        qrCodes: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            createdAt: true,
+            asset: {
+              select: {
+                title: true,
+              },
             },
           },
         },
-      },
-      customTierLimit: true,
-      businessIntel: true,
+        businessIntel: {
+          select: {
+            howDidYouHearAboutUs: true,
+            jobTitle: true,
+            teamSize: true,
+            companyName: true,
+            primaryUseCase: true,
+            currentSolution: true,
+            timeline: true,
+          },
+        },
+      } satisfies Prisma.UserSelect,
     });
 
     const userOrganizations = await db.userOrganization
@@ -157,9 +194,11 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     );
 
     /** Get the Stripe customer */
-    const customer = (await getStripeCustomer(
-      await getOrCreateCustomerId(user)
-    )) as CustomerWithSubscriptions;
+    const customer = premiumIsEnabled
+      ? ((await getStripeCustomer(
+          await getOrCreateCustomerId(user)
+        )) as CustomerWithSubscriptions)
+      : null;
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
@@ -170,6 +209,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         ssoUsersByDomain,
         customer,
         prices,
+        premiumIsEnabled,
       })
     );
   } catch (cause) {
@@ -220,7 +260,18 @@ export const action = async ({
           })
         );
 
+        // Get current tier before updating
+        const currentUser = await db.user.findUniqueOrThrow({
+          where: { id: shelfUserId },
+          select: { tierId: true },
+        });
+
         const user = await updateUserTierId(shelfUserId, tierId);
+
+        // Reset personal workspace branding when downgrading from Plus to Free
+        if (currentUser.tierId === TierId.tier_1 && tierId === TierId.free) {
+          await resetPersonalWorkspaceBranding(shelfUserId);
+        }
 
         sendNotification({
           title: "Tier updated",
@@ -271,7 +322,14 @@ export const action = async ({
           return json(data({ success: true }));
         }
       case "createCustomerId": {
-        const user = await getUserByID(shelfUserId);
+        const user = await getUserByID(shelfUserId, {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         await createStripeCustomer({
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
@@ -290,6 +348,7 @@ export const action = async ({
         await db.user.update({
           where: { id: shelfUserId },
           data: { skipSubscriptionCheck },
+          select: { id: true },
         });
 
         sendNotification({
@@ -315,19 +374,35 @@ export default function Area51UserPage() {
   // Get the loader data type
   type LoaderData = SerializeFrom<typeof loader>;
 
-  const { user, organizations, ssoUsersByDomain, customer, prices } =
-    useLoaderData<LoaderData>();
+  const {
+    user,
+    organizations,
+    ssoUsersByDomain,
+    customer,
+    prices,
+    premiumIsEnabled,
+  } = useLoaderData<LoaderData>();
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
   type User = NonNullable<LoaderData["user"]>;
-  type BusinessIntel = NonNullable<User["businessIntel"]>;
+  type BusinessIntel = Pick<
+    UserBusinessIntel,
+    | "howDidYouHearAboutUs"
+    | "jobTitle"
+    | "teamSize"
+    | "companyName"
+    | "primaryUseCase"
+    | "currentSolution"
+    | "timeline"
+  >;
 
   const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
     switch (key) {
       case "tierId":
         return <TierUpdateForm tierId={user.tierId} />;
       case "customerId":
+        if (!premiumIsEnabled) return null;
         return !value ? (
           <Form className="inline-block" method="POST">
             <input type="hidden" name="intent" value="createCustomerId" />
@@ -373,12 +448,7 @@ export default function Area51UserPage() {
 
     return value;
   };
-  const businessIntelExcludedFields = new Set<keyof BusinessIntel>([
-    "id",
-    "userId",
-    "createdAt",
-    "updatedAt",
-  ]);
+
   const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
@@ -413,21 +483,14 @@ export default function Area51UserPage() {
               <div className="mt-6">
                 <h4 className="font-semibold">Business intel</h4>
                 <ul className="mt-2 space-y-1">
-                  {Object.entries(user.businessIntel)
-                    .filter(
-                      ([key]) =>
-                        !businessIntelExcludedFields.has(
-                          key as keyof BusinessIntel
-                        )
-                    )
-                    .map(([key, value]) => (
-                      <li key={key}>
-                        <span className="font-semibold">{key}</span>:{" "}
-                        {renderBusinessIntelValue(
-                          value as BusinessIntel[keyof BusinessIntel]
-                        )}
-                      </li>
-                    ))}
+                  {Object.entries(user.businessIntel).map(([key, value]) => (
+                    <li key={key}>
+                      <span className="font-semibold">{key}</span>:{" "}
+                      {renderBusinessIntelValue(
+                        value as BusinessIntel[keyof BusinessIntel]
+                      )}
+                    </li>
+                  ))}
                 </ul>
               </div>
             ) : null}

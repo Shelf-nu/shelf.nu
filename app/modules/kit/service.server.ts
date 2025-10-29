@@ -1,5 +1,6 @@
 import type {
   Asset,
+  AssetIndexSettings,
   Barcode,
   Booking,
   Kit,
@@ -15,6 +16,7 @@ import {
   BookingStatus,
   ErrorCorrection,
   KitStatus,
+  NoteType,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import invariant from "tiny-invariant";
@@ -41,9 +43,13 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapCustodianForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import { resolveTeamMemberName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
 import {
@@ -52,14 +58,18 @@ import {
   KITS_INCLUDE_FIELDS,
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
+import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
-import { createBulkKitChangeNotes, createNote } from "../note/service.server";
+import {
+  createBulkKitChangeNotes,
+  createNote,
+  createNotes,
+} from "../note/service.server";
 import { getQr } from "../qr/service.server";
-
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -738,16 +748,36 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId, organizationId },
-      select: {
-        id: true,
-        name: true,
-        assets: true,
-        createdBy: { select: { firstName: true, lastName: true } },
-        custody: { select: { custodian: true } },
-      },
+    const [kit, actor] = await Promise.all([
+      db.kit.findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true, title: true } },
+          createdBy: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+          custody: { select: { custodian: { include: { user: true } } } },
+        },
+      }),
+      getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+    ]);
+
+    const actorLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: actor?.firstName,
+      lastName: actor?.lastName,
     });
+    const custodianDisplay = kit.custody?.custodian
+      ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
+      : "**Unknown Custodian**";
+    const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
     await Promise.all([
       db.kit.update({
@@ -766,18 +796,12 @@ export async function releaseCustody({
           },
         })
       ),
-      ...kit.assets.map((asset) =>
-        createNote({
-          content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
-            .custody?.custodian
-            .name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })
-      ),
+      createNotes({
+        content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
+        type: "UPDATE",
+        userId,
+        assetIds: kit.assets.map((asset) => asset.id),
+      }),
     ]);
 
     return kit;
@@ -1015,7 +1039,7 @@ export async function bulkAssignKitCustody({
     /**
      * We have to make notes and assign custody to all assets of a kit so we have to make this query
      */
-    const [kits, user] = await Promise.all([
+    const [kits, user, custodianTeamMember] = await Promise.all([
       db.kit.findMany({
         where,
         select: {
@@ -1032,7 +1056,21 @@ export async function bulkAssignKitCustody({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+      db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: {
+          id: true,
+          name: true,
+          user: { select: { id: true, firstName: true, lastName: true } },
+        },
+      }),
     ]);
 
     const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
@@ -1097,14 +1135,26 @@ export async function bulkAssignKitCustody({
       });
 
       /** Creating notes for all the assets of the kit */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const custodianDisplay = custodianTeamMember
+        ? wrapCustodianForNote({ teamMember: custodianTeamMember })
+        : `**${custodianName.trim()}**`;
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${asset
-            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: allAssetsOfAllKits.map((asset) => {
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} granted ${custodianDisplay} custody via kit assignment ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
   } catch (cause) {
@@ -1154,7 +1204,9 @@ export async function bulkReleaseKitCustody({
         select: {
           id: true,
           status: true,
-          custody: { select: { id: true, custodian: true } },
+          custody: {
+            select: { id: true, custodian: { include: { user: true } } },
+          },
           assets: {
             select: {
               id: true,
@@ -1166,7 +1218,13 @@ export async function bulkReleaseKitCustody({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     const custodian = kits[0].custody?.custodian;
@@ -1223,14 +1281,26 @@ export async function bulkReleaseKitCustody({
       });
 
       /** Creating notes for all the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const custodianDisplay = custodian
+        ? wrapCustodianForNote({ teamMember: custodian })
+        : "**Unknown Custodian**";
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${asset
-            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: allAssetsOfAllKits.map((asset) => {
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} released ${custodianDisplay}'s custody via kit assignment ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
   } catch (cause) {
@@ -1452,7 +1522,13 @@ export async function updateKitLocation({
 
       // Add notes to assets about location update via parent kit
       if (userId && assetIds.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const location = await db.location.findUnique({
           where: { id: newLocationId },
           select: { name: true, id: true },
@@ -1465,9 +1541,9 @@ export async function updateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location, // Use the asset's current location
                 newLocation: location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetName: asset.title,
                 isRemoving: false,
               }),
               type: "UPDATE",
@@ -1493,7 +1569,13 @@ export async function updateKitLocation({
 
       // Add notes to assets about location removal via parent kit
       if (userId && assetIds.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const currentLocation = await db.location.findUnique({
           where: { id: currentLocationId },
           select: { name: true, id: true },
@@ -1506,9 +1588,9 @@ export async function updateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: currentLocation,
                 newLocation: null,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetName: asset.title,
                 isRemoving: true,
               }),
               type: "UPDATE",
@@ -1590,7 +1672,13 @@ export async function bulkUpdateKitLocation({
 
       // Create notes for affected assets
       if (allAssets.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         const location = await db.location.findUnique({
           where: { id: newLocationId },
           select: { name: true, id: true },
@@ -1603,9 +1691,9 @@ export async function bulkUpdateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location,
                 newLocation: location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetName: asset.title,
                 isRemoving: false,
               }),
               type: "UPDATE",
@@ -1626,7 +1714,13 @@ export async function bulkUpdateKitLocation({
 
       // Also remove location from assets and create notes
       if (allAssets.length > 0) {
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
 
         await db.asset.updateMany({
           where: {
@@ -1644,9 +1738,9 @@ export async function bulkUpdateKitLocation({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location,
                 newLocation: null,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetName: asset.title,
                 isRemoving: true,
               }),
               type: "UPDATE",
@@ -1684,7 +1778,18 @@ export async function updateKitAssets({
   addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
 
     const kit = await db.kit
       .findUniqueOrThrow({
@@ -1707,6 +1812,7 @@ export async function updateKitAssets({
                   name: true,
                   user: {
                     select: {
+                      id: true,
                       email: true,
                       firstName: true,
                       lastName: true,
@@ -1728,6 +1834,10 @@ export async function updateKitAssets({
           label: "Kit",
         });
       });
+
+    const kitCustodianDisplay = kit.custody?.custodian
+      ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
+      : undefined;
 
     const removedAssets = kit.assets.filter(
       (asset) => !assetIds.includes(asset.id)
@@ -1846,16 +1956,22 @@ export async function updateKitAssets({
         });
 
         // Create notes for assets that had their location changed
-        const user = await getUserByID(userId);
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         await Promise.all(
           newlyAddedAssets.map((asset) =>
             createNote({
               content: getKitLocationUpdateNoteContent({
                 currentLocation: asset.location,
                 newLocation: kit.location,
+                userId,
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
-                assetName: asset.title,
                 isRemoving: false,
               }),
               type: "UPDATE",
@@ -1877,16 +1993,22 @@ export async function updateKitAssets({
           });
 
           // Create notes for assets that had their location removed
-          const user = await getUserByID(userId);
+          const user = await getUserByID(userId, {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            } satisfies Prisma.UserSelect,
+          });
           await Promise.all(
             assetsWithLocation.map((asset) =>
               createNote({
                 content: getKitLocationUpdateNoteContent({
                   currentLocation: asset.location,
                   newLocation: null,
+                  userId,
                   firstName: user?.firstName ?? "",
                   lastName: user?.lastName ?? "",
-                  assetName: asset.title,
                   isRemoving: true,
                 }),
                 type: "UPDATE",
@@ -1911,8 +2033,9 @@ export async function updateKitAssets({
       kit.custody.custodian.id &&
       assetsToInheritStatus.length > 0
     ) {
-      await Promise.all([
-        ...assetsToInheritStatus.map((asset) =>
+      // Update custody for all assets to inherit kit's custody
+      await Promise.all(
+        assetsToInheritStatus.map((asset) =>
           db.asset.update({
             where: { id: asset.id, organizationId },
             data: {
@@ -1924,18 +2047,17 @@ export async function updateKitAssets({
               },
             },
           })
-        ),
-        db.note.createMany({
-          data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
-        }),
-      ]);
+        )
+      );
+
+      // Create notes for all assets that inherited custody
+      const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+      await createNotes({
+        content: `${actor} granted ${custodianDisplay} custody.`,
+        type: NoteType.UPDATE,
+        userId,
+        assetIds: assetsToInheritStatus.map((asset) => asset.id),
+      });
     }
 
     /**
@@ -1944,6 +2066,7 @@ export async function updateKitAssets({
      * Only apply this when not in addOnly mode
      */
     if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
+      const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       await Promise.all([
         db.custody.deleteMany({
           where: { assetId: { in: removedAssets.map((a) => a.id) } },
@@ -1952,15 +2075,11 @@ export async function updateKitAssets({
           where: { id: { in: removedAssets.map((a) => a.id) }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
-        db.note.createMany({
-          data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}'s** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
+        await createNotes({
+          content: `${actor} released ${custodianDisplay}'s custody.`,
+          type: NoteType.UPDATE,
+          userId,
+          assetIds: removedAssets.map((asset) => asset.id),
         }),
       ]);
     }
@@ -2020,37 +2139,39 @@ export async function bulkRemoveAssetsFromKits({
   organizationId,
   userId,
   request,
+  settings,
 }: {
   assetIds: Asset["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
+  settings: AssetIndexSettings;
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
 
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-
-      assetIds = allAssets.map((asset) => asset.id);
-    }
+    // Resolve IDs (works for both simple and advanced mode)
+    const searchParams = getCurrentSearchParams(request);
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams: searchParams.toString(),
+      settings,
+    });
 
     const assets = await db.asset.findMany({
-      where: { id: { in: assetIds }, organizationId },
+      where: { id: { in: resolvedIds }, organizationId },
       select: {
         id: true,
         title: true,
@@ -2063,7 +2184,9 @@ export async function bulkRemoveAssetsFromKits({
             custodian: {
               select: {
                 name: true,
-                user: { select: { firstName: true, lastName: true } },
+                user: {
+                  select: { id: true, firstName: true, lastName: true },
+                },
               },
             },
           },
@@ -2090,32 +2213,49 @@ export async function bulkRemoveAssetsFromKits({
         return a.custody.id;
       });
 
-      await tx.custody.deleteMany({
-        where: { id: { in: custodyIdsToDelete } },
-      });
+      if (custodyIdsToDelete.length > 0) {
+        await tx.custody.deleteMany({
+          where: { id: { in: custodyIdsToDelete } },
+        });
+      }
 
       /** Create notes for assets released from custody */
-      await tx.note.createMany({
-        data: assetsWhoseKitsInCustody.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-            (asset.custody as NonNullable<typeof asset.custody>).custodian
-          )}'s** custody over **${asset.title.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+      if (assetsWhoseKitsInCustody.length > 0) {
+        await tx.note.createMany({
+          data: assetsWhoseKitsInCustody.map((asset) => {
+            const custodianDisplay = asset.custody?.custodian
+              ? wrapCustodianForNote({
+                  teamMember: asset.custody.custodian,
+                })
+              : "**Unknown Custodian**";
+            return {
+              content: `${actor} released ${custodianDisplay}'s custody.`,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
 
       /** Create notes for assets removed from kit */
-      await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has removed **${asset.title.trim()}** from **[${asset.kit?.name.trim()}](/kits/${asset
-            .kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+      const assetsRemovedFromKit = assets.filter((asset) => asset.kit);
+      if (assetsRemovedFromKit.length > 0) {
+        await tx.note.createMany({
+          data: assetsRemovedFromKit.map((asset) => {
+            const kitLink = wrapLinkForNote(
+              `/kits/${asset.kit!.id}`,
+              asset.kit!.name.trim()
+            );
+            return {
+              content: `${actor} removed asset from ${kitLink}.`,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
     });
 
     return true;

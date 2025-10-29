@@ -132,7 +132,14 @@ export async function createOrganization({
   image: File | null;
 }) {
   try {
-    const owner = await db.user.findFirstOrThrow({ where: { id: userId } });
+    const owner = await db.user.findFirstOrThrow({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
 
     const data = {
       name,
@@ -236,6 +243,7 @@ export async function updateOrganization({
   ssoDetails,
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
+  showShelfBranding,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
   name?: string;
@@ -248,6 +256,7 @@ export async function updateOrganization({
   };
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
+  showShelfBranding?: Organization["showShelfBranding"];
 }) {
   try {
     const data = {
@@ -256,6 +265,9 @@ export async function updateOrganization({
       ...(qrIdDisplayPreference && { qrIdDisplayPreference }),
       ...(hasSequentialIdsMigrated !== undefined && {
         hasSequentialIdsMigrated,
+      }),
+      ...(typeof showShelfBranding === "boolean" && {
+        showShelfBranding,
       }),
       ...(ssoDetails && {
         ssoDetails: {
@@ -329,6 +341,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   barcodesEnabled: true,
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
+  showShelfBranding: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
@@ -735,6 +748,35 @@ export async function transferOwnership({
         ? cause.message
         : "Something went wrong while transferring ownership. Please try again or contact support.",
       additionalData: { currentOrganization, newOwnerId },
+      label,
+    });
+  }
+}
+
+/**
+ * Resets showShelfBranding to true for all personal workspaces owned by a user.
+ * Called when Plus user downgrades to free tier.
+ *
+ * @param userId - The ID of the user whose personal workspaces should be reset
+ * @returns Promise resolving to the update result
+ */
+export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
+  try {
+    return await db.organization.updateMany({
+      where: {
+        userId,
+        type: OrganizationType.PERSONAL,
+      },
+      data: {
+        showShelfBranding: true,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while resetting personal workspace branding.",
+      additionalData: { userId },
       label,
     });
   }

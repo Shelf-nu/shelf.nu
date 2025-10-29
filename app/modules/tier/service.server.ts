@@ -81,6 +81,10 @@ export async function updateUserTierId(id: User["id"], tierId: TierId) {
           },
         }),
       },
+      select: {
+        id: true,
+        tierId: true,
+      },
     });
   } catch (cause) {
     throw new ShelfError({

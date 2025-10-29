@@ -294,7 +294,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },

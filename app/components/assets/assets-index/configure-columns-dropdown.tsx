@@ -92,7 +92,7 @@ export function ConfigureColumnsDropdown() {
                 <ColumnRow className="flex items-center gap-1 pb-2">
                   <FakeCheckbox
                     checked={true}
-                    className={tw("mr-1 text-gray-400")}
+                    className={tw("mr-1 text-gray-600")}
                   />
                   Name
                 </ColumnRow>

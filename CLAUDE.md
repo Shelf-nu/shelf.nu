@@ -8,7 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `npm run dev` - Start development server on port 3000
 - `npm run test` - Run Vitest unit tests
-- `npm run test:e2e:dev` - Run Playwright E2E tests with UI
 - `npm run validate` - Run all tests, linting, and typecheck (use before commits)
 
 ### Code Quality
@@ -91,6 +90,31 @@ app/
 - **Multi-tenancy**: Organization-based data isolation
 - **Authentication**: Supabase Auth with SSO support
 
+### Bulk Operations & Select All Pattern
+
+When implementing bulk operations that work across multiple pages of filtered data, follow the **ALL_SELECTED_KEY pattern**:
+
+**The Pattern:**
+
+1. **Component Layer** - Pass current search params when "select all" is active
+2. **Route/API Layer** - Extract and forward `currentSearchParams`
+3. **Service Layer** - Use `getAssetsWhereInput` helper to build where clause from params
+
+**Key Implementation Points:**
+
+- Use `isSelectingAllItems()` from `app/utils/list.ts` to detect select all
+- Always pass `currentSearchParams` alongside `assetIds` when ALL_SELECTED_KEY is present
+- Use `getAssetsWhereInput({ organizationId, currentSearchParams })` to build Prisma where clause
+- Set `takeAll: true` to remove pagination limits
+
+**Working Examples:**
+
+- Export assets: `app/components/assets/assets-index/export-assets-button.tsx`
+- Bulk delete: `app/routes/_layout+/assets._index.tsx` (action)
+- QR download: `app/routes/api+/assets.get-assets-for-bulk-qr-download.ts`
+
+**📖 Full Documentation:** See [docs/select-all-pattern.md](./docs/select-all-pattern.md) for detailed implementation guide, code examples, and common pitfalls.
+
 ## Testing Approach
 
 ### Unit Tests (Vitest)
@@ -98,12 +122,6 @@ app/
 - Tests co-located with source files
 - Happy DOM environment for React component testing
 - Run with `npm run test` or `npm run test:cov` for coverage
-
-### E2E Tests (Playwright)
-
-- Located in `/test/e2e/`
-- Chromium browser testing
-- Run with `npm run test:e2e:dev` (with UI) or `npm run test:e2e:run`
 
 ### Validation Pipeline
 
@@ -114,7 +132,86 @@ Always run `npm run validate` before committing - this runs:
 3. Prettier formatting
 4. TypeScript checking
 5. Unit tests
-6. E2E tests
+
+### Writing & Organizing Tests
+
+#### Test Philosophy
+
+- Write behavior-driven tests focusing on observable outcomes rather than implementation details.
+- Tests should describe what the system does, not how it does it.
+- Avoid testing internal private methods or state; instead, test public interfaces and user-visible effects.
+
+#### When to Mock
+
+- Mock only external network calls, time-based functions, feature flags, or heavy dependencies that are impractical or slow to run in tests.
+- Avoid mocking internal business logic or utility functions to keep tests realistic and maintainable.
+- Prefer using real implementations where possible to catch integration issues early.
+
+#### Mock Justification Rule
+
+- Every mock must be accompanied by a `// why:` comment explaining the reason for mocking.
+- This encourages thoughtful use of mocks and helps reviewers understand test design choices.
+
+#### Organizing Mocks and Factories
+
+- **Test files**: Co-located with source files (e.g., `app/modules/user/service.server.test.ts`)
+- **Shared mocks**: Place in `test/mocks/` directory, organized by domain (remix.tsx, database.ts)
+- **Factories**: Place in `test/factories/` directory for generating test data
+- **MSW handlers**: Keep in root `mocks/` directory for API mocking
+
+Example directory structure:
+
+```
+app/
+├── modules/
+│   └── user/
+│       ├── service.server.ts
+│       └── service.server.test.ts  # Co-located test
+test/
+├── mocks/
+│   ├── remix.tsx          # Remix hook mocks
+│   └── database.ts        # Database/Prisma mocks
+└── factories/
+    ├── user.ts            # User factory
+    ├── asset.ts           # Asset factory
+    └── index.ts           # Export all
+mocks/                      # MSW API handlers (kept at root)
+├── handlers.ts
+└── index.ts
+```
+
+#### Path Aliases (Configured)
+
+Path aliases are configured in `vitest.config.ts` for easy imports:
+
+```typescript
+import { createUser } from "@factories"; // → test/factories/index.ts
+import { createRemixMocks } from "@mocks/remix"; // → test/mocks/remix.tsx
+```
+
+#### Factories & Test Data
+
+- Use factories to generate consistent and realistic test data.
+- Factories should allow overrides for specific fields to tailor data for each test case.
+- Avoid hardcoding data within tests; use factories to keep tests clean and maintainable.
+
+Example factory usage:
+
+```typescript
+import { userFactory } from "@factories/userFactory";
+
+const testUser = userFactory.build({ role: "admin" });
+```
+
+#### Pre-Commit Checklist
+
+Before committing tests:
+
+- Ensure tests are behavior-driven and do not rely heavily on implementation details.
+- Confirm mocks have `// why:` comments explaining their necessity.
+- Verify tests run quickly and reliably without flaky behavior.
+- Check that test data is generated via factories or well-structured mocks.
+- Review test readability and maintainability.
 
 ## Environment Configuration
 
@@ -143,14 +240,21 @@ Always run `npm run validate` before committing - this runs:
 1. **Database Changes**: Modify `schema.prisma` → `npm run db:prepare-migration` → `npm run db:deploy`
 2. **New Features**: Create in `app/modules/` for business logic, `app/routes/` for pages
 3. **Component Updates**: Follow existing patterns in `app/components/`
-4. **Testing**: Write unit tests for utilities, E2E tests for user flows
+4. **Testing**: Write unit tests for utilities  
+   Follow the testing conventions outlined in the Writing & Organizing Tests section to ensure consistent, behavior-driven testing and minimal mocking.
 5. **Pre-commit**: Always run `npm run validate` to ensure code quality
 
 ## Git and Version control
 
-- add and commit automatically whenever a task is finished\
+- add and commit automatically whenever a task is finished
+- Always use Conventional Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - use descriptive commit messages that capture the full scope of the changes
+- **IMPORTANT: Each line in the commit message body must be ≤ 100 characters**
+  - Wrap long lines to stay within the limit
+  - This is enforced by commitlint pre-commit hook
+  - Subject line can be longer, only body lines are restricted
 - dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
+- Include test readability and mock discipline in PR reviews. Overly mocked or verbose tests should be refactored before merge.
 
 ## Rule Improvement Triggers
 

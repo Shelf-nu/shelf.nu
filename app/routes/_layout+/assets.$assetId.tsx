@@ -339,7 +339,7 @@ export default function AssetDetailsPage() {
   ];
 
   return (
-    <>
+    <div className="relative">
       <Header
         slots={{
           "left-of-title": (
@@ -350,7 +350,7 @@ export default function AssetDetailsPage() {
                 thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
               }}
-              alt={asset.title}
+              alt={`Image of ${asset.title}`}
               className={tw(
                 "mr-4 size-14 cursor-pointer rounded border object-cover"
               )}
@@ -383,6 +383,6 @@ export default function AssetDetailsPage() {
       <div>
         <Outlet />
       </div>
-    </>
+    </div>
   );
 }

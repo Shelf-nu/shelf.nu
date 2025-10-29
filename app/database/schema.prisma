@@ -166,7 +166,7 @@ model Asset {
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
-  sequentialId        String?     // Sequential identifier for the asset (e.g., "SAM-0001")
+  sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
 
   // Datetime
   createdAt DateTime @default(now())
@@ -194,6 +194,8 @@ model Asset {
   bookings     Booking[]
   reminders    AssetReminder[]
 
+  // Unique constraint for organization-scoped sequential IDs
+  @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
   // Indexes for optimization of queries
@@ -207,8 +209,6 @@ model Asset {
   @@index([sequentialId], name: "Asset_sequentialId_idx")
   // Index for foreign key
   @@index([userId])
-  // Unique constraint for organization-scoped sequential IDs
-  @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
 }
 
 enum AssetStatus {
@@ -344,9 +344,9 @@ model BookingNote {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user      User?    @relation("BookingNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  user      User?   @relation("BookingNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   userId    String?
-  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   bookingId String
 
   // Indexes for foreign keys
@@ -663,12 +663,15 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
-  
+
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
 
   // QR code display preference - which ID to show on QR code labels
   qrIdDisplayPreference QrIdDisplayPreference @default(QR_ID)
+
+  // Branding preference for downloadable labels
+  showShelfBranding Boolean @default(true)
 
   // Indexes for foreign keys
   @@index([userId])
@@ -698,8 +701,8 @@ enum OrganizationType {
 }
 
 enum QrIdDisplayPreference {
-  QR_ID    // Display the QR code ID (current default)
-  SAM_ID   // Display the sequential/SAM ID
+  QR_ID // Display the QR code ID (current default)
+  SAM_ID // Display the sequential/SAM ID
 }
 
 enum OrganizationRoles {
@@ -754,6 +757,7 @@ model TierLimit {
   canImportAssets  Boolean  @default(false)
   canExportAssets  Boolean  @default(false)
   canImportNRM     Boolean  @default(false)
+  canHideShelfBranding Boolean @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
   createdAt        DateTime @default(now())
@@ -768,6 +772,7 @@ model CustomTierLimit {
   canImportAssets  Boolean  @default(true)
   canExportAssets  Boolean  @default(true)
   canImportNRM     Boolean  @default(true)
+  canHideShelfBranding Boolean @default(true)
   maxCustomFields  Int      @default(1000)
   maxOrganizations Int      @default(1)
   isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -797,12 +802,14 @@ model CustomField {
   // Datetime
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
+  deletedAt               DateTime?
   assetCustomFieldsValues AssetCustomFieldValue[]
 
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, deletedAt])
 }
 
 enum CustomFieldType {
@@ -959,7 +966,7 @@ model Booking {
   assets Asset[]
   notes  BookingNote[]
 
-  tags Tag[]
+  tags            Tag[]
   partialCheckins PartialBookingCheckin[]
 
   // Datetime
@@ -1001,33 +1008,32 @@ model BookingSettings {
   @@index([organizationId])
 }
 
+model PartialBookingCheckin {
+  id String @id @default(cuid())
 
-  model PartialBookingCheckin {
-    id String @id @default(cuid())
+  // Track which assets were checked in during this session
+  assetIds     String[] // Array of asset IDs checked in
+  checkinCount Int // Number of assets checked in (for quick reference)
 
-    // Track which assets were checked in during this session
-    assetIds String[] // Array of asset IDs checked in
-    checkinCount Int   // Number of assets checked in (for quick reference)
+  // Metadata
+  checkinTimestamp DateTime @default(now()) @db.Timestamptz(3)
 
-    // Metadata
-    checkinTimestamp DateTime @default(now()) @db.Timestamptz(3)
+  // Relationships
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId String
 
-    // Relationships
-    booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-    bookingId String
+  checkedInBy   User   @relation("PartialCheckinUser", fields: [checkedInById], references: [id])
+  checkedInById String
 
-    checkedInBy   User @relation("PartialCheckinUser", fields: [checkedInById], references: [id])
-    checkedInById String
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    // Timestamps
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-
-    @@index([bookingId])
-    @@index([checkedInById])
-    @@index([checkinTimestamp])
-    @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
-  }
+  @@index([bookingId])
+  @@index([checkedInById])
+  @@index([checkinTimestamp])
+  @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+}
 
 model Kit {
   id String @id @default(cuid())
@@ -1177,8 +1183,8 @@ model Update {
   id String @id @default(cuid())
 
   title       String
-  content     String   // Markdown content
-  url         String?  // Optional URL to redirect to when clicked
+  content     String // Markdown content
+  url         String? // Optional URL to redirect to when clicked
   publishDate DateTime // When the update should be visible to users
   status      UpdateStatus @default(DRAFT)
 
@@ -1186,8 +1192,8 @@ model Update {
   targetRoles OrganizationRoles[]
 
   // Analytics
-  clickCount  Int @default(0)
-  viewCount   Int @default(0)
+  clickCount Int @default(0)
+  viewCount  Int @default(0)
 
   // Relations
   userReads UserUpdateRead[]

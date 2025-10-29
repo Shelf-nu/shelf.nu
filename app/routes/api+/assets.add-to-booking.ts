@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
 import {
@@ -9,6 +10,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -78,17 +80,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     const booking = await updateBookingAssets({
       id,
       organizationId,
       assetIds: finalAssetIds,
     });
 
+    const actor = wrapUserLinkForNote({
+      id: authSession.userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name.trim()
+    );
     await createNotes({
-      content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
-        booking.name
-      }](/bookings/${booking.id})**.`,
+      content: `${actor} added asset to ${bookingLink}.`,
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,

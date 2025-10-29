@@ -1,5 +1,5 @@
 {
-  "plugins": ["tailwindcss", "no-restricted-imports"],
+  "plugins": ["tailwindcss", "no-restricted-imports", "local-rules"],
   "extends": [
     "@remix-run/eslint-config",
     "@remix-run/eslint-config/node",
@@ -77,7 +77,10 @@
           }
         ]
       }
-    ]
+    ],
+    // Custom local rules
+    "local-rules/require-satisfies-on-nested-prisma-selects": "error",
+    "local-rules/require-deleted-at-check-on-custom-field-queries": "error"
   },
   "overrides": [
     {

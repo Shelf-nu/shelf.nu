@@ -32,6 +32,12 @@ import { createUserOrAttachOrg } from "../user/service.server";
 
 const label: ErrorLabel = "Invite";
 
+const INVITE_EMAIL_BATCH_SIZE = 20;
+const INVITE_EMAIL_BATCH_DELAY_MS = 1_000;
+const INVITE_EMAIL_SPACING_MS = Math.ceil(
+  INVITE_EMAIL_BATCH_DELAY_MS / INVITE_EMAIL_BATCH_SIZE
+);
+
 /**
  * Validates invite based on SSO configuration, considering target organization
  * @param email - Email of the user being invited
@@ -140,6 +146,7 @@ export async function createInvite(
           some: { organizationId },
         },
       },
+      select: { id: true },
     });
 
     if (existingUser) {
@@ -718,9 +725,45 @@ export async function bulkInviteUsers({
       organization: true,
     } satisfies Prisma.InviteInclude;
 
-    let createdInvites: Array<
-      Prisma.InviteGetPayload<{ include: typeof INVITE_INCLUDE }>
-    > = [];
+    type InviteWithRelations = Prisma.InviteGetPayload<{
+      include: typeof INVITE_INCLUDE;
+    }>;
+
+    let createdInvites: InviteWithRelations[] = [];
+
+    const scheduleInviteEmailSending = (
+      invites: InviteWithRelations[],
+      extraInviteMessage?: string | null
+    ) => {
+      invites.forEach((invite, index) => {
+        const batchIndex = Math.floor(index / INVITE_EMAIL_BATCH_SIZE);
+        const positionInBatch = index % INVITE_EMAIL_BATCH_SIZE;
+        const delay =
+          batchIndex * INVITE_EMAIL_BATCH_DELAY_MS +
+          positionInBatch * INVITE_EMAIL_SPACING_MS;
+
+        setTimeout(() => {
+          const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
+            expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
+          });
+
+          sendEmail({
+            to: invite.inviteeEmail,
+            subject: `✉️ You have been invited to ${invite.organization.name}`,
+            text: inviteEmailText({
+              invite,
+              token,
+              extraMessage: extraInviteMessage,
+            }),
+            html: invitationTemplateString({
+              invite,
+              token,
+              extraMessage: extraInviteMessage,
+            }),
+          });
+        }, delay);
+      });
+    };
 
     await db.$transaction(async (tx) => {
       // Bulk create all required team members
@@ -768,19 +811,9 @@ export async function bulkInviteUsers({
       });
     });
 
-    // Queue emails for sending - no need to await since it's handled by queue
-    createdInvites.forEach((invite) => {
-      const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
-        expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
-      });
-
-      sendEmail({
-        to: invite.inviteeEmail,
-        subject: `✉️ You have been invited to ${invite.organization.name}`,
-        text: inviteEmailText({ invite, token, extraMessage }),
-        html: invitationTemplateString({ invite, token, extraMessage }),
-      });
-    });
+    if (createdInvites.length > 0) {
+      scheduleInviteEmailSending(createdInvites, extraMessage);
+    }
 
     sendNotification({
       title: "Successfully invited users",

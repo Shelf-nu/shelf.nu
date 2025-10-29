@@ -4,8 +4,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import { DeleteCustomFieldDialog } from "./delete-dialog";
 import { Button } from "../shared/button";
 
 export function ActionsDropdown({ customField }: { customField: CustomField }) {
@@ -22,7 +24,7 @@ export function ActionsDropdown({ customField }: { customField: CustomField }) {
 
       <DropdownMenuContent
         align="end"
-        className="order w-[180px] rounded-md bg-white p-0 text-right "
+        className="order w-[200px] rounded-md bg-white p-0 text-right "
       >
         <DropdownMenuItem className="px-4 py-3">
           <Button
@@ -36,6 +38,8 @@ export function ActionsDropdown({ customField }: { customField: CustomField }) {
             Edit
           </Button>
         </DropdownMenuItem>
+        <DropdownMenuSeparator className="bg-gray-100" />
+        <DeleteCustomFieldDialog customField={customField} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
