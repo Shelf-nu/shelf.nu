@@ -1910,7 +1910,8 @@ export async function updateKitAssets({
     if (isSomeAssetInCustody) {
       throw new ShelfError({
         cause: null,
-        message: "Cannot add unavailable asset in a kit.",
+        message:
+          "Cannot add assets that are already in custody to a kit. Please release custody of assets to allow them to be added to a kit.",
         additionalData: { userId, kitId },
         label: "Kit",
         shouldBeCaptured: false,
@@ -2125,9 +2126,13 @@ export async function updateKitAssets({
 
     return kit;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating kit assets.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while updating kit assets.",
       label,
       additionalData: { kitId, assetIds },
     });
