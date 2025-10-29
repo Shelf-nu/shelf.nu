@@ -691,25 +691,49 @@ const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
   return [ACTIVITY_HEADER, ...rows].join("\n");
 };
 
-export async function exportAssetNotesToCsv({
-  request,
-  assetId,
-  organizationId,
-}: {
+type ActivityNoteRecord = {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+  content: string | null;
+  createdAt: Date;
+  type: string;
+};
+
+type NoteFetcher<Where> = (args: {
+  where: Where;
+  include: {
+    user: {
+      select: {
+        firstName: true;
+        lastName: true;
+      };
+    };
+  };
+  orderBy: {
+    createdAt: "desc";
+  };
+}) => Promise<ActivityNoteRecord[]>;
+
+type ExportNotesToCsvArgs<Where> = {
   request: Request;
-  assetId: string;
-  organizationId: string;
-}) {
+  where: Where;
+  findMany: NoteFetcher<Where>;
+};
+
+async function exportNotesToCsv<Where>({
+  request,
+  where,
+  findMany,
+}: ExportNotesToCsvArgs<Where>) {
   const formatter = getDateTimeFormat(request, {
     dateStyle: "short",
     timeStyle: "short",
   });
 
-  const notes = await db.note.findMany({
-    where: {
-      assetId,
-      asset: { organizationId },
-    },
+  const notes = await findMany({
+    where,
     include: {
       user: {
         select: {
@@ -724,9 +748,9 @@ export async function exportAssetNotesToCsv({
   });
 
   const activityNotes = notes.map<ActivityNote>((note) => ({
-    content: note.content,
+    content: note.content ?? "",
     createdAt: note.createdAt,
-    type: note.type,
+    type: note.type as ActivityNote["type"],
     user: note.user
       ? {
           firstName: note.user.firstName,
@@ -738,6 +762,25 @@ export async function exportAssetNotesToCsv({
   return notesToCsv(activityNotes, formatter);
 }
 
+export async function exportAssetNotesToCsv({
+  request,
+  assetId,
+  organizationId,
+}: {
+  request: Request;
+  assetId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.NoteWhereInput>({
+    request,
+    where: {
+      assetId,
+      asset: { organizationId },
+    },
+    findMany: (args) => db.note.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
 export async function exportBookingNotesToCsv({
   request,
   bookingId,
@@ -747,42 +790,15 @@ export async function exportBookingNotesToCsv({
   bookingId: string;
   organizationId: string;
 }) {
-  const formatter = getDateTimeFormat(request, {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
-
-  const notes = await db.bookingNote.findMany({
+  return exportNotesToCsv<Prisma.BookingNoteWhereInput>({
+    request,
     where: {
       bookingId,
       booking: { organizationId },
     },
-    include: {
-      user: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
+    findMany: (args) =>
+      db.bookingNote.findMany(args) as Promise<ActivityNoteRecord[]>,
   });
-
-  const activityNotes = notes.map<ActivityNote>((note) => ({
-    content: note.content,
-    createdAt: note.createdAt,
-    type: note.type,
-    user: note.user
-      ? {
-          firstName: note.user.firstName,
-          lastName: note.user.lastName,
-        }
-      : null,
-  }));
-
-  return notesToCsv(activityNotes, formatter);
 }
 
 /** Define some types to use for normalizing bookings across the different fetches */

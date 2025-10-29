@@ -10,12 +10,14 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-function buildFilename(title: string) {
-  const sanitizedTitle = title
+function buildFilename(title: string | null | undefined) {
+  const fallback = "asset";
+  const source = title && title.trim().length > 0 ? title : fallback;
+  const sanitizedTitle = source
     .replace(/[\\/:*?"<>|]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
-  const base = sanitizedTitle.length > 0 ? sanitizedTitle : "asset";
+  const base = sanitizedTitle.length > 0 ? sanitizedTitle : fallback;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
   return `${base}-activity-${timestamp}.csv`;
 }
