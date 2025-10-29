@@ -5,7 +5,7 @@ import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
@@ -76,7 +76,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const items = formatBookingsDates(bookings, request);
 
     return json(
-      data({
+      payload({
         header,
         items,
         search,

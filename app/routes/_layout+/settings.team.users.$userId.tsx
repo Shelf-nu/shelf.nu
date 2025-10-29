@@ -20,7 +20,7 @@ import { resolveUserAction } from "~/modules/user/utils.server";
 import { getUserContactById } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -80,7 +80,7 @@ export const loader = async ({
     };
 
     return json(
-      data({
+      payload({
         isPersonalOrg: currentOrganization.type === "PERSONAL",
         orgName: currentOrganization.name,
         header,

@@ -9,7 +9,7 @@ import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
 import { generateOrphanedCodes } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -48,7 +48,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    return json(data({ organization }));
+    return json(payload({ organization }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
     throw json(error(reason), { status: reason.status });
@@ -93,7 +93,7 @@ export const action = async ({
           amount,
         });
 
-        return json(data({ message: "Generated Orphaned QR codes" }));
+        return json(payload({ message: "Generated Orphaned QR codes" }));
       default:
         throw new ShelfError({
           cause: null,

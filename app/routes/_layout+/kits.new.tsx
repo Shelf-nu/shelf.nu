@@ -14,7 +14,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -50,7 +50,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ]);
 
     return json(
-      data({
+      payload({
         header,
         categories,
         totalCategories,

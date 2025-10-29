@@ -6,7 +6,7 @@ import { db } from "~/database/db.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -38,7 +38,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ kits }));
+    return json(payload({ kits }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -82,7 +82,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       message: `Successfully added ${assetIds.length} assets to kit "${updatedKit.name}".`,
     });
 
-    return json(data({ success: true }));
+    return json(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

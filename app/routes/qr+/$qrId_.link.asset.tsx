@@ -45,7 +45,7 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -127,7 +127,7 @@ export const loader = async ({
     };
 
     return json(
-      data({
+      payload({
         header: {
           title: "Link with existing asset",
           subHeading: "Choose an asset to link with this QR tag.",

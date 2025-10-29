@@ -18,7 +18,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -48,7 +48,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     return json(
-      data({
+      payload({
         header: {
           title: `Duplicate asset`,
           subHeading: "Choose the amount of duplicates you want to create.",

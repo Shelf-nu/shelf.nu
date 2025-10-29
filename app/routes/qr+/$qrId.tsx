@@ -11,7 +11,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -159,7 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ ok: true }));
+    return json(payload({ ok: true }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

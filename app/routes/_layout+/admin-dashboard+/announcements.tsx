@@ -8,7 +8,7 @@ import { Button } from "~/components/shared/button";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { requireAdmin } from "~/utils/roles.server";
 
@@ -35,7 +35,7 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
       });
 
     return json(
-      data({
+      payload({
         announcements: announcements.map((a) => ({
           ...a,
           content: parseMarkdownToReact(a.content),
@@ -81,7 +81,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         });
       });
 
-    return json(data(null));
+    return json(payload(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

@@ -19,7 +19,12 @@ import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getActionMethod,
+  parseData,
+} from "~/utils/http.server";
 import { isValidDomain } from "~/utils/misc";
 
 const SSOLoginFormSchema = z.object({
@@ -54,7 +59,7 @@ export function loader({ context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(data({ title, subHeading }));
+    return json(payload({ title, subHeading }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

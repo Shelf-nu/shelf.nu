@@ -120,10 +120,7 @@ function AdvancedFilter() {
       newCols.push({
         name: firstColumn.name, // Keep the name for proper UI rendering
         operator: operatorsPerType[fieldType][0],
-        value: getDefaultValueForFieldType(
-          firstColumn,
-          customFields as SerializeFrom<CustomField>[] | null
-        ),
+        value: getDefaultValueForFieldType(firstColumn, customFields),
         type: fieldType,
         isNew: true, // Mark as new/unselected
       });
@@ -212,9 +209,7 @@ function AdvancedFilter() {
                                   operator: operatorsPerType[fieldType][0],
                                   value: getDefaultValueForFieldType(
                                     column,
-                                    customFields as
-                                      | SerializeFrom<CustomField>[]
-                                      | null
+                                    customFields
                                   ),
                                   isNew: false,
                                 };

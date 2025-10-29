@@ -18,7 +18,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -72,7 +72,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         inviter: `${invite.inviter.firstName} ${invite.inviter.lastName}`,
         workspace: `${invite.organization.name}`,
       })

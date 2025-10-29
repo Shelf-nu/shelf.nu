@@ -38,7 +38,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -174,7 +174,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const items = formatBookingsDates(bookings, request);
 
     return json(
-      data({
+      payload({
         header,
         currentOrganization,
         items,

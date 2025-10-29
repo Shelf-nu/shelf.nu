@@ -7,7 +7,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -36,7 +36,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       subHeading,
     };
 
-    return json(data({ header }));
+    return json(payload({ header }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

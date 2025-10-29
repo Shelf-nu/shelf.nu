@@ -20,7 +20,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -57,7 +57,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         ...assets,
         modelName,

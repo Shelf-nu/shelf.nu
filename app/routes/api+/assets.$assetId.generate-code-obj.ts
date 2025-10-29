@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getAsset } from "~/modules/asset/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -51,7 +51,7 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
     ]);
 
     return json(
-      data({
+      payload({
         qrObj,
         barcodes: asset.barcodes,
         sequentialId: asset.sequentialId,

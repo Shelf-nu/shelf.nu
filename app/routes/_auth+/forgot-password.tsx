@@ -24,7 +24,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -74,7 +74,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading }));
+  return json(payload({ title, subHeading }));
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {

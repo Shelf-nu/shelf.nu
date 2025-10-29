@@ -31,7 +31,7 @@ import { makeShelfError } from "~/utils/error";
 import {
   error,
   getParams,
-  data,
+  payload,
   getCurrentSearchParams,
 } from "~/utils/http.server";
 import {
@@ -89,7 +89,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         booking,
         header,
       })

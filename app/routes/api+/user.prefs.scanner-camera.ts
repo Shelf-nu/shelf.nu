@@ -1,7 +1,7 @@
 import { type ActionFunctionArgs, json } from "@remix-run/node";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -14,7 +14,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     cookie.scannerCameraId = bodyParams.get("scannerCameraId");
 
-    return json(data({ success: true }), {
+    return json(payload({ success: true }), {
       headers: [setCookie(await userPrefs.serialize(cookie))],
     });
   } catch (cause) {

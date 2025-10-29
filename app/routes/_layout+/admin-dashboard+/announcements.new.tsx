@@ -8,7 +8,7 @@ import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
@@ -18,7 +18,7 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    return json(data(null));
+    return json(payload(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

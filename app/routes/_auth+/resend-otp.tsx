@@ -4,7 +4,12 @@ import { z } from "zod";
 import { sendOTP } from "~/modules/auth/service.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getActionMethod,
+  parseData,
+} from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -26,7 +31,7 @@ export async function action({ request }: ActionFunctionArgs) {
         );
 
         await sendOTP(email);
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
     }
 

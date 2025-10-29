@@ -1,7 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -27,13 +27,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const idsParam = url.searchParams.get("ids");
 
     if (!idsParam) {
-      return json(data({ kits: [] }));
+      return json(payload({ kits: [] }));
     }
 
     const kitIds = idsParam.split(",").filter(Boolean);
 
     if (kitIds.length === 0) {
-      return json(data({ kits: [] }));
+      return json(payload({ kits: [] }));
     }
 
     const kits = await db.kit.findMany({
@@ -73,7 +73,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ kits }));
+    return json(payload({ kits }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

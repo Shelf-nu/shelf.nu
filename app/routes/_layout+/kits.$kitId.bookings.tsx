@@ -10,7 +10,7 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -107,7 +107,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const items = formatBookingsDates(bookings, request);
 
     return json(
-      data({
+      payload({
         header,
         items,
         search,

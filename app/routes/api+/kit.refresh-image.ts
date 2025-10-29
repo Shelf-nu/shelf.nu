@@ -2,7 +2,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { updateKit } from "~/modules/kit/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
   PermissionAction,
@@ -59,7 +59,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return json(data({ kit }));
+    return json(payload({ kit }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });

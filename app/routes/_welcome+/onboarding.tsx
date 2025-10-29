@@ -48,7 +48,7 @@ import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -269,7 +269,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
     return json(
-      data({
+      payload({
         title,
         subHeading,
         user,

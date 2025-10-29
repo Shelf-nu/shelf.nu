@@ -16,7 +16,7 @@ import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -107,7 +107,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
 
       case "changeFreeze": {
@@ -123,7 +123,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { freezeColumn },
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
 
       case "changeShowImage": {
@@ -139,12 +139,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { showAssetImage },
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return json(payload(null));
       }
     }
   } catch (cause) {

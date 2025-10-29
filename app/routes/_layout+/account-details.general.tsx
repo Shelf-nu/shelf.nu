@@ -44,7 +44,7 @@ import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -170,7 +170,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
       case "updateUserContact": {
         if (payload.type !== "updateUserContact")
@@ -199,7 +199,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
       case "deleteUser": {
         if (payload.type !== "deleteUser")
@@ -230,7 +230,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
       case "initiateEmailChange": {
         if (payload.type !== "initiateEmailChange")
@@ -301,7 +301,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return json(
-          data({
+          payload({
             awaitingOtp: true,
             newEmail, // We'll need this to show which email we're waiting for verification
             success: true,
@@ -356,12 +356,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return json(
-          data({ success: true, awaitingOtp: false, emailChanged: true })
+          payload({ success: true, awaitingOtp: false, emailChanged: true })
         );
       }
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return json(payload(null));
       }
     }
   } catch (cause) {
@@ -384,7 +384,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const title = "Account Details";
     const user = await getUserWithContact(userId);
 
-    return json(data({ title, user }));
+    return json(payload({ title, user }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

@@ -43,7 +43,7 @@ import { makeShelfError } from "~/utils/error";
 import {
   error,
   getParams,
-  data,
+  payload,
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
@@ -94,7 +94,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         asset: {
           ...asset,
           createdAt: getDateTimeFormat(request, {
@@ -195,7 +195,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
 
       case "set-reminder": {
@@ -251,7 +251,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         if (validationError) {
-          return json(data({ error: validationError }), { status: 400 });
+          return json(payload({ error: validationError }), { status: 400 });
         }
 
         try {
@@ -270,7 +270,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             senderId: authSession.userId,
           });
 
-          return json(data({ success: true }));
+          return json(payload({ success: true }));
         } catch (cause) {
           // Handle constraint violations and other barcode creation errors
           const reason = makeShelfError(cause);
@@ -280,14 +280,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             ?.validationErrors as any;
           if (validationErrors && validationErrors["barcodes[0].value"]) {
             return json(
-              data({ error: validationErrors["barcodes[0].value"].message }),
+              payload({ error: validationErrors["barcodes[0].value"].message }),
               {
                 status: reason.status,
               }
             );
           }
 
-          return json(data({ error: reason.message }), {
+          return json(payload({ error: reason.message }), {
             status: reason.status,
           });
         }
@@ -295,7 +295,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return json(payload(null));
       }
     }
   } catch (cause) {

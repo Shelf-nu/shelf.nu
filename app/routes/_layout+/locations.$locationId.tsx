@@ -28,7 +28,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -97,7 +97,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         location,
         header,
         mapData,

@@ -6,7 +6,7 @@ import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import { makeShelfError, ShelfError } from "~/utils/error";
 
-import { assertIsPost, data, error } from "~/utils/http.server";
+import { assertIsPost, payload, error } from "~/utils/http.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -60,7 +60,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       profilePicture: getPublicFileURL({ filename: profilePicture }),
     });
 
-    return json(data({ updatedUser }));
+    return json(payload({ updatedUser }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

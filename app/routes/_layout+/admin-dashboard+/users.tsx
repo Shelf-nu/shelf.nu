@@ -13,7 +13,7 @@ import { DateS } from "~/components/shared/date";
 import { Td, Th } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -45,7 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         items: users,
         search,

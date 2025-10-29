@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getAssets } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -30,7 +30,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     if (!query) {
       return json(
-        data({
+        payload({
           query,
           assets: [],
           kits: [],
@@ -279,7 +279,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ]);
 
     return json(
-      data({
+      payload({
         query,
         assets: assetResults.assets.map((asset) => ({
           id: asset.id,

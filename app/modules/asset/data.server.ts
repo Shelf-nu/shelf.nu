@@ -14,7 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { data, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -203,7 +203,7 @@ export async function simpleModeLoader({
   ];
 
   return json(
-    data({
+    payload({
       header,
       items: assets,
       categories,
@@ -387,7 +387,7 @@ export async function advancedModeLoader({
   ];
 
   return json(
-    data({
+    payload({
       header,
       items: assets,
       search,

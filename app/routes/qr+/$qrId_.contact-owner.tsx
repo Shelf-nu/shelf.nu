@@ -16,7 +16,7 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -111,7 +111,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ report }));
+    return json(payload({ report }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });

@@ -28,7 +28,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   getRefererPath,
@@ -95,7 +95,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         kit,
         header,
         categories,
@@ -200,7 +200,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(safeRedirect(payload.redirectTo, `/kits/${kitId}`));
     }
 
-    return json(data({ success: true }));
+    return json(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });

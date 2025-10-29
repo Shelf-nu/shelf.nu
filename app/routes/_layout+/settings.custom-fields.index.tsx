@@ -27,7 +27,7 @@ import {
 } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -81,7 +81,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         items: customFields,
         search,

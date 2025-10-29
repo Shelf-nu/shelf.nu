@@ -3,7 +3,7 @@ import { json } from "@remix-run/node";
 import { z } from "zod";
 import { getOngoingBookingForAsset } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, getParams } from "~/utils/http.server";
+import { payload, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -27,7 +27,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return json(data(booking));
+    return json(payload(booking));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     throw reason;

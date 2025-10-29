@@ -27,7 +27,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -83,7 +83,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const nextSequentialId = await estimateNextSequentialId(organizationId);
 
     return json(
-      data({
+      payload({
         header,
         categories,
         totalCategories,

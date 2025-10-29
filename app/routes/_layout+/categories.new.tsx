@@ -15,7 +15,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getRandomColor } from "~/utils/get-random-color";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -49,7 +49,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ header, colorFromServer }));
+    return json(payload({ header, colorFromServer }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

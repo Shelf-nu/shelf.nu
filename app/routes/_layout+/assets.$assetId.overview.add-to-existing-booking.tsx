@@ -21,7 +21,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 
 import {
@@ -59,7 +59,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ids: assetId ? [assetId] : undefined,
     });
 
-    return json(data(loaderData), {
+    return json(payload(loaderData), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],

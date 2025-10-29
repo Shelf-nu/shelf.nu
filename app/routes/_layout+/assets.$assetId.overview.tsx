@@ -48,7 +48,7 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -175,7 +175,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         asset: {
           ...asset,
           createdAt: getDateTimeFormat(request, {
@@ -248,10 +248,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });
-      return json(data(null));
+      return json(payload(null));
     } else {
       checkExhaustiveSwitch(intent);
-      return json(data(null));
+      return json(payload(null));
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });

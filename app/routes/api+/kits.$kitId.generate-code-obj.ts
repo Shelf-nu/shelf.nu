@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getKit } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -47,7 +47,7 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
     ]);
 
     return json(
-      data({
+      payload({
         qrObj,
         barcodes: kit.barcodes,
         showShelfBranding: currentOrganization.showShelfBranding,

@@ -13,7 +13,7 @@ import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import {
   PermissionAction,
@@ -66,7 +66,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       organizationId,
       canUseBarcodes,
     });
-    return json(data(null));
+    return json(payload(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -88,7 +88,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     await assertUserCanImportAssets({ organizationId, organizations });
 
     return json(
-      data({
+      payload({
         header: {
           title: "Import assets",
         },

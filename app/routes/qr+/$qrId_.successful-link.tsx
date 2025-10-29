@@ -11,7 +11,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import { normalizeQrData } from "~/utils/qr";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -49,7 +49,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       });
 
     return json(
-      data({
+      payload({
         header: {
           title: "Successfully linked asset to QR code",
         },

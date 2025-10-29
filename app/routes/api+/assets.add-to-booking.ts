@@ -9,7 +9,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -116,7 +116,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true, bookingId: booking.id }));
+    return json(payload({ success: true, bookingId: booking.id }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });

@@ -32,7 +32,7 @@ import {
 } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   parseData,
@@ -49,7 +49,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading, disableSignup, disableSSO }));
+  return json(payload({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({

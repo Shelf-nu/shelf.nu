@@ -4,7 +4,7 @@ import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
@@ -97,7 +97,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         assets: assetsWithQrObj,
         qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
         showShelfBranding: currentOrganization.showShelfBranding,

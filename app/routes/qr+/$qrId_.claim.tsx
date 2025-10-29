@@ -19,7 +19,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -55,7 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         header: {
           title: "Claim QR code for your organization",
         },

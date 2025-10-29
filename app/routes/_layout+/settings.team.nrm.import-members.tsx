@@ -23,7 +23,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { memoryUploadHandler } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -45,7 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     await assertUserCanImportNRM({ organizationId, organizations });
 
     return json(
-      data({
+      payload({
         showModal: true,
       })
     );
@@ -94,7 +94,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return json(data({ success: true }));
+    return json(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

@@ -22,7 +22,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -68,7 +68,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${booking.name}'s activity`,
     };
 
-    return json(data({ booking: { ...booking, notes: bookingNotes }, header }));
+    return json(
+      payload({ booking: { ...booking, notes: bookingNotes }, header })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason));
@@ -115,7 +117,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           bookingId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
 
       case "DELETE": {
@@ -139,7 +141,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
     }
 

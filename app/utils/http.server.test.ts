@@ -9,7 +9,7 @@ import {
   makeRedirectToFromHere,
   isPost,
   safeRedirect,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -160,10 +160,10 @@ describe(safeRedirect.name, () => {
   });
 });
 
-describe(data.name, () => {
+describe(payload.name, () => {
   it("should return data with error set to null", () => {
     const responseData = { name: "John" };
-    const result = data(responseData);
+    const result = payload(responseData);
 
     expect(result).toEqual({
       ...responseData,

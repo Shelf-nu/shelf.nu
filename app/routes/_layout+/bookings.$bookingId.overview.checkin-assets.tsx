@@ -29,7 +29,7 @@ import { canUserManageBookingAssets } from "~/utils/bookings";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { assertIsPost, data, error, getParams } from "~/utils/http.server";
+import { assertIsPost, payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -108,7 +108,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         title,
         header,
         booking,

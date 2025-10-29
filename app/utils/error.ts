@@ -219,7 +219,10 @@ function isAbortError(cause: unknown) {
       return true;
     }
 
-    if (message.includes("call aborted") || message.includes("request aborted")) {
+    if (
+      message.includes("call aborted") ||
+      message.includes("request aborted")
+    ) {
       return true;
     }
 

@@ -41,7 +41,11 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
-import { data, getCurrentSearchParams, parseData } from "~/utils/http.server";
+import {
+  payload,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
@@ -4551,7 +4555,7 @@ export async function checkinAssets({
   // Return JSON if requested by bulk dialog, otherwise redirect
   if (returnJson) {
     return json(
-      data({
+      payload({
         success: true,
         message: `Successfully checked in ${assetIds.length} asset${
           assetIds.length > 1 ? "s" : ""

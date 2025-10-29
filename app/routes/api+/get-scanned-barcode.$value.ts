@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -140,7 +140,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         barcode: {
           ...barcode,
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,

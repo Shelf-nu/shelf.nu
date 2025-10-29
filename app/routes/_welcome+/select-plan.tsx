@@ -17,7 +17,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -61,7 +61,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const prices = await getStripePricesForTrialPlanSelection();
 
     return json(
-      data({
+      payload({
         title: "Subscription",
         subTitle: "Pick an account plan that fits your workflow.",
         /** Filter out the montly and yearly prices to only have prices for team plan */

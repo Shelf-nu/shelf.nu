@@ -40,7 +40,7 @@ import {
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -135,7 +135,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     };
 
     return json(
-      data({
+      payload({
         header,
         events,
         ...teamMembersData,

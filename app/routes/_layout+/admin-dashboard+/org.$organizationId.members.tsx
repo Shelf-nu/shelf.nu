@@ -7,7 +7,7 @@ import { Table, Td, Tr } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -44,7 +44,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       },
     });
 
-    return json(data({ members }));
+    return json(payload({ members }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
     throw json(error(reason), { status: reason.status });

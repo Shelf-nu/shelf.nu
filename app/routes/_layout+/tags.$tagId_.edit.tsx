@@ -15,7 +15,7 @@ import { getTag, updateTag } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { formatEnum } from "~/utils/misc";
 
 import {
@@ -59,7 +59,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         tag,
         tagUseFor: Object.values(TagUseFor).map((useFor) => ({

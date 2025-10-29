@@ -13,7 +13,7 @@ import {
   updateUpdate,
 } from "~/modules/update/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
@@ -25,7 +25,7 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
 
     const updates = await getAllUpdatesForAdmin();
 
-    return json(data({ updates }));
+    return json(payload({ updates }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -52,7 +52,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       status,
     });
 
-    return json(data(null));
+    return json(payload(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

@@ -5,7 +5,7 @@ import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { data, parseData } from "~/utils/http.server";
+import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
@@ -60,7 +60,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       );
 
       return json(
-        data({
+        payload({
           asset: null,
           error: "Asset not found",
         })
@@ -93,7 +93,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             },
           });
 
-          return json(data({ asset: updatedAsset }));
+          return json(payload({ asset: updatedAsset }));
         } catch (error) {
           Logger.error(
             new ShelfError({
@@ -106,7 +106,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
           // Return the existing thumbnail rather than failing
           return json(
-            data({
+            payload({
               asset: {
                 id: asset.id,
                 thumbnailImage: asset.thumbnailImage,
@@ -120,7 +120,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // If there's no main image, we can't generate a thumbnail
     if (!asset.mainImage) {
       return json(
-        data({
+        payload({
           asset: {
             id: asset.id,
             thumbnailImage: asset.thumbnailImage, // Will be null
@@ -135,7 +135,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     if (!originalPath) {
       // If we can't extract the path, return existing values
       return json(
-        data({
+        payload({
           asset: {
             id: asset.id,
             thumbnailImage: asset.thumbnailImage,
@@ -151,7 +151,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     if (downloadError) {
       // If download fails, return existing values
       return json(
-        data({
+        payload({
           asset: {
             id: asset.id,
             thumbnailImage: asset.thumbnailImage,
@@ -222,7 +222,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       );
 
       return json(
-        data({
+        payload({
           asset: null,
           error: "Asset was deleted during processing",
         })
@@ -242,7 +242,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ asset: updatedAsset }));
+    return json(payload({ asset: updatedAsset }));
   } catch (cause) {
     // In case of any error, try to return existing values instead of failing
     try {
@@ -257,7 +257,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         });
 
         if (asset) {
-          return json(data({ asset }));
+          return json(payload({ asset }));
         }
       }
     } catch {
@@ -280,7 +280,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Return a successful response with error flag
     return json(
-      data({
+      payload({
         asset: null,
         error: reason.message,
       })

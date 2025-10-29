@@ -3,7 +3,7 @@ import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { IMPORT_USERS_CSV_HEADERS } from "~/modules/invite/utils.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error } from "~/utils/http.server";
+import { assertIsPost, payload, error } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import {
   PermissionAction,
@@ -54,10 +54,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (!response) {
-      return json(data({ success: true }));
+      return json(payload({ success: true }));
     }
 
-    return json(data({ success: true, ...response }));
+    return json(payload({ success: true, ...response }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

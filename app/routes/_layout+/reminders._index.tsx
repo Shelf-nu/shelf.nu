@@ -12,7 +12,7 @@ import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -52,7 +52,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }));
 
     return json(
-      data({
+      payload({
         header,
         modelName,
         items: assetReminders,

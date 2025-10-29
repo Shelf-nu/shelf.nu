@@ -10,7 +10,7 @@ import NewBooking, {
 } from "~/routes/_layout+/bookings.new";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -81,7 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         header: newBookingHeader,
         currentOrganization,
         userId,

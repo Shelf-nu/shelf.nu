@@ -6,12 +6,12 @@ import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
-import { data, getParams } from "~/utils/http.server";
+import { payload, getParams } from "~/utils/http.server";
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  return json(data({ qrId }));
+  return json(payload({ qrId }));
 }
 
 export default function QrNotLoggedIn() {

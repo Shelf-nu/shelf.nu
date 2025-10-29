@@ -15,7 +15,7 @@ import { createSSOFormData } from "~/utils/auth";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   parseData,
@@ -153,7 +153,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading }));
+  return json(payload({ title, subHeading }));
 }
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();

@@ -34,7 +34,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -115,7 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         asset,
         header,
         categories,
@@ -250,7 +250,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(safeRedirect(redirectTo, `/assets/${id}`));
     }
 
-    return json(data({ success: true }));
+    return json(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });

@@ -52,7 +52,7 @@ import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -135,7 +135,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header: {
           title: `Add assets for ${kit.name}`,
           subHeading: "Fill up the kit with the assets of your choice.",

@@ -46,7 +46,7 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -184,7 +184,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         kit: {
           ...kit,
           custody,
@@ -328,7 +328,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ kit }));
+        return json(payload({ kit }));
       }
 
       case "add-barcode": {
@@ -351,7 +351,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         if (validationError) {
-          return json(data({ error: validationError }), { status: 400 });
+          return json(payload({ error: validationError }), { status: 400 });
         }
 
         try {
@@ -370,7 +370,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             senderId: authSession.userId,
           });
 
-          return json(data({ success: true }));
+          return json(payload({ success: true }));
         } catch (cause) {
           // Handle constraint violations and other barcode creation errors
           const reason = makeShelfError(cause);
@@ -380,14 +380,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             ?.validationErrors as any;
           if (validationErrors && validationErrors["barcodes[0].value"]) {
             return json(
-              data({ error: validationErrors["barcodes[0].value"].message }),
+              payload({ error: validationErrors["barcodes[0].value"].message }),
               {
                 status: reason.status,
               }
             );
           }
 
-          return json(data({ error: reason.message }), {
+          return json(payload({ error: reason.message }), {
             status: reason.status,
           });
         }
@@ -395,7 +395,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return json(payload(null));
       }
     }
   } catch (cause) {

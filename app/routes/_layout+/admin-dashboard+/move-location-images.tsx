@@ -14,7 +14,7 @@ import { PUBLIC_BUCKET } from "~/utils/constants";
 import { cropImage } from "~/utils/crop-image";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { requireAdmin } from "~/utils/roles.server";
 
@@ -37,7 +37,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
     });
 
     return json(
-      data({
+      payload({
         numberOfLocationWithImages: locationWithImages,
       })
     );
@@ -335,7 +335,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     if (locationWithImages.length === 0) {
       return json(
-        data({
+        payload({
           moved: 0,
           fixed: 0,
           skipped: 0,
@@ -545,7 +545,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     console.log(`- Skipped: ${skippedLocationIds.length}`);
 
     return json(
-      data({
+      payload({
         moved: movedLocationIds.length,
         fixed: shouldFix ? fixedLocationIds.length : 0,
         skipped: skippedLocationIds.length,

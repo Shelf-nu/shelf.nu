@@ -9,7 +9,7 @@ import { UserSubheading } from "~/components/user/user-subheading";
 import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -22,7 +22,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     const header = { title: userName };
 
-    return json(data({ header, user, userName }));
+    return json(payload({ header, user, userName }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

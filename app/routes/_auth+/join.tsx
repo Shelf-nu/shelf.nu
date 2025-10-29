@@ -26,7 +26,12 @@ import {
   notAllowedMethod,
 } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getActionMethod,
+  parseData,
+} from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 import { validateNonSSOSignup } from "~/utils/sso.server";
 
@@ -51,7 +56,7 @@ export function loader({ context }: LoaderFunctionArgs) {
       return redirect("/assets");
     }
 
-    return json(data({ title, subHeading }));
+    return json(payload({ title, subHeading }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

@@ -215,12 +215,12 @@ export type ResponsePayload = Record<string, unknown> | null;
  * @param data - The data to return
  * @returns The normalized data with `error` key set to `null`
  */
-export function data<T extends ResponsePayload>(data: T) {
+export function payload<T extends ResponsePayload>(data: T) {
   return { error: null, ...data };
 }
 
 export type DataResponse<T extends ResponsePayload = ResponsePayload> =
-  ReturnType<typeof data<T>>;
+  ReturnType<typeof payload<T>>;
 
 /**
  * Create an error response payload.

@@ -18,7 +18,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -44,7 +44,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const teamMember = await getTeamMember({ id: nrmId, organizationId });
 
-    return json(data({ showModal: true, teamMember }));
+    return json(payload({ showModal: true, teamMember }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, nrmId });
     throw json(error(reason), { status: reason.status });

@@ -6,7 +6,7 @@ import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -116,7 +116,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
 
       return json(
-        data({
+        payload({
           qr: {
             type: "asset" as const,
             asset,
@@ -158,7 +158,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,

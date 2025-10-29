@@ -19,7 +19,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -69,7 +69,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         header: {
           title: "Link QR with asset",
         },

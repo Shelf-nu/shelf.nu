@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { NotificationIcon } from "~/atoms/notifications";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 
 export const ClientNotificationSchema = z.object({
   title: z.string().min(4, { message: "Title is required" }),
@@ -31,7 +31,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true }));
+    return json(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

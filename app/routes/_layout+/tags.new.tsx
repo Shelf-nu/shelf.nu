@@ -15,7 +15,7 @@ import { createTag } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { formatEnum } from "~/utils/misc";
 import {
   PermissionAction,
@@ -53,7 +53,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         tagUseFor: Object.values(TagUseFor).map((useFor) => ({
           label: formatEnum(useFor),

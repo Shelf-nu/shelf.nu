@@ -2,7 +2,7 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { getBookings } from "~/modules/booking/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -62,7 +62,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return b;
     });
 
-    return json(data({ bookings }));
+    return json(payload({ bookings }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });

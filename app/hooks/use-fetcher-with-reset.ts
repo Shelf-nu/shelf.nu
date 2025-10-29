@@ -28,6 +28,14 @@ export default function useFetcherWithReset<T>() {
       data: data as T,
       reset: () => setData(undefined),
     }),
-    [data, fetcher.Form, fetcher.formData, fetcher.formMethod, fetcher.load, fetcher.state, fetcher.submit]
+    [
+      data,
+      fetcher.Form,
+      fetcher.formData,
+      fetcher.formMethod,
+      fetcher.load,
+      fetcher.state,
+      fetcher.submit,
+    ]
   );
 }

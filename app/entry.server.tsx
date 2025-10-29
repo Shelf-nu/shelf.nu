@@ -74,6 +74,9 @@ export const handleError = Sentry.wrapHandleErrorWithSentry;
 
 const ABORT_DELAY = 5000;
 
+// Stream timeout for v3_singleFetch
+export const streamTimeout = 5000;
+
 export default function handleRequest(
   request: Request,
   responseStatusCode: number,

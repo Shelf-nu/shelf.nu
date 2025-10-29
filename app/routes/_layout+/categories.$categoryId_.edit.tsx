@@ -14,7 +14,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import { error, getParams, payload, parseData } from "~/utils/http.server";
 
 import {
   PermissionAction,
@@ -57,7 +57,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title };
 
-    return json(data({ header, colorFromServer, category }));
+    return json(payload({ header, colorFromServer, category }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     throw json(error(reason), { status: reason.status });

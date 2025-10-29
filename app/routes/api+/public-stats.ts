@@ -1,7 +1,7 @@
 import { json } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 
 export async function loader() {
   try {
@@ -11,7 +11,7 @@ export async function loader() {
       db.qr.count(),
     ]);
 
-    return json(data({ totalAssets, totalUsers, totalQrCodes }), {
+    return json(payload({ totalAssets, totalUsers, totalQrCodes }), {
       status: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",

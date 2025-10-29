@@ -25,7 +25,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   parseData,
@@ -45,7 +45,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title }));
+  return json(payload({ title }));
 }
 
 const OtpSchema = z.object({

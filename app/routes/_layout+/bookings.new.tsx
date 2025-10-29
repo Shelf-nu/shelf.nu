@@ -33,7 +33,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -91,7 +91,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ]);
 
     return json(
-      data({
+      payload({
         userId,
         currentOrganization,
         header: newBookingHeader,

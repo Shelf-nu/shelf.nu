@@ -25,7 +25,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -69,7 +69,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, location }));
+    return json(payload({ title, header, location }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw json(error(reason), { status: reason.status });

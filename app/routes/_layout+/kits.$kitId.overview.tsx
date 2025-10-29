@@ -17,7 +17,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams, data } from "~/utils/http.server";
+import { error, getParams, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -67,7 +67,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         kit: {
           ...kit,
           createdAt: getDateTimeFormat(request, {

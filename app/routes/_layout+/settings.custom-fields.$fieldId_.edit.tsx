@@ -23,7 +23,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -76,7 +76,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         customField,
         header,
         categories,
@@ -141,7 +141,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data(null));
+    return json(payload(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });

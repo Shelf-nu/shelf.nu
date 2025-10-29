@@ -31,7 +31,7 @@ import { createDefaultWorkingHours } from "~/modules/working-hours/service.serve
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { getParams, data, error, parseData } from "~/utils/http.server";
+import { getParams, payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
@@ -77,7 +77,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       await createDefaultWorkingHours(organization.id);
     }
 
-    return json(data({ organization }));
+    return json(payload({ organization }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
     throw json(error(reason), { status: reason.status });
@@ -125,7 +125,7 @@ export const action = async ({
         );
         await toggleOrganizationSso({ organizationId, enabledSso });
 
-        return json(data({ message: "SSO toggled" }));
+        return json(payload({ message: "SSO toggled" }));
       case "disableWorkspace":
         const { workspaceDisabled } = parseData(
           await request.formData(),
@@ -140,7 +140,7 @@ export const action = async ({
         await toggleWorkspaceDisabled({ organizationId, workspaceDisabled });
 
         return json(
-          data({
+          payload({
             message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
           })
         );
@@ -157,7 +157,7 @@ export const action = async ({
         await toggleBarcodeEnabled({ organizationId, barcodesEnabled });
 
         return json(
-          data({
+          payload({
             message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
           })
         );
@@ -207,7 +207,7 @@ export const action = async ({
           },
         });
 
-        return json(data({ message: "SSO details updated" }));
+        return json(payload({ message: "SSO details updated" }));
       case "content":
         const csvData = await csvDataFromRequest({ request });
         if (csvData.length < 2) {
@@ -228,7 +228,7 @@ export const action = async ({
           userId,
           organizationId,
         });
-        return json(data(null));
+        return json(payload(null));
       default:
         throw new ShelfError({
           cause: null,
