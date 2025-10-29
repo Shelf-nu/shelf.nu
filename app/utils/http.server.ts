@@ -199,9 +199,12 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  * @returns The normalized error with `error` key set to the error
  */
 export function error(cause: ShelfError, shouldSendNotification = true) {
-  Logger.error(cause);
+  if (cause.label !== "Request aborted") {
+    Logger.error(cause);
+  }
 
   if (
+    cause.label !== "Request aborted" &&
     cause.additionalData?.userId &&
     typeof cause.additionalData?.userId === "string" &&
     shouldSendNotification

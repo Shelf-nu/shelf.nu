@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetcher, type FetcherWithComponents } from "@remix-run/react";
 
 export type FetcherWithComponentsReset<T> = FetcherWithComponents<T> & {
@@ -15,14 +15,19 @@ export default function useFetcherWithReset<T>() {
     }
   }, [fetcher.data, fetcher.state]);
 
-  return {
-    state: fetcher.state,
-    formMethod: fetcher.formMethod,
-    formData: fetcher.formData,
-    Form: fetcher.Form,
-    submit: fetcher.submit,
-    load: fetcher.load,
-    data: data as T,
-    reset: () => setData(undefined),
-  };
+  useEffect(() => () => setData(undefined), []);
+
+  return useMemo(
+    () => ({
+      state: fetcher.state,
+      formMethod: fetcher.formMethod,
+      formData: fetcher.formData,
+      Form: fetcher.Form,
+      submit: fetcher.submit,
+      load: fetcher.load,
+      data: data as T,
+      reset: () => setData(undefined),
+    }),
+    [data, fetcher.Form, fetcher.formData, fetcher.formMethod, fetcher.load, fetcher.state, fetcher.submit]
+  );
 }
