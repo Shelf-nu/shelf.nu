@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -115,7 +115,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
-      return json(
+      return data(
         payload({
           qr: {
             type: "asset" as const,
@@ -157,7 +157,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
+    return data(
       payload({
         qr: {
           ...qr,
@@ -171,7 +171,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const shouldSendNotification =
       typeof sendNotification === "boolean" && sendNotification;
 
-    return json(error(reason, shouldSendNotification), {
+    return data(error(reason, shouldSendNotification), {
       status: reason.status,
     });
   }

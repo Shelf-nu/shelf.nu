@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -40,19 +40,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const workingHours = await getWorkingHoursForOrganization(organizationId);
 
-    return json(
-      payload({
-        workingHours: {
-          ...workingHours,
-          overrides: workingHours.overrides.map((override) => ({
-            ...override,
-            date: override.date.toISOString(),
-          })),
-        },
-      })
-    );
+    return payload({
+      workingHours: {
+        ...workingHours,
+        overrides: workingHours.overrides.map((override) => ({
+          ...override,
+          date: override.date.toISOString(),
+        })),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

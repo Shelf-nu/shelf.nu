@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getKit } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -46,15 +46,13 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    return json(
-      payload({
-        qrObj,
-        barcodes: kit.barcodes,
-        showShelfBranding: currentOrganization.showShelfBranding,
-      })
-    );
+    return payload({
+      qrObj,
+      barcodes: kit.barcodes,
+      showShelfBranding: currentOrganization.showShelfBranding,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { getBookings } from "~/modules/booking/service.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
@@ -62,9 +62,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return b;
     });
 
-    return json(payload({ bookings }));
+    return payload({ bookings });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }

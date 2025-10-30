@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
@@ -139,21 +139,19 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      payload({
-        barcode: {
-          ...barcode,
-          type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
-        },
-      })
-    );
+    return payload({
+      barcode: {
+        ...barcode,
+        type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     const sendNotification = reason.additionalData?.shouldSendNotification;
     const shouldSendNotification =
       typeof sendNotification === "boolean" && sendNotification;
 
-    return json(error(reason, shouldSendNotification), {
+    return data(error(reason, shouldSendNotification), {
       status: reason.status,
     });
   }

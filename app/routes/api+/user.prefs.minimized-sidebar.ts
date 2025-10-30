@@ -1,4 +1,4 @@
-import { type ActionFunctionArgs, json } from "@remix-run/node";
+import { type ActionFunctionArgs, data } from "@remix-run/node";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -13,11 +13,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const bodyParams = await request.formData();
     cookie.minimizedSidebar = bodyParams.get("minimizeSidebar") === "open";
 
-    return json(payload({ success: true, isTogglingSidebar: true }), {
+    return data(payload({ success: true, isTogglingSidebar: true }), {
       headers: [setCookie(await userPrefs.serialize(cookie))],
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -63,9 +63,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       include: TEAM_MEMBER_INCLUDE,
     });
 
-    return json(payload({ teamMembers }));
+    return payload({ teamMembers });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

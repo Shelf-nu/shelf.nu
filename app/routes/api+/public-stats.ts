@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -11,7 +11,7 @@ export async function loader() {
       db.qr.count(),
     ]);
 
-    return json(payload({ totalAssets, totalUsers, totalQrCodes }), {
+    return data(payload({ totalAssets, totalUsers, totalQrCodes }), {
       status: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
@@ -20,6 +20,6 @@ export async function loader() {
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
