@@ -3,13 +3,8 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import {
-  Form,
-  json,
-  redirect,
-  useActionData,
-  useNavigation,
-} from "@remix-run/react";
+import { data, redirect } from "@remix-run/node";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -59,10 +54,10 @@ export function loader({ context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(payload({ title, subHeading }));
+    return payload({ title, subHeading });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -85,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

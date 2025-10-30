@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -45,7 +45,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(payload({ title }));
+  return payload({ title });
 }
 
 const OtpSchema = z.object({
@@ -99,7 +99,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

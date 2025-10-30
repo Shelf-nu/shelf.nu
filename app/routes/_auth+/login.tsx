@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 
 import { useZorm } from "react-zorm";
@@ -49,7 +49,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(payload({ title, subHeading, disableSignup, disableSSO }));
+  return payload({ title, subHeading, disableSignup, disableSSO });
 }
 
 const LoginFormSchema = z.object({
@@ -111,7 +111,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ? cause.shouldBeCaptured
         : !isZodValidationError(cause)
     );
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

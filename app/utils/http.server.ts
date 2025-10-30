@@ -196,6 +196,12 @@ export function safeRedirect(
     return defaultRedirect;
   }
 
+  // Block internal Remix routes (manifest, etc.) from being used as redirects
+  // These are framework-internal URLs created by lazy route discovery
+  if (to.startsWith("/__")) {
+    return defaultRedirect;
+  }
+
   // Check if the URL starts with any of the safe domains
   const isSafeDomain = safeList.some((safeUrl) => to.startsWith(safeUrl));
   if (!to.startsWith("/") && !isSafeDomain) {

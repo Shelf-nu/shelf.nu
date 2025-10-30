@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher } from "@remix-run/react";
 import { z } from "zod";
@@ -141,7 +141,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -153,7 +153,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(payload({ title, subHeading }));
+  return payload({ title, subHeading });
 }
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();

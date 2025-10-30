@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { sendOTP } from "~/modules/auth/service.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
@@ -31,7 +31,7 @@ export async function action({ request }: ActionFunctionArgs) {
         );
 
         await sendOTP(email);
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
     }
 
@@ -41,6 +41,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const isRateLimitError = cause.code === "over_email_send_rate_limit";
 
     const reason = makeShelfError(cause, {}, !isRateLimitError);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
