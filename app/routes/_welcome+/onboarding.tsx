@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { ChevronDownIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
@@ -268,23 +268,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const subHeading =
       "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
-    return json(
-      payload({
-        title,
-        subHeading,
-        user,
-        userSignedUpWithPassword,
-        OnboardingFormSchema,
-        collectBusinessIntel: config.collectBusinessIntel,
-        createdWithInvite,
-        requireCompanyName,
-        organizationName,
-        organizationId: verifiedOrganizationId,
-      })
-    );
+    return payload({
+      title,
+      subHeading,
+      user,
+      userSignedUpWithPassword,
+      OnboardingFormSchema,
+      collectBusinessIntel: config.collectBusinessIntel,
+      createdWithInvite,
+      requireCompanyName,
+      organizationName,
+      organizationId: verifiedOrganizationId,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -462,7 +460,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       { userId },
       !isZodValidationError(cause)
     );
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

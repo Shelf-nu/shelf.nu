@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import {
-  json,
+  data,
   type LoaderFunctionArgs,
   type MetaFunction,
 } from "@remix-run/node";
@@ -60,18 +60,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesForTrialPlanSelection();
 
-    return json(
-      payload({
-        title: "Subscription",
-        subTitle: "Pick an account plan that fits your workflow.",
-        /** Filter out the montly and yearly prices to only have prices for team plan */
-        prices,
-        customer,
-      })
-    );
+    return payload({
+      title: "Subscription",
+      subTitle: "Pick an account plan that fits your workflow.",
+      /** Filter out the montly and yearly prices to only have prices for team plan */
+      prices,
+      customer,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
