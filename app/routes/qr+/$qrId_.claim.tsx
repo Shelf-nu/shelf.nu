@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -16,7 +16,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { claimQrCode } from "~/modules/qr/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   payload,
@@ -43,30 +43,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const qr = await db.qr.findUnique({
-      where: {
-        id: qrId,
-      },
-    });
+    const qr = await db.qr
+      .findUniqueOrThrow({
+        where: {
+          id: qrId,
+          assetId: null,
+          kitId: null,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          title: "Code not found",
+          message:
+            "The code you are trying to claim is not available for claiming.",
+          additionalData: { qrId, currentOrganization },
+          label: "QR",
+        });
+      });
 
     /** If for some reason its already claimed, redirect to link */
     if (qr?.organizationId) {
       return redirect(`/qr/${qrId}/link`);
     }
 
-    return json(
-      payload({
-        header: {
-          title: "Claim QR code for your organization",
-        },
-        qrId,
-        organizations,
-        currentOrganizationId: currentOrganization.id,
-      })
-    );
+    return payload({
+      header: {
+        title: "Claim QR code for your organization",
+      },
+      qrId,
+      organizations,
+      currentOrganizationId: currentOrganization.id,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -105,7 +116,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

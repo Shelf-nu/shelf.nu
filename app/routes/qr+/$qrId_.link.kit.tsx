@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Kit } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -131,32 +131,30 @@ export const loader = async ({
       plural: "kits",
     };
 
-    return json(
-      payload({
-        header: {
-          title: "Link with existing asset",
-          subHeading: "Choose an asset to link with this QR tag.",
-        },
-        qrId,
-        items: kits,
-        search,
-        page,
-        totalItems: totalKits,
-        perPage,
-        totalPages,
-        modelName,
-        searchFieldLabel: "Search kits",
-        searchFieldTooltip: {
-          title: "Search your kits database",
-          text: "Search kits based on name or description.",
-        },
-        teamMembers,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      header: {
+        title: "Link with existing asset",
+        subHeading: "Choose an asset to link with this QR tag.",
+      },
+      qrId,
+      items: kits,
+      search,
+      page,
+      totalItems: totalKits,
+      perPage,
+      totalPages,
+      modelName,
+      searchFieldLabel: "Search kits",
+      searchFieldTooltip: {
+        title: "Search your kits database",
+        text: "Search kits based on name or description.",
+      },
+      teamMembers,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -192,7 +190,7 @@ export const action = async ({
     return redirect(`/qr/${qrId}/successful-link?type=kit`);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

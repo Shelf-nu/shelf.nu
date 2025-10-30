@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
@@ -23,7 +23,11 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     const qr = await db.qr
       .findUniqueOrThrow({
         where: { id: qrId },
-        include: {
+        select: {
+          id: true,
+          assetId: true,
+          kitId: true,
+
           asset: {
             select: {
               id: true,
@@ -48,17 +52,15 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    return json(
-      payload({
-        header: {
-          title: "Successfully linked asset to QR code",
-        },
-        qr,
-      })
-    );
+    return payload({
+      header: {
+        title: "Successfully linked asset to QR code",
+      },
+      qr,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 };
 

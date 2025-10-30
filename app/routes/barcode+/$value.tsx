@@ -1,5 +1,5 @@
 import type { Organization } from "@prisma/client";
-import { redirect, json } from "@remix-run/node";
+import { redirect, data } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
@@ -55,6 +55,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (!barcode) {
       throw new ShelfError({
         cause: null,
+        title: "Barcode not found",
         message:
           "This barcode doesn't exist or it doesn't belong to your current organization.",
         additionalData: { value, shouldSendNotification: false },
@@ -132,10 +133,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, value });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
+export const ErrorBoundary = () => <ErrorContent />;
+
 export default function BarcodeScanner() {
-  return <ErrorContent />;
+  return null;
 }

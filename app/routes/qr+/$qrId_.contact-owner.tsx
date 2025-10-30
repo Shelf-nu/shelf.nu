@@ -1,4 +1,4 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -31,6 +31,30 @@ export const NewReportSchema = z.object({
   content: z.string().min(3, "Content is required"),
 });
 
+export const QR_SELECT_FOR_REPORT = {
+  id: true,
+  organizationId: true,
+  userId: true,
+  assetId: true,
+  kitId: true,
+  asset: {
+    select: {
+      id: true,
+      organization: {
+        select: {
+          owner: {
+            select: {
+              email: true,
+              id: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  kit: true,
+};
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
@@ -43,23 +67,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         where: {
           id: qrId,
         },
-        include: {
-          asset: {
-            include: {
-              organization: {
-                select: {
-                  owner: {
-                    select: {
-                      email: true,
-                      id: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-          kit: true,
-        },
+        select: QR_SELECT_FOR_REPORT,
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -87,8 +95,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const ownerEmail = qr?.asset?.organization?.owner.email;
 
-    const payload = parseData(await request.formData(), NewReportSchema);
-    const { email, content } = payload;
+    const parsedData = parseData(await request.formData(), NewReportSchema);
+    const { email, content } = parsedData;
 
     const report = await createReport({
       email,
@@ -111,10 +119,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     }
 
-    return json(payload({ report }));
+    return payload({ report });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { z } from "zod";
 import { UnlinkIcon } from "~/components/icons/library";
@@ -68,19 +68,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      payload({
-        header: {
-          title: "Link QR with asset",
-        },
-        qrId,
-        organizations,
-        currentOrganizationId: currentOrganization.id,
-      })
-    );
+    return payload({
+      header: {
+        title: "Link QR with asset",
+      },
+      qrId,
+      organizations,
+      currentOrganizationId: currentOrganization.id,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -124,7 +122,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

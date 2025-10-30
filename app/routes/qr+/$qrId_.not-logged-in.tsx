@@ -1,5 +1,4 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { CuboidIcon } from "~/components/icons/library";
@@ -11,7 +10,7 @@ import { payload, getParams } from "~/utils/http.server";
 export function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  return json(payload({ qrId }));
+  return payload({ qrId });
 }
 
 export default function QrNotLoggedIn() {
