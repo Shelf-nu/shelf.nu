@@ -1,6 +1,5 @@
 import { AssetIndexMode } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import type {
@@ -107,7 +106,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "changeFreeze": {
@@ -123,7 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { freezeColumn },
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "changeShowImage": {
@@ -139,16 +138,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { showAssetImage },
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(payload(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId: authSession.userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

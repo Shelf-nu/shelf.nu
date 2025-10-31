@@ -1,4 +1,4 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getAsset } from "~/modules/asset/service.server";
 import { createScan } from "~/modules/scan/service.server";
@@ -57,9 +57,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       manuallyGenerated,
     });
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

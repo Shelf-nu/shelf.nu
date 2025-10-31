@@ -1,5 +1,4 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -256,7 +255,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(payload({ asset: updatedAsset }));
+    return payload({ asset: updatedAsset });
   } catch (cause) {
     // Log the error for debugging
     Logger.error(
@@ -273,11 +272,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     );
 
     // Return a successful response with error flag
-    return json(
-      payload({
-        asset: null,
-        error: "Error refreshing image.",
-      })
-    );
+    return payload({
+      asset: null,
+      error: "Error refreshing image.",
+    });
   }
 }

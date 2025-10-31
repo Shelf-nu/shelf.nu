@@ -1,4 +1,4 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { updateKit } from "~/modules/kit/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -59,9 +59,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return json(payload({ kit }));
+    return payload({ kit });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
