@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -57,10 +57,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title };
 
-    return json(payload({ header, colorFromServer, category }));
+    return payload({ header, colorFromServer, category });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -111,7 +111,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     return redirect(`/categories`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

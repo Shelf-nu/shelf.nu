@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -80,7 +80,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "custom Fields",
     };
 
-    return json(
+    return data(
       payload({
         header,
         items: customFields,
@@ -101,7 +101,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

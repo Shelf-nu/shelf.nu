@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, unstable_parseMultipartFormData } from "@remix-run/node";
+import { data, unstable_parseMultipartFormData } from "@remix-run/node";
 import { useFetcher } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
@@ -44,14 +44,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
     await assertUserCanImportNRM({ organizationId, organizations });
 
-    return json(
-      payload({
-        showModal: true,
-      })
-    );
+    return payload({
+      showModal: true,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -94,10 +92,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

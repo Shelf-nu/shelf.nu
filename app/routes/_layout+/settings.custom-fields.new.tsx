@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -53,17 +53,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(
-      payload({
-        header,
-        categories,
-        totalCategories,
-      })
-    );
+    return payload({
+      header,
+      categories,
+      totalCategories,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
 
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -122,7 +120,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect(`/settings/custom-fields`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

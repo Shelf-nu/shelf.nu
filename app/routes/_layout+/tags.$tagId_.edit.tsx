@@ -1,6 +1,6 @@
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -58,19 +58,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(
-      payload({
-        header,
-        tag,
-        tagUseFor: Object.values(TagUseFor).map((useFor) => ({
-          label: formatEnum(useFor),
-          value: useFor,
-        })),
-      })
-    );
+    return payload({
+      header,
+      tag,
+      tagUseFor: Object.values(TagUseFor).map((useFor) => ({
+        label: formatEnum(useFor),
+        value: useFor,
+      })),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -113,7 +111,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     return redirect(`/tags`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

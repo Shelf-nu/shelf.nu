@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -51,26 +51,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }).format(reminder.alertDateTime),
     }));
 
-    return json(
-      payload({
-        header,
-        modelName,
-        items: assetReminders,
-        totalItems: totalReminders,
-        page,
-        perPage,
-        totalPages,
-        searchFieldLabel: "Search reminders",
-        searchFieldTooltip: {
-          title: "Search reminders",
-          text: "Search reminders by reminder name, message, asset name or team member name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, maintenance' will find reminders matching any of these terms.",
-        },
-        search,
-      })
-    );
+    return payload({
+      header,
+      modelName,
+      items: assetReminders,
+      totalItems: totalReminders,
+      page,
+      perPage,
+      totalPages,
+      searchFieldLabel: "Search reminders",
+      searchFieldTooltip: {
+        title: "Search reminders",
+        text: "Search reminders by reminder name, message, asset name or team member name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, maintenance' will find reminders matching any of these terms.",
+      },
+      search,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -93,7 +91,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

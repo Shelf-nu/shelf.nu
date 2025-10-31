@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -25,7 +25,7 @@ import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, parseData } from "~/utils/http.server";
+import { error, parseData, payload } from "~/utils/http.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -70,7 +70,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "non-registered members",
     };
 
-    return {
+    return payload({
       header,
       modelName,
       page,
@@ -81,10 +81,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: totalTeamMembers,
       canImportNRM: canImportNRM(tierLimit),
       isPersonalOrg: checkIsPersonalOrg(currentOrganization),
-    };
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -165,7 +165,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

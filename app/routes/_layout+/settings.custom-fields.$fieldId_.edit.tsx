@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -75,17 +75,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: FIELD_TYPE_NAME[customField.type],
     };
 
-    return json(
-      payload({
-        customField,
-        header,
-        categories,
-        totalCategories,
-      })
-    );
+    return payload({
+      customField,
+      header,
+      categories,
+      totalCategories,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -104,12 +102,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const payload = parseData(
+    const parsedData = parseData(
       await request.formData(),
       NewCustomFieldFormSchema
     );
 
-    const { name, helpText, active, required, options, categories } = payload;
+    const { name, helpText, active, required, options, categories } =
+      parsedData;
 
     const field = await getCustomField({ organizationId, id });
 
@@ -141,10 +140,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(payload(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

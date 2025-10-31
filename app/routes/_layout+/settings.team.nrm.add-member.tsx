@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -31,14 +31,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    return json(
-      payload({
-        showModal: true,
-      })
-    );
+    return payload({
+      showModal: true,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -79,7 +77,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(`/settings/team/nrm`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

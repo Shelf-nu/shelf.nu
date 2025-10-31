@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
@@ -29,10 +29,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    return json(payload(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -89,10 +89,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

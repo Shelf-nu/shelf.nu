@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
@@ -78,7 +78,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "categories",
     };
 
-    return json(
+    return data(
       payload({
         header,
         items: categories,
@@ -95,7 +95,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -134,10 +134,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
