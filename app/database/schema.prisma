@@ -58,6 +58,7 @@ model User {
   assets            Asset[]
   categories        Category[]
   notes             Note[]
+  locationNotes     LocationNote[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
   qrCodes           Qr[]
   scans             Scan[]
@@ -354,6 +355,26 @@ model BookingNote {
   @@index([userId])
 }
 
+model LocationNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user      User?     @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId    String?
+  location  Location  @relation("LocationNotes", fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  locationId String
+
+  // Indexes for foreign keys
+  @@index([locationId])
+  @@index([userId])
+}
+
 enum NoteType {
   COMMENT
   UPDATE
@@ -544,6 +565,7 @@ model Location {
 
   assets Asset[]
   kits   Kit[]
+  notes  LocationNote[] @relation("LocationNotes")
 
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys

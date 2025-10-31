@@ -1353,6 +1353,7 @@ export async function updateAsset({
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
         assetId: asset.id,
+        assetTitle: asset.title,
         userId,
         isRemoving: newLocationId === null,
       });
