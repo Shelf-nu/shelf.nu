@@ -1,6 +1,5 @@
 import { TagUseFor } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
@@ -141,19 +140,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : undefined,
     })) as Array<Record<string, string>>;
 
-    return json(
-      payload({
-        filters: queryData.map((item) => ({
-          id: item.id,
-          name: item[queryKey],
-          color: item?.color,
-          metadata: item,
-          user: item?.user as any,
-        })),
-      })
-    );
+    return payload({
+      filters: queryData.map((item) => ({
+        id: item.id,
+        name: item[queryKey],
+        color: item?.color,
+        metadata: item,
+        user: item?.user as any,
+      })),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

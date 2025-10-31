@@ -1,5 +1,4 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkDeleteTagsSchema } from "~/components/tag/bulk-delete-dialog";
 import { bulkDeleteTags } from "~/modules/tag/service.server";
@@ -51,16 +50,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(payload(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

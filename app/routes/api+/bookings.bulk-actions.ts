@@ -1,5 +1,4 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
@@ -71,7 +70,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "bulk-archive": {
@@ -90,7 +89,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "bulk-cancel": {
@@ -111,16 +110,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(payload(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

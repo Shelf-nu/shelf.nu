@@ -183,9 +183,9 @@ export default function AdminOrgQrCodes() {
               Print unlinked codes
             </Button>
             <Button
-              to={`/api/${
-                organization.id
-              }/qr-codes-${new Date().getTime()}.zip`}
+              to={`/api/${organization.id}/qr-codes.zip?${new URLSearchParams({
+                timestamp: new Date().getTime().toString(),
+              })}`}
               reloadDocument
               className="whitespace-nowrap"
               variant="secondary"

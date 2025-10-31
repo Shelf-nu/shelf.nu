@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
@@ -29,16 +29,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const query = validated.q?.trim() ?? "";
 
     if (!query) {
-      return json(
-        payload({
-          query,
-          assets: [],
-          kits: [],
-          bookings: [],
-          locations: [],
-          teamMembers: [],
-        })
-      );
+      return payload({
+        query,
+        assets: [],
+        kits: [],
+        bookings: [],
+        locations: [],
+        teamMembers: [],
+      });
     }
 
     const {
@@ -278,73 +276,71 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : Promise.resolve([]),
       ]);
 
-    return json(
-      payload({
-        query,
-        assets: assetResults.assets.map((asset) => ({
-          id: asset.id,
-          title: asset.title,
-          sequentialId: asset.sequentialId,
-          mainImage: asset.mainImage,
-          mainImageExpiration: asset.mainImageExpiration?.toISOString() ?? null,
-          locationName: asset.location?.name ?? null,
-          description: asset.description,
-          qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
-          categoryName: asset.category?.name ?? null,
-          tagNames: asset.tags?.map((tag) => tag.name) ?? [],
-          custodianName: (asset.custody as any)?.custodian?.name ?? null,
-          custodianUserName: (asset.custody as any)?.custodian?.user
-            ? `${(asset.custody as any).custodian.user.firstName} ${
-                (asset.custody as any).custodian.user.lastName
-              }`.trim()
-            : null,
-          barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
-          customFieldValues:
-            asset.customFields
-              ?.map((cf) => {
-                const value = cf.value as any;
-                const extractedValue = value?.raw ?? value ?? "";
-                return String(extractedValue);
-              })
-              .filter(Boolean) ?? [],
-        })),
-        kits: kits.map((kit) => ({
-          id: kit.id,
-          name: kit.name,
-          description: kit.description || null,
-          status: kit.status,
-          assetCount: kit._count?.assets || 0,
-        })),
-        bookings: bookings.map((booking) => ({
-          id: booking.id,
-          name: booking.name,
-          description: booking.description || null,
-          status: booking.status,
-          custodianName: booking.custodianUser
-            ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`.trim()
-            : booking.custodianTeamMember?.name || null,
-          from: booking.from?.toISOString() || null,
-          to: booking.to?.toISOString() || null,
-        })),
-        locations: locations.map((location) => ({
-          id: location.id,
-          name: location.name,
-          description: location.description || null,
-          address: location.address || null,
-          assetCount: location._count?.assets || 0,
-        })),
-        teamMembers: teamMembers.map((member) => ({
-          id: member.id,
-          name: member.name,
-          email: member.user?.email || null,
-          firstName: member.user?.firstName || null,
-          lastName: member.user?.lastName || null,
-          userId: member.userId,
-        })),
-      })
-    );
+    return payload({
+      query,
+      assets: assetResults.assets.map((asset) => ({
+        id: asset.id,
+        title: asset.title,
+        sequentialId: asset.sequentialId,
+        mainImage: asset.mainImage,
+        mainImageExpiration: asset.mainImageExpiration?.toISOString() ?? null,
+        locationName: asset.location?.name ?? null,
+        description: asset.description,
+        qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
+        categoryName: asset.category?.name ?? null,
+        tagNames: asset.tags?.map((tag) => tag.name) ?? [],
+        custodianName: (asset.custody as any)?.custodian?.name ?? null,
+        custodianUserName: (asset.custody as any)?.custodian?.user
+          ? `${(asset.custody as any).custodian.user.firstName} ${
+              (asset.custody as any).custodian.user.lastName
+            }`.trim()
+          : null,
+        barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
+        customFieldValues:
+          asset.customFields
+            ?.map((cf) => {
+              const value = cf.value as any;
+              const extractedValue = value?.raw ?? value ?? "";
+              return String(extractedValue);
+            })
+            .filter(Boolean) ?? [],
+      })),
+      kits: kits.map((kit) => ({
+        id: kit.id,
+        name: kit.name,
+        description: kit.description || null,
+        status: kit.status,
+        assetCount: kit._count?.assets || 0,
+      })),
+      bookings: bookings.map((booking) => ({
+        id: booking.id,
+        name: booking.name,
+        description: booking.description || null,
+        status: booking.status,
+        custodianName: booking.custodianUser
+          ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`.trim()
+          : booking.custodianTeamMember?.name || null,
+        from: booking.from?.toISOString() || null,
+        to: booking.to?.toISOString() || null,
+      })),
+      locations: locations.map((location) => ({
+        id: location.id,
+        name: location.name,
+        description: location.description || null,
+        address: location.address || null,
+        assetCount: location._count?.assets || 0,
+      })),
+      teamMembers: teamMembers.map((member) => ({
+        id: member.id,
+        name: member.name,
+        email: member.user?.email || null,
+        firstName: member.user?.firstName || null,
+        lastName: member.user?.lastName || null,
+        userId: member.userId,
+      })),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

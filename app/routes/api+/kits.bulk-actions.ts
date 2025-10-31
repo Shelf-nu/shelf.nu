@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
@@ -78,7 +78,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "bulk-assign-custody": {
@@ -130,7 +130,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "bulk-release-custody": {
@@ -169,7 +169,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       case "bulk-update-location": {
@@ -193,16 +193,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(payload(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

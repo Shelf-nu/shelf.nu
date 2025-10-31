@@ -1,6 +1,9 @@
 import { KitStatus } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import {
+  data,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
 import { BulkAddToKitSchema } from "~/components/assets/bulk-add-to-kit-dialog";
 import { db } from "~/database/db.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
@@ -38,10 +41,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(payload({ kits }));
+    return payload({ kits });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -82,9 +85,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       message: `Successfully added ${assetIds.length} assets to kit "${updatedKit.name}".`,
     });
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
