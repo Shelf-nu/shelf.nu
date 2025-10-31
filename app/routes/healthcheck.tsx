@@ -3,7 +3,7 @@ import { json } from "@remix-run/node";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 
 export async function loader() {
   try {
@@ -12,7 +12,7 @@ export async function loader() {
     await db.user.findFirst({
       select: { id: true },
     });
-    return json(data({ status: "OK" }));
+    return json(payload({ status: "OK" }));
   } catch (cause) {
     return json(
       error(

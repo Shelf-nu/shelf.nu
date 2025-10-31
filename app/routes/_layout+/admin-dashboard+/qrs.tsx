@@ -25,7 +25,7 @@ import {
 } from "~/modules/qr/service.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -57,7 +57,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         items: qrCodes,
         search,
@@ -92,7 +92,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await markBatchAsPrinted({ batch });
 
     return json(
-      data({
+      payload({
         success: true,
       })
     );

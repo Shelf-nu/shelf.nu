@@ -1,6 +1,7 @@
 import type { Asset, Kit, Prisma, ReportFound, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import type { QR_SELECT_FOR_REPORT } from "~/routes/qr+/$qrId_.contact-owner";
 import { ShelfError } from "~/utils/error";
 import { normalizeQrData } from "~/utils/qr";
 
@@ -56,10 +57,7 @@ export async function sendReportEmails({
   message: ReportFound["content"];
   reporterEmail: ReportFound["email"];
   qr: Prisma.QrGetPayload<{
-    include: {
-      asset: true;
-      kit: true;
-    };
+    select: typeof QR_SELECT_FOR_REPORT;
   }>;
 }) {
   const { item, type, normalizedName } = normalizeQrData(qr);

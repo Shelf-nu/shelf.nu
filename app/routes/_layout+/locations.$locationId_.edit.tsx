@@ -24,7 +24,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getParams,
   getRefererPath,
@@ -70,7 +70,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         location,
         header,
         referer: getRefererPath(request),
@@ -150,7 +150,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(safeRedirect(payload.redirectTo, `/locations/${id}`));
     }
 
-    return json(data({ success: true }));
+    return json(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });

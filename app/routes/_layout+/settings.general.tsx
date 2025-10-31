@@ -42,7 +42,7 @@ import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -132,7 +132,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user.tierId === "tier_1");
 
     return json(
-      data({
+      payload({
         header,
         organization: currentOrganization,
         canExportAssets: canExportAssets(tierLimit),

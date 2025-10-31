@@ -20,7 +20,7 @@ import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -91,7 +91,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const tierLimit = await getUserTierLimit(userId);
 
     return json(
-      data({
+      payload({
         userId,
         tier: user.tier,
         tierLimit,

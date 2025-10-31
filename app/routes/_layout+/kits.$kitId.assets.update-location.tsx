@@ -10,7 +10,7 @@ import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import { getKit, updateKitLocation } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, getParams, parseData } from "~/utils/http.server";
+import { payload, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -52,7 +52,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     });
 
     return json(
-      data({
+      payload({
         showModal: true,
         kit,
         locations,

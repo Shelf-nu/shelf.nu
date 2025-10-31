@@ -20,7 +20,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -67,7 +67,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
     const prices = await getStripePricesAndProducts();
 
     return json(
-      data({
+      payload({
         title: `Subscriptions`,
         subTitle:
           customer?.subscriptions.total_count === 0

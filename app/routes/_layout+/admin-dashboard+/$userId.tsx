@@ -37,7 +37,7 @@ import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getParams,
   isDelete,
@@ -203,7 +203,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
     return json(
-      data({
+      payload({
         user,
         organizations: userOrganizations.map((uo) => uo.organization),
         ssoUsersByDomain,
@@ -319,7 +319,7 @@ export const action = async ({
             icon: { name: "trash", variant: "error" },
             senderId: userId,
           });
-          return json(data({ success: true }));
+          return json(payload({ success: true }));
         }
       case "createCustomerId": {
         const user = await getUserByID(shelfUserId, {
@@ -335,7 +335,7 @@ export const action = async ({
           name: `${user.firstName} ${user.lastName}`,
           userId: user.id,
         });
-        return json(data(null));
+        return json(payload(null));
       }
       case "toggleSubscriptionCheck": {
         const { skipSubscriptionCheck } = parseData(
@@ -363,7 +363,7 @@ export const action = async ({
       }
     }
 
-    return json(data(null));
+    return json(payload(null));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, shelfUserId });
     return json(error(reason), { status: reason.status });

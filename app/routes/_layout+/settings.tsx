@@ -9,7 +9,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -41,7 +41,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({ header, _isPersonalOrg: isPersonalOrg(currentOrganization) })
+      payload({ header, _isPersonalOrg: isPersonalOrg(currentOrganization) })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

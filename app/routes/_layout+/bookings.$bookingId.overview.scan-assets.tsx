@@ -30,7 +30,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -89,7 +89,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, booking }));
+    return json(payload({ title, header, booking }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw json(error(reason), { status: reason.status });

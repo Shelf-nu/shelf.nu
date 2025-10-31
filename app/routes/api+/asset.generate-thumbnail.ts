@@ -1,11 +1,10 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { data, parseData } from "~/utils/http.server";
+import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
@@ -59,12 +58,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         })
       );
 
-      return json(
-        data({
-          asset: null,
-          error: "Asset not found",
-        })
-      );
+      return payload({
+        asset: null,
+        error: "Asset not found",
+      });
     }
 
     // If thumbnail already exists, refresh its URL
@@ -93,7 +90,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             },
           });
 
-          return json(data({ asset: updatedAsset }));
+          return payload({ asset: updatedAsset });
         } catch (error) {
           Logger.error(
             new ShelfError({
@@ -105,28 +102,24 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           );
 
           // Return the existing thumbnail rather than failing
-          return json(
-            data({
-              asset: {
-                id: asset.id,
-                thumbnailImage: asset.thumbnailImage,
-              },
-            })
-          );
+          return payload({
+            asset: {
+              id: asset.id,
+              thumbnailImage: asset.thumbnailImage,
+            },
+          });
         }
       }
     }
 
     // If there's no main image, we can't generate a thumbnail
     if (!asset.mainImage) {
-      return json(
-        data({
-          asset: {
-            id: asset.id,
-            thumbnailImage: asset.thumbnailImage, // Will be null
-          },
-        })
-      );
+      return payload({
+        asset: {
+          id: asset.id,
+          thumbnailImage: asset.thumbnailImage, // Will be null
+        },
+      });
     }
 
     // Extract the original filename from the mainImage URL using the consistent function
@@ -134,14 +127,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     if (!originalPath) {
       // If we can't extract the path, return existing values
-      return json(
-        data({
-          asset: {
-            id: asset.id,
-            thumbnailImage: asset.thumbnailImage,
-          },
-        })
-      );
+      return payload({
+        asset: {
+          id: asset.id,
+          thumbnailImage: asset.thumbnailImage,
+        },
+      });
     }
 
     // Download the original image from Supabase
@@ -150,14 +141,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     if (downloadError) {
       // If download fails, return existing values
-      return json(
-        data({
-          asset: {
-            id: asset.id,
-            thumbnailImage: asset.thumbnailImage,
-          },
-        })
-      );
+      return payload({
+        asset: {
+          id: asset.id,
+          thumbnailImage: asset.thumbnailImage,
+        },
+      });
     }
 
     // Convert to AsyncIterable for the uploadFile function
@@ -221,12 +210,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         })
       );
 
-      return json(
-        data({
-          asset: null,
-          error: "Asset was deleted during processing",
-        })
-      );
+      return payload({
+        asset: null,
+        error: "Asset was deleted during processing",
+      });
     }
 
     // Update the asset record with both the thumbnail and a fresh expiration
@@ -242,7 +229,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ asset: updatedAsset }));
+    return payload({ asset: updatedAsset });
   } catch (cause) {
     // In case of any error, try to return existing values instead of failing
     try {
@@ -257,7 +244,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         });
 
         if (asset) {
-          return json(data({ asset }));
+          return payload({ asset });
         }
       }
     } catch {
@@ -279,11 +266,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     Logger.error(reason);
 
     // Return a successful response with error flag
-    return json(
-      data({
-        asset: null,
-        error: reason.message,
-      })
-    );
+    return payload({
+      asset: null,
+      error: reason.message,
+    });
   }
 }

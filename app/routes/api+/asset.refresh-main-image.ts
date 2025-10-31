@@ -1,11 +1,10 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { data, parseData } from "~/utils/http.server";
+import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
@@ -256,7 +255,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ asset: updatedAsset }));
+    return payload({ asset: updatedAsset });
   } catch (cause) {
     // Log the error for debugging
     Logger.error(
@@ -273,11 +272,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     );
 
     // Return a successful response with error flag
-    return json(
-      data({
-        asset: null,
-        error: "Error refreshing image.",
-      })
-    );
+    return payload({
+      asset: null,
+      error: "Error refreshing image.",
+    });
   }
 }

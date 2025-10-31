@@ -23,7 +23,7 @@ import { getLocation } from "~/modules/location/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -82,7 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         location,
         header,
         modelName,

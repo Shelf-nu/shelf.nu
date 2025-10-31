@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -45,7 +45,7 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -126,8 +126,8 @@ export const loader = async ({
       plural: "assets",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header: {
           title: "Link with existing asset",
           subHeading: "Choose an asset to link with this QR tag.",
@@ -158,7 +158,7 @@ export const loader = async ({
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -194,7 +194,7 @@ export const action = async ({
     return redirect(`/qr/${qrId}/successful-link?type=asset`);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

@@ -46,7 +46,7 @@ import {
 } from "~/utils/cookies.server";
 import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -158,7 +158,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     return json(
-      data({
+      payload({
         user,
         organizations,
         currentOrganizationId: organizationId,

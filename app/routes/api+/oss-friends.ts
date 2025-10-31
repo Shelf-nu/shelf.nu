@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 
@@ -7,7 +7,7 @@ export async function loader() {
     const query = await fetch("https://formbricks.com/api/oss-friends");
     const response = await query.json();
 
-    return json(response, {
+    return data(response, {
       status: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
@@ -16,6 +16,6 @@ export async function loader() {
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

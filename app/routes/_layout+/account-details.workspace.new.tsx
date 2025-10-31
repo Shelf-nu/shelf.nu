@@ -27,7 +27,7 @@ import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { assertUserCanCreateMoreOrganizations } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -47,7 +47,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         currentOrganizationId: organizationId,
         curriences: Object.keys(Currency),

@@ -74,7 +74,7 @@ import {
   makeShelfError,
 } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -414,7 +414,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `Edit | ${booking.name}`,
     };
     return json(
-      data({
+      payload({
         userId,
         currentOrganization,
         header,
@@ -613,7 +613,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking }), {
+        return json(payload({ booking }), {
           headers,
         });
       }
@@ -672,7 +672,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking }), {
+        return json(payload({ booking }), {
           headers,
         });
       }
@@ -710,7 +710,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking }), {
+        return json(payload({ booking }), {
           headers,
         });
       }
@@ -753,7 +753,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking, success: true }), {
+        return json(payload({ booking, success: true }), {
           headers,
         });
       case "partial-checkin": {
@@ -861,7 +861,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking: b }), {
+        return json(payload({ booking: b }), {
           headers,
         });
       }
@@ -875,7 +875,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }), { headers });
+        return json(payload({ success: true }), { headers });
       }
       case "cancel": {
         const cancelledBooking = await cancelBooking({
@@ -908,7 +908,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }), {
+        return json(payload({ success: true }), {
           headers,
         });
       }
@@ -946,7 +946,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking: b }), {
+        return json(payload({ booking: b }), {
           headers,
         });
       }
@@ -960,7 +960,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
       case "extend-booking": {
         const hints = getClientHint(request);
@@ -999,7 +999,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
       case "bulk-remove-asset-or-kit": {
         const { assetOrKitIds } = parseData(
@@ -1058,11 +1058,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ booking: b, success: true }), { headers });
+        return json(payload({ booking: b, success: true }), { headers });
       }
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return json(payload(null));
       }
     }
   } catch (cause) {

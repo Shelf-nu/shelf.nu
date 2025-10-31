@@ -7,7 +7,7 @@ import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/ser
 import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -52,7 +52,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }));
 
     return json(
-      data({
+      payload({
         header,
         modelName,
         items: assetReminders,

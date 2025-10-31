@@ -7,7 +7,7 @@ import { createNote, deleteNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -81,7 +81,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
         });
 
-        return json(data({ note }));
+        return json(payload({ note }));
       }
       case "DELETE": {
         const { noteId } = parseData(
@@ -106,7 +106,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
         });
 
-        return json(data(null));
+        return json(payload(null));
       }
     }
 

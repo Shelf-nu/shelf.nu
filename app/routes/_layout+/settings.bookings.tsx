@@ -40,7 +40,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -80,7 +80,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         organization: currentOrganization,
         bookingSettings,
@@ -167,7 +167,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return json(payload({ success: true }), { status: 200 });
       }
       case "updateTagsRequired": {
         const { tagsRequired } = parseData(
@@ -194,7 +194,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return json(payload({ success: true }), { status: 200 });
       }
       case "toggle": {
         // Only use parseData for simple fields without numeric keys
@@ -215,7 +215,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return json(payload({ success: true }), { status: 200 });
       }
 
       case "updateSchedule": {
@@ -259,7 +259,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return json(payload({ success: true }), { status: 200 });
       }
       case "createOverride": {
         // Use parseData function following your standard pattern
@@ -284,7 +284,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return json(payload({ success: true }), { status: 200 });
       }
 
       case "deleteOverride": {
@@ -308,7 +308,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return json(payload({ success: true }), { status: 200 });
       }
 
       default: {

@@ -7,7 +7,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { duplicateBooking, getBooking } from "~/modules/booking/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -37,7 +37,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     });
 
     return json(
-      data({
+      payload({
         showModal: true,
         booking,
       })

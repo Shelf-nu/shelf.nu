@@ -36,7 +36,7 @@ import {
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
@@ -144,7 +144,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         assets,
         locale: getLocale(request),

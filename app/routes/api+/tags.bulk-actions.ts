@@ -1,12 +1,11 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkDeleteTagsSchema } from "~/components/tag/bulk-delete-dialog";
 import { bulkDeleteTags } from "~/modules/tag/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -51,16 +50,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

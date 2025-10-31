@@ -68,7 +68,7 @@ import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -176,7 +176,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
-      data({
+      payload({
         header: {
           title: `Add assets for '${booking?.name}'`,
           subHeading: "Fill up the booking with the assets of your choice",

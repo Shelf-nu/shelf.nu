@@ -30,7 +30,7 @@ import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getClientHint } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
-import { data } from "./utils/http.server";
+import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
@@ -65,7 +65,7 @@ export const meta: MetaFunction = () => [
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
   json(
-    data({
+    payload({
       env: getBrowserEnv(),
       maintenanceMode: false,
       requestInfo: {

@@ -146,6 +146,9 @@ export function getResolveToMatches(matches: UIMatch[]) {
 
   // Use the full pathname for the leaf match so we include splat values for "." links
   // https://github.com/remix-run/react-router/issues/11052#issuecomment-1836589329
+  // This mirrors the behaviour behind Remix's `v3_relativeSplatPath` flag so
+  // downstream helpers continue to resolve nested splat routes correctly while
+  // we prepare for React Router v7.
   return pathMatches.map((match: any, idx: number) =>
     idx === pathMatches.length - 1 ? match?.pathname : match?.pathnameBase
   );

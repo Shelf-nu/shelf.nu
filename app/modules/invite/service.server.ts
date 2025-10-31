@@ -310,7 +310,7 @@ export async function updateInviteStatus({
       if (invite?.status === InviteStatuses.ACCEPTED) {
         title = "Invite already accepted";
         message =
-          "Please login to your account to access the organization. \n If you have not set a password yet,\n you must use the <b>OTP login</b> the first time you access your account.";
+          "Please login to your account to access the organization. <br/> If you have not set a password yet, you must use the <b>OTP login</b> the first time you access your account.";
       }
 
       if (invite?.status === InviteStatuses.REJECTED) {

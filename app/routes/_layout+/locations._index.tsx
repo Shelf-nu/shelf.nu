@@ -22,7 +22,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -63,7 +63,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         header,
         items: locations,
         search,

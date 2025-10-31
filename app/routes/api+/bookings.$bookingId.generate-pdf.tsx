@@ -1,11 +1,11 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -63,9 +63,9 @@ export const loader = async ({
       pdfMeta.originalTo = dateTimeFormat.format(new Date(originalTo));
     }
 
-    return json(data({ pdfMeta }));
+    return payload({ pdfMeta });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };

@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
@@ -96,15 +96,13 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return json(
-      data({
-        assets: assetsWithQrObj,
-        qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
-        showShelfBranding: currentOrganization.showShelfBranding,
-      })
-    );
+    return payload({
+      assets: assetsWithQrObj,
+      qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+      showShelfBranding: currentOrganization.showShelfBranding,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

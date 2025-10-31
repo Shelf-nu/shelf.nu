@@ -1,9 +1,9 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { getOngoingBookingForAsset } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -27,9 +27,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return json(data(booking));
+    return payload(booking);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw reason;
+    throw data(error(reason), { status: reason.status });
   }
 }

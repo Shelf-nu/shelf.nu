@@ -39,7 +39,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -126,7 +126,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return json(
-      data({
+      payload({
         organization,
         header,
         curriences: Object.keys(Currency),

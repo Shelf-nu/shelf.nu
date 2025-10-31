@@ -6,7 +6,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import When from "~/components/when/when";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -30,7 +30,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       action: PermissionAction.read,
     });
     return json(
-      data({
+      payload({
         isPersonalOrg: currentOrganization.type === "PERSONAL",
         orgName: currentOrganization.name,
       })

@@ -196,6 +196,12 @@ export function safeRedirect(
     return defaultRedirect;
   }
 
+  // Block internal Remix routes (manifest, etc.) from being used as redirects
+  // These are framework-internal URLs created by lazy route discovery
+  if (to.startsWith("/__")) {
+    return defaultRedirect;
+  }
+
   // Check if the URL starts with any of the safe domains
   const isSafeDomain = safeList.some((safeUrl) => to.startsWith(safeUrl));
   if (!to.startsWith("/") && !isSafeDomain) {
@@ -215,12 +221,12 @@ export type ResponsePayload = Record<string, unknown> | null;
  * @param data - The data to return
  * @returns The normalized data with `error` key set to `null`
  */
-export function data<T extends ResponsePayload>(data: T) {
+export function payload<T extends ResponsePayload>(data: T) {
   return { error: null, ...data };
 }
 
 export type DataResponse<T extends ResponsePayload = ResponsePayload> =
-  ReturnType<typeof data<T>>;
+  ReturnType<typeof payload<T>>;
 
 /**
  * Create an error response payload.
@@ -231,9 +237,12 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  * @returns The normalized error with `error` key set to the error
  */
 export function error(cause: ShelfError, shouldSendNotification = true) {
-  Logger.error(cause);
+  if (cause.label !== "Request aborted") {
+    Logger.error(cause);
+  }
 
   if (
+    cause.label !== "Request aborted" &&
     cause.additionalData?.userId &&
     typeof cause.additionalData?.userId === "string" &&
     shouldSendNotification

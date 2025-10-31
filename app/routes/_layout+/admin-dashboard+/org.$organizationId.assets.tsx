@@ -12,7 +12,7 @@ import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.se
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -62,7 +62,7 @@ export const loader = async ({
     };
 
     return json(
-      data({
+      payload({
         items: assets,
         categories,
         tags,
@@ -145,12 +145,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return json(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return json(payload(null));
       }
     }
   } catch (cause) {

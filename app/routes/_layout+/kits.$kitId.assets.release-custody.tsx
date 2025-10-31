@@ -14,7 +14,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -56,7 +56,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } & typeof kit;
 
     return json(
-      data({
+      payload({
         showModal: true,
         kit: kitWithCustody,
       })

@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { NRM_ID_PARAM } from "~/components/nrm/export-nrm-button";
 import { exportNRMsToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -42,6 +42,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

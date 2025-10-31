@@ -27,7 +27,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -121,7 +121,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalTeamMembers = await db.teamMember.count({ where });
 
     return json(
-      data({
+      payload({
         showModal: true,
         teamMembers,
         asset,

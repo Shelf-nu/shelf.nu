@@ -15,7 +15,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   wrapCustodianForNote,
   wrapUserLinkForNote,
@@ -93,7 +93,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     return json(
-      data({
+      payload({
         showModal: true,
         custody,
         asset,

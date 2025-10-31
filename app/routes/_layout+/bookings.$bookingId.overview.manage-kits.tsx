@@ -64,7 +64,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -199,7 +199,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     return json(
-      data({
+      payload({
         header: {
           title: `Manage kits for ‘${booking?.name}’`,
           subHeading: "Fill up the booking with the kits of your choice",
