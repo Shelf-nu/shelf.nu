@@ -81,7 +81,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, userId, currentOrganization } =
+  const { teamMembers, teamMembersForForm, userId, currentOrganization } =
     useLoaderData<BookingPageLoaderData>();
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
@@ -139,7 +139,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   });
 
   /** This is used when we have selfSErvice or Base as we are setting the default */
-  const defaultTeamMember = teamMembers?.find(
+  // Use teamMembersForForm for BASE/SELF_SERVICE users to ensure their team member is always available
+  const teamMembersToUse = teamMembersForForm || teamMembers;
+  const defaultTeamMember = teamMembersToUse?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
