@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
@@ -93,7 +93,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /** We format the dates on the server based on the users timezone and locale  */
     const items = formatBookingsDates(bookings, request);
 
-    return json(
+    return data(
       payload({
         header,
         items,
@@ -115,7 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

@@ -3,7 +3,8 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, Outlet, useLoaderData } from "@remix-run/react";
+import { data } from "@remix-run/node";
+import { Outlet, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -79,21 +80,19 @@ export const loader = async ({
       title: userName,
     };
 
-    return json(
-      payload({
-        isPersonalOrg: currentOrganization.type === "PERSONAL",
-        orgName: currentOrganization.name,
-        header,
-        user: {
-          ...user,
-          contact: userContact,
-        },
-        userName,
-      })
-    );
+    return payload({
+      isPersonalOrg: currentOrganization.type === "PERSONAL",
+      orgName: currentOrganization.name,
+      header,
+      user: {
+        ...user,
+        contact: userContact,
+      },
+      userName,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -112,7 +111,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

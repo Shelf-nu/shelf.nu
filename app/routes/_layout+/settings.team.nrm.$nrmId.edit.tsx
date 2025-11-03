@@ -1,11 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import {
-  json,
-  redirect,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from "@remix-run/react";
+import { data, redirect } from "@remix-run/node";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -44,10 +39,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const teamMember = await getTeamMember({ id: nrmId, organizationId });
 
-    return json(payload({ showModal: true, teamMember }));
+    return payload({ showModal: true, teamMember });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, nrmId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -84,7 +79,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect("/settings/team/nrm");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, nrmId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
