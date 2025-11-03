@@ -311,7 +311,6 @@ export async function getTeamMemberForCustodianFilter({
 
     /** Checks and fixes teamMember names if they are broken */
     await fixTeamMembersNames(teamMembers);
-
     return {
       teamMembers,
       totalTeamMembers,
@@ -321,6 +320,73 @@ export async function getTeamMemberForCustodianFilter({
       cause,
       message: "Failed to fetch team members",
       additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Fetches team member(s) for use in booking form custodian select.
+ *
+ * For BASE/SELF_SERVICE users: Returns only their team member (optimized single query)
+ * For ADMIN users: Returns paginated list (same as filter logic)
+ *
+ * This is separate from getTeamMemberForCustodianFilter to avoid mixing concerns:
+ * - Filter: needs paginated list for sidebar filters
+ * - Form: BASE/SELF_SERVICE need guaranteed access to their team member
+ */
+export async function getTeamMemberForForm({
+  organizationId,
+  userId,
+  isSelfServiceOrBase,
+  getAll,
+}: {
+  organizationId: Organization["id"];
+  userId: string;
+  isSelfServiceOrBase: boolean;
+  getAll?: boolean;
+}) {
+  try {
+    // BASE/SELF_SERVICE users only need their own team member
+    if (isSelfServiceOrBase) {
+      const teamMember = await db.teamMember.findFirst({
+        where: {
+          organizationId,
+          userId,
+          deletedAt: null,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      await fixTeamMembersNames(teamMember ? [teamMember] : []);
+
+      return {
+        teamMembers: teamMember ? [teamMember] : [],
+        totalTeamMembers: 1,
+      };
+    }
+
+    // ADMIN users get paginated list (reuse filter logic)
+    return await getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers: [],
+      getAll,
+      userId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch team member for form",
+      additionalData: { organizationId, userId, isSelfServiceOrBase },
       label,
     });
   }

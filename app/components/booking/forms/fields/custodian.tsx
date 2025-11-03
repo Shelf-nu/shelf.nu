@@ -56,7 +56,7 @@ export function CustodianField({
         }}
         fieldName="custodian"
         contentLabel="Team members"
-        initialDataKey="teamMembers"
+        initialDataKey="teamMembersForForm"
         countKey="totalTeamMembers"
         placeholder="Select a team member"
         allowClear
