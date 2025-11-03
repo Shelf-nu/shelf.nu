@@ -371,7 +371,7 @@ export async function getTeamMemberForForm({
 
       return {
         teamMembers: teamMember ? [teamMember] : [],
-        totalTeamMembers: 1,
+        totalTeamMembers: teamMember ? 1 : 0,
       };
     }
 
@@ -381,6 +381,7 @@ export async function getTeamMemberForForm({
       selectedTeamMembers: [],
       getAll,
       userId,
+      filterByUserId: false,
     });
   } catch (cause) {
     throw new ShelfError({
