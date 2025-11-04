@@ -526,6 +526,7 @@ export default function Onboarding() {
         <div className="md:flex md:gap-6">
           <Input
             label="First name"
+            autoComplete="given-name"
             required
             data-test-id="firstName"
             type="text"
@@ -536,6 +537,7 @@ export default function Onboarding() {
           />
           <Input
             label="Last name"
+            autoComplete="family-name"
             required
             data-test-id="lastName"
             type="text"
@@ -548,6 +550,7 @@ export default function Onboarding() {
           <Input
             label="Username"
             addOn="shelf.nu/"
+            autoComplete="username"
             required
             type="text"
             name={zo.fields.username()}

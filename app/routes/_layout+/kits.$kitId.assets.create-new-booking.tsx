@@ -5,7 +5,7 @@ import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getKit } from "~/modules/kit/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { getTeamMemberForForm } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
 } from "~/routes/_layout+/bookings.new";
@@ -66,13 +66,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /* We need to fetch the team members to be able to display them in the custodian dropdown. */
     const [teamMembersData, tagsData] = await Promise.all([
-      getTeamMemberForCustodianFilter({
+      getTeamMemberForForm({
         organizationId,
+        userId,
+        isSelfServiceOrBase,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: isSelfServiceOrBase, // Self service or Base users can only create bookings for themselves so we always filter by userId
-        userId,
       }),
       getTagsForBookingTagsFilter({
         organizationId,
@@ -103,6 +103,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         isSelfServiceOrBase,
         selfServiceOrBaseUser,
         ...teamMembersData,
+        // For consistency, also provide teamMembersForForm
+        teamMembersForForm: teamMembersData.teamMembers,
         assetIds: kit.assets.map((a) => a.id),
         ...tagsData,
       })

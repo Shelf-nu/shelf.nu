@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
@@ -16,24 +16,47 @@ export const Dialog = ({
   title: string | ReactNode;
   children: ReactNode;
   open: boolean;
-  onClose: Function;
+  onClose: () => void;
   className?: string;
   headerClassName?: string;
 }) => {
-  // Handle Escape key to close dialog
-  useEffect(() => {
-    if (!open) return;
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const onCloseRef = useRef(onClose);
+  const previouslyFocusedElement = useRef<HTMLElement | null>(null);
 
-    const handleEscape = (event: KeyboardEvent) => {
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || !open) return;
+
+    previouslyFocusedElement.current =
+      (document.activeElement as HTMLElement | null) ?? null;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current?.();
       }
     };
 
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [open, onClose]);
+    dialog.addEventListener("keydown", handleKeyDown);
+
+    const focusTarget =
+      dialog.querySelector<HTMLElement>(
+        '[data-dialog-initial-focus],[autofocus],button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
+      ) ?? dialog;
+
+    focusTarget.focus();
+
+    return () => {
+      dialog.removeEventListener("keydown", handleKeyDown);
+      previouslyFocusedElement.current?.focus();
+      previouslyFocusedElement.current = null;
+    };
+  }, [open]);
 
   return open ? (
     <div
@@ -44,7 +67,7 @@ export const Dialog = ({
         }
       }}
     >
-      <dialog className={tw("dialog", className)} open>
+      <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
         <div className="flex h-full flex-col bg-white">
           <div
             className={tw(

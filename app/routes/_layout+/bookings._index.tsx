@@ -33,7 +33,10 @@ import {
 } from "~/modules/booking/service.server";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
@@ -115,50 +118,66 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/bookings?${cookieParams.toString()}`);
     }
 
-    const [{ bookings, bookingCount }, teamMembersData, tags] =
-      await Promise.all([
-        getBookings({
-          organizationId,
-          page,
-          perPage,
-          search,
-          userId: userId,
-          ...(status && {
-            // If status is in the params, we filter based on it
-            statuses: [status],
-          }),
-          custodianTeamMemberIds: teamMemberIds,
-          ...selfServiceData,
-          orderBy,
-          orderDirection,
-          tags: filterTags,
-          extraInclude: {
-            tags: { select: { id: true, name: true } },
-          },
+    const [
+      { bookings, bookingCount },
+      teamMembersData,
+      teamMembersForFormData,
+      tags,
+    ] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId: userId,
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
         }),
+        custodianTeamMemberIds: teamMemberIds,
+        ...selfServiceData,
+        orderBy,
+        orderDirection,
+        tags: filterTags,
+        extraInclude: {
+          tags: { select: { id: true, name: true } },
+        },
+      }),
 
-        // team members/custodian
-        getTeamMemberForCustodianFilter({
-          organizationId,
-          selectedTeamMembers: teamMemberIds,
-          getAll:
-            searchParams.has("getAll") &&
-            hasGetAllValue(searchParams, "teamMember"),
-          filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
-          userId,
-        }),
+      // team members for filter dropdown
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
+        userId,
+      }),
 
-        db.tag.findMany({
-          where: {
+      // team members for booking form - BASE/SELF_SERVICE users need their team member guaranteed
+      isSelfServiceOrBase
+        ? getTeamMemberForForm({
             organizationId,
-            OR: [
-              { useFor: { isEmpty: true } },
-              { useFor: { has: TagUseFor.BOOKING } },
-            ],
-          },
-          orderBy: { name: "asc" },
-        }),
-      ]);
+            userId,
+            isSelfServiceOrBase,
+            getAll:
+              searchParams.has("getAll") &&
+              hasGetAllValue(searchParams, "teamMember"),
+          })
+        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            { useFor: { has: TagUseFor.BOOKING } },
+          ],
+        },
+        orderBy: { name: "asc" },
+      }),
+    ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -172,7 +191,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** We format the dates on the server based on the users timezone and locale  */
     const items = formatBookingsDates(bookings, request);
-
     return json(
       payload({
         header,
@@ -185,6 +203,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...teamMembersData,
+        // For BASE/SELF_SERVICE users, provide dedicated form team members
+        // For ADMIN users, reuse the filter team members
+        teamMembersForForm:
+          teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
         isSelfServiceOrBase,
         tags,
         totalTags: tags.length,

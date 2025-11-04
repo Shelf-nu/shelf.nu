@@ -35,7 +35,10 @@ import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
 import { getTagsForBookingTagsFilter } from "../tag/service.server";
-import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
 interface Props {
@@ -75,6 +78,8 @@ export async function simpleModeLoader({
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const isSelfServiceOrBase =
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
 
   // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
   // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
@@ -133,6 +138,7 @@ export async function simpleModeLoader({
       totalTeamMembers,
     },
     tagsData,
+    teamMembersForFormData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -177,6 +183,17 @@ export async function simpleModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
+    // Team members for booking form - BASE/SELF_SERVICE always get their team member
+    isSelfServiceOrBase
+      ? getTeamMemberForForm({
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+        })
+      : Promise.resolve(null),
   ]);
 
   assets = await updateAssetsWithBookingCustodians(assets);
@@ -234,6 +251,7 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
+      teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
       filters,
       organizationId,
       locale,
@@ -266,6 +284,8 @@ export async function advancedModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
+  const isSelfServiceOrBase =
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
 
   /** Parse filters */
   const {
@@ -320,6 +340,7 @@ export async function advancedModeLoader({
     kits,
     totalKits,
     tagsData,
+    teamMembersForFormData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -340,7 +361,7 @@ export async function advancedModeLoader({
       includeAllCategories: true,
     }),
 
-    // team members/custodian
+    // team members/custodian for filters
     getTeamMemberForCustodianFilter({
       organizationId,
       selectedTeamMembers: teamMemberIds,
@@ -363,6 +384,17 @@ export async function advancedModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
+    // Team members for booking form - BASE/SELF_SERVICE always get their team member
+    isSelfServiceOrBase
+      ? getTeamMemberForForm({
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+        })
+      : Promise.resolve(null),
   ]);
 
   const header: HeaderData = {
@@ -419,6 +451,8 @@ export async function advancedModeLoader({
 
       customFields,
       ...teamMembersData,
+      teamMembersForForm:
+        teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       categories,
       totalCategories,
       locations,

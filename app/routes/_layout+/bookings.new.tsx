@@ -2,6 +2,7 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
+  MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -23,10 +24,11 @@ import {
 } from "~/modules/tag/service.server";
 import {
   getTeamMember,
-  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
 } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/bookings.new.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
@@ -77,13 +79,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      * We need to fetch the team members to be able to display them in the custodian dropdown.
      */
     const [teamMembersData, tagsData] = await Promise.all([
-      getTeamMemberForCustodianFilter({
+      getTeamMemberForForm({
         organizationId,
+        userId,
+        isSelfServiceOrBase,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: isSelfServiceOrBase, // Self service or Base users can only create bookings for themselves so we always filter by userId
-        userId,
       }),
       getTagsForBookingTagsFilter({
         organizationId,
@@ -98,6 +100,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         showModal: false,
         isSelfServiceOrBase,
         ...teamMembersData,
+        // For consistency, also provide teamMembersForForm
+        teamMembersForForm: teamMembersData.teamMembers,
         assetIds: assetIds.length ? assetIds : undefined,
         ...tagsData,
       }),
@@ -112,6 +116,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw json(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
 
 export type NewBookingActionReturnType = typeof action;
 
