@@ -19,13 +19,13 @@ import {
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
 import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
-import { SkipLinks } from "~/components/layout/skip-links";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "~/components/layout/sidebar/sidebar";
+import { SkipLinks } from "~/components/layout/skip-links";
 import { useCrisp } from "~/components/marketing/crisp";
 import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { SequentialIdMigrationModal } from "~/components/sequential-id-migration-modal";
