@@ -1,4 +1,10 @@
 import { ChevronRightIcon } from "@radix-ui/react-icons";
+import {
+  Popover,
+  PopoverContent,
+  PopoverPortal,
+  PopoverTrigger,
+} from "@radix-ui/react-popover";
 import { useHydrated } from "remix-utils/use-hydrated";
 import Icon from "~/components/icons/icon";
 import type {
@@ -6,13 +12,6 @@ import type {
   DisabledProp,
 } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
-
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "~/components/shared/dropdown";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "~/utils/tw";
 import type { IconType } from "./icons-map";
@@ -40,7 +39,7 @@ const ConditionalActionsDropdown = ({
   disabledTrigger?: DisabledProp;
 }) => {
   const {
-    ref: dropdownRef,
+    ref: popoverContentRef,
     open,
     setOpen,
   } = useControlledDropdownMenu({ skipDefault: true });
@@ -53,20 +52,20 @@ const ConditionalActionsDropdown = ({
           )}
         />
       )}
-      <DropdownMenu modal={false} open={open}>
-        <DropdownMenuTrigger
-          className={`asset-actions hidden sm:flex`}
-          onClick={() => setOpen(true)}
-          asChild
-        >
-          <Button variant="primary" disabled={disabledTrigger}>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="primary"
+            disabled={disabledTrigger}
+            className="asset-actions hidden sm:flex"
+          >
             <span className="flex items-center gap-2">
               {label} <ChevronRightIcon className="chev" />
             </span>
           </Button>
-        </DropdownMenuTrigger>
+        </PopoverTrigger>
 
-        {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
+        {/* using custom trigger on mobile which only opens popover not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="primary"
           className="asset-actions sm:hidden"
@@ -89,55 +88,62 @@ const ConditionalActionsDropdown = ({
                   will-change: auto !important;
                 }
               }`,
-            }} // is a hack to fix the dropdown menu not being in the right place on mobile
+            }} // is a hack to fix the popover not being in the right place on mobile
             // can not target [data-radix-popper-content-wrapper] for this file only with css
             // so we have to use dangerouslySetInnerHTML
             // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
           ></style>
         )}
-        <DropdownMenuContent
-          asChild
-          align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
-          ref={dropdownRef}
-        >
-          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            {links &&
-              links.map((link) => (
-                <DropdownMenuItem key={link.label} asChild>
-                  <Button
-                    to={link.to}
-                    role="link"
-                    variant="link"
-                    aria-label={link.label}
-                    className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                    width="full"
-                    onClick={() => setOpen(false)}
-                    disabled={link.disabled}
-                  >
-                    <span className="flex items-center gap-2">
-                      <When truthy={!!link.icon}>
-                        <Icon icon={link.icon as IconType} />
-                      </When>
-                      {link.label}
-                    </span>
-                  </Button>
-                </DropdownMenuItem>
-              ))}
-            <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
-              <Button
-                role="button"
-                variant="secondary"
-                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                width="full"
-                onClick={() => setOpen(false)}
-              >
-                Close
-              </Button>
-            </DropdownMenuItem>
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <PopoverPortal>
+          <PopoverContent
+            ref={popoverContentRef}
+            tabIndex={-1}
+            align="end"
+            side="bottom"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              popoverContentRef.current?.focus();
+            }}
+            className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
+          >
+            <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
+              {links &&
+                links.map((link) => (
+                  <div className="px-0 py-1 md:p-0" key={link.label}>
+                    <Button
+                      to={link.to}
+                      role="link"
+                      variant="link"
+                      aria-label={link.label}
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                      onClick={() => setOpen(false)}
+                      disabled={link.disabled}
+                    >
+                      <span className="flex items-center gap-2">
+                        <When truthy={!!link.icon}>
+                          <Icon icon={link.icon as IconType} />
+                        </When>
+                        {link.label}
+                      </span>
+                    </Button>
+                  </div>
+                ))}
+              <div className="border-t p-4 md:hidden md:p-0">
+                <Button
+                  role="button"
+                  variant="secondary"
+                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                  width="full"
+                  onClick={() => setOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
     </>
   );
 };
