@@ -58,6 +58,7 @@ export function UserContactDetailsForm({
           <Input
             label="Phone"
             type="tel"
+            autoComplete="tel"
             hideLabel
             name={zo.fields.phone()}
             defaultValue={user?.contact?.phone || undefined}

@@ -71,6 +71,7 @@ export function UserDetailsForm({
           <div className="flex gap-6">
             <Input
               label="First name"
+              autoComplete="given-name"
               type="text"
               name={zo.fields.firstName()}
               defaultValue={user?.firstName || undefined}
@@ -82,6 +83,7 @@ export function UserDetailsForm({
             />
             <Input
               label="Last name"
+              autoComplete="family-name"
               type="text"
               name={zo.fields.lastName()}
               defaultValue={user?.lastName || undefined}
@@ -111,6 +113,7 @@ export function UserDetailsForm({
           {/* Just previews the email address */}
           <Input
             label={zo.fields.email()}
+            autoComplete="email"
             icon="mail"
             hideLabel={true}
             placeholder="zaans@huisje.com"

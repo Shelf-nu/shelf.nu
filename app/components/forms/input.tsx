@@ -53,6 +53,13 @@ export interface InputProps
   hasAttachedButton?: boolean;
 
   required?: boolean;
+
+  /**
+   * Autocomplete attribute for better form UX and accessibility.
+   * Common values: "email", "name", "username", "new-password", "current-password", "tel", etc.
+   * See: https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/autocomplete
+   */
+  autoComplete?: string;
 }
 
 const Input = forwardRef(function Input(
