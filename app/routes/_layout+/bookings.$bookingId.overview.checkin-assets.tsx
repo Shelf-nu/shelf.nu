@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -107,18 +107,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(
-      payload({
-        title,
-        header,
-        booking,
-        partialCheckinProgress,
-        partialCheckinDetails,
-      })
-    );
+    return payload({
+      title,
+      header,
+      booking,
+      partialCheckinProgress,
+      partialCheckinDetails,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -150,7 +148,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
