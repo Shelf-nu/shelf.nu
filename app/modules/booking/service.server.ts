@@ -14,7 +14,6 @@ import { json, redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import z from "zod";
-import type { AuthSession } from "server/session";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -92,6 +91,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import type { AuthSession } from "../../../server/session";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";

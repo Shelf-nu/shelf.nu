@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -134,38 +134,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    return json(
-      payload({
-        header: {
-          title: `Add assets for ${kit.name}`,
-          subHeading: "Fill up the kit with the assets of your choice.",
-        },
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        kit,
-        items: assets,
-        totalItems: totalAssets,
-        categories,
-        tags,
-        search,
-        page,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        totalPages,
-        perPage,
-        modelName,
-      })
-    );
+    return payload({
+      header: {
+        title: `Add assets for ${kit.name}`,
+        subHeading: "Fill up the kit with the assets of your choice.",
+      },
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      kit,
+      items: assets,
+      totalItems: totalAssets,
+      categories,
+      tags,
+      search,
+      page,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      totalPages,
+      perPage,
+      modelName,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -204,7 +202,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

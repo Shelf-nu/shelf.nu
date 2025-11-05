@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -57,6 +57,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(url);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

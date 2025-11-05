@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
@@ -66,23 +66,21 @@ export async function loader({ context }: LoaderFunctionArgs) {
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
 
-    return json(
-      payload({
-        title: `Subscriptions`,
-        subTitle:
-          customer?.subscriptions.total_count === 0
-            ? "Pick an account plan that fits your workflow."
-            : "Manage your account plan.",
-        tier: user.tierId,
-        tierLimit,
-        prices,
-        customer,
-        usedFreeTrial: user.usedFreeTrial,
-      })
-    );
+    return payload({
+      title: `Subscriptions`,
+      subTitle:
+        customer?.subscriptions.total_count === 0
+          ? "Pick an account plan that fits your workflow."
+          : "Manage your account plan.",
+      tier: user.tierId,
+      tierLimit,
+      prices,
+      customer,
+      usedFreeTrial: user.usedFreeTrial,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -127,7 +125,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(stripeRedirectUrl);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

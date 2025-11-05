@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -49,18 +49,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         }),
       ]);
 
-    return json(
-      payload({
-        header,
-        categories,
-        totalCategories,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      header,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -129,7 +127,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect("/kits");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

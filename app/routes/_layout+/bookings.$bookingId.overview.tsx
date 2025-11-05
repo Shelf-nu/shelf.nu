@@ -598,7 +598,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     switch (intent) {
       case "save": {
         const hints = getHints(request);
-        const payload = parseData(
+        const parsedData = parseData(
           formData,
           BookingFormSchema({
             action: "save",
@@ -627,17 +627,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }).toJSDate()
           : undefined;
 
-        const tags = buildTagsSet(payload.tags).set;
+        const tags = buildTagsSet(parsedData.tags).set;
 
         const booking = await updateBasicBooking({
           id,
           organizationId,
-          name: payload.name,
-          description: payload.description,
+          name: parsedData.name,
+          description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: payload.custodian?.userId,
-          custodianTeamMemberId: payload.custodian?.id,
+          custodianUserId: parsedData.custodian?.userId,
+          custodianTeamMemberId: parsedData.custodian?.id,
           tags,
           userId,
         });
@@ -656,7 +656,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "reserve": {
         const hints = getHints(request);
 
-        const payload = parseData(
+        const parsedData = parseData(
           formData,
           BookingFormSchema({
             hints,
@@ -672,7 +672,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const from = formData.get("startDate");
         const to = formData.get("endDate");
-        const tags = buildTagsSet(payload.tags).set;
+        const tags = buildTagsSet(parsedData.tags).set;
 
         const formattedFrom = from
           ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
@@ -689,12 +689,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const booking = await reserveBooking({
           id,
           organizationId,
-          name: payload.name,
-          description: payload.description,
+          name: parsedData.name,
+          description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: payload.custodian?.userId,
-          custodianTeamMemberId: payload.custodian?.id,
+          custodianUserId: parsedData.custodian?.userId,
+          custodianTeamMemberId: parsedData.custodian?.id,
           hints: getClientHint(request),
           isSelfServiceOrBase,
           tags,

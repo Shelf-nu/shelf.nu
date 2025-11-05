@@ -74,7 +74,7 @@ export const DateS = ({
   includeTime = false,
   localeOnly = false,
 }: {
-  date: string | Date;
+  date: string | Date | null;
   /**
    * Options to pass to Intl.DateTimeFormat
    * Default values are { year: 'numeric', month: 'numeric', day: 'numeric' }
@@ -94,6 +94,11 @@ export const DateS = ({
   localeOnly?: boolean;
 }) => {
   const hints = useHints();
+  if (!date) {
+    // eslint-disable-next-line no-console
+    console.warn("DateS component received null date:", date);
+    return null;
+  }
 
   // Handle locale-only formatting (no timezone conversion)
   if (localeOnly) {

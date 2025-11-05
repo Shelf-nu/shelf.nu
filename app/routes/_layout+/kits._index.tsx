@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -174,7 +174,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "kits",
     };
 
-    return json(
+    return data(
       payload({
         header,
         items: kits,
@@ -200,7 +200,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

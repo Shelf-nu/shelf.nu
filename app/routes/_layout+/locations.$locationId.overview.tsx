@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -52,18 +52,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${location.name}'s overview`,
     };
 
-    return json(
-      payload({
-        location,
-        totalValue,
-        locale,
-        currentOrganization,
-        header,
-      })
-    );
+    return payload({
+      location,
+      totalValue,
+      locale,
+      currentOrganization,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId: id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

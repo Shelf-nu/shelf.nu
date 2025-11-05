@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -55,15 +55,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       custody: NonNullable<typeof kit.custody>;
     } & typeof kit;
 
-    return json(
-      payload({
-        showModal: true,
-        kit: kitWithCustody,
-      })
-    );
+    return payload({
+      showModal: true,
+      kit: kitWithCustody,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -131,7 +129,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

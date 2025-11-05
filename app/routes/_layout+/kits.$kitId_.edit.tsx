@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -94,20 +94,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: kit.id,
     };
 
-    return json(
-      payload({
-        kit,
-        header,
-        categories,
-        totalCategories,
-        locations,
-        totalLocations,
-        referer: getRefererPath(request),
-      })
-    );
+    return payload({
+      kit,
+      header,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
+      referer: getRefererPath(request),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -140,7 +138,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
-    const payload = parseData(formData, NewKitFormSchema, {
+    const parsedData = parseData(formData, NewKitFormSchema, {
       additionalData: { userId, kitId, organizationId },
     });
 
@@ -161,10 +159,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateKit({
         id: kitId,
         createdById: userId,
-        name: payload.name,
-        description: payload.description,
+        name: parsedData.name,
+        description: parsedData.description,
         organizationId,
-        categoryId: payload.category ? payload.category : "uncategorized",
+        categoryId: parsedData.category ? parsedData.category : "uncategorized",
         barcodes,
         // Don't set locationId here - will be handled by updateKitLocation if changed
       }),
@@ -177,12 +175,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ]);
 
     // Handle location update separately to cascade to assets
-    if (payload.locationId !== currentKit.locationId) {
+    if (parsedData.locationId !== currentKit.locationId) {
       await updateKitLocation({
         id: kitId,
         organizationId,
         currentLocationId: currentKit.locationId,
-        newLocationId: payload.locationId || "", // Handle undefined case
+        newLocationId: parsedData.locationId || "", // Handle undefined case
         userId,
       });
     }
@@ -196,14 +194,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // If redirectTo is provided, redirect back to previous page
     // Otherwise stay on current page (e.g., when opened in new tab)
-    if (payload.redirectTo) {
-      return redirect(safeRedirect(payload.redirectTo, `/kits/${kitId}`));
+    if (parsedData.redirectTo) {
+      return redirect(safeRedirect(parsedData.redirectTo, `/kits/${kitId}`));
     }
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

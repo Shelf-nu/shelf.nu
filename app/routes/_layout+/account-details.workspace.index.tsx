@@ -1,7 +1,7 @@
 import { TierId } from "@prisma/client";
 import type { Organization } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
@@ -85,31 +85,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "Workspaces",
     };
 
-    /** Get the organization that are owner by the current uer */
+    /** Get the organization that are owned by the current uer */
     const organizations = user.userOrganizations.map((r) => r.organization);
     /** Get the tier limit */
     const tierLimit = await getUserTierLimit(userId);
 
-    return json(
-      payload({
-        userId,
-        tier: user.tier,
-        tierLimit,
-        currentOrganizationId: organizationId,
-        canCreateMoreOrganizations: canCreateMoreOrganizations({
-          tierLimit: tierLimit,
-          totalOrganizations: organizations.filter((o) => o.owner.id === userId)
-            .length,
-        }),
-        items: organizations,
-        totalItems: organizations.length,
-        modelName,
-        title: "Workspace",
-      })
-    );
+    return payload({
+      userId,
+      tier: user.tier,
+      tierLimit,
+      currentOrganizationId: organizationId,
+      canCreateMoreOrganizations: canCreateMoreOrganizations({
+        tierLimit: tierLimit,
+        totalOrganizations: organizations.filter((o) => o.owner.id === userId)
+          .length,
+      }),
+      items: organizations,
+      totalItems: organizations.length,
+      modelName,
+      title: "Workspace",
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

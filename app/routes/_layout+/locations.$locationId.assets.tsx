@@ -1,6 +1,6 @@
 import type { Asset, Category, Tag, Location } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import z from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -81,21 +81,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: location.id,
     };
 
-    return json(
-      payload({
-        location,
-        header,
-        modelName,
-        items: location.assets,
-        page,
-        totalItems,
-        perPage,
-        totalPages,
-      })
-    );
+    return payload({
+      location,
+      header,
+      modelName,
+      items: location.assets,
+      page,
+      totalItems,
+      perPage,
+      totalPages,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

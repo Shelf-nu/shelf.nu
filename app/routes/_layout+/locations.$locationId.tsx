@@ -1,8 +1,9 @@
 import type { ActionFunctionArgs, LinksFunction } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
+
 import type { MetaFunction } from "@remix-run/react";
-import { json, Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "react-router";
-import { redirect } from "react-router";
 import { z } from "zod";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import Header from "~/components/layout/header";
@@ -96,7 +97,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       }
     }
 
-    return json(
+    return data(
       payload({
         location,
         header,
@@ -108,7 +109,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -155,7 +156,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

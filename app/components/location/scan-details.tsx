@@ -1,16 +1,16 @@
-import type { SerializeFrom } from "@remix-run/node";
 import { Button } from "~/components/shared/button";
 import type { parseScanData } from "~/modules/scan/utils.server";
 import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
+import { DateS } from "../shared/date";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export function ScanDetails({
   lastScan,
 }: {
-  lastScan?: SerializeFrom<ReturnType<typeof parseScanData>> | null;
+  lastScan?: ReturnType<typeof parseScanData> | null;
 }) {
   let latitude, longitude;
 
@@ -45,7 +45,9 @@ export function ScanDetails({
           >
             <div className="flex justify-between py-2">
               <p>Date/Time</p>
-              <p>{lastScan.dateTime}</p>
+              <p>
+                <DateS date={lastScan.dateTime} includeTime />
+              </p>
             </div>
             <div className="flex justify-between py-2">
               <p>Coordinates</p>

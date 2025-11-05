@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
@@ -122,7 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Then parse the full payload with the correct schema
-    const payload = parseData(
+    const parsedData = parseData(
       await request.clone().formData(),
       getActionSchema(intent),
       {
@@ -132,7 +132,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "resetPassword": {
-        if (payload.type !== "resetPassword")
+        if (parsedData.type !== "resetPassword")
           throw new Error("Invalid payload type");
 
         /** Logout user after 3 seconds */
@@ -143,15 +143,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/forgot-password");
       }
       case "updateUser": {
-        if (payload.type !== "updateUser")
+        if (parsedData.type !== "updateUser")
           throw new Error("Invalid payload type");
         /** Create the payload if the client side validation works */
 
         const updateUserPayload: UpdateUserPayload = {
-          email: payload.email,
-          username: payload.username,
-          firstName: payload.firstName,
-          lastName: payload.lastName,
+          email: parsedData.email,
+          username: parsedData.username,
+          firstName: parsedData.firstName,
+          lastName: parsedData.lastName,
           id: userId,
         };
 
@@ -170,10 +170,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
       case "updateUserContact": {
-        if (payload.type !== "updateUserContact")
+        if (parsedData.type !== "updateUserContact")
           throw new ShelfError({
             cause: null,
             message: "Invalid payload type",
@@ -182,12 +182,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const updateUserContactPayload: UpdateUserContactPayload = {
           userId,
-          phone: payload.phone,
-          street: payload.street,
-          city: payload.city,
-          stateProvince: payload.stateProvince,
-          zipPostalCode: payload.zipPostalCode,
-          countryRegion: payload.countryRegion,
+          phone: parsedData.phone,
+          street: parsedData.street,
+          city: parsedData.city,
+          stateProvince: parsedData.stateProvince,
+          zipPostalCode: parsedData.zipPostalCode,
+          countryRegion: parsedData.countryRegion,
         };
 
         await updateUserContact(updateUserContactPayload);
@@ -199,25 +199,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
       case "deleteUser": {
-        if (payload.type !== "deleteUser")
+        if (parsedData.type !== "deleteUser")
           throw new Error("Invalid payload type");
 
         let reason = "No reason provided";
-        if ("reason" in payload && payload.reason) {
-          reason = payload?.reason;
+        if ("reason" in parsedData && parsedData.reason) {
+          reason = parsedData?.reason;
         }
 
         sendEmail({
           to: ADMIN_EMAIL || `"Shelf" <updates@emails.shelf.nu>`,
           subject: "Delete account request",
-          text: `User with id ${userId} and email ${payload.email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
+          text: `User with id ${userId} and email ${parsedData.email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
         });
 
         sendEmail({
-          to: payload.email,
+          to: parsedData.email,
           subject: "Delete account request received",
           text: `We have received your request to delete your account. It will be processed within 72 hours.\n\n Kind regards,\nthe Shelf team \n\n`,
         });
@@ -230,10 +230,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
       case "initiateEmailChange": {
-        if (payload.type !== "initiateEmailChange")
+        if (parsedData.type !== "initiateEmailChange")
           throw new Error("Invalid payload type");
 
         const ssoDomains = await getConfiguredSSODomains();
@@ -300,19 +300,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(
-          payload({
-            awaitingOtp: true,
-            newEmail, // We'll need this to show which email we're waiting for verification
-            success: true,
-          })
-        );
+        return payload({
+          awaitingOtp: true,
+          newEmail, // We'll need this to show which email we're waiting for verification
+          success: true,
+        });
       }
       case "verifyEmailChange": {
-        if (payload.type !== "verifyEmailChange")
+        if (parsedData.type !== "verifyEmailChange")
           throw new Error("Invalid payload type");
 
-        const { otp, email: newEmail } = payload;
+        const { otp, email: newEmail } = parsedData;
 
         /** Just to make sure the user exists */
         await getUserByID(userId, {
@@ -355,18 +353,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(
-          payload({ success: true, awaitingOtp: false, emailChanged: true })
-        );
+        return payload({
+          success: true,
+          awaitingOtp: false,
+          emailChanged: true,
+        });
       }
       default: {
         checkExhaustiveSwitch(intent);
-        return json(payload(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -384,10 +384,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const title = "Account Details";
     const user = await getUserWithContact(userId);
 
-    return json(payload({ title, user }));
+    return payload({ title, user });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
