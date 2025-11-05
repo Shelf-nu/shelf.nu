@@ -111,7 +111,7 @@ const ConditionalActionsDropdown = () => {
               event.preventDefault();
               popoverContentRef.current?.focus();
             }}
-            className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
+            className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[230px] md:rounded-t-[4px]"
           >
             <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
               <When
