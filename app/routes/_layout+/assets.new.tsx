@@ -1,6 +1,6 @@
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect, redirectDocument } from "@remix-run/node";
+import { data, redirect, redirectDocument } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -82,23 +82,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Estimate the next sequential ID that will be assigned to the new asset
     const nextSequentialId = await estimateNextSequentialId(organizationId);
 
-    return json(
-      payload({
-        header,
-        categories,
-        totalCategories,
-        tags,
-        totalTags: tags.length,
-        locations,
-        totalLocations,
-        currency: currentOrganization?.currency,
-        customFields,
-        nextSequentialId,
-      })
-    );
+    return payload({
+      header,
+      categories,
+      totalCategories,
+      tags,
+      totalTags: tags.length,
+      locations,
+      totalLocations,
+      currency: currentOrganization?.currency,
+      customFields,
+      nextSequentialId,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -241,7 +239,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect(`/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

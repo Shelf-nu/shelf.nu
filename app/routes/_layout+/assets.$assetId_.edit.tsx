@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
@@ -114,24 +114,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: asset.id,
     };
 
-    return json(
-      payload({
-        asset,
-        header,
-        categories,
-        totalCategories,
-        tags,
-        totalTags: tags.length,
-        locations,
-        totalLocations,
-        currency: currentOrganization?.currency,
-        customFields,
-        referer: getRefererPath(request),
-      })
-    );
+    return payload({
+      asset,
+      header,
+      categories,
+      totalCategories,
+      tags,
+      totalTags: tags.length,
+      locations,
+      totalLocations,
+      currency: currentOrganization?.currency,
+      customFields,
+      referer: getRefererPath(request),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -183,12 +181,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       })),
     });
 
-    const payload = parseData(formData, FormSchema, {
+    const parsedData = parseData(formData, FormSchema, {
       additionalData: { userId, organizationId },
     });
 
     const customFieldsValues = extractCustomFieldValuesFromPayload({
-      payload,
+      payload: parsedData,
       customFieldDef: customFields,
     });
 
@@ -208,10 +206,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       valuation,
       addAnother,
       redirectTo,
-    } = payload;
+    } = parsedData;
 
     /** This checks if tags are passed and build the  */
-    const tags = buildTagsSet(payload.tags);
+    const tags = buildTagsSet(parsedData.tags);
 
     /** Extract barcode data from form */
     const barcodes = canUseBarcodes
@@ -250,10 +248,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(safeRedirect(redirectTo, `/assets/${id}`));
     }
 
-    return json(payload({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -15,7 +15,13 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { assertIsPost, getParams, error, parseData } from "~/utils/http.server";
+import {
+  assertIsPost,
+  getParams,
+  error,
+  parseData,
+  payload,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -49,14 +55,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       defaultLocation: asset.locationId,
     });
 
-    return json({
+    return payload({
       asset,
       locations,
       showModal: true,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, params, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -103,7 +109,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/assets/${id}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

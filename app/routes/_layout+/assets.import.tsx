@@ -3,7 +3,7 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { z } from "zod";
 import { ImportContent } from "~/components/assets/import-content";
@@ -66,10 +66,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       organizationId,
       canUseBarcodes,
     });
-    return json(payload(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
@@ -87,16 +87,14 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     await assertUserCanImportAssets({ organizationId, organizations });
 
-    return json(
-      payload({
-        header: {
-          title: "Import assets",
-        },
-      })
-    );
+    return payload({
+      header: {
+        title: "Import assets",
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 

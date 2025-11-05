@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { Notes } from "~/components/assets/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
@@ -57,10 +57,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${asset.title}'s activity`,
     };
 
-    return json(payload({ asset, header }));
+    return payload({ asset, header });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 

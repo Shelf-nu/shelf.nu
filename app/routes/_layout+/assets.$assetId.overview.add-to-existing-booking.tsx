@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { CalendarCheck } from "lucide-react";
 import { z } from "zod";
@@ -59,14 +59,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ids: assetId ? [assetId] : undefined,
     });
 
-    return json(payload(loaderData), {
+    return data(payload(loaderData), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -146,7 +146,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/assets/${params.assetId}/overview`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
