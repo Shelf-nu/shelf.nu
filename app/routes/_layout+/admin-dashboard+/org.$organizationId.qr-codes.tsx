@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -48,10 +48,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    return json(payload({ organization }));
+    return payload({ organization });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -93,7 +93,7 @@ export const action = async ({
           amount,
         });
 
-        return json(payload({ message: "Generated Orphaned QR codes" }));
+        return payload({ message: "Generated Orphaned QR codes" });
       default:
         throw new ShelfError({
           cause: null,
@@ -105,7 +105,7 @@ export const action = async ({
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

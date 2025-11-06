@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { DateS } from "~/components/shared/date";
@@ -44,10 +44,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       },
     });
 
-    return json(payload({ members }));
+    return payload({ members });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
