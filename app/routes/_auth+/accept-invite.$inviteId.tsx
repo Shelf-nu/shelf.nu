@@ -192,7 +192,7 @@ export default function AcceptInvite() {
           <div>
             <h2>{error.title}</h2>
             <p
-              className="mx-[-200px] mb-3 mt-2"
+              className="mx-4 mb-3 mt-2 md:mx-[-200px]"
               dangerouslySetInnerHTML={{ __html: error.message }}
             />
             <Button to="/" variant={"secondary"}>
@@ -220,7 +220,7 @@ export default function AcceptInvite() {
           </div>
         )}
       </div>
-      <div className=" mx-[-200px] mt-20 flex flex-col items-center text-center text-gray-600">
+      <div className=" mx-4 mt-20 flex flex-col items-center text-center text-gray-600 md:mx-[-200px]">
         <p>
           If you have any questions or need assistance, please don't hesitate to
           contact our support team at{" "}
