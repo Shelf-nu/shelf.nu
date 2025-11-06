@@ -185,7 +185,7 @@ export default function AcceptInvite() {
   const error = actionData?.error;
   return (
     <>
-      <div className=" flex  flex-col items-center text-center">
+      <div className=" flex flex-col items-center text-center">
         <h2>Accept invite</h2>
         <p>
           <strong>{inviter}</strong> invites you to join Shelf as a member of{" "}
@@ -198,7 +198,7 @@ export default function AcceptInvite() {
             value={searchParams.get("token") || ""}
           />
           {error && (
-            <p className="mx-[-200px] mb-3 text-sm text-error-500">
+            <p className="mx-4 mb-3 text-sm text-error-500 md:mx-[-200px]">
               {error.message}
             </p>
           )}
@@ -207,7 +207,7 @@ export default function AcceptInvite() {
           </Button>
         </Form>
       </div>
-      <div className=" mx-[-200px] mt-20 flex flex-col items-center text-center text-gray-600">
+      <div className=" mx-4 mt-20 flex flex-col items-center text-center text-gray-600 md:mx-[-200px]">
         <p>
           If you have any questions or need assistance, please don't hesitate to
           contact our support team at {SUPPORT_EMAIL}.
