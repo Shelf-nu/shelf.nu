@@ -22,7 +22,9 @@ describe("sanitizeNoteContent", () => {
     const content =
       'Due {% date value="2023-12-25T10:30:00.000Z" includeTime=false /%} and scheduled {% date value="2023-12-25T10:30:00.000Z" /%}.';
 
-    expect(sanitize(content)).toBe("Due 12/25/23 and scheduled 12/25/23, 10:30 AM.");
+    expect(sanitize(content)).toBe(
+      "Due 12/25/23 and scheduled 12/25/23, 10:30 AM."
+    );
   });
 
   it("converts assets and kits markdoc tags to readable counts", () => {
