@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
 import { useAtom, useSetAtom } from "jotai";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
@@ -105,14 +105,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
     /** End locations */
 
-    return json({
+    return data({
       header,
       ...teamMemberData,
       ...locationsData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

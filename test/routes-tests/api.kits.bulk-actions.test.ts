@@ -52,22 +52,28 @@ vi.mock("~/utils/http.server", () => ({
       : undefined;
     return { intent, kitIds, custodian };
   }),
-  data: vi.fn((x) => ({ success: true, ...x })),
+  data: vi.fn(
+    (data, init) =>
+      new Response(JSON.stringify(data), {
+        status: init?.status || 200,
+        headers: { "Content-Type": "application/json" },
+      })
+  ),
   error: vi.fn((x) => ({ error: x })),
 }));
 
-// why: mocking json response helper for testing route handler status codes
+// why: mocking response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
+  const mockResponse = (data: any, init?: { status?: number }) =>
+    new Response(JSON.stringify(data), {
+      status: init?.status || 200,
+      headers: { "Content-Type": "application/json" },
+    });
   return {
     ...actual,
-    json: vi.fn(
-      (data, init) =>
-        new Response(JSON.stringify(data), {
-          status: init?.status || 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    ),
+    json: vi.fn(mockResponse),
+    data: vi.fn(mockResponse),
   };
 });
 
@@ -122,7 +128,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(404);
 
@@ -162,7 +170,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(200);
 
@@ -202,7 +212,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(500); // ShelfError defaults to 500
   });
@@ -236,7 +248,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(200);
   });
@@ -256,7 +270,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(200);
 

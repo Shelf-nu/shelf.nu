@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -34,10 +34,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return json(payload(loaderData), { headers });
+    return data(payload(loaderData), { headers });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

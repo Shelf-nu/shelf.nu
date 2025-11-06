@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -40,12 +40,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       subHeading,
     };
 
-    return json(
-      payload({ header, _isPersonalOrg: isPersonalOrg(currentOrganization) })
-    );
+    return payload({
+      header,
+      _isPersonalOrg: isPersonalOrg(currentOrganization),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

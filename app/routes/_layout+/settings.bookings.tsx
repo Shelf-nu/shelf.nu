@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import {
   TagsRequiredSettings,
@@ -79,17 +79,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: "Bookings settings",
     };
 
-    return json(
-      payload({
-        header,
-        organization: currentOrganization,
-        bookingSettings,
-        workingHours,
-      })
-    );
+    return payload({
+      header,
+      organization: currentOrganization,
+      bookingSettings,
+      workingHours,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -167,7 +165,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
       case "updateTagsRequired": {
         const { tagsRequired } = parseData(
@@ -194,7 +192,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
       case "toggle": {
         // Only use parseData for simple fields without numeric keys
@@ -215,7 +213,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
 
       case "updateSchedule": {
@@ -259,7 +257,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
       case "createOverride": {
         // Use parseData function following your standard pattern
@@ -284,7 +282,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
 
       case "deleteOverride": {
@@ -308,7 +306,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(payload({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
 
       default: {
@@ -322,7 +320,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 export default function GeneralPage() {

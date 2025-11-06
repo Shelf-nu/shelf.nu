@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
@@ -158,7 +158,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
+    return data(
       payload({
         user,
         organizations,
@@ -193,7 +193,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId: authSession.userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

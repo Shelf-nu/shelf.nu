@@ -54,19 +54,19 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-// why: mocking redirect and json response helpers for testing route handler status codes
+// why: mocking redirect and response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
+  const mockResponse = (data: any, init?: { status?: number }) =>
+    new Response(JSON.stringify(data), {
+      status: init?.status || 200,
+      headers: { "Content-Type": "application/json" },
+    });
   return {
     ...actual,
     redirect: vi.fn(() => new Response(null, { status: 302 })),
-    json: vi.fn(
-      (data, init) =>
-        new Response(JSON.stringify(data), {
-          status: init?.status || 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    ),
+    json: vi.fn(mockResponse),
+    data: vi.fn(mockResponse),
   };
 });
 
@@ -121,7 +121,9 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
       }
     );
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(302);
     expect(addScannedAssetsToBookingMock).toHaveBeenCalledWith({

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -94,24 +94,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      payload({
-        header: newBookingHeader,
-        currentOrganization,
-        userId,
-        showModal: true,
-        isSelfServiceOrBase,
-        selfServiceOrBaseUser,
-        ...teamMembersData,
-        // For consistency, also provide teamMembersForForm
-        teamMembersForForm: teamMembersData.teamMembers,
-        assetIds: kit.assets.map((a) => a.id),
-        ...tagsData,
-      })
-    );
+    return payload({
+      header: newBookingHeader,
+      currentOrganization,
+      userId,
+      showModal: true,
+      isSelfServiceOrBase,
+      selfServiceOrBaseUser,
+      ...teamMembersData,
+      // For consistency, also provide teamMembersForForm
+      teamMembersForForm: teamMembersData.teamMembers,
+      assetIds: kit.assets.map((a) => a.id),
+      ...tagsData,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

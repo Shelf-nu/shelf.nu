@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 import { MapPinIcon } from "lucide-react";
@@ -51,14 +51,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       defaultLocation: kit?.locationId,
     });
 
-    return json(
-      payload({
-        showModal: true,
-        kit,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      showModal: true,
+      kit,
+      locations,
+      totalLocations,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     throw reason;

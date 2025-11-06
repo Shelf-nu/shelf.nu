@@ -5,7 +5,7 @@ import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { type BookingStatus, type Tag } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import BookingFilters from "~/components/booking/booking-filters";
@@ -150,29 +150,27 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       plural: "bookings",
     };
 
-    return json(
-      payload({
-        header,
-        events,
-        ...teamMembersData,
-        // For BASE/SELF_SERVICE users, provide dedicated form team members
-        // For ADMIN users, reuse the filter team members
-        teamMembersForForm:
-          teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
-        currentOrganization,
-        ...tagsData,
-        modelName,
-        isSelfServiceOrBase,
-        userId,
-        searchFieldTooltip: {
-          title: "Search your bookings",
-          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
-        },
-      })
-    );
+    return payload({
+      header,
+      events,
+      ...teamMembersData,
+      // For BASE/SELF_SERVICE users, provide dedicated form team members
+      // For ADMIN users, reuse the filter team members
+      teamMembersForForm:
+        teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
+      currentOrganization,
+      ...tagsData,
+      modelName,
+      isSelfServiceOrBase,
+      userId,
+      searchFieldTooltip: {
+        title: "Search your bookings",
+        text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
