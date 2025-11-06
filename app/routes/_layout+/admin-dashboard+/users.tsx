@@ -1,7 +1,7 @@
 import type { User } from "@prisma/client";
 import { TierId } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useNavigate, useLoaderData } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
@@ -44,7 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       custom: TierId.custom,
     };
 
-    return json(
+    return data(
       payload({
         header,
         items: users,
@@ -60,7 +60,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

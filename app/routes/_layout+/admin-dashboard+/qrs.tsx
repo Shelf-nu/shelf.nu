@@ -1,6 +1,6 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { GenerateBatchQr } from "~/components/admin/generate-batch-qr";
@@ -56,7 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "qrs",
     };
 
-    return json(
+    return data(
       payload({
         header,
         items: qrCodes,
@@ -71,7 +71,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -91,14 +91,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     /** Update the QR codes from the batch as printed */
     await markBatchAsPrinted({ batch });
 
-    return json(
+    return data(
       payload({
         success: true,
       })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

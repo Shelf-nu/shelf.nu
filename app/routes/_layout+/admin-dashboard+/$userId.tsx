@@ -14,7 +14,7 @@ import type {
   LoaderFunctionArgs,
   SerializeFrom,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useLoaderData, Link, useFetcher } from "@remix-run/react";
 
 import { z } from "zod";
@@ -202,19 +202,17 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
-    return json(
-      payload({
-        user,
-        organizations: userOrganizations.map((uo) => uo.organization),
-        ssoUsersByDomain,
-        customer,
-        prices,
-        premiumIsEnabled,
-      })
-    );
+    return payload({
+      user,
+      organizations: userOrganizations.map((uo) => uo.organization),
+      ssoUsersByDomain,
+      customer,
+      prices,
+      premiumIsEnabled,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, shelfUserId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -319,7 +317,7 @@ export const action = async ({
             icon: { name: "trash", variant: "error" },
             senderId: userId,
           });
-          return json(payload({ success: true }));
+          return payload({ success: true });
         }
       case "createCustomerId": {
         const user = await getUserByID(shelfUserId, {
@@ -335,7 +333,7 @@ export const action = async ({
           name: `${user.firstName} ${user.lastName}`,
           userId: user.id,
         });
-        return json(payload(null));
+        return payload(null);
       }
       case "toggleSubscriptionCheck": {
         const { skipSubscriptionCheck } = parseData(
@@ -363,10 +361,10 @@ export const action = async ({
       }
     }
 
-    return json(payload(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, shelfUserId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
