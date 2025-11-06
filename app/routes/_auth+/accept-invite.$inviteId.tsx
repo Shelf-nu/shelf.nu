@@ -197,15 +197,14 @@ export default function AcceptInvite() {
             name="token"
             value={searchParams.get("token") || ""}
           />
-          {error ? (
+          {error && (
             <p className="mx-4 mb-3 text-sm text-error-500 md:mx-[-200px]">
               {error.message}
             </p>
-          ) : (
-            <Button type="submit" disabled={disabled || error}>
-              {disabled ? "Validating token..." : "Accept invite"}
-            </Button>
           )}
+          <Button type="submit" disabled={disabled || error}>
+            {disabled ? "Validating token..." : "Accept invite"}
+          </Button>
         </Form>
       </div>
       <div className=" mx-4 mt-20 flex flex-col items-center text-center text-gray-600 md:mx-[-200px]">
