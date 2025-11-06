@@ -1,6 +1,6 @@
 import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { redirect, json } from "@remix-run/node";
+import { redirect, data } from "@remix-run/node";
 import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
@@ -88,15 +88,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: booking.name,
     };
 
-    return json(
-      payload({
-        booking,
-        header,
-      })
-    );
+    return payload({
+      booking,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason));
   }
 }
 

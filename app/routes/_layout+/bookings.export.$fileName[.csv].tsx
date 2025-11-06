@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { exportBookingsFromIndexToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -57,6 +57,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };

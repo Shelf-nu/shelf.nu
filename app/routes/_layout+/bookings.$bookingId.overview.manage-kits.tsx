@@ -10,7 +10,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import {
   Form,
   useLoaderData,
@@ -198,33 +198,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
       });
 
-    return json(
-      payload({
-        header: {
-          title: `Manage kits for ‘${booking?.name}’`,
-          subHeading: "Fill up the booking with the kits of your choice",
-        },
-        searchFieldLabel: "Search kits",
-        searchFieldTooltip: {
-          title: "Search your kit database",
-          text: "Search kits based on name or description",
-        },
-        showSidebar: true,
-        noScroll: true,
-        booking,
-        modelName,
-        page,
-        perPage,
-        totalPages,
-        search,
-        items: kits,
-        totalItems: totalKits,
-        bookingKitIds,
-      })
-    );
+    return payload({
+      header: {
+        title: `Manage kits for '${booking?.name}'`,
+        subHeading: "Fill up the booking with the kits of your choice",
+      },
+      searchFieldLabel: "Search kits",
+      searchFieldTooltip: {
+        title: "Search your kit database",
+        text: "Search kits based on name or description",
+      },
+      showSidebar: true,
+      noScroll: true,
+      booking,
+      modelName,
+      page,
+      perPage,
+      totalPages,
+      search,
+      items: kits,
+      totalItems: totalKits,
+      bookingKitIds,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -431,7 +429,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -463,10 +461,9 @@ export default function AddKitsToBooking() {
   const manageAssetsUrl = useMemo(
     () =>
       `/bookings/${booking.id}/overview/manage-assets?${new URLSearchParams({
-        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from as string).toISOString(),
-        bookingTo: new Date(booking.to as string).toISOString(),
+        bookingFrom: booking.from!.toISOString(),
+        bookingTo: booking.to!.toISOString(),
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`,

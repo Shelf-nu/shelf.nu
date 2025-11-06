@@ -6,7 +6,7 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import {
   useLoaderData,
   useNavigate,
@@ -175,39 +175,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
-    return json(
-      payload({
-        header: {
-          title: `Add assets for '${booking?.name}'`,
-          subHeading: "Fill up the booking with the assets of your choice",
-        },
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        booking,
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        bookingKitIds,
-      })
-    );
+    return payload({
+      header: {
+        title: `Add assets for '${booking?.name}'`,
+        subHeading: "Fill up the booking with the assets of your choice",
+      },
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      booking,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      modelName,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      bookingKitIds,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -424,7 +422,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

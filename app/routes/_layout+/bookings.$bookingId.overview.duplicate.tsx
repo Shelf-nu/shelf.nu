@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
@@ -36,12 +36,10 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       userOrganizations,
     });
 
-    return json(
-      payload({
-        showModal: true,
-        booking,
-      })
-    );
+    return payload({
+      showModal: true,
+      booking,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw reason;
@@ -78,7 +76,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${newBooking.id}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

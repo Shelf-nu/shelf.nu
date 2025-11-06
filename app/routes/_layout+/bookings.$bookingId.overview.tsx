@@ -4,7 +4,7 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -448,7 +448,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ]
       : teamMembersData.teamMembers;
 
-    return json(
+    return data(
       payload({
         userId,
         currentOrganization,
@@ -487,7 +487,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -649,7 +649,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking }), {
+        return data(payload({ booking }), {
           headers,
         });
       }
@@ -708,7 +708,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking }), {
+        return data(payload({ booking }), {
           headers,
         });
       }
@@ -746,7 +746,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking }), {
+        return data(payload({ booking }), {
           headers,
         });
       }
@@ -789,7 +789,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking, success: true }), {
+        return data(payload({ booking, success: true }), {
           headers,
         });
       case "partial-checkin": {
@@ -897,7 +897,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking: b }), {
+        return data(payload({ booking: b }), {
           headers,
         });
       }
@@ -911,7 +911,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }), { headers });
+        return data(payload({ success: true }), { headers });
       }
       case "cancel": {
         const cancelledBooking = await cancelBooking({
@@ -944,7 +944,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }), {
+        return data(payload({ success: true }), {
           headers,
         });
       }
@@ -982,7 +982,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking: b }), {
+        return data(payload({ booking: b }), {
           headers,
         });
       }
@@ -996,7 +996,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
       case "extend-booking": {
         const hints = getClientHint(request);
@@ -1035,7 +1035,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ success: true }));
+        return payload({ success: true });
       }
       case "bulk-remove-asset-or-kit": {
         const { assetOrKitIds } = parseData(
@@ -1094,11 +1094,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(payload({ booking: b, success: true }), { headers });
+        return data(payload({ booking: b, success: true }), { headers });
       }
       default: {
         checkExhaustiveSwitch(intent);
-        return json(payload(null));
+        return payload(null);
       }
     }
   } catch (cause) {
@@ -1107,7 +1107,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { userId, id },
       !isZodValidationError(cause)
     );
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

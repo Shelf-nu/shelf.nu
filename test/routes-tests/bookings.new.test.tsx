@@ -101,19 +101,19 @@ vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn().mockResolvedValue("cookie"),
 }));
 
-// why: mocking redirect and json response helpers for testing route handler status codes
+// why: mocking redirect, json, and data response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
+  const mockResponse = (data: any, init?: { status?: number }) =>
+    new Response(JSON.stringify(data), {
+      status: init?.status || 200,
+      headers: { "Content-Type": "application/json" },
+    });
   return {
     ...actual,
     redirect: vi.fn(() => new Response(null, { status: 302 })),
-    json: vi.fn(
-      (data, init) =>
-        new Response(JSON.stringify(data), {
-          status: init?.status || 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    ),
+    json: vi.fn(mockResponse),
+    data: vi.fn(mockResponse),
   };
 });
 
@@ -173,7 +173,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(404);
+    expect((response as Response).status).toBe(404);
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
@@ -216,7 +216,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(302); // Redirect on success
+    expect((response as Response).status).toBe(302); // Redirect on success
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -257,7 +257,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(302);
+    expect((response as Response).status).toBe(302);
     expect(vi.mocked(redirect)).toHaveBeenCalledWith(
       "/bookings/booking-123/overview/scan-assets"
     );
@@ -295,7 +295,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(500); // ShelfError defaults to 500
+    expect((response as Response).status).toBe(500); // ShelfError defaults to 500
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
   });
@@ -332,7 +332,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(302); // Redirect on success
+    expect((response as Response).status).toBe(302); // Redirect on success
   });
 
   it("allows BASE role users to assign booking to themselves only", async () => {
@@ -367,7 +367,7 @@ describe("bookings/new - custodian assignment", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(500); // ShelfError for self-assignment restriction
+    expect((response as Response).status).toBe(500); // ShelfError for self-assignment restriction
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
   });
