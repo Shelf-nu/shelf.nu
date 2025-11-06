@@ -1,6 +1,6 @@
 import { UpdateStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
@@ -27,10 +27,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       throw new Error("Update not found");
     }
 
-    return json(payload({ update }));
+    return payload({ update });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -81,7 +81,7 @@ export const action = async ({
     return redirect("/admin-dashboard/updates");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

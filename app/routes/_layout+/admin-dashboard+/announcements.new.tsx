@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
@@ -18,10 +18,10 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    return json(payload(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -59,7 +59,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     return redirect("/admin-dashboard/announcements");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
