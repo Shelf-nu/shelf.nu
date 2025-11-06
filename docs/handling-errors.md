@@ -13,17 +13,17 @@ In order to have a good user experience and proper error handling with meaningfu
 
 ### Loader
 
-- ✅ Always return a `json(payload({...}))` response in the `try` block.
-- ✅ Always throw a `json(error({...}))` response in the `catch` block.
+- ✅ Always return a `payload({...})` response in the `try` block.
+- ✅ Always throw a `data(error({...}))` response in the `catch` block.
 
 ```ts
 export function loader(){
 	try {
 		// Do something
-		return json(payload({name: 'John'}));
+		return payload({name: 'John'});
 	} catch (cause) {
 		const reason = makeShelfError(cause);
-		throw json(error(reason));
+		throw data(error(reason));
 	}
 }
 
@@ -36,8 +36,8 @@ export default Route() {
 
 ### Action
 
-- ✅ Always return a `json(payload({...}))` response in the `try` block.
-- ✅ Always return a `json(error({...}))` response in the `catch` block.
+- ✅ Always return a `payload({...})` response in the `try` block.
+- ✅ Always return a `data(error({...}))` response in the `catch` block.
 
 Now, in the route component using `useActionData`, you can access the returned data or error.
 
@@ -47,10 +47,10 @@ You have to handle the error first before accessing the data.
 export function action(){
 	try {
 		// Do something
-		return json(payload({name: 'John'}));
+		return payload({name: 'John'});
 	} catch (cause) {
 		const reason = makeShelfError(cause);
-		return json(error(reason));
+		return data(error(reason));
 	}
 }
 
@@ -72,19 +72,19 @@ export default Route() {
 
 ### Loader
 
-- ✅ Always return a `json(payload({...}))` response in the `try` block.
-- ✅ Always return a `json(error({...}))` response in the `catch` block.
+- ✅ Always return a `payload({...})` response in the `try` block.
+- ✅ Always return a `data(error({...}))` response in the `catch` block.
 
 ### Action
 
-- ✅ Always return a `json(payload({...}))` response in the `try` block.
-- ✅ Always return a `json(error({...}))` response in the `catch` block.
+- ✅ Always return a `payload({...})` response in the `try` block.
+- ✅ Always return a `data(error({...}))` response in the `catch` block.
 
 ## Services
 
 > [!IMPORTANT]
 >
-> Only throw `ShelfError`, never a `json` or `Response`
+> Only throw `ShelfError`, never a `payload` or `Response`
 
 - ✅ Always use a `try/catch` block to catch errors and send a proper `ShelfError`.
 - Everything that can throw an error should be inside the `try` block.
@@ -118,10 +118,10 @@ async function loader({ params }: LoaderFunctionArgs) {
         });
       }); // Now we have a better understanding of the error happening here
 
-    return json(payload({ user, userMainOrg }));
+    return payload({ user, userMainOrg });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 ```
@@ -154,7 +154,7 @@ throw new ShelfError({
 
 > [Source](/app/utils/http.server.ts)
 
-These functions are used to build the payload response returned by `json()`. The `payload()` function is used to send a successful response, while the `error()` function is used to send an error response.
+These functions are used to build the payload response returned by `payload()`. The `payload()` function is used to send a successful response, while the `error()` function is used to send an error response.
 
 ### `makeShelfError()` function
 
@@ -170,7 +170,7 @@ It can take an optional `additionalData` parameter to add more context to the er
 ...
 } catch (cause) {
 	const reason = makeShelfError(cause, {userId});
-	throw json(error(reason));
+	throw data(error(reason), { status: reason.status });
 }
 
 ```

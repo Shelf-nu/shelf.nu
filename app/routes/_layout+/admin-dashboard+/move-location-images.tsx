@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import { useState } from "react";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
@@ -36,14 +36,12 @@ export async function loader({ context }: LoaderFunctionArgs) {
       where: { image: { isNot: null } },
     });
 
-    return json(
-      payload({
-        numberOfLocationWithImages: locationWithImages,
-      })
-    );
+    return payload({
+      numberOfLocationWithImages: locationWithImages,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -334,15 +332,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (locationWithImages.length === 0) {
-      return json(
-        payload({
-          moved: 0,
-          fixed: 0,
-          skipped: 0,
-          resultsByType: {},
-          errors: ["No locations with images found to process."],
-        })
-      );
+      return payload({
+        moved: 0,
+        fixed: 0,
+        skipped: 0,
+        resultsByType: {},
+        errors: ["No locations with images found to process."],
+      });
     }
 
     const supabase = getSupabaseAdmin();
@@ -544,18 +540,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
     console.log(`- Skipped: ${skippedLocationIds.length}`);
 
-    return json(
-      payload({
-        moved: movedLocationIds.length,
-        fixed: shouldFix ? fixedLocationIds.length : 0,
-        skipped: skippedLocationIds.length,
-        errors: errorLog,
-        resultsByType,
-      })
-    );
+    return payload({
+      moved: movedLocationIds.length,
+      fixed: shouldFix ? fixedLocationIds.length : 0,
+      skipped: skippedLocationIds.length,
+      errors: errorLog,
+      resultsByType,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

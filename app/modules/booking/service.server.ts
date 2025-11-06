@@ -10,7 +10,7 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import z from "zod";
@@ -4554,14 +4554,12 @@ export async function checkinAssets({
 
   // Return JSON if requested by bulk dialog, otherwise redirect
   if (returnJson) {
-    return json(
-      payload({
-        success: true,
-        message: `Successfully checked in ${assetIds.length} asset${
-          assetIds.length > 1 ? "s" : ""
-        }`,
-      })
-    );
+    return payload({
+      success: true,
+      message: `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      }`,
+    });
   }
 
   return redirect(`/bookings/${bookingId}`);

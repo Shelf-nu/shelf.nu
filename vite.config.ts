@@ -24,10 +24,10 @@ const buildHash = process.env.BUILD_HASH || createHash();
 export default defineConfig({
   server: {
     port: 3000,
-    // https: {
-    //   key: "./.cert/key.pem",
-    //   cert: "./.cert/cert.pem",
-    // },
+    https: {
+      key: "./.cert/key.pem",
+      cert: "./.cert/cert.pem",
+    },
     warmup: {
       clientFiles: [
         "./app/entry.client.tsx",

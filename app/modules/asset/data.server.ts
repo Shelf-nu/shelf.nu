@@ -2,7 +2,7 @@
 
 import type { AssetIndexSettings, Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -219,7 +219,7 @@ export async function simpleModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  return json(
+  return data(
     payload({
       header,
       items: assets,
@@ -418,7 +418,7 @@ export async function advancedModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  return json(
+  return data(
     payload({
       header,
       items: assets,

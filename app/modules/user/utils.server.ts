@@ -1,6 +1,6 @@
 import type { OrganizationRoles } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -248,7 +248,7 @@ export async function resolveUserAction(
         });
       }
 
-      return json(payload(null));
+      return payload(null);
     }
     default: {
       throw new ShelfError({

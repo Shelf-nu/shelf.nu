@@ -1,6 +1,6 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
-  json,
+  data,
   MaxPartSizeExceededError,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
@@ -125,19 +125,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `Edit | ${organization.name}`,
     };
 
-    return json(
-      payload({
-        organization,
-        header,
-        curriences: Object.keys(Currency),
-        isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
-        admins,
-        canHideShelfBranding: canHideBrandingForThisWorkspace,
-      })
-    );
+    return payload({
+      organization,
+      header,
+      curriences: Object.keys(Currency),
+      isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
+      admins,
+      canHideShelfBranding: canHideBrandingForThisWorkspace,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -241,12 +239,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organization.type === "PERSONAL"
         );
 
-        const payload = parseData(formData, schema, {
+        const parsedData = parseData(formData, schema, {
           additionalData: { userId, organizationId: id },
         });
 
         const { name, currency, qrIdDisplayPreference, showShelfBranding } =
-          payload;
+          parsedData;
 
         let nextShowShelfBranding = resolveShowShelfBranding(
           showShelfBranding,
@@ -283,12 +281,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json({ success: true });
+        return payload({ success: true });
       }
       case "permissions": {
         const schema = EditWorkspacePermissionsSettingsFormSchema();
 
-        const payload = parseData(formData, schema, {
+        const parsedData = parseData(formData, schema, {
           additionalData: { userId, organization },
         });
 
@@ -297,7 +295,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           selfServiceCanSeeBookings,
           baseUserCanSeeCustody,
           baseUserCanSeeBookings,
-        } = payload;
+        } = parsedData;
 
         await updateOrganizationPermissions({
           id,
@@ -316,7 +314,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json({ success: true });
+        return payload({ success: true });
       }
       case "sso": {
         if (role !== OrganizationRoles.OWNER) {
@@ -340,11 +338,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const schema = EditWorkspaceSSOSettingsFormSchema(enabledSso);
 
-        const payload = parseData(formData, schema, {
+        const parsedData = parseData(formData, schema, {
           additionalData: { userId, organizationId: id },
         });
 
-        const { selfServiceGroupId, adminGroupId, baseUserGroupId } = payload;
+        const { selfServiceGroupId, adminGroupId, baseUserGroupId } =
+          parsedData;
 
         await updateOrganization({
           id,
@@ -363,7 +362,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json({ success: true });
+        return payload({ success: true });
       }
       default: {
         throw new ShelfError({
@@ -377,7 +376,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   } catch (cause) {
     const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
+    return data(
       error({
         ...reason,
         ...(isMaxPartSizeExceeded && {

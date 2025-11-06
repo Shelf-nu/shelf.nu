@@ -1,5 +1,4 @@
-import type { Params } from "@remix-run/react";
-import { json } from "react-router";
+import { data, type Params } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";
 import { sendNotification } from "./emitter/send-notification.server";
@@ -161,7 +160,7 @@ export function getParams<Schema extends ZodType<any, any, any>>(
     });
   } catch (cause) {
     const reason = cause instanceof ShelfError ? cause : makeShelfError(cause);
-    throw json(error(reason), { status: 400 });
+    throw data(error(reason), { status: 400 });
   }
 }
 

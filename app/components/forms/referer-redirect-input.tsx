@@ -27,7 +27,7 @@ interface RefererRedirectInputProps {
  * ```tsx
  * // In your route loader
  * const referer = getRefererPath(request);
- * return json(payload({ referer, ...otherData }));
+ * return payload({ referer, ...otherData });
  * // referer might be: "/assets?search=laptop&status=AVAILABLE"
  *
  * // In your form component
@@ -41,7 +41,7 @@ interface RefererRedirectInputProps {
  * if (redirectTo) {
  *   return redirect(safeRedirect(redirectTo, fallbackPath));
  * }
- * return json(payload({ success: true })); // Stay on page
+ * return payload({ success: true }); // Stay on page
  * ```
  */
 export function RefererRedirectInput({

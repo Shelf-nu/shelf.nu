@@ -1,5 +1,5 @@
 import type { AssetReminder } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
@@ -76,12 +76,12 @@ export async function resolveRemindersActions({
         senderId: userId,
       });
 
-      return json(payload({ success: true }));
+      return payload({ success: true });
     }
 
     default: {
       checkExhaustiveSwitch(intent);
-      return json(payload(null));
+      return payload(null);
     }
   }
 }

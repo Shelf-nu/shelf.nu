@@ -5,7 +5,6 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import {
   Links,
   Meta,
@@ -64,15 +63,13 @@ export const meta: MetaFunction = () => [
 ];
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
-  json(
-    payload({
-      env: getBrowserEnv(),
-      maintenanceMode: false,
-      requestInfo: {
-        hints: getClientHint(request),
-      },
-    })
-  );
+  payload({
+    env: getBrowserEnv(),
+    maintenanceMode: false,
+    requestInfo: {
+      hints: getClientHint(request),
+    },
+  });
 
 export const shouldRevalidate = () => false;
 

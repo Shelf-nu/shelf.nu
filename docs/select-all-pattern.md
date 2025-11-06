@@ -155,7 +155,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     settings, // Pass settings for mode detection
   });
 
-  return json(payload({ success: true }));
+  return payload({ success: true });
 }
 ```
 

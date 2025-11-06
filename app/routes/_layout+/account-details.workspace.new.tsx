@@ -1,6 +1,6 @@
 import { Currency } from "@prisma/client";
 import {
-  json,
+  data,
   MaxPartSizeExceededError,
   redirect,
   unstable_createMemoryUploadHandler,
@@ -46,16 +46,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: `New workspace`,
     };
 
-    return json(
-      payload({
-        header,
-        currentOrganizationId: organizationId,
-        curriences: Object.keys(Currency),
-      })
-    );
+    return payload({
+      header,
+      currentOrganizationId: organizationId,
+      curriences: Object.keys(Currency),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -116,7 +114,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   } catch (cause) {
     const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
+    return data(
       error({
         ...reason,
         ...(isMaxPartSizeExceeded && {
