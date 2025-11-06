@@ -339,7 +339,7 @@ export default function AssetDetailsPage() {
   ];
 
   return (
-    <>
+    <div className="relative">
       <Header
         slots={{
           "left-of-title": (
@@ -383,6 +383,6 @@ export default function AssetDetailsPage() {
       <div>
         <Outlet />
       </div>
-    </>
+    </div>
   );
 }

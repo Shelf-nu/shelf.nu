@@ -17,10 +17,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { useDisabled } from "~/hooks/use-disabled";
 
 export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
   const fetcher = useFetcher();
   const params = useParams();
+  const disabled = useDisabled(fetcher);
 
   return (
     <AlertDialog>
@@ -52,35 +54,44 @@ export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
 
         <DropdownMenuContent
           align="end"
-          className="order w-64 rounded-md border border-gray-300 bg-white p-1.5 text-right shadow-lg"
+          className="order w-[180px] rounded bg-white p-1.5 text-right"
         >
-          <AlertDialogTrigger asChild>
-            <DropdownMenuItem className="cursor-pointer rounded px-4 py-1 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700">
-              <span className="flex items-center gap-2">
-                <TrashIcon />
-                Delete
-              </span>
-            </DropdownMenuItem>
-          </AlertDialogTrigger>
+          <div className="relative flex  select-none items-center rounded text-left text-[13px] leading-none outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-gradient-to-br hover:bg-gray-100">
+            <AlertDialogTrigger asChild>
+              <DropdownMenuItem className="w-full cursor-pointer rounded  py-2 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700">
+                <span className="flex items-center gap-2">
+                  <TrashIcon />
+                  Delete
+                </span>
+              </DropdownMenuItem>
+            </AlertDialogTrigger>
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+          <AlertDialogTitle>
+            Are you sure you want to delete this note?
+          </AlertDialogTitle>
           <AlertDialogDescription>
             This action cannot be undone. This will permanently remove this note
             from our servers.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={disabled}>Cancel</AlertDialogCancel>
           <fetcher.Form
             action={`/bookings/${params.bookingId}/activity`}
             method="DELETE"
           >
             <input type="hidden" name="noteId" value={noteId} />
-            <Button type="submit" variant="primary" size="sm">
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={disabled}
+            >
               Delete
             </Button>
           </fetcher.Form>
