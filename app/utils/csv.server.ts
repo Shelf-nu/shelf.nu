@@ -49,6 +49,10 @@ import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
+import {
+  cleanMarkdownFormatting,
+  sanitizeNoteContent,
+} from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -469,25 +473,6 @@ export const buildCsvExportDataFromAssets = ({
 };
 
 /**
- * Cleans markdown formatting from a text string
- * @param text - Text containing markdown to clean
- * @returns Plain text with markdown formatting removed
- */
-const cleanMarkdownFormatting = (text: string): string =>
-  text
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_match, group1, group2) => group1 + ":" + group2
-    ) // Replace markdown links: [text](url) -> text:url
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "") // Remove image references: ![alt](url)
-    .replace(/[*_~`#|]+/g, "") // Remove markdown formatting characters
-    .replace(/\[[^\]]*\]/g, "") // Remove remaining brackets, e.g., [text]
-    .replace(/\r?\n/g, " ") // Replace newlines with spaces
-    .replace(/\s+/g, " ") // Normalize multiple spaces
-    .replace(/^## /, "") // Remove '## ' from the start
-    .trim();
-
-/**
  * Safely formats a value for CSV export by properly escaping and quoting values
  */
 export const formatValueForCsv = (value: any, isMarkdown = false): string => {
@@ -684,7 +669,7 @@ const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
       sanitizeCsvValue(formatter.format(note.createdAt)),
       sanitizeCsvValue(author),
       sanitizeCsvValue(note.type),
-      sanitizeCsvValue(note.content ?? ""),
+      sanitizeCsvValue(sanitizeNoteContent(note.content ?? "", formatter)),
     ].join(",");
   });
 
