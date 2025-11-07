@@ -306,6 +306,7 @@ export async function exportAssetsFromIndexToCsv({
       ...(settings.columns as Column[]),
     ],
     currentOrganization,
+    request,
   });
 
   // Join rows with CRLF as per CSV spec
@@ -316,12 +317,14 @@ export async function exportAssetsFromIndexToCsv({
  * Builds CSV export data from assets using the column settings to maintain order
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
   assets,
   columns,
   currentOrganization,
+  request,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -329,6 +332,7 @@ export const buildCsvExportDataFromAssets = ({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
+  request: Request;
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -341,6 +345,13 @@ export const buildCsvExportDataFromAssets = ({
   const headers = visibleColumns.map((col) =>
     formatValueForCsv(parseColumnName(col.name))
   );
+
+  // Create date formatter for reminder dates
+  const formatDate = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
+
   // Create data rows
   const rows = assets.map((asset) =>
     visibleColumns.map((column) => {
@@ -410,7 +421,21 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.availableToBook ? "Yes" : "No";
             break;
           case "upcomingReminder": {
-            value = asset.upcomingReminder?.displayDate;
+            if (asset.upcomingReminder?.alertDateTime) {
+              try {
+                const date = new Date(asset.upcomingReminder.alertDateTime);
+                // Check if date is valid
+                if (!isNaN(date.getTime())) {
+                  value = formatDate(date);
+                } else {
+                  value = "";
+                }
+              } catch {
+                value = "";
+              }
+            } else {
+              value = "";
+            }
             break;
           }
           case "upcomingBookings": {
@@ -732,21 +757,25 @@ export const buildCsvExportDataFromBookings = (
             booking.status.slice(1).toLowerCase();
           break;
         case "from":
-          value = format(booking.from!).split(",");
+          value = booking.from ? format(booking.from).split(",") : "";
           break;
         case "originalFrom":
           value = booking.originalFrom
             ? format(booking.originalFrom).split(",")
-            : format(booking.from!).split(",");
+            : booking.from
+            ? format(booking.from).split(",")
+            : "";
           break;
 
         case "to":
-          value = format(booking.to!).split(",");
+          value = booking.to ? format(booking.to).split(",") : "";
           break;
         case "originalTo":
           value = booking.originalTo
             ? format(booking.originalTo).split(",")
-            : format(booking.to!).split(",");
+            : booking.to
+            ? format(booking.to).split(",")
+            : "";
           break;
         case "custodian":
           const teamMember = {
