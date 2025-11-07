@@ -49,7 +49,9 @@ export const BookingNotes = () => {
         <Button
           to={`/bookings/${booking.id}/activity.csv`}
           variant="secondary"
-          className={"absolute right-0 top-[-58px] px-2 py-1 text-sm "}
+          className={
+            "absolute right-0 top-[-58px] hidden px-2 py-1 text-sm md:inline-flex"
+          }
           download
           reloadDocument
         >
