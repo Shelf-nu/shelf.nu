@@ -4,7 +4,6 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -104,11 +103,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    const items = formatBookingsDates(bookings, request);
-
     return payload({
       header,
-      items,
+      items: bookings,
       search,
       page,
       perPage,

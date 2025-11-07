@@ -87,7 +87,6 @@ import type {
 } from "./types";
 import {
   createBookingConflictConditions,
-  formatBookingsDates,
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
@@ -4286,13 +4285,10 @@ export async function loadBookingsData({
   const totalPages = Math.ceil(bookingCount / perPage);
   const hints = getClientHint(request);
 
-  // Format booking dates
-  const items = formatBookingsDates(bookings, request);
-
   return {
     showModal: true,
     header,
-    bookings: items,
+    bookings,
     search,
     page,
     bookingCount,

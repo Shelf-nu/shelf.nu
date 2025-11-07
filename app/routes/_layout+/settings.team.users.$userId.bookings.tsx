@@ -2,7 +2,6 @@ import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   setCookie,
@@ -90,13 +89,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    /** We format the dates on the server based on the users timezone and locale  */
-    const items = formatBookingsDates(bookings, request);
-
     return data(
       payload({
         header,
-        items,
+        items: bookings,
         search,
         page,
         totalItems: bookingCount,

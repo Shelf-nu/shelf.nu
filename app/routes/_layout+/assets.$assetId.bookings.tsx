@@ -7,7 +7,6 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -126,13 +125,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    /** We format the dates on the server based on the users timezone and locale  */
-    const items = formatBookingsDates(bookings, request);
-
     return data(
       payload({
         header,
-        items,
+        items: bookings,
         search,
         page,
         totalItems: bookingCount,

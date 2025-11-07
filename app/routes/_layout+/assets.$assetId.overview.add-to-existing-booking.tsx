@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 
 import {
   loadBookingsData,
@@ -212,7 +213,8 @@ export default function ExistingBooking() {
                     {item.name}
                   </div>
                   <div className="text-sm">
-                    {item.displayFrom} - {item.displayTo}
+                    <DateS date={item.from} includeTime /> -{" "}
+                    <DateS date={item.to} includeTime />
                   </div>
                 </div>
               ) : null
@@ -221,7 +223,7 @@ export default function ExistingBooking() {
           <div className="mt-2 text-gray-500">
             Only <span className="font-medium text-gray-600">Draft</span> and{" "}
             <span className="font-medium text-gray-600">Reserved</span> bookings
-            Shown
+            are visible
           </div>
         </div>
         {actionData?.error && (
