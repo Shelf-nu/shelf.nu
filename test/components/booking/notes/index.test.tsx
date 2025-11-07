@@ -34,12 +34,24 @@ vi.mock("~/components/booking/notes/new", () => ({
   NewBookingNote: () => <div data-testid="new-booking-note-form" />,
 }));
 
+// why: avoid creating a Remix router context for shared date component usage
+vi.mock("~/components/shared/date", () => ({
+  DateS: ({ date }: { date: string }) => (
+    <time data-testid="note-date">{String(date)}</time>
+  ),
+}));
+
 // why: preventing Remix loader dependency for user data hook usage
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: vi.fn(() => ({
     firstName: "Casey",
     lastName: "Lee",
   })),
+}));
+
+// why: bypass Remix navigation context requirement inside actions dropdown hooks
+vi.mock("~/hooks/use-disabled", () => ({
+  useDisabled: vi.fn(() => false),
 }));
 
 const useLoaderDataMock = vi.mocked(useLoaderData);

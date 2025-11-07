@@ -44,18 +44,17 @@ export const Notes = () => {
       : null;
 
   return (
-    <div>
+    <div className="relative">
       {hasNotes ? (
-        <div className="mb-4 flex justify-end">
-          <Button
-            to={`/assets/${asset.id}/activity.csv`}
-            variant="secondary"
-            download
-            reloadDocument
-          >
-            Export activity CSV
-          </Button>
-        </div>
+        <Button
+          to={`/assets/${asset.id}/activity.csv`}
+          variant="secondary"
+          className={"absolute right-0 top-[-58px] px-2 py-1 text-sm "}
+          download
+          reloadDocument
+        >
+          Export activity CSV
+        </Button>
       ) : null}
       <NewNote fetcher={fetcher} />
       {hasNotes ? (

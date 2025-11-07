@@ -34,6 +34,13 @@ vi.mock("~/components/assets/notes/new", () => ({
   NewNote: () => <div data-testid="new-note-form" />,
 }));
 
+// why: avoid Remix router dependency inside date component for isolated rendering
+vi.mock("~/components/shared/date", () => ({
+  DateS: ({ date }: { date: string }) => (
+    <time data-testid="note-date">{String(date)}</time>
+  ),
+}));
+
 // why: avoiding Remix loader context requirements for user data hook
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: vi.fn(() => ({

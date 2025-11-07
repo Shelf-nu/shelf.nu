@@ -66,4 +66,21 @@ Bold text with link and code const x = 1.`);
       "Nikolayz Bonevz created a new reminder kekeroo."
     );
   });
+
+  it("falls back when formatter lacks resolvedOptions", () => {
+    const fallbackFormatter = {
+      format: (date: Date) => `formatted-${date.toISOString()}`,
+    } as unknown as Intl.DateTimeFormat;
+
+    const dateOnly = new Intl.DateTimeFormat("en-US", {
+      dateStyle: "short",
+    }).format(new Date("2024-01-15T12:00:00.000Z"));
+
+    expect(
+      sanitizeNoteContent(
+        '{% date value="2024-01-15T12:00:00.000Z" includeTime=false /%}',
+        fallbackFormatter
+      )
+    ).toBe(dateOnly);
+  });
 });

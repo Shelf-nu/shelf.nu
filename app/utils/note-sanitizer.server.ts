@@ -65,16 +65,21 @@ const parseMarkdocAttributes = (rawAttributes: string) => {
 };
 
 const createDateOnlyFormatter = (formatter: Intl.DateTimeFormat) => {
-  const { locale, timeZone, numberingSystem, calendar } =
-    formatter.resolvedOptions();
+  const resolved =
+    typeof formatter.resolvedOptions === "function"
+      ? formatter.resolvedOptions()
+      : null;
 
   const options: Intl.DateTimeFormatOptions = {
     dateStyle: "short",
   };
 
-  if (timeZone) options.timeZone = timeZone;
-  if (numberingSystem) options.numberingSystem = numberingSystem;
-  if (calendar) options.calendar = calendar;
+  if (resolved?.timeZone) options.timeZone = resolved.timeZone;
+  if (resolved?.numberingSystem)
+    options.numberingSystem = resolved.numberingSystem;
+  if (resolved?.calendar) options.calendar = resolved.calendar;
+
+  const locale = resolved?.locale ?? "en-US";
 
   return new Intl.DateTimeFormat(locale, options);
 };
