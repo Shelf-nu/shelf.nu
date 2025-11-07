@@ -1,4 +1,3 @@
-import type { SerializeFrom } from "@remix-run/node";
 import { useFetcher, useParams } from "@remix-run/react";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
@@ -16,7 +15,7 @@ export const UpdateGpsCoordinatesForm = ({
 }: {
   callback: () => void;
 }) => {
-  const fetcher = useFetcher<SerializeFrom<typeof action>>();
+  const fetcher = useFetcher<typeof action>();
   const { assetId } = useParams();
   const [sendNotification] = useClientNotification();
 

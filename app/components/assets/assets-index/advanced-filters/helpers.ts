@@ -1,5 +1,4 @@
 import type { CustomField } from "@prisma/client";
-import type { SerializeFrom } from "@remix-run/node";
 import { useSearchParams } from "~/hooks/search-params";
 import type {
   Column,
@@ -142,7 +141,7 @@ export function useInitialFilters(columns: Column[]) {
 // Function to get default value based on field type
 export function getDefaultValueForFieldType(
   column: Column,
-  customFields: SerializeFrom<CustomField[]> | null // Update the type to allow null
+  customFields: CustomField[] | null // Update the type to allow null
 ): any {
   if (column.name.startsWith("cf_")) {
     // Find the matching custom field, handle potential null customFields

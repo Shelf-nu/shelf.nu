@@ -153,7 +153,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ? parseScanData({
           scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) || null,
           userId,
-          request,
         })
       : null;
     const currentBooking = getKitCurrentBooking({

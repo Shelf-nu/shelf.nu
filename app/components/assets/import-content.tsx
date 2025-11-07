@@ -1,6 +1,5 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
-import type { SerializeFrom } from "@remix-run/node";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
@@ -234,7 +233,7 @@ export const ImportContent = () => {
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const [agreed, setAgreed] = useState<"I AGREE" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
-  const fetcher = useFetcherWithReset<SerializeFrom<typeof action>>();
+  const fetcher = useFetcherWithReset<typeof action>();
 
   const { data, state } = fetcher;
   const disabled = isFormProcessing(state) || agreed !== "I AGREE";

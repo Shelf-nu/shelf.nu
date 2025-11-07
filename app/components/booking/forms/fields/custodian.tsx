@@ -1,21 +1,14 @@
-import type { SerializeFrom } from "@remix-run/node";
+import type { useLoaderData } from "@remix-run/react";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import FormRow from "~/components/forms/form-row";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import type { NewBookingLoaderReturnType } from "~/routes/_layout+/bookings.new";
 import { resolveTeamMemberName } from "~/utils/user";
 
-// Add these utility types to extract the data
-export type LoaderData<T extends (...args: any) => any> = Awaited<
-  ReturnType<T>
-> extends Response
-  ? Awaited<ReturnType<Awaited<ReturnType<T>>["json"]>>
-  : never;
-
-// Now you can use it to get the team member type
-export type TeamMemberType = SerializeFrom<
-  LoaderData<NewBookingLoaderReturnType>["teamMembers"][number]
->;
+// Extract the team member type from the loader return type
+export type TeamMemberType = ReturnType<
+  typeof useLoaderData<NewBookingLoaderReturnType>
+>["teamMembers"][number];
 
 export function CustodianField({
   defaultTeamMember,

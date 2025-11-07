@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CustomField } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Search } from "lucide-react";

@@ -1,7 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@prisma/client";
-import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useSearchParams } from "~/hooks/search-params";
 import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
@@ -83,7 +82,7 @@ export function useModelFilters({
     defaultValues ?? []
   );
 
-  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
+  const fetcher = useFetcherWithReset<typeof loader>();
   const totalItems = initialData[countKey];
 
   // Track if all data is loaded

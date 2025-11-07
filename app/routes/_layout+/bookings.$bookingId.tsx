@@ -106,10 +106,6 @@ export default function AssetDetailsPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking } = useLoaderData<typeof loader>();
-  /**
-   * Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
-   * Source: https://github.com/prisma/prisma/discussions/14371
-   */
   const { roles } = useUserRoleHelper();
 
   let items = [

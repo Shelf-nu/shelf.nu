@@ -9,11 +9,7 @@ import {
   type UserBusinessIntel,
   type Prisma,
 } from "@prisma/client";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  SerializeFrom,
-} from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { data } from "@remix-run/node";
 import { useLoaderData, Link, useFetcher } from "@remix-run/react";
 
@@ -369,9 +365,6 @@ export const action = async ({
 };
 
 export default function Area51UserPage() {
-  // Get the loader data type
-  type LoaderData = SerializeFrom<typeof loader>;
-
   const {
     user,
     organizations,
@@ -379,11 +372,11 @@ export default function Area51UserPage() {
     customer,
     prices,
     premiumIsEnabled,
-  } = useLoaderData<LoaderData>();
+  } = useLoaderData<typeof loader>();
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
-  type User = NonNullable<LoaderData["user"]>;
+  type User = NonNullable<Awaited<ReturnType<typeof loader>>["user"]>;
   type BusinessIntel = Pick<
     UserBusinessIntel,
     | "howDidYouHearAboutUs"
