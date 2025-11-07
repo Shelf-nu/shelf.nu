@@ -22,7 +22,10 @@ export function isBookingEarlyCheckin(to: string | Date) {
 }
 
 // Calculate and format booking duration
-export function formatBookingDuration(from: string, to: string): string {
+export function formatBookingDuration(
+  from: string | Date,
+  to: string | Date
+): string {
   const start = new Date(from);
   const end = new Date(to);
 

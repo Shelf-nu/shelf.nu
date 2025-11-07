@@ -66,7 +66,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       organizationId,
       canUseBarcodes,
     });
-    return payload(null);
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

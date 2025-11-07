@@ -11,6 +11,7 @@ import * as rolesServer from "~/utils/roles.server";
 
 // Import the action function
 import { action } from "./bookings.$bookingId.overview.manage-kits";
+import { assertIsDataWithResponseInit } from "../../../test/helpers/assertions";
 
 // @vitest-environment node
 
@@ -175,7 +176,8 @@ describe("manage-kits route validation", () => {
       });
 
       // Should return error response for checked out kits
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
 
       // Should only validate kit1 (adds new asset3), not kit2 (only existing assets)
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledTimes(1);
@@ -323,7 +325,8 @@ describe("manage-kits route validation", () => {
         params: mockParams,
       });
 
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
     });
 
     it("should allow available kits regardless of partial check-in status", async () => {

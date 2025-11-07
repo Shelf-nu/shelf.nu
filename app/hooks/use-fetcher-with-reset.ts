@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useFetcher, type FetcherWithComponents } from "@remix-run/react";
+import { useFetcher } from "@remix-run/react";
 
-export type FetcherWithComponentsReset<T> = FetcherWithComponents<T> & {
-  reset: () => void;
-};
-
-export default function useFetcherWithReset<T>() {
-  const fetcher = useFetcher<T>();
-  const [data, setData] = useState(fetcher.data);
+export default function useFetcherWithReset<TData = unknown>() {
+  const fetcher = useFetcher<TData>();
+  type Fetcher = typeof fetcher;
+  const [data, setData] = useState<Fetcher["data"]>(fetcher.data);
 
   useEffect(() => {
     if (fetcher.state === "idle") {
@@ -17,25 +14,12 @@ export default function useFetcherWithReset<T>() {
 
   useEffect(() => () => setData(undefined), []);
 
-  return useMemo(
+  return useMemo<Fetcher & { reset: () => void }>(
     () => ({
-      state: fetcher.state,
-      formMethod: fetcher.formMethod,
-      formData: fetcher.formData,
-      Form: fetcher.Form,
-      submit: fetcher.submit,
-      load: fetcher.load,
-      data: data as T,
+      ...fetcher,
+      data,
       reset: () => setData(undefined),
     }),
-    [
-      data,
-      fetcher.Form,
-      fetcher.formData,
-      fetcher.formMethod,
-      fetcher.load,
-      fetcher.state,
-      fetcher.submit,
-    ]
+    [data, fetcher]
   );
 }

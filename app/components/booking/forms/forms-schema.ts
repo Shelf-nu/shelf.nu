@@ -1,6 +1,6 @@
 import type { BookingSettings } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
-import { format, parseISO, addHours, differenceInHours } from "date-fns";
+import { format, addHours, differenceInHours } from "date-fns";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import {
@@ -31,7 +31,7 @@ function validateWorkingHours(
 
   // Check for date-specific overrides first
   const override = workingHours.overrides.find((override) => {
-    const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+    const overrideDate = format(override.date, "yyyy-MM-dd");
     return overrideDate === dateString;
   });
 

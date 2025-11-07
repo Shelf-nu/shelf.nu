@@ -17,6 +17,12 @@
     },
     "jest": {
       "version": 27
+    },
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true,
+        "project": "./tsconfig.json"
+      }
     }
   },
   "rules": {

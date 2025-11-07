@@ -1,14 +1,14 @@
+import type { WorkingHoursOverride } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
 import { TrashIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { TimeRangeDisplay } from "~/components/shared/time-display";
 import { useDisabled } from "~/hooks/use-disabled";
-import type { SerializedWorkingHoursOverride } from "~/modules/working-hours/types";
 import { tw } from "~/utils/tw";
 
 interface OverridePreviewProps {
-  override: SerializedWorkingHoursOverride;
+  override: WorkingHoursOverride;
 }
 
 export function OverridePreview({ override }: OverridePreviewProps) {

@@ -1,10 +1,6 @@
 import type { ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CustomField as RawCustomField,
-  CustomFieldType,
-  Currency,
-} from "@prisma/client";
+import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -17,7 +13,6 @@ import { Search } from "lucide-react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { WithDateFields } from "~/modules/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -30,8 +25,6 @@ import { Switch } from "../forms/switch";
 import { CheckIcon, SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
-
-type CustomField = WithDateFields<RawCustomField, string>;
 
 export default function AssetCustomFields({
   zo,
@@ -201,13 +194,9 @@ export default function AssetCustomFields({
     ),
   };
 
-  const requiredFields = customFields.filter(
-    (field) => field.required
-  ) as CustomField[];
+  const requiredFields = customFields.filter((field) => field.required);
 
-  const optionalFields = customFields.filter(
-    (field) => !field.required
-  ) as CustomField[];
+  const optionalFields = customFields.filter((field) => !field.required);
 
   return (
     <div className="border-b pb-6">
