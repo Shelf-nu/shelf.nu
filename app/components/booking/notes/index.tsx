@@ -1,6 +1,7 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import type { NoteWithUser } from "~/components/assets/notes/note";
 import { Note } from "~/components/assets/notes/note";
+import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { isFormProcessing } from "~/utils/form";
@@ -43,7 +44,20 @@ export const BookingNotes = () => {
       : null;
 
   return (
-    <div>
+    <div className="relative">
+      {hasNotes ? (
+        <Button
+          to={`/bookings/${booking.id}/activity.csv`}
+          variant="secondary"
+          className={
+            "absolute right-0 top-[-58px] hidden px-2 py-1 text-sm md:inline-flex"
+          }
+          download
+          reloadDocument
+        >
+          Export activity CSV
+        </Button>
+      ) : null}
       <NewBookingNote fetcher={fetcher} />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
