@@ -1,4 +1,3 @@
-import { json } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
@@ -6,6 +5,28 @@ import { loader } from "~/routes/api+/assets";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
+// why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
+const createDataMock = vitest.hoisted(() => {
+  return () =>
+    vitest.fn((data: unknown, init?: ResponseInit) => {
+      return new Response(JSON.stringify(data), {
+        status: init?.status || 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init?.headers || {}),
+        },
+      });
+    });
+});
+
+vitest.mock("@remix-run/node", async () => {
+  const actual = await vitest.importActual("@remix-run/node");
+  return {
+    ...actual,
+    data: createDataMock(),
+  };
+});
 
 // Mock dependencies
 vitest.mock("~/database/db.server", () => ({
@@ -22,10 +43,6 @@ vitest.mock("~/utils/roles.server", () => ({
 
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn(),
-}));
-
-vitest.mock("@remix-run/node", () => ({
-  json: vitest.fn((data) => ({ json: data })),
 }));
 
 const mockContext = {
@@ -94,7 +111,8 @@ describe("/api/assets", () => {
         },
       });
 
-      expect(json).toHaveBeenCalledWith({
+      // Success case returns plain object, not Response
+      expect(result).toEqual({
         error: null,
         assets: mockAssets,
       });
@@ -109,7 +127,8 @@ describe("/api/assets", () => {
         params: {},
       });
 
-      expect(json).toHaveBeenCalledWith({
+      // Success case returns plain object, not Response
+      expect(result).toEqual({
         error: null,
         assets: [],
       });
@@ -126,7 +145,8 @@ describe("/api/assets", () => {
         params: {},
       });
 
-      expect(json).toHaveBeenCalledWith({
+      // Success case returns plain object, not Response
+      expect(result).toEqual({
         error: null,
         assets: [],
       });
@@ -171,7 +191,7 @@ describe("/api/assets", () => {
       const singleAsset = [mockAssets[0]];
       (db.asset.findMany as any).mockResolvedValue(singleAsset);
 
-      await loader({
+      const result = await loader({
         request: mockRequest,
         context: mockContext,
         params: {},
@@ -192,7 +212,8 @@ describe("/api/assets", () => {
         },
       });
 
-      expect(json).toHaveBeenCalledWith({
+      // Success case returns plain object, not Response
+      expect(result).toEqual({
         error: null,
         assets: singleAsset,
       });
@@ -236,7 +257,7 @@ describe("/api/assets", () => {
       const shelfError = { status: 403, message: "Permission denied" };
       (makeShelfError as any).mockReturnValue(shelfError);
 
-      await loader({
+      const result = await loader({
         request: mockRequest,
         context: mockContext,
         params: {},
@@ -246,14 +267,15 @@ describe("/api/assets", () => {
         userId: "user-1",
       });
 
-      expect(json).toHaveBeenCalledWith(
-        {
-          error: expect.objectContaining({
-            message: "Permission denied",
-          }),
-        },
-        { status: 403 }
-      );
+      // Error case returns Response
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(403);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
+        error: expect.objectContaining({
+          message: "Permission denied",
+        }),
+      });
     });
 
     it("should handle database errors", async () => {
@@ -267,7 +289,7 @@ describe("/api/assets", () => {
       const shelfError = { status: 500, message: "Database error" };
       (makeShelfError as any).mockReturnValue(shelfError);
 
-      await loader({
+      const result = await loader({
         request: mockRequest,
         context: mockContext,
         params: {},
@@ -277,14 +299,15 @@ describe("/api/assets", () => {
         userId: "user-1",
       });
 
-      expect(json).toHaveBeenCalledWith(
-        {
-          error: expect.objectContaining({
-            message: "Database error",
-          }),
-        },
-        { status: 500 }
-      );
+      // Error case returns Response
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(500);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
+        error: expect.objectContaining({
+          message: "Database error",
+        }),
+      });
     });
 
     it("should return assets ordered by title", async () => {

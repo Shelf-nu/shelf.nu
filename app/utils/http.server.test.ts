@@ -15,6 +15,7 @@ import {
   parseData,
 } from "./http.server";
 import { Logger } from "./logger";
+import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -252,16 +253,15 @@ describe(getParams.name, () => {
     expect(result).toEqual(params);
   });
 
-  it("should throw a `json` response if params are invalid", async () => {
+  it("should throw a `json` response if params are invalid", () => {
     const params = {};
 
     try {
       getParams(params, z.object({ id: z.string() }));
     } catch (e) {
-      const response = e as Response;
-      const body = await response.json();
-      expect(response.status).toEqual(400);
-      expect(body).toEqual({
+      assertIsDataWithResponseInit(e);
+      expect(e.init?.status).toEqual(400);
+      expect(e.data).toEqual({
         error: {
           additionalData: {
             data: {},
@@ -280,7 +280,7 @@ describe(getParams.name, () => {
     }
   });
 
-  it("should return additionalData if validation fails", async () => {
+  it("should return additionalData if validation fails", () => {
     const params = { id: "123" };
 
     try {
@@ -288,10 +288,9 @@ describe(getParams.name, () => {
         additionalData: { userId: "user-id" },
       });
     } catch (e) {
-      const response = e as Response;
-      const body = await response.json();
-      expect(response.status).toEqual(400);
-      expect(body).toEqual({
+      assertIsDataWithResponseInit(e);
+      expect(e.init?.status).toEqual(400);
+      expect(e.data).toEqual({
         error: {
           additionalData: {
             data: params,

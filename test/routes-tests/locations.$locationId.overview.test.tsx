@@ -126,8 +126,8 @@ describe("locations.$locationId.overview loader", () => {
         error: null,
         location: expect.objectContaining({
           id: "loc-123",
-          // Date is serialized to ISO string by Remix json()
-          createdAt: "2024-01-01T12:34:56.000Z",
+          // In tests, Date stays as Date object (will be serialized on network)
+          createdAt: new Date("2024-01-01T12:34:56Z"),
         }),
         totalValue: 9876.54,
         locale: "en-GB",

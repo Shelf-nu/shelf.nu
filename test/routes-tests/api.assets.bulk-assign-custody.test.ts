@@ -6,6 +6,28 @@ import { action } from "~/routes/api+/assets.bulk-assign-custody";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
+// why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
+const createDataMock = vi.hoisted(() => {
+  return () =>
+    vi.fn((data: unknown, init?: ResponseInit) => {
+      return new Response(JSON.stringify(data), {
+        status: init?.status || 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init?.headers || {}),
+        },
+      });
+    });
+});
+
+vi.mock("@remix-run/node", async () => {
+  const actual = await vi.importActual("@remix-run/node");
+  return {
+    ...actual,
+    data: createDataMock(),
+  };
+});
+
 const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
@@ -35,24 +57,20 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-// why: controlling form data parsing and response formatting for predictable test behavior
-vi.mock("~/utils/http.server", () => ({
-  assertIsPost: vi.fn(),
-  parseData: vi.fn().mockImplementation((formData) => {
-    const assetIds = JSON.parse(formData.get("assetIds") || "[]");
-    const custodian = JSON.parse(formData.get("custodian") || "{}");
-    const currentSearchParams = formData.get("currentSearchParams") || null;
-    return { assetIds, custodian, currentSearchParams };
-  }),
-  data: vi.fn(
-    (data, init) =>
-      new Response(JSON.stringify(data), {
-        status: init?.status || 200,
-        headers: { "Content-Type": "application/json" },
-      })
-  ),
-  error: vi.fn((x) => ({ error: x })),
-}));
+// why: controlling form data parsing for predictable test behavior
+vi.mock("~/utils/http.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/utils/http.server")>();
+  return {
+    ...actual,
+    assertIsPost: vi.fn(),
+    parseData: vi.fn().mockImplementation((formData) => {
+      const assetIds = JSON.parse(formData.get("assetIds") || "[]");
+      const custodian = JSON.parse(formData.get("custodian") || "{}");
+      const currentSearchParams = formData.get("currentSearchParams") || null;
+      return { assetIds, custodian, currentSearchParams };
+    }),
+  };
+});
 
 // why: mocking asset index settings without database lookups
 vi.mock("~/modules/asset-index-settings/service.server", () => ({
@@ -60,21 +78,6 @@ vi.mock("~/modules/asset-index-settings/service.server", () => ({
     mode: "SIMPLE",
   }),
 }));
-
-// why: mocking response helpers for testing route handler status codes
-vi.mock("@remix-run/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
-  const mockResponse = (data: any, init?: { status?: number }) =>
-    new Response(JSON.stringify(data), {
-      status: init?.status || 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  return {
-    ...actual,
-    json: vi.fn(mockResponse),
-    data: vi.fn(mockResponse),
-  };
-});
 
 const requirePermissionMock = vi.mocked(requirePermission);
 const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
@@ -130,9 +133,7 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(
-      createActionArgs({ request })
-    )) as unknown as Response;
+    const response = (await action(createActionArgs({ request }))) as any;
 
     expect(response.status).toBe(404);
 
@@ -175,11 +176,10 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(
-      createActionArgs({ request })
-    )) as unknown as Response;
+    const response = (await action(createActionArgs({ request }))) as any;
 
-    expect(response.status).toBe(200);
+    // Success case returns plain object, not Response
+    expect(response).toEqual({ error: null, success: true });
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -220,9 +220,7 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(
-      createActionArgs({ request })
-    )) as unknown as Response;
+    const response = (await action(createActionArgs({ request }))) as any;
 
     expect(response.status).toBe(500); // ShelfError defaults to 500
   });
@@ -259,10 +257,9 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(
-      createActionArgs({ request })
-    )) as unknown as Response;
+    const response = (await action(createActionArgs({ request }))) as any;
 
-    expect(response.status).toBe(200);
+    // Success case returns plain object, not Response
+    expect(response).toEqual({ error: null, success: true });
   });
 });

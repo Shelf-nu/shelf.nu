@@ -4,6 +4,28 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
+// why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
+const createDataMock = vi.hoisted(() => {
+  return () =>
+    vi.fn((data: unknown, init?: ResponseInit) => {
+      return new Response(JSON.stringify(data), {
+        status: init?.status || 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init?.headers || {}),
+        },
+      });
+    });
+});
+
+vi.mock("@remix-run/node", async () => {
+  const actual = await vi.importActual("@remix-run/node");
+  return {
+    ...actual,
+    data: createDataMock(),
+  };
+});
+
 // why: ensuring consistent validation behavior across test environments
 vi.mock("~/config/shelf.config", () => ({
   config: {
