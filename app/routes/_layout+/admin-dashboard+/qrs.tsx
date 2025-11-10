@@ -56,19 +56,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "qrs",
     };
 
-    return data(
-      payload({
-        header,
-        items: qrCodes,
-        search,
-        page,
-        totalItems: totalQrCodes,
-        perPage,
-        totalPages,
-        modelName,
-        batches,
-      })
-    );
+    return payload({
+      header,
+      items: qrCodes,
+      search,
+      page,
+      totalItems: totalQrCodes,
+      perPage,
+      totalPages,
+      modelName,
+      batches,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });
@@ -91,11 +89,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     /** Update the QR codes from the batch as printed */
     await markBatchAsPrinted({ batch });
 
-    return data(
-      payload({
-        success: true,
-      })
-    );
+    return payload({
+      success: true,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });

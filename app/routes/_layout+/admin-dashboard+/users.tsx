@@ -44,20 +44,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       custom: TierId.custom,
     };
 
-    return data(
-      payload({
-        header,
-        items: users,
-        search,
-        page,
-        totalItems: totalUsers,
-        perPage,
-        totalPages,
-        modelName,
-        tierId,
-        tierItems,
-      })
-    );
+    return payload({
+      header,
+      items: users,
+      search,
+      page,
+      totalItems: totalUsers,
+      perPage,
+      totalPages,
+      modelName,
+      tierId,
+      tierItems,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });

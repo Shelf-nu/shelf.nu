@@ -115,14 +115,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
-      return data(
-        payload({
-          qr: {
-            type: "asset" as const,
-            asset,
-          },
-        })
-      );
+      return payload({
+        qr: {
+          type: "asset" as const,
+          asset,
+        },
+      });
     }
 
     const include = {
@@ -157,14 +155,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return data(
-      payload({
-        qr: {
-          ...qr,
-          type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
-        },
-      })
-    );
+    return payload({
+      qr: {
+        ...qr,
+        type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     const sendNotification = reason.additionalData?.shouldSendNotification;

@@ -23,7 +23,7 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import { error, getCurrentSearchParams, payload } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -105,7 +105,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
     /** End locations */
 
-    return data({
+    return payload({
       header,
       ...teamMemberData,
       ...locationsData,
