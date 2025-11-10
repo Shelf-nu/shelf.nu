@@ -143,7 +143,6 @@ export function CustodyCard({
             </Link>
             <span>
               {" "}
-              {/* @TODO test this as its a new change */}
               Since <DateS date={booking.from} includeTime />
             </span>
           </div>
