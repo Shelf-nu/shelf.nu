@@ -43,7 +43,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
   const { custodianRef, assetIds } = booking;
 
-  const { teamMembers, userId, currentOrganization, tags } =
+  const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
   const tagsSuggestions = tags.map((tag) => ({
     label: tag.name,
@@ -79,8 +79,11 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const { roles, isBaseOrSelfService } = useUserRoleHelper();
 
+  /** Use teamMembersForForm when available (from dialog contexts), otherwise fall back to teamMembers */
+  const teamMembersToUse = teamMembersForForm || teamMembers;
+
   /** This is used when we have selfSErvice or Base as we are setting the default */
-  const defaultTeamMember = teamMembers?.find(
+  const defaultTeamMember = teamMembersToUse?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 

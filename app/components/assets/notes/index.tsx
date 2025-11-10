@@ -1,10 +1,11 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
-import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
+import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/assets.$assetId.activity";
 import { isFormProcessing } from "~/utils/form";
+import { ActionsDopdown } from "./actions-dropdown";
 import { NewNote } from "./new";
-import type { NoteWithDate } from "./note";
+import type { NoteWithUser } from "./note";
 import { Note } from "./note";
 
 export const Notes = () => {
@@ -16,7 +17,7 @@ export const Notes = () => {
   const hasNotes = asset?.notes && asset?.notes.length > 0;
 
   /* Importing fetcher here in the parent file such that we can use fetcher's states to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
-  const fetcher = useFetcher();
+  const fetcher = useFetcher({ key: "add-note" });
   let onSubmissionContent = "";
   /* Getting the form data using fetcher and storing the content of form in onSubmissionContent Variable */
   if (fetcher.formData) {
@@ -25,29 +26,56 @@ export const Notes = () => {
     }
   }
 
+  // Create optimistic note data that matches the NoteWithUser shape
+  const optimisticNote: NoteWithUser | null =
+    isFormProcessing(fetcher.state) && onSubmissionContent
+      ? {
+          id: "optimistic-note", // Temporary ID for optimistic UI
+          content: onSubmissionContent,
+          type: "COMMENT",
+          createdAt: new Date().toISOString(),
+          user: user
+            ? {
+                firstName: user.firstName || "",
+                lastName: user.lastName || "",
+              }
+            : undefined,
+        }
+      : null;
+
   return (
-    <div>
+    <div className="relative">
+      {hasNotes ? (
+        <Button
+          to={`/assets/${asset.id}/activity.csv`}
+          variant="secondary"
+          className={
+            "absolute right-0 top-[-58px] hidden px-2 py-1 text-sm md:inline-flex"
+          }
+          download
+          reloadDocument
+        >
+          Export activity CSV
+        </Button>
+      ) : null}
       <NewNote fetcher={fetcher} />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
-          {isFormProcessing(fetcher.state) ? (
-            <li className="note mb-2 rounded border bg-white md:mb-8">
-              <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
-                <div>
-                  <span className="commentator font-medium text-gray-900">
-                    {/* Here we just take the current user because this is just handling optimistic UI */}
-                    {user?.firstName} {user?.lastName}
-                  </span>{" "}
-                  <span className="text-gray-600">Just Now</span>
-                </div>
-              </header>
-              <div className="message px-3.5 py-3">
-                <MarkdownViewer content={onSubmissionContent} />
-              </div>
-            </li>
-          ) : null}
-          {(asset.notes as NoteWithDate[]).map((note) => (
-            <Note key={note.id} note={note} />
+          {/* Render optimistic note using the same Note component */}
+          {optimisticNote && (
+            <Note
+              key={optimisticNote.id}
+              note={optimisticNote}
+              actionsDropdown={<ActionsDopdown noteId={optimisticNote.id} />}
+            />
+          )}
+          {/* Render all existing notes */}
+          {(asset.notes as NoteWithUser[]).map((note) => (
+            <Note
+              key={note.id}
+              note={note}
+              actionsDropdown={<ActionsDopdown noteId={note.id} />}
+            />
           ))}
         </ul>
       ) : (

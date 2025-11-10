@@ -25,6 +25,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "~/components/layout/sidebar/sidebar";
+import { SkipLinks } from "~/components/layout/skip-links";
 import { useCrisp } from "~/components/marketing/crisp";
 import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { SequentialIdMigrationModal } from "~/components/sequential-id-migration-modal";
@@ -237,9 +238,10 @@ export default function App() {
   return (
     <CommandPaletteRoot>
       <SidebarProvider defaultOpen={!minimizedSidebar}>
+        <SkipLinks />
         <AtomsResetHandler />
-        <AppSidebar />
-        <SidebarInset>
+        <AppSidebar id="navigation" />
+        <SidebarInset id="main-content" tabIndex={-1}>
           {disabledTeamOrg ? (
             <NoSubscription />
           ) : workspaceSwitching ? (

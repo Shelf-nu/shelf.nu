@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
-import { NewNoteSchema } from "~/components/assets/notes/new";
+import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
 import { createNote, deleteNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -60,9 +60,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const payload = parseData(await request.formData(), NewNoteSchema, {
-          additionalData: { userId, assetId },
-        });
+        const payload = parseData(
+          await request.formData(),
+          MarkdownNoteSchema,
+          {
+            additionalData: { userId, assetId },
+          }
+        );
 
         sendNotification({
           title: "Note created",

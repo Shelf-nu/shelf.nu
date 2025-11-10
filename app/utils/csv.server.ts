@@ -1,6 +1,7 @@
 import type {
   Asset,
   AssetIndexSettings,
+  Note,
   Organization,
   Prisma,
   Tag,
@@ -41,12 +42,17 @@ import {
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { formatBookingsDates } from "~/modules/booking/utils.server";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
+import {
+  cleanMarkdownFormatting,
+  sanitizeNoteContent,
+} from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -467,25 +473,6 @@ export const buildCsvExportDataFromAssets = ({
 };
 
 /**
- * Cleans markdown formatting from a text string
- * @param text - Text containing markdown to clean
- * @returns Plain text with markdown formatting removed
- */
-const cleanMarkdownFormatting = (text: string): string =>
-  text
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_match, group1, group2) => group1 + ":" + group2
-    ) // Replace markdown links: [text](url) -> text:url
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "") // Remove image references: ![alt](url)
-    .replace(/[*_~`#|]+/g, "") // Remove markdown formatting characters
-    .replace(/\[[^\]]*\]/g, "") // Remove remaining brackets, e.g., [text]
-    .replace(/\r?\n/g, " ") // Replace newlines with spaces
-    .replace(/\s+/g, " ") // Normalize multiple spaces
-    .replace(/^## /, "") // Remove '## ' from the start
-    .trim();
-
-/**
  * Safely formats a value for CSV export by properly escaping and quoting values
  */
 export const formatValueForCsv = (value: any, isMarkdown = false): string => {
@@ -655,6 +642,148 @@ export async function exportBookingsFromIndexToCsv({
       label: "Booking",
     });
   }
+}
+
+const ACTIVITY_HEADER = "Date,Author,Type,Content";
+
+type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+};
+
+const sanitizeCsvValue = (value: string | null | undefined) =>
+  formatValueForCsv((value ?? "").replace(/\r?\n/g, "\\n"));
+
+const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
+  const rows = notes.map((note) => {
+    const author = note.user
+      ? [note.user.firstName, note.user.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim()
+      : "";
+
+    return [
+      sanitizeCsvValue(formatter.format(note.createdAt)),
+      sanitizeCsvValue(author),
+      sanitizeCsvValue(note.type),
+      sanitizeCsvValue(sanitizeNoteContent(note.content ?? "", formatter)),
+    ].join(",");
+  });
+
+  return [ACTIVITY_HEADER, ...rows].join("\n");
+};
+
+type ActivityNoteRecord = {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+  content: string | null;
+  createdAt: Date;
+  type: string;
+};
+
+type NoteFetcher<Where> = (args: {
+  where: Where;
+  include: {
+    user: {
+      select: {
+        firstName: true;
+        lastName: true;
+      };
+    };
+  };
+  orderBy: {
+    createdAt: "desc";
+  };
+}) => Promise<ActivityNoteRecord[]>;
+
+type ExportNotesToCsvArgs<Where> = {
+  request: Request;
+  where: Where;
+  findMany: NoteFetcher<Where>;
+};
+
+async function exportNotesToCsv<Where>({
+  request,
+  where,
+  findMany,
+}: ExportNotesToCsvArgs<Where>) {
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  const notes = await findMany({
+    where,
+    include: {
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  const activityNotes = notes.map<ActivityNote>((note) => ({
+    content: note.content ?? "",
+    createdAt: note.createdAt,
+    type: note.type as ActivityNote["type"],
+    user: note.user
+      ? {
+          firstName: note.user.firstName,
+          lastName: note.user.lastName,
+        }
+      : null,
+  }));
+
+  return notesToCsv(activityNotes, formatter);
+}
+
+export async function exportAssetNotesToCsv({
+  request,
+  assetId,
+  organizationId,
+}: {
+  request: Request;
+  assetId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.NoteWhereInput>({
+    request,
+    where: {
+      assetId,
+      asset: { organizationId },
+    },
+    findMany: (args) => db.note.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
+export async function exportBookingNotesToCsv({
+  request,
+  bookingId,
+  organizationId,
+}: {
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.BookingNoteWhereInput>({
+    request,
+    where: {
+      bookingId,
+      booking: { organizationId },
+    },
+    findMany: (args) =>
+      db.bookingNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
 }
 
 /** Define some types to use for normalizing bookings across the different fetches */

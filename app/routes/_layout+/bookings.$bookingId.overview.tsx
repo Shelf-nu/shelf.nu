@@ -50,7 +50,10 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -251,106 +254,123 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     // Execute all necessary queries in parallel
-    const [teamMembersData, assetDetails, bookingFlags, kits] =
-      await Promise.all([
-        /**
-         * We need to fetch the team members to be able to display them in the custodian dropdown.
-         */
-        getTeamMemberForCustodianFilter({
-          organizationId,
-          getAll:
-            searchParams.has("getAll") &&
-            hasGetAllValue(searchParams, "teamMember"),
-          selectedTeamMembers: booking.custodianTeamMemberId
-            ? [booking.custodianTeamMemberId]
-            : [],
-          filterByUserId: isSelfServiceOrBase, // If the user is self service or base, they can only see their own. Also if the booking status is not draft, we dont need to load teammembers as the select is disabled. An improvement can be done that if the booking is not draft, we dont need to loading any other teamMember than the currently assigned one
-          userId,
-        }),
+    const [
+      teamMembersData,
+      teamMembersForFormData,
+      assetDetails,
+      bookingFlags,
+      kits,
+    ] = await Promise.all([
+      /**
+       * We need to fetch the team members to be able to display them in the custodian dropdown.
+       */
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        selectedTeamMembers: booking.custodianTeamMemberId
+          ? [booking.custodianTeamMemberId]
+          : [],
+        filterByUserId: isSelfServiceOrBase, // If the user is self service or base, they can only see their own. Also if the booking status is not draft, we dont need to load teammembers as the select is disabled. An improvement can be done that if the booking is not draft, we dont need to loading any other teamMember than the currently assigned one
+        userId,
+      }),
 
-        /**
-         * Get detailed asset information with bookings for the paginated assets
-         */
-        db.asset.findMany({
-          where: {
-            id: { in: assetIdsToFetch },
-          },
-          include: {
-            category: true,
-            custody: true,
-            kit: true,
-            bookings: {
-              where: {
-                ...(booking.from && booking.to
-                  ? {
-                      OR: [
-                        // Rule 1: RESERVED bookings always conflict
-                        {
-                          status: "RESERVED",
-                          id: { not: booking.id }, // Exclude current booking from conflicts
-                          OR: [
-                            {
-                              from: { lte: booking.to },
-                              to: { gte: booking.from },
-                            },
-                            {
-                              from: { gte: booking.from },
-                              to: { lte: booking.to },
-                            },
-                          ],
-                        },
-                        // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
-                        {
-                          status: { in: ["ONGOING", "OVERDUE"] },
-                          id: { not: booking.id }, // Exclude current booking from conflicts
-                          OR: [
-                            {
-                              from: { lte: booking.to },
-                              to: { gte: booking.from },
-                            },
-                            {
-                              from: { gte: booking.from },
-                              to: { lte: booking.to },
-                            },
-                          ],
-                        },
-                      ],
-                    }
-                  : {}),
-              },
+      // Team members for booking form - BASE/SELF_SERVICE always get their team member
+      isSelfServiceOrBase
+        ? getTeamMemberForForm({
+            organizationId,
+            userId,
+            isSelfServiceOrBase,
+            getAll:
+              searchParams.has("getAll") &&
+              hasGetAllValue(searchParams, "teamMember"),
+          })
+        : Promise.resolve(null),
+
+      /**
+       * Get detailed asset information with bookings for the paginated assets
+       */
+      db.asset.findMany({
+        where: {
+          id: { in: assetIdsToFetch },
+        },
+        include: {
+          category: true,
+          custody: true,
+          kit: true,
+          bookings: {
+            where: {
+              ...(booking.from && booking.to
+                ? {
+                    OR: [
+                      // Rule 1: RESERVED bookings always conflict
+                      {
+                        status: "RESERVED",
+                        id: { not: booking.id }, // Exclude current booking from conflicts
+                        OR: [
+                          {
+                            from: { lte: booking.to },
+                            to: { gte: booking.from },
+                          },
+                          {
+                            from: { gte: booking.from },
+                            to: { lte: booking.to },
+                          },
+                        ],
+                      },
+                      // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
+                      {
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                        id: { not: booking.id }, // Exclude current booking from conflicts
+                        OR: [
+                          {
+                            from: { lte: booking.to },
+                            to: { gte: booking.from },
+                          },
+                          {
+                            from: { gte: booking.from },
+                            to: { lte: booking.to },
+                          },
+                        ],
+                      },
+                    ],
+                  }
+                : {}),
             },
           },
-        }),
+        },
+      }),
 
-        /** Calculate booking flags considering all assets */
-        getBookingFlags({
-          id: booking.id,
-          assetIds: booking.assets.map((a) => a.id),
-          from: booking.from,
-          to: booking.to,
-        }),
+      /** Calculate booking flags considering all assets */
+      getBookingFlags({
+        id: booking.id,
+        assetIds: booking.assets.map((a) => a.id),
+        from: booking.from,
+        to: booking.to,
+      }),
 
-        /** Get kit details for the kits in the current page */
-        db.kit.findMany({
-          where: {
-            id: {
-              in: paginatedItems
-                .filter((item) => item.type === "kit")
-                .map((item) => item.id),
+      /** Get kit details for the kits in the current page */
+      db.kit.findMany({
+        where: {
+          id: {
+            in: paginatedItems
+              .filter((item) => item.type === "kit")
+              .map((item) => item.id),
+          },
+        },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
             },
           },
-          include: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                color: true,
-              },
-            },
-            _count: { select: { assets: true } },
-          },
-        }),
-      ]);
+          _count: { select: { assets: true } },
+        },
+      }),
+    ]);
 
     // Create maps for easy lookup
     const assetDetailsMap = new Map(
@@ -413,6 +433,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
+    // Ensure the booking's current custodian is always in teamMembersForForm
+    // teamMembersData already includes the current custodian (via selectedTeamMembers parameter)
+    // For BASE/SELF_SERVICE, merge it with their team member from teamMembersForFormData
+    const teamMembersForForm = teamMembersForFormData?.teamMembers
+      ? [
+          ...teamMembersForFormData.teamMembers,
+          ...teamMembersData.teamMembers.filter(
+            (tm) =>
+              !teamMembersForFormData.teamMembers.some(
+                (formTm) => formTm.id === tm.id
+              )
+          ),
+        ]
+      : teamMembersData.teamMembers;
+
     return json(
       data({
         userId,
@@ -427,6 +462,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         totalPages,
         ...teamMembersData,
+        teamMembersForForm,
         bookingFlags,
         totalKits: Object.keys(assetsByKit).length,
         totalValue: calculateTotalValueOfAssets({

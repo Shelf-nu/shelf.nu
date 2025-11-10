@@ -27,7 +27,10 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -107,27 +110,40 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-    const [teamMembersData, tagsData, events] = await Promise.all([
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
-        userId,
-      }),
-      getTagsForBookingTagsFilter({
-        organizationId,
-      }),
-      getBookingsForCalendar({
-        request,
-        organizationId,
-        userId,
-        canSeeAllBookings,
-        canSeeAllCustody,
-      }),
-    ]);
+    const [teamMembersData, teamMembersForFormData, tagsData, events] =
+      await Promise.all([
+        // Team members for filters - when canSeeAllCustody is false, only current user's team member
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          filterByUserId: !canSeeAllCustody,
+          userId,
+        }),
+        // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
+        isSelfServiceOrBase
+          ? getTeamMemberForForm({
+              organizationId,
+              userId,
+              isSelfServiceOrBase,
+              getAll:
+                searchParams.has("getAll") &&
+                hasGetAllValue(searchParams, "teamMember"),
+            })
+          : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        getTagsForBookingTagsFilter({
+          organizationId,
+        }),
+        getBookingsForCalendar({
+          request,
+          organizationId,
+          userId,
+          canSeeAllBookings,
+          canSeeAllCustody,
+        }),
+      ]);
 
     const modelName = {
       singular: "booking",
@@ -139,6 +155,10 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         header,
         events,
         ...teamMembersData,
+        // For BASE/SELF_SERVICE users, provide dedicated form team members
+        // For ADMIN users, reuse the filter team members
+        teamMembersForForm:
+          teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
         currentOrganization,
         ...tagsData,
         modelName,
