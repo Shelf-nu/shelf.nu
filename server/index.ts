@@ -165,7 +165,7 @@ export const server = await createHonoServer({
 /**
  * Declare our loaders and actions context type
  */
-declare module "@remix-run/node" {
+declare module "react-router" {
   interface AppLoadContext {
     /**
      * The app version from the build assets
