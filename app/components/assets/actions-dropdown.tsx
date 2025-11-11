@@ -184,16 +184,16 @@ const ConditionalActionsDropdown = () => {
                       assetIsCheckedOut
                         ? true
                         : assetIsPartOfKit
-                          ? {
-                              reason: (
-                                <>
-                                  This asset's location is managed by its parent
-                                  kit <strong>"{asset.kit?.name}"</strong>.
-                                  Update the kit's location instead.
-                                </>
-                              ),
-                            }
-                          : undefined
+                        ? {
+                            reason: (
+                              <>
+                                This asset's location is managed by its parent
+                                kit <strong>"{asset.kit?.name}"</strong>. Update
+                                the kit's location instead.
+                              </>
+                            ),
+                          }
+                        : undefined
                     } // to show tooltip only when disabled
                   >
                     <span className="flex items-center gap-2">

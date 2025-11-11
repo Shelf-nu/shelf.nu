@@ -296,17 +296,20 @@ const labels = createAvailabilityLabels(assetLabelPresets.booking);
 ### Manual Testing Checklist
 
 1. **Basic Functionality**:
+
    - [ ] Drawer opens and closes correctly
    - [ ] Items appear when scanned
    - [ ] Form submission works with valid items
 
 2. **Blocker Testing**:
+
    - [ ] Invalid QR codes show error blockers
    - [ ] Wrong item types (kits when not allowed) show blockers
    - [ ] Wrong status items show appropriate blockers
    - [ ] "Resolve All" button works correctly
 
 3. **Edge Cases**:
+
    - [ ] Empty state displays correctly
    - [ ] Duplicate items are handled properly
    - [ ] Form validation works with no items

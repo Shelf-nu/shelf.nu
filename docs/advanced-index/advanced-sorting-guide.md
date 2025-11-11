@@ -17,6 +17,7 @@ When you sort by a single field, all assets are organized based on that one crit
 ### Examples of Single Field Sorting:
 
 1. **Sort by Name (A to Z)**
+
    - Result: Assets arranged alphabetically
    - Example order:
      1. Anesthesia Machine
@@ -93,11 +94,13 @@ Surgical Equipment (Category)
 ## Tips for Effective Sorting
 
 1. **Think Hierarchically**
+
    - Start with your most important grouping
    - Add supporting sorts that make sense within groups
    - Use name as a final sort for easy scanning
 
 2. **Consider Your Task**
+
    - Inventory: Location-based sorting might be most useful
    - Maintenance: Date-based sorting might be priority
    - Auditing: Value-based sorting might be key

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data, unstable_parseMultipartFormData } from "react-router";
+import { data, parseMultipartFormData } from "react-router";
 import { useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
@@ -68,10 +68,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     await assertUserCanImportNRM({ organizationId, organizations });
 
     // Upload handler to store file in memory
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      memoryUploadHandler
-    );
+    const formData = await parseMultipartFormData(request, memoryUploadHandler);
 
     const csvFile = formData.get("file") as File;
     const text = await csvFile.text();

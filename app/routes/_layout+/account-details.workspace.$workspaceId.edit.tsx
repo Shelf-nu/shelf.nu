@@ -2,8 +2,8 @@ import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
   data,
   MaxPartSizeExceededError,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
+  createMemoryUploadHandler,
+  parseMultipartFormData,
 } from "react-router";
 import type {
   ActionFunctionArgs,
@@ -255,9 +255,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           nextShowShelfBranding = true;
         }
 
-        const formDataFile = await unstable_parseMultipartFormData(
+        const formDataFile = await parseMultipartFormData(
           request,
-          unstable_createMemoryUploadHandler({
+          createMemoryUploadHandler({
             maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
           })
         );

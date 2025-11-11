@@ -1,7 +1,4 @@
-import {
-  unstable_composeUploadHandlers,
-  unstable_parseMultipartFormData,
-} from "react-router";
+import { composeUploadHandlers, parseMultipartFormData } from "react-router";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -187,7 +184,7 @@ export async function parseFileFormData({
   thumbnailSize?: number;
 }) {
   try {
-    const uploadHandler = unstable_composeUploadHandlers(
+    const uploadHandler = composeUploadHandlers(
       async ({ contentType, data, filename }) => {
         if (!contentType?.includes("image")) {
           return undefined;
@@ -234,10 +231,7 @@ export async function parseFileFormData({
       }
     );
 
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      uploadHandler
-    );
+    const formData = await parseMultipartFormData(request, uploadHandler);
 
     return formData;
   } catch (cause) {

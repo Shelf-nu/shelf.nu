@@ -500,8 +500,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-              ? filter.value
-              : [filter.value]
+            ? filter.value
+            : [filter.value]
         ).filter(Boolean);
 
         if (values.includes("uncategorized")) {
@@ -569,8 +569,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-              ? filter.value
-              : [filter.value]
+            ? filter.value
+            : [filter.value]
         ).filter(Boolean);
 
         if (values.includes("without-location")) {
@@ -638,8 +638,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-              ? filter.value
-              : [filter.value]
+            ? filter.value
+            : [filter.value]
         ).filter(Boolean);
 
         if (values.includes("without-kit")) {
@@ -866,8 +866,8 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
           : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+          ? filter.value
+          : [filter.value]
       ).filter(Boolean);
 
       if (values.includes("without-custody")) {

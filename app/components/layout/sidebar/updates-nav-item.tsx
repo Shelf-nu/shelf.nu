@@ -39,8 +39,8 @@ export default function UpdatesNavItem() {
             update.userReads.length === 0 && !readUpdateIds.has(update.id)
         ).length
       : optimisticMarkAllRead
-        ? 0
-        : unreadUpdatesCount;
+      ? 0
+      : unreadUpdatesCount;
 
   const hasUnread = unreadCount > 0;
 

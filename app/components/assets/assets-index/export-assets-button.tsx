@@ -76,8 +76,8 @@ export function ExportAssetsButton() {
               ),
             }
           : disabled
-            ? { reason: "You must select at least 1 asset to export" }
-            : isDownloading
+          ? { reason: "You must select at least 1 asset to export" }
+          : isDownloading
       }
     >
       <div className="flex items-center gap-1">

@@ -105,6 +105,7 @@ npm run validate
 ### Critical Setup Requirements
 
 1. **Supabase Setup** (REQUIRED):
+
    - Follow `docs/supabase-setup.md` for complete instructions
    - Create Supabase project and get connection strings
    - Configure authentication and storage buckets
@@ -152,23 +153,27 @@ These operations require network access and will fail in restricted environments
 Execute these workflows to validate functionality:
 
 1. **Asset Creation Flow**:
+
    - Navigate to asset creation page
    - Fill in asset name and description
    - Save asset and verify creation
    - Verify QR code generation
 
 2. **Category Management**:
+
    - Create new category with name and description
    - Verify category appears in listings
    - Assign category to assets
 
 3. **Team Collaboration**:
+
    - Add team member to organization
    - Assign asset custody to team member
    - Release custody and verify status changes
    - Verify custody change notifications
 
 4. **Booking System**:
+
    - Create booking for available assets
    - Verify conflict detection for double bookings
    - Check in/out assets from bookings

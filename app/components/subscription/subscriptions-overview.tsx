@@ -122,8 +122,8 @@ function Item({
       planTier === "tier_2"
         ? "Team plan"
         : planTier === "tier_1"
-          ? "Plus plan"
-          : subscriptionPrice?.product.name,
+        ? "Plus plan"
+        : subscriptionPrice?.product.name,
       subscription.status,
       interval === "year" ? "Yearly billing" : "Monthly billing",
     ];

@@ -14,7 +14,7 @@ import {
   useLoaderData,
   useRouteLoaderData,
 } from "react-router";
-import { withSentry } from "@sentry/remix";
+import { withSentry } from "@sentry/react-router";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";

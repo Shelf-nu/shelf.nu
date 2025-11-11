@@ -182,13 +182,13 @@ export class ShelfError extends Error {
     this.additionalData = additionalData;
     this.shouldBeCaptured =
       (isLikeShelfError(cause)
-        ? (shouldBeCaptured ?? cause.shouldBeCaptured)
+        ? shouldBeCaptured ?? cause.shouldBeCaptured
         : shouldBeCaptured) ?? true;
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : isNotFoundError(cause)
-        ? 404
-        : status || 500;
+      ? 404
+      : status || 500;
     this.traceId = traceId || createId();
   }
 }

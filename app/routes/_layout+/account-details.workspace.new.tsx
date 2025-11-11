@@ -3,8 +3,8 @@ import {
   data,
   MaxPartSizeExceededError,
   redirect,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
+  createMemoryUploadHandler,
+  parseMultipartFormData,
 } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { invariant } from "framer-motion";
@@ -83,9 +83,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { name, currency } = payload;
     /** This checks if tags are passed and build the  */
 
-    const formDataFile = await unstable_parseMultipartFormData(
+    const formDataFile = await parseMultipartFormData(
       request,
-      unstable_createMemoryUploadHandler({
+      createMemoryUploadHandler({
         maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
       })
     );

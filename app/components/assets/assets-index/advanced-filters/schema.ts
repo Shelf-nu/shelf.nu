@@ -148,12 +148,12 @@ export type FilterValue<T extends FilterFieldType> = T extends
   | "amount"
   ? NumberFilterValue
   : T extends "string"
-    ? StringFilterValue
-    : T extends "boolean"
-      ? BooleanFilterValue
-      : T extends "array"
-        ? ArrayFilterValue
-        : never;
+  ? StringFilterValue
+  : T extends "boolean"
+  ? BooleanFilterValue
+  : T extends "array"
+  ? ArrayFilterValue
+  : never;
 
 // Type guard helpers
 export function isNumberTuple(value: unknown): value is [number, number] {

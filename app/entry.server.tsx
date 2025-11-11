@@ -4,7 +4,7 @@ import { PassThrough } from "stream";
 import { createReadableStreamFromReadable } from "@react-router/node";
 import type { AppLoadContext, EntryContext } from "react-router";
 import { ServerRouter } from "react-router";
-import * as Sentry from "@sentry/remix";
+import * as Sentry from "@sentry/react-router";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerEmailWorkers } from "./emails/email.worker.server";
@@ -70,7 +70,9 @@ schedulerService
  * If this happen, you will have Sentry logs with a `Unhandled` tag and `unhandled.remix.server` as origin.
  *
  */
-export const handleError = Sentry.wrapHandleErrorWithSentry;
+export const handleError = Sentry.createSentryHandleError({
+  logErrors: false,
+});
 
 const ABORT_DELAY = 5000;
 
@@ -111,11 +113,7 @@ function handleBotRequest(
   return new Promise((resolve, reject) => {
     let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
-      <ServerRouter
-        context={reactRouterContext}
-        url={request.url}
-        abortDelay={ABORT_DELAY}
-      />,
+      <ServerRouter context={reactRouterContext} url={request.url} />,
       {
         onAllReady() {
           shellRendered = true;
@@ -161,11 +159,7 @@ function handleBrowserRequest(
   return new Promise((resolve, reject) => {
     let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
-      <ServerRouter
-        context={reactRouterContext}
-        url={request.url}
-        abortDelay={ABORT_DELAY}
-      />,
+      <ServerRouter context={reactRouterContext} url={request.url} />,
       {
         onShellReady() {
           shellRendered = true;

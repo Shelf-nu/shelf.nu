@@ -57,9 +57,8 @@ export default function AssetCustomFields({
   const hints = useHints();
 
   const getCustomFieldVal = (id: string) => {
-    const value = customFieldsValues?.find(
-      (cfv) => cfv.customFieldId === id
-    )?.value;
+    const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
+      ?.value;
     return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
   };
 

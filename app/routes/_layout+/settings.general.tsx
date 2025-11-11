@@ -8,8 +8,8 @@ import {
   data,
   MaxPartSizeExceededError,
   redirect,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
+  createMemoryUploadHandler,
+  parseMultipartFormData,
 } from "react-router";
 
 import { useLoaderData } from "react-router";
@@ -237,9 +237,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
           nextShowShelfBranding = true;
         }
 
-        const formDataFile = await unstable_parseMultipartFormData(
+        const formDataFile = await parseMultipartFormData(
           request,
-          unstable_createMemoryUploadHandler({
+          createMemoryUploadHandler({
             maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
           })
         );
