@@ -136,6 +136,7 @@ export const server = await createHonoServer({
         onFailRedirectTo: "/login",
         publicPaths: [
           "/",
+          "/_root", // Root layout loader - needed for all pages including public routes
           "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite
           "/forgot-password",
           "/join",

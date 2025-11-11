@@ -1,6 +1,6 @@
 import { UpdateStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Outlet, useFetcher, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
@@ -13,7 +13,7 @@ import {
   updateUpdate,
 } from "~/modules/update/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
@@ -25,10 +25,10 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
 
     const updates = await getAllUpdatesForAdmin();
 
-    return json(data({ updates }));
+    return payload({ updates });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -52,10 +52,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       status,
     });
 
-    return json(data(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

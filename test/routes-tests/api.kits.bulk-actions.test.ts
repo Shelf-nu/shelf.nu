@@ -5,6 +5,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { action } from "~/routes/api+/kits.bulk-actions";
 import { requirePermission } from "~/utils/roles.server";
 
+// why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
+const createDataMock = vi.hoisted(() => {
+  return () =>
+    vi.fn((data: unknown, init?: ResponseInit) => {
+      return new Response(JSON.stringify(data), {
+        status: init?.status || 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init?.headers || {}),
+        },
+      });
+    });
+});
+
 const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
@@ -41,33 +55,29 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-// why: controlling form data parsing and response formatting for predictable test behavior
-vi.mock("~/utils/http.server", () => ({
-  assertIsPost: vi.fn(),
-  parseData: vi.fn().mockImplementation((formData) => {
-    const intent = formData.get("intent");
-    const kitIds = JSON.parse(formData.get("kitIds") || "[]");
-    const custodian = formData.get("custodian")
-      ? JSON.parse(formData.get("custodian"))
-      : undefined;
-    return { intent, kitIds, custodian };
-  }),
-  data: vi.fn((x) => ({ success: true, ...x })),
-  error: vi.fn((x) => ({ error: x })),
-}));
+// why: controlling form data parsing for predictable test behavior
+vi.mock("~/utils/http.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/utils/http.server")>();
+  return {
+    ...actual,
+    assertIsPost: vi.fn(),
+    parseData: vi.fn().mockImplementation((formData) => {
+      const intent = formData.get("intent");
+      const kitIds = JSON.parse(formData.get("kitIds") || "[]");
+      const custodian = formData.get("custodian")
+        ? JSON.parse(formData.get("custodian"))
+        : undefined;
+      return { intent, kitIds, custodian };
+    }),
+  };
+});
 
-// why: mocking json response helper for testing route handler status codes
+// why: mocking response helpers for testing route handler status codes
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   return {
     ...actual,
-    json: vi.fn(
-      (data, init) =>
-        new Response(JSON.stringify(data), {
-          status: init?.status || 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    ),
+    data: createDataMock(),
   };
 });
 
@@ -122,7 +132,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(404);
 
@@ -162,9 +174,12 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as any;
 
-    expect(response.status).toBe(200);
+    // Success case returns plain object, not Response
+    expect(response).toEqual({ error: null, success: true });
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -202,7 +217,9 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(500); // ShelfError defaults to 500
   });
@@ -236,9 +253,12 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as any;
 
-    expect(response.status).toBe(200);
+    // Success case returns plain object, not Response
+    expect(response).toEqual({ error: null, success: true });
   });
 
   it("does not validate custodian for non-custody operations", async () => {
@@ -256,9 +276,12 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       body: formData,
     });
 
-    const response = await action(createActionArgs({ request }));
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as any;
 
-    expect(response.status).toBe(200);
+    // Success case returns plain object, not Response
+    expect(response).toEqual({ error: null, success: true });
 
     // Should not call teamMember.findUnique for non-custody operations
     expect(mockGetTeamMember).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -19,7 +19,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -75,10 +75,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, kit }));
+    return payload({ title, header, kit });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

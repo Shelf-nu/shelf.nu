@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
@@ -7,7 +7,7 @@ import { createNote, deleteNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -60,7 +60,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const payload = parseData(
+        const { content } = parseData(
           await request.formData(),
           MarkdownNoteSchema,
           {
@@ -76,12 +76,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         const note = await createNote({
-          ...payload,
+          content,
           assetId,
           userId,
         });
 
-        return json(data({ note }));
+        return payload({ note });
       }
       case "DELETE": {
         const { noteId } = parseData(
@@ -106,13 +106,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
         });
 
-        return json(data(null));
+        return payload(null);
       }
     }
 
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

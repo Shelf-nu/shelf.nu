@@ -11,6 +11,7 @@ import * as rolesServer from "~/utils/roles.server";
 
 // Import the action function
 import { action } from "./bookings.$bookingId.overview.manage-assets";
+import { assertIsDataWithResponseInit } from "../../../test/helpers/assertions";
 
 // @vitest-environment node
 
@@ -180,7 +181,8 @@ describe("manage-assets route validation", () => {
       });
 
       // Should return error response for checked out assets
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
 
       // Should only validate newly added assets (asset3, asset4)
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledTimes(2);
@@ -316,7 +318,8 @@ describe("manage-assets route validation", () => {
         params: mockParams,
       });
 
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
     });
 
     it("should allow available assets regardless of partial check-in status", async () => {
@@ -422,7 +425,8 @@ describe("manage-assets route validation", () => {
         params: mockParams,
       });
 
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
     });
 
     it("should validate for OVERDUE bookings", async () => {
@@ -461,7 +465,8 @@ describe("manage-assets route validation", () => {
         params: mockParams,
       });
 
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
     });
   });
 
@@ -650,7 +655,8 @@ describe("manage-assets route validation", () => {
         params: mockParams,
       });
 
-      expect(response.status).toBe(500);
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(500);
     });
   });
 });

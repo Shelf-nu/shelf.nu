@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CustomField } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Search } from "lucide-react";
@@ -120,10 +118,7 @@ function AdvancedFilter() {
       newCols.push({
         name: firstColumn.name, // Keep the name for proper UI rendering
         operator: operatorsPerType[fieldType][0],
-        value: getDefaultValueForFieldType(
-          firstColumn,
-          customFields as SerializeFrom<CustomField>[] | null
-        ),
+        value: getDefaultValueForFieldType(firstColumn, customFields),
         type: fieldType,
         isNew: true, // Mark as new/unselected
       });
@@ -212,9 +207,7 @@ function AdvancedFilter() {
                                   operator: operatorsPerType[fieldType][0],
                                   value: getDefaultValueForFieldType(
                                     column,
-                                    customFields as
-                                      | SerializeFrom<CustomField>[]
-                                      | null
+                                    customFields
                                   ),
                                   isNew: false,
                                 };

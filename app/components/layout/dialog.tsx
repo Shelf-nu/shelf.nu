@@ -38,11 +38,13 @@ export const Dialog = ({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onCloseRef.current?.();
       }
     };
 
-    dialog.addEventListener("keydown", handleKeyDown);
+    // Attach to document to capture ESC even when Select or other components are focused
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
       dialog.querySelector<HTMLElement>(
@@ -52,7 +54,7 @@ export const Dialog = ({
     focusTarget.focus();
 
     return () => {
-      dialog.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
       previouslyFocusedElement.current?.focus();
       previouslyFocusedElement.current = null;
     };

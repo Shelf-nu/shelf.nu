@@ -64,8 +64,8 @@ export function BookingAssetsColumn() {
       `manage-assets?${new URLSearchParams({
         // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from as string).toISOString(),
-        bookingTo: new Date(booking.to as string).toISOString(),
+        bookingFrom: new Date(booking.from!).toISOString(),
+        bookingTo: new Date(booking.to!).toISOString(),
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`,

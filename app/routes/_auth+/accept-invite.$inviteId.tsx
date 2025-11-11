@@ -1,6 +1,6 @@
 import { InviteStatuses } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
@@ -18,7 +18,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -71,15 +71,13 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
-        inviter: `${invite.inviter.firstName} ${invite.inviter.lastName}`,
-        workspace: `${invite.organization.name}`,
-      })
-    );
+    return payload({
+      inviter: `${invite.inviter.firstName} ${invite.inviter.lastName}`,
+      workspace: `${invite.organization.name}`,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(
+    throw data(
       error({ ...reason, title: reason.title || "Accept team invite" }),
       {
         status: reason.status,
@@ -162,14 +160,18 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause);
-
+    let titleOverride = null;
     if (cause instanceof Error && cause.name === "JsonWebTokenError") {
+      titleOverride = "Invalid invite token";
       reason.message =
         "The invitation link is invalid. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support";
     }
 
-    return json(
-      error({ ...reason, title: reason.title || "Accept team invite" }),
+    return data(
+      error({
+        ...reason,
+        title: titleOverride ?? (reason.title || "Accept team invite"),
+      }),
       {
         status: reason.status,
       }
@@ -186,31 +188,46 @@ export default function AcceptInvite() {
   return (
     <>
       <div className=" flex flex-col items-center text-center">
-        <h2>Accept invite</h2>
-        <p>
-          <strong>{inviter}</strong> invites you to join Shelf as a member of{" "}
-          <strong>{workspace}’s</strong> workspace.
-        </p>
-        <Form method="post" className="my-3">
-          <input
-            type="hidden"
-            name="token"
-            value={searchParams.get("token") || ""}
-          />
-          {error && (
-            <p className="mx-4 mb-3 text-sm text-error-500 md:mx-[-200px]">
-              {error.message}
+        {error ? (
+          <div>
+            <h2>{error.title}</h2>
+            <p
+              className="mx-4 mb-3 mt-2 md:mx-[-200px]"
+              dangerouslySetInnerHTML={{ __html: error.message }}
+            />
+            <Button to="/" variant={"secondary"}>
+              Back to home
+            </Button>
+          </div>
+        ) : (
+          <div>
+            <h2>Accept invite</h2>
+            <p className="mt-2">
+              <strong>{inviter}</strong> invites you to join Shelf as a member
+              of <strong>{workspace}’s</strong> workspace.
             </p>
-          )}
-          <Button type="submit" disabled={disabled || error}>
-            {disabled ? "Validating token..." : "Accept invite"}
-          </Button>
-        </Form>
+            <Form method="post" className="my-3">
+              <input
+                type="hidden"
+                name="token"
+                value={searchParams.get("token") || ""}
+              />
+
+              <Button type="submit" disabled={disabled || error}>
+                {disabled ? "Validating token..." : "Accept invite"}
+              </Button>
+            </Form>
+          </div>
+        )}
       </div>
       <div className=" mx-4 mt-20 flex flex-col items-center text-center text-gray-600 md:mx-[-200px]">
         <p>
           If you have any questions or need assistance, please don't hesitate to
-          contact our support team at {SUPPORT_EMAIL}.
+          contact our support team at{" "}
+          <Button variant={"link-gray"} to={`mailto:${SUPPORT_EMAIL}`}>
+            {SUPPORT_EMAIL}
+          </Button>
+          .
         </p>
       </div>
     </>

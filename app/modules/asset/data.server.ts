@@ -2,7 +2,7 @@
 
 import type { AssetIndexSettings, Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -14,7 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { data, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -219,8 +219,8 @@ export async function simpleModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  return json(
-    data({
+  return data(
+    payload({
       header,
       items: assets,
       categories,
@@ -418,8 +418,8 @@ export async function advancedModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  return json(
-    data({
+  return data(
+    payload({
       header,
       items: assets,
       search,

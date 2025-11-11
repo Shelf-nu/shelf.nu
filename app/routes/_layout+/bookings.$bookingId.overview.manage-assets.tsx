@@ -6,7 +6,7 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import {
   useLoaderData,
   useNavigate,
@@ -68,7 +68,7 @@ import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -175,39 +175,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const bookingKitIds = getKitIdsByAssets(booking.assets);
 
-    return json(
-      data({
-        header: {
-          title: `Add assets for '${booking?.name}'`,
-          subHeading: "Fill up the booking with the assets of your choice",
-        },
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        booking,
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        bookingKitIds,
-      })
-    );
+    return payload({
+      header: {
+        title: `Add assets for '${booking?.name}'`,
+        subHeading: "Fill up the booking with the assets of your choice",
+      },
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      booking,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      modelName,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      bookingKitIds,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -424,7 +422,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -469,10 +467,9 @@ export default function AddAssetsToNewBooking() {
   const manageKitsUrl = useMemo(
     () =>
       `/bookings/${booking.id}/overview/manage-kits?${new URLSearchParams({
-        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
         // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from as string).toISOString(),
-        bookingTo: new Date(booking.to as string).toISOString(),
+        bookingFrom: new Date(booking.from!).toISOString(),
+        bookingTo: new Date(booking.to!).toISOString(),
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`,

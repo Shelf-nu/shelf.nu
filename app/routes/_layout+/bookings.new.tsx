@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
@@ -35,7 +35,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -92,8 +92,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    return json(
-      data({
+    return data(
+      payload({
         userId,
         currentOrganization,
         header: newBookingHeader,
@@ -113,7 +113,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -253,7 +253,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

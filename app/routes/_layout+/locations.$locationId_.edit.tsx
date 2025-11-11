@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -24,7 +24,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getParams,
   getRefererPath,
@@ -69,16 +69,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: location.id,
     };
 
-    return json(
-      data({
-        location,
-        header,
-        referer: getRefererPath(request),
-      })
-    );
+    return payload({
+      location,
+      header,
+      referer: getRefererPath(request),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -110,7 +108,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
     const clonedRequest = request.clone();
 
-    const payload = parseData(
+    const parsedData = parseData(
       await clonedRequest.formData(),
       NewLocationFormSchema,
       {
@@ -118,7 +116,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address } = payload;
+    const { name, description, address } = parsedData;
 
     const location = await updateLocation({
       id,
@@ -146,14 +144,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // If redirectTo is provided, redirect back to previous page
     // Otherwise stay on current page (e.g., when opened in new tab)
-    if (payload.redirectTo) {
-      return redirect(safeRedirect(payload.redirectTo, `/locations/${id}`));
+    if (parsedData.redirectTo) {
+      return redirect(safeRedirect(parsedData.redirectTo, `/locations/${id}`));
     }
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

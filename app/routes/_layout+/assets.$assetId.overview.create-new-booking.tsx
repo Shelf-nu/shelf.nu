@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -10,7 +10,7 @@ import NewBooking, {
 } from "~/routes/_layout+/bookings.new";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -80,24 +80,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
-        header: newBookingHeader,
-        currentOrganization,
-        userId,
-        showModal: true,
-        isSelfServiceOrBase,
-        selfServiceOrBaseUser,
-        ...teamMembersData,
-        // For consistency, also provide teamMembersForForm
-        teamMembersForForm: teamMembersData.teamMembers,
-        assetIds: [assetId],
-        ...tagsData,
-      })
-    );
+    return payload({
+      header: newBookingHeader,
+      currentOrganization,
+      userId,
+      showModal: true,
+      isSelfServiceOrBase,
+      selfServiceOrBaseUser,
+      ...teamMembersData,
+      // For consistency, also provide teamMembersForForm
+      teamMembersForForm: teamMembersData.teamMembers,
+      assetIds: [assetId],
+      ...tagsData,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

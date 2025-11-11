@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { server } from "mocks";
+import { server } from "./mocks";
 
 process.env.DATABASE_URL =
   "postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true";

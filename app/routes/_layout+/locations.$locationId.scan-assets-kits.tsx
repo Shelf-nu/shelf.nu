@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -25,7 +25,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -69,10 +69,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, location }));
+    return payload({ title, header, location });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -130,7 +130,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

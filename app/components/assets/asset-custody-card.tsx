@@ -1,4 +1,4 @@
-import type { TeamMember, User } from "@prisma/client";
+import type { Booking, TeamMember, User } from "@prisma/client";
 import { Link } from "@remix-run/react";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -10,6 +10,7 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import { DateS } from "../shared/date";
 
 /**
  * Renders the Asset Custody Card
@@ -22,24 +23,18 @@ export function CustodyCard({
   className,
 }: {
   booking:
-    | {
-        id: string;
-        name: string;
-        from: string | null;
-        custodianUser: Omit<
+    | (Pick<Booking, "id" | "name" | "from"> & {
+        custodianUser: Pick<
           User,
-          "createdAt" | "updatedAt" | "deletedAt"
+          "firstName" | "lastName" | "profilePicture" | "email"
         > | null;
-        custodianTeamMember: Omit<
-          TeamMember,
-          "createdAt" | "updatedAt" | "deletedAt"
-        > | null;
-      }
+        custodianTeamMember: TeamMember | null;
+      })
     | null
     | undefined;
   hasPermission: boolean;
   custody: {
-    dateDisplay: string;
+    createdAt: Date;
     custodian: {
       id: string;
       name: string;
@@ -57,6 +52,7 @@ export function CustodyCard({
     entity: PermissionEntity.teamMemberProfile,
     action: PermissionAction.read,
   });
+
   /** We return null if user is selfService or if neither custody nor booking exists */
   if (!hasPermission || (!custody && !booking)) {
     return <div className="my-3" />;
@@ -65,7 +61,7 @@ export function CustodyCard({
   const fullName = custody ? resolveTeamMemberName(custody.custodian) : "";
 
   /* If custody is present, we render the card showing custody */
-  if (custody?.dateDisplay) {
+  if (custody?.createdAt) {
     return (
       <Card className={tw("my-[14px]", className)}>
         <div className="flex items-center gap-3">
@@ -97,12 +93,15 @@ export function CustodyCard({
               )}
               <span className="font-semibold">{}</span>
             </p>
-            <span>Since {custody.dateDisplay}</span>
+            <span>
+              Since <DateS date={custody.createdAt} includeTime />
+            </span>
           </div>
         </div>
       </Card>
     );
   }
+
   /** If booking is present, we render the card showing custody via booking */
   if (booking) {
     let teamMemberName = "";
@@ -142,7 +141,10 @@ export function CustodyCard({
             <Link to={`/bookings/${booking.id}`} className="underline">
               {booking.name}
             </Link>
-            <span> Since {booking.from}</span>
+            <span>
+              {" "}
+              Since <DateS date={booking.from} includeTime />
+            </span>
           </div>
         </div>
       </Card>

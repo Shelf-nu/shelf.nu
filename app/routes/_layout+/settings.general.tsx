@@ -5,7 +5,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import {
-  json,
+  data,
   MaxPartSizeExceededError,
   redirect,
   unstable_createMemoryUploadHandler,
@@ -42,7 +42,7 @@ import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -131,22 +131,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (currentOrganization.type === OrganizationType.TEAM ||
         user.tierId === "tier_1");
 
-    return json(
-      data({
-        header,
-        organization: currentOrganization,
-        canExportAssets: canExportAssets(tierLimit),
-        canHideShelfBranding: canHideBrandingForThisWorkspace,
-        user,
-        curriences: Object.keys(Currency),
-        isPersonalWorkspace:
-          currentOrganization.type === OrganizationType.PERSONAL,
-        admins,
-      })
-    );
+    return payload({
+      header,
+      organization: currentOrganization,
+      canExportAssets: canExportAssets(tierLimit),
+      canHideShelfBranding: canHideBrandingForThisWorkspace,
+      user,
+      curriences: Object.keys(Currency),
+      isPersonalWorkspace:
+        currentOrganization.type === OrganizationType.PERSONAL,
+      admins,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -367,13 +365,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "transfer-ownership": {
-        const payload = parseData(formData, TransferOwnershipSchema, {
+        const parsedData = parseData(formData, TransferOwnershipSchema, {
           additionalData: { userId, organizationId },
         });
 
         const { newOwner } = await transferOwnership({
           currentOrganization,
-          newOwnerId: payload.newOwner,
+          newOwnerId: parsedData.newOwner,
           userId: authSession.userId,
         });
 
@@ -398,7 +396,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   } catch (cause) {
     const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
+    return data(
       error({
         ...reason,
         ...(isMaxPartSizeExceeded && {

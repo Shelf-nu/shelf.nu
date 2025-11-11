@@ -6,7 +6,7 @@ import {
   NoteType,
   OrganizationRoles,
 } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import {
   Link,
@@ -34,7 +34,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -143,17 +143,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const totalTeamMembers = await db.teamMember.count({ where });
 
-    return json(
-      data({
-        showModal: true,
-        kit,
-        teamMembers,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      showModal: true,
+      kit,
+      teamMembers,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -289,7 +287,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

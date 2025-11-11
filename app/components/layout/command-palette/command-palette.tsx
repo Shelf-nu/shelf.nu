@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SerializeFrom } from "@remix-run/node";
 import { useNavigate, useRouteLoaderData } from "@remix-run/react";
 import Fuse from "fuse.js";
 import {
@@ -444,7 +443,7 @@ export function getTeamMemberHref(member: TeamMemberSearchResult) {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const navigate = useNavigate();
-  const layoutData = useRouteLoaderData<SerializeFrom<LayoutLoaderResponse>>(
+  const layoutData = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
   );
 

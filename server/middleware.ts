@@ -27,7 +27,21 @@ export function protect({
   onFailRedirectTo: string;
 }) {
   return createMiddleware(async (c, next) => {
-    const isPublic = pathMatch(publicPaths, c.req.path);
+    // Skip authentication for internal Remix/framework routes (manifest, etc.)
+    // These are created by lazy route discovery and should never require auth
+    if (c.req.path.startsWith("/__")) {
+      return next();
+    }
+
+    // TODO: Remove this workaround when migrating to React Router v7 + react-router-hono-server v2
+    // v2 of react-router-hono-server should handle .data suffix internally
+    // For single fetch routes (*.data), strip the .data suffix before checking public paths
+    // This ensures /login.data is treated the same as /login for auth purposes
+    const pathToCheck = c.req.path.endsWith(".data")
+      ? c.req.path.slice(0, -5)
+      : c.req.path;
+
+    const isPublic = pathMatch(publicPaths, pathToCheck);
 
     if (isPublic) {
       return next();

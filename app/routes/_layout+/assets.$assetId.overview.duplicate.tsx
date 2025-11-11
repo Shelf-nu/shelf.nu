@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -18,7 +18,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -47,19 +47,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    return json(
-      data({
-        header: {
-          title: `Duplicate asset`,
-          subHeading: "Choose the amount of duplicates you want to create.",
-        },
-        showModal: true,
-        asset,
-      })
-    );
+    return payload({
+      header: {
+        title: `Duplicate asset`,
+        subHeading: "Choose the amount of duplicates you want to create.",
+      },
+      showModal: true,
+      asset,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -122,7 +120,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

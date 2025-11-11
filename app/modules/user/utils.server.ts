@@ -1,13 +1,13 @@
 import type { OrganizationRoles } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
-import { data, parseData } from "~/utils/http.server";
+import { payload, parseData } from "~/utils/http.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import { revokeAccessToOrganization } from "./service.server";
 import { revokeAccessEmailText } from "../invite/helpers";
@@ -248,7 +248,7 @@ export async function resolveUserAction(
         });
       }
 
-      return json(data(null));
+      return payload(null);
     }
     default: {
       throw new ShelfError({

@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json, redirect, redirectDocument } from "@remix-run/node";
+import { data, redirect, redirectDocument } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
@@ -19,7 +19,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -43,10 +43,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ header }));
+    return payload({ header });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -117,7 +117,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(`/locations/${location.id}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, Outlet, useRouteLoaderData } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -7,7 +7,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -36,10 +36,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       subHeading,
     };
 
-    return json(data({ header }));
+    return payload({ header });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

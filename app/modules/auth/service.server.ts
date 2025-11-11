@@ -1,5 +1,5 @@
 import { AuthError, isAuthApiError } from "@supabase/supabase-js";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";

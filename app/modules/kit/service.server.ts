@@ -26,7 +26,6 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -914,29 +913,21 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
 type CurrentBookingType = {
   id: string;
   name: string;
-  custodianUser: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
-  custodianTeamMember: Omit<
-    TeamMember,
-    "createdAt" | "updatedAt" | "deletedAt"
+  custodianUser: Pick<
+    User,
+    "firstName" | "lastName" | "profilePicture" | "email"
   > | null;
+  custodianTeamMember: TeamMember | null;
   status: BookingStatus;
-  from: string | Date | null;
+  from: Booking["from"];
 };
 
-export function getKitCurrentBooking(
-  request: Request,
-  kit: {
-    id: string;
-    assets: {
-      bookings: CurrentBookingType[];
-    }[];
-  }
-) {
+export function getKitCurrentBooking(kit: {
+  id: string;
+  assets: {
+    bookings: CurrentBookingType[];
+  }[];
+}) {
   const ongoingBookingAsset = kit.assets
     .map((a) => ({
       ...a,
@@ -951,18 +942,7 @@ export function getKitCurrentBooking(
     ? ongoingBookingAsset.bookings[0]
     : undefined;
 
-  let currentBooking: CurrentBookingType | null | undefined = null;
-
-  if (ongoingBooking && ongoingBooking.from) {
-    const bookingFrom = new Date(ongoingBooking.from);
-    const bookingDateDisplay = getDateTimeFormat(request, {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(bookingFrom);
-
-    currentBooking = { ...ongoingBooking, from: bookingDateDisplay };
-  }
-  return currentBooking;
+  return ongoingBooking;
 }
 
 export async function bulkDeleteKits({

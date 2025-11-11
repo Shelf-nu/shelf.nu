@@ -3,13 +3,8 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import {
-  Form,
-  json,
-  redirect,
-  useActionData,
-  useNavigation,
-} from "@remix-run/react";
+import { data, redirect } from "@remix-run/node";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -19,7 +14,12 @@ import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getActionMethod,
+  parseData,
+} from "~/utils/http.server";
 import { isValidDomain } from "~/utils/misc";
 
 const SSOLoginFormSchema = z.object({
@@ -54,10 +54,10 @@ export function loader({ context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(data({ title, subHeading }));
+    return payload({ title, subHeading });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -80,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

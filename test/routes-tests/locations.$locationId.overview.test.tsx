@@ -8,7 +8,7 @@ import {
   getLocation,
   getLocationTotalValuation,
 } from "~/modules/location/service.server";
-import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import {
   PermissionAction,
@@ -50,7 +50,6 @@ const requirePermissionMock = vi.mocked(requirePermission);
 const getLocationMock = vi.mocked(getLocation);
 const getLocationTotalValuationMock = vi.mocked(getLocationTotalValuation);
 const getClientHintMock = vi.mocked(getClientHint);
-const getDateTimeFormatMock = vi.mocked(getDateTimeFormat);
 const useLoaderDataMock = vi.mocked(useLoaderData);
 
 function createLoaderArgs(
@@ -101,8 +100,7 @@ describe("locations.$locationId.overview loader", () => {
       }),
     });
 
-    const response = await loader(args);
-    const result = await response.json();
+    const result = await loader(args);
 
     expect(requirePermissionMock).toHaveBeenCalledWith({
       userId: "user-123",
@@ -128,8 +126,8 @@ describe("locations.$locationId.overview loader", () => {
         error: null,
         location: expect.objectContaining({
           id: "loc-123",
-          // Date is serialized to ISO string by Remix json()
-          createdAt: "2024-01-01T12:34:56.000Z",
+          // In tests, Date stays as Date object (will be serialized on network)
+          createdAt: new Date("2024-01-01T12:34:56Z"),
         }),
         totalValue: 9876.54,
         locale: "en-GB",

@@ -10,11 +10,11 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import z from "zod";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -41,7 +41,11 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
-import { data, getCurrentSearchParams, parseData } from "~/utils/http.server";
+import {
+  payload,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
@@ -84,7 +88,6 @@ import type {
 } from "./types";
 import {
   createBookingConflictConditions,
-  formatBookingsDates,
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
@@ -4282,13 +4285,10 @@ export async function loadBookingsData({
   const totalPages = Math.ceil(bookingCount / perPage);
   const hints = getClientHint(request);
 
-  // Format booking dates
-  const items = formatBookingsDates(bookings, request);
-
   return {
     showModal: true,
     header,
-    bookings: items,
+    bookings,
     search,
     page,
     bookingCount,
@@ -4550,14 +4550,12 @@ export async function checkinAssets({
 
   // Return JSON if requested by bulk dialog, otherwise redirect
   if (returnJson) {
-    return json(
-      data({
-        success: true,
-        message: `Successfully checked in ${assetIds.length} asset${
-          assetIds.length > 1 ? "s" : ""
-        }`,
-      })
-    );
+    return payload({
+      success: true,
+      message: `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      }`,
+    });
   }
 
   return redirect(`/bookings/${bookingId}`);

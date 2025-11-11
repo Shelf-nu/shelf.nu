@@ -1,11 +1,11 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkMarkAvailabilitySchema } from "~/components/assets/bulk-mark-availability-dialog";
 import { bulkMarkAvailability } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -55,9 +55,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(reason, { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import {
@@ -12,7 +12,7 @@ import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.se
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -61,33 +61,31 @@ export const loader = async ({
       plural: "assets",
     };
 
-    return json(
-      data({
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        teamMembers,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      modelName,
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      teamMembers,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -145,17 +143,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

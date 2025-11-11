@@ -3,7 +3,7 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { redirect, json } from "@remix-run/node";
+import { redirect, data } from "@remix-run/node";
 import { useActionData, useNavigation } from "@remix-run/react";
 
 import { useZorm } from "react-zorm";
@@ -26,7 +26,12 @@ import {
   notAllowedMethod,
 } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getActionMethod,
+  parseData,
+} from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 import { validateNonSSOSignup } from "~/utils/sso.server";
 
@@ -51,10 +56,10 @@ export function loader({ context }: LoaderFunctionArgs) {
       return redirect("/assets");
     }
 
-    return json(data({ title, subHeading }));
+    return payload({ title, subHeading });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -128,7 +133,7 @@ export async function action({ request }: ActionFunctionArgs) {
       undefined,
       isZodValidationError(cause)
     );
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

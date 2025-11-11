@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -14,7 +14,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -49,18 +49,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         }),
       ]);
 
-    return json(
-      data({
-        header,
-        categories,
-        totalCategories,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      header,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -129,7 +127,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect("/kits");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

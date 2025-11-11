@@ -72,9 +72,10 @@ export const DateS = ({
   date,
   options,
   includeTime = false,
+  onlyTime = false,
   localeOnly = false,
 }: {
-  date: string | Date;
+  date: string | Date | null;
   /**
    * Options to pass to Intl.DateTimeFormat
    * Default values are { year: 'numeric', month: 'numeric', day: 'numeric' }
@@ -87,6 +88,11 @@ export const DateS = ({
    */
   includeTime?: boolean;
   /**
+   * Whether to show only the time portion (no date)
+   * When true, formats only hours and minutes
+   */
+  onlyTime?: boolean;
+  /**
    * Whether to format the date based on locale only, without timezone conversion.
    * Use this for absolute dates like working hours overrides that represent
    * real-world, location-specific dates that should not change based on user timezone.
@@ -94,6 +100,11 @@ export const DateS = ({
   localeOnly?: boolean;
 }) => {
   const hints = useHints();
+  if (!date) {
+    // eslint-disable-next-line no-console
+    console.warn("DateS component received null date:", date);
+    return null;
+  }
 
   // Handle locale-only formatting (no timezone conversion)
   if (localeOnly) {
@@ -112,15 +123,27 @@ export const DateS = ({
     d = new Date(date);
   }
 
-  // If includeTime is true and no time options have been explicitly provided,
-  // add default time formatting options
-  const timeOptions: Intl.DateTimeFormatOptions = includeTime
-    ? {
-        hour: "numeric",
-        minute: "numeric",
-        ...options,
-      }
-    : options || {};
+  // Determine formatting options based on flags
+  let timeOptions: Intl.DateTimeFormatOptions;
+
+  if (onlyTime) {
+    // Only show time (no date)
+    // Use timeStyle to prevent default date options from being added
+    timeOptions = {
+      timeStyle: "short",
+      ...options,
+    };
+  } else if (includeTime) {
+    // Show both date and time
+    timeOptions = {
+      hour: "numeric",
+      minute: "numeric",
+      ...options,
+    };
+  } else {
+    // Show only date (default)
+    timeOptions = options || {};
+  }
 
   const formattedDate = getDateTimeFormatFromHints(hints, timeOptions).format(
     new Date(d)

@@ -1,4 +1,4 @@
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import { ErrorContent } from "~/components/errors";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
@@ -28,7 +28,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     );
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 

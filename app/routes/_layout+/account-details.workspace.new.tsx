@@ -1,6 +1,6 @@
 import { Currency } from "@prisma/client";
 import {
-  json,
+  data,
   MaxPartSizeExceededError,
   redirect,
   unstable_createMemoryUploadHandler,
@@ -27,7 +27,7 @@ import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { assertUserCanCreateMoreOrganizations } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -46,16 +46,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: `New workspace`,
     };
 
-    return json(
-      data({
-        header,
-        currentOrganizationId: organizationId,
-        curriences: Object.keys(Currency),
-      })
-    );
+    return payload({
+      header,
+      currentOrganizationId: organizationId,
+      curriences: Object.keys(Currency),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -116,7 +114,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   } catch (cause) {
     const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
+    return data(
       error({
         ...reason,
         ...(isMaxPartSizeExceeded && {

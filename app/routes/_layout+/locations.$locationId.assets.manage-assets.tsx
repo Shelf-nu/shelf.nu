@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import {
   useLoaderData,
   useNavigate,
@@ -44,7 +44,7 @@ import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server"
 import { updateLocationAssets } from "~/modules/location/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -119,34 +119,32 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    return json(
-      data({
-        header: {
-          title: `Move assets to ‘${location?.name}’ location`,
-          subHeading:
-            "Search your database for assets that you would like to move to this location.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        location,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      header: {
+        title: `Move assets to ‘${location?.name}’ location`,
+        subHeading:
+          "Search your database for assets that you would like to move to this location.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      modelName,
+      location,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -201,7 +199,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

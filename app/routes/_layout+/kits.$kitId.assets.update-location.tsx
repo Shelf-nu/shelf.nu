@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 import { MapPinIcon } from "lucide-react";
@@ -10,7 +10,7 @@ import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import { getKit, updateKitLocation } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, getParams, parseData } from "~/utils/http.server";
+import { payload, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -51,14 +51,12 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       defaultLocation: kit?.locationId,
     });
 
-    return json(
-      data({
-        showModal: true,
-        kit,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      showModal: true,
+      kit,
+      locations,
+      totalLocations,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     throw reason;

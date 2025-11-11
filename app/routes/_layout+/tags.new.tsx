@@ -1,6 +1,6 @@
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -15,7 +15,7 @@ import { createTag } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { formatEnum } from "~/utils/misc";
 import {
   PermissionAction,
@@ -52,18 +52,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(
-      data({
-        header,
-        tagUseFor: Object.values(TagUseFor).map((useFor) => ({
-          label: formatEnum(useFor),
-          value: useFor,
-        })),
-      })
-    );
+    return payload({
+      header,
+      tagUseFor: Object.values(TagUseFor).map((useFor) => ({
+        label: formatEnum(useFor),
+        value: useFor,
+      })),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -105,7 +103,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect(`/tags`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

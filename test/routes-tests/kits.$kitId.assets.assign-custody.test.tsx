@@ -76,16 +76,16 @@ vi.mock("~/utils/http.server", () => ({
 
 vi.mock("@remix-run/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
+  const mockResponse = (data: any, init?: { status?: number }) =>
+    new Response(JSON.stringify(data), {
+      status: init?.status || 200,
+      headers: { "Content-Type": "application/json" },
+    });
   return {
     ...actual,
     redirect: vi.fn(() => new Response(null, { status: 302 })),
-    json: vi.fn(
-      (data, init) =>
-        new Response(JSON.stringify(data), {
-          status: init?.status || 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    ),
+    json: vi.fn(mockResponse),
+    data: vi.fn(mockResponse),
   };
 });
 
@@ -161,7 +161,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(404);
+    expect((response as Response).status).toBe(404);
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
@@ -226,7 +226,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(302); // Redirect on success
+    expect((response as Response).status).toBe(302); // Redirect on success
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -285,7 +285,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(500); // ShelfError defaults to 500
+    expect((response as Response).status).toBe(500); // ShelfError defaults to 500
 
     expect(mockKitUpdate).not.toHaveBeenCalled();
   });
@@ -333,7 +333,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
 
     const response = await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(302); // Redirect on success
+    expect((response as Response).status).toBe(302); // Redirect on success
 
     expect(mockKitUpdate).toHaveBeenCalled();
   });

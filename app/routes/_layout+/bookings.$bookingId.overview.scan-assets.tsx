@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -30,7 +30,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -89,10 +89,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, booking }));
+    return payload({ title, header, booking });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -137,7 +137,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

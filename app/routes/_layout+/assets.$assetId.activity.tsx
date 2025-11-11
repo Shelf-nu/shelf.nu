@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { Notes } from "~/components/assets/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
@@ -9,7 +9,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -57,10 +57,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${asset.title}'s activity`,
     };
 
-    return json(data({ asset, header }));
+    return payload({ asset, header });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 

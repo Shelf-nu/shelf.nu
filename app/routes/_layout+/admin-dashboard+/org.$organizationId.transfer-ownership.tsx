@@ -1,9 +1,9 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import z from "zod";
 import TransferOwnershipCard from "~/components/settings/transfer-ownership-card";
 import { getOrganizationAdmins } from "~/modules/organization/service.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams } from "~/utils/http.server";
+import { error, getParams, payload } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
@@ -16,10 +16,10 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
   try {
     await requireAdmin(userId);
     const admins = await getOrganizationAdmins({ organizationId });
-    return json({ admins });
+    return payload({ admins });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

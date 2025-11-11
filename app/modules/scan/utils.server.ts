@@ -1,12 +1,10 @@
 import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
 import parser from "ua-parser-js";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
 
 export function parseScanData({
   scan,
   userId,
-  request,
 }: {
   scan:
     | (Scan & {
@@ -14,7 +12,6 @@ export function parseScanData({
       } & { qr: Qr | null })
     | null;
   userId: string;
-  request: Request;
 }) {
   try {
     /**
@@ -45,16 +42,12 @@ export function parseScanData({
           ? `${scan.latitude}, ${scan.longitude}`
           : "Unknown location";
 
-      const dateTime = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(scan.createdAt);
       const ua = parser(scan.userAgent || "");
 
       return {
         scannedBy,
         coordinates,
-        dateTime,
+        dateTime: scan.createdAt,
         ua,
         manuallyGenerated: scan.manuallyGenerated,
       };

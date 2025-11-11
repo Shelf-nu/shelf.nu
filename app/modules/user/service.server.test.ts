@@ -1,19 +1,19 @@
 import { Roles } from "@prisma/client";
-import { matchRequestUrl, rest } from "msw";
 
-import { server } from "mocks";
+import { matchRequestUrl, rest } from "msw";
+import { server } from "@mocks";
 import {
   SUPABASE_URL,
   SUPABASE_AUTH_TOKEN_API,
   SUPABASE_AUTH_ADMIN_USER_API,
   authSession,
-} from "mocks/handlers";
+} from "@mocks/handlers";
 import {
   ORGANIZATION_ID,
   USER_EMAIL,
   USER_ID,
   USER_PASSWORD,
-} from "mocks/user";
+} from "@mocks/user";
 import { db } from "~/database/db.server";
 
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";

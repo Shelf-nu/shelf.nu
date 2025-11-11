@@ -173,9 +173,7 @@ export type AdvancedIndexAsset = Pick<
   upcomingReminder?: Pick<
     AssetReminder,
     "id" | "alertDateTime" | "name" | "message"
-  > & {
-    displayDate: string;
-  };
+  >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
 };

@@ -1,5 +1,5 @@
 import { AssetIndexMode } from "@prisma/client";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   exportAssetsBackupToCsv,
@@ -64,6 +64,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };

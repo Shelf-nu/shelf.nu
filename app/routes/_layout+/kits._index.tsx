@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -45,7 +45,7 @@ import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -174,8 +174,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "kits",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: kits,
         page,
@@ -200,7 +200,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

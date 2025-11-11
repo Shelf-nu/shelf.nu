@@ -1,12 +1,13 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json, Outlet, useLoaderData, useParams } from "@remix-run/react";
+import { data } from "@remix-run/node";
+import { Outlet, useLoaderData, useParams } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import When from "~/components/when/when";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -29,15 +30,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       entity: PermissionEntity.teamMember,
       action: PermissionAction.read,
     });
-    return json(
-      data({
-        isPersonalOrg: currentOrganization.type === "PERSONAL",
-        orgName: currentOrganization.name,
-      })
-    );
+    return payload({
+      isPersonalOrg: currentOrganization.type === "PERSONAL",
+      orgName: currentOrganization.name,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 

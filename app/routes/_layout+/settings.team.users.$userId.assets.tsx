@@ -1,10 +1,10 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -37,10 +37,10 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return json(data(loaderData), { headers });
+    return data(payload(loaderData), { headers });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

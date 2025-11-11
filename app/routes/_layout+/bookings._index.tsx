@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
@@ -21,6 +21,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
@@ -31,7 +32,6 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -41,7 +41,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -189,13 +189,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    /** We format the dates on the server based on the users timezone and locale  */
-    const items = formatBookingsDates(bookings, request);
-    return json(
-      data({
+    return data(
+      payload({
         header,
         currentOrganization,
-        items,
+        items: bookings,
         search,
         page,
         totalItems: bookingCount,
@@ -225,7 +223,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -400,10 +398,7 @@ const ListBookingsContent = ({
       custodianTeamMember: true;
       tags: { select: { id: true; name: true } };
     };
-  }> & {
-    displayFrom?: string[];
-    displayTo?: string[];
-  };
+  }>;
 }) => {
   const hasUnavaiableAssets =
     item.assets.some(
@@ -466,24 +461,28 @@ const ListBookingsContent = ({
 
       {/* From */}
       <Td>
-        {item.displayFrom ? (
+        {item.from ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
-              {item.displayFrom[0]}
+              <DateS date={item.from} />
             </span>
-            <span className="block text-gray-600">{item.displayFrom[1]}</span>
+            <span className="block text-gray-600">
+              <DateS date={item.from} onlyTime />
+            </span>
           </div>
         ) : null}
       </Td>
 
       {/* To */}
       <Td>
-        {item.displayTo ? (
+        {item.to ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
-              {item.displayTo[0]}
+              <DateS date={item.to} />
             </span>
-            <span className="block text-gray-600">{item.displayTo[1]}</span>
+            <span className="block text-gray-600">
+              <DateS date={item.to} onlyTime />
+            </span>
           </div>
         ) : null}
       </Td>

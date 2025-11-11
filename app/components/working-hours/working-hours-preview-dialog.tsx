@@ -13,7 +13,7 @@ import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
 
 // Check if date is upcoming (within next 30 days)
-const isUpcoming = (dateString: string): boolean => {
+const isUpcoming = (dateString: string | Date): boolean => {
   const date = new Date(dateString);
   const now = new Date();
   const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);

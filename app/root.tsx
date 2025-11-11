@@ -5,7 +5,6 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import {
   Links,
   Meta,
@@ -30,7 +29,7 @@ import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getClientHint } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
-import { data } from "./utils/http.server";
+import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
@@ -64,15 +63,13 @@ export const meta: MetaFunction = () => [
 ];
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
-  json(
-    data({
-      env: getBrowserEnv(),
-      maintenanceMode: false,
-      requestInfo: {
-        hints: getClientHint(request),
-      },
-    })
-  );
+  payload({
+    env: getBrowserEnv(),
+    maintenanceMode: false,
+    requestInfo: {
+      hints: getClientHint(request),
+    },
+  });
 
 export const shouldRevalidate = () => false;
 

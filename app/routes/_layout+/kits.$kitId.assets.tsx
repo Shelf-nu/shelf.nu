@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -20,7 +20,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -56,16 +56,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    return json(
-      data({
-        header,
-        ...assets,
-        modelName,
-      })
-    );
+    return payload({
+      header,
+      ...assets,
+      modelName,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

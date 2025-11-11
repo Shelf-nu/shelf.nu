@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type { MetaFunction } from "@remix-run/react";
 import {
   useLoaderData,
@@ -51,7 +51,7 @@ import { updateLocationKits } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -109,28 +109,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "kits",
     };
 
-    return json(
-      data({
-        header: {
-          title: `Move kits to '${location?.name}' location`,
-          subHeading:
-            "Search your database for kits that you would like to move to this location.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        items: kits,
-        page,
-        search,
-        totalItems: totalKits,
-        perPage,
-        totalPages,
-        modelName,
-        location,
-      })
-    );
+    return payload({
+      header: {
+        title: `Move kits to '${location?.name}' location`,
+        subHeading:
+          "Search your database for kits that you would like to move to this location.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      items: kits,
+      page,
+      search,
+      totalItems: totalKits,
+      perPage,
+      totalPages,
+      modelName,
+      location,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -180,7 +178,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/kits`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

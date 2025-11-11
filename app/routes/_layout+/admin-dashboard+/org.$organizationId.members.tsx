@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { DateS } from "~/components/shared/date";
@@ -7,7 +7,7 @@ import { Table, Td, Tr } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -44,10 +44,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       },
     });
 
-    return json(data({ members }));
+    return payload({ members });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 

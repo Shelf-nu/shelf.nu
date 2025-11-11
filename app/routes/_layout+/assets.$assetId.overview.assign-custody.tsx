@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import {
   Link,
   useActionData,
@@ -27,7 +27,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -120,17 +120,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const totalTeamMembers = await db.teamMember.count({ where });
 
-    return json(
-      data({
-        showModal: true,
-        teamMembers,
-        asset,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      showModal: true,
+      teamMembers,
+      asset,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -288,7 +286,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/assets/${assetId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

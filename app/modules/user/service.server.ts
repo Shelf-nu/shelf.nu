@@ -9,7 +9,7 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";

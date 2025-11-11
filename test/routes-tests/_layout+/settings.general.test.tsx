@@ -1,5 +1,4 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
-import { json } from "@remix-run/node";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { db } from "~/database/db.server";
@@ -21,7 +20,6 @@ vi.mock("@remix-run/node", async () => {
 
   return {
     ...actual,
-    json: vi.fn((data) => data),
     redirect: vi.fn((url) => ({ redirect: url })),
     unstable_createMemoryUploadHandler: vi.fn(() => ({})),
     unstable_parseMultipartFormData: vi.fn(async () => new FormData()),
@@ -60,7 +58,6 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-const jsonMock = vi.mocked(json);
 const dbMock = db as unknown as {
   user: {
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
@@ -146,7 +143,7 @@ describe("settings.general loader", () => {
   });
 
   it("includes canHideShelfBranding in the loader payload", async () => {
-    await loader({
+    const result = await loader({
       context: mockContext,
       request: new Request("http://localhost/settings/general"),
       params: {},
@@ -158,7 +155,7 @@ describe("settings.general loader", () => {
       })
     );
 
-    expect(jsonMock).toHaveBeenCalledWith(
+    expect(result).toEqual(
       expect.objectContaining({
         canHideShelfBranding: true,
       })
@@ -189,14 +186,14 @@ describe("settings.general loader", () => {
       userOrganizations: [],
     });
 
-    await loader({
+    const result = await loader({
       context: mockContext,
       request: new Request("http://localhost/settings/general"),
       params: {},
     });
 
     // Even though tier allows hiding, workspace-tier mismatch prevents it
-    expect(jsonMock).toHaveBeenCalledWith(
+    expect(result).toEqual(
       expect.objectContaining({
         canHideShelfBranding: false,
       })
@@ -227,14 +224,14 @@ describe("settings.general loader", () => {
       userOrganizations: [],
     });
 
-    await loader({
+    const result = await loader({
       context: mockContext,
       request: new Request("http://localhost/settings/general"),
       params: {},
     });
 
     // Plus tier on personal workspace = allowed
-    expect(jsonMock).toHaveBeenCalledWith(
+    expect(result).toEqual(
       expect.objectContaining({
         canHideShelfBranding: true,
       })
@@ -249,14 +246,14 @@ describe("settings.general loader", () => {
       userOrganizations: [],
     });
 
-    await loader({
+    const result = await loader({
       context: mockContext,
       request: new Request("http://localhost/settings/general"),
       params: {},
     });
 
     // Team tier on team workspace = allowed
-    expect(jsonMock).toHaveBeenCalledWith(
+    expect(result).toEqual(
       expect.objectContaining({
         canHideShelfBranding: true,
       })
@@ -323,7 +320,6 @@ describe("settings.general action", () => {
     expect(updateOrganizationMock).toHaveBeenCalledWith(
       expect.objectContaining({ showShelfBranding: true })
     );
-    expect(jsonMock).not.toHaveBeenCalled();
   });
 
   it("allows hiding branding when tier permits and toggle is off", async () => {

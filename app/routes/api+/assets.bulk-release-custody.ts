@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
@@ -7,7 +7,7 @@ import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -75,9 +75,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

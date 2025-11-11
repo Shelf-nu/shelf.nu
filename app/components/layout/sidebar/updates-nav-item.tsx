@@ -26,11 +26,11 @@ export default function UpdatesNavItem() {
   const { unreadUpdatesCount } = useLoaderData<typeof loader>();
 
   // Fetch updates when popover opens
-  const { data: updates = [], isLoading } = useApiQuery<UpdateForUser[]>({
+  const { data, isLoading } = useApiQuery<{ updates: UpdateForUser[] }>({
     api: "/api/updates",
     enabled: open,
   }); // Only show Updates on desktop - handled with CSS instead of conditional return
-
+  const updates = data?.updates ?? [];
   // Calculate unread count including optimistic updates
   const unreadCount =
     updates?.length > 0

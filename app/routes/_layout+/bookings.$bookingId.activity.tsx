@@ -3,7 +3,7 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";
 import { ErrorContent } from "~/components/errors";
@@ -22,7 +22,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -68,10 +68,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${booking.name}'s activity`,
     };
 
-    return json(data({ booking: { ...booking, notes: bookingNotes }, header }));
+    return payload({ booking: { ...booking, notes: bookingNotes }, header });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -94,7 +94,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const payload = parseData(
+        const { content } = parseData(
           await request.formData(),
           MarkdownNoteSchema,
           {
@@ -110,12 +110,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         await createBookingNote({
-          content: payload.content,
+          content,
           userId,
           bookingId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
 
       case "DELETE": {
@@ -139,14 +139,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
     }
 
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

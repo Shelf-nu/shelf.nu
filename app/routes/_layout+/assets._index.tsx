@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
@@ -34,7 +34,7 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -137,7 +137,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -195,17 +195,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

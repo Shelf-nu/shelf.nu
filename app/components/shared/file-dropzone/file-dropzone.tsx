@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
 
-import type { SerializeFrom } from "@remix-run/node";
 import type { Fetcher } from "@remix-run/react";
 import { useAtom } from "jotai";
 import type { DropzoneOptions, FileRejection } from "react-dropzone";
@@ -31,7 +30,7 @@ export function FileDropzone({
   const [fileInfo, updateAllFileInfo] = useAtom(derivedFileInfoAtom);
   const { filename, message, error } = fileInfo;
 
-  const { data } = fetcher as Fetcher<SerializeFrom<DataOrErrorResponse>>;
+  const { data } = fetcher as Fetcher<DataOrErrorResponse>;
   const serverError = data?.error?.message;
 
   const isPending = isFormProcessing(fetcher.state);

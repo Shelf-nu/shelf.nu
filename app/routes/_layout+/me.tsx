@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { MetaArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
@@ -9,7 +9,7 @@ import { UserSubheading } from "~/components/user/user-subheading";
 import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -22,10 +22,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     const header = { title: userName };
 
-    return json(data({ header, user, userName }));
+    return payload({ header, user, userName });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

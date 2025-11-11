@@ -1,5 +1,5 @@
 import {
-  json,
+  data,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
@@ -17,7 +17,7 @@ import { generateLocationWithImages } from "~/modules/location/service.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -34,10 +34,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
   try {
     await requireAdmin(userId);
-    return json(data(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -94,10 +94,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

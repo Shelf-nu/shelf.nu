@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   LinksFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
@@ -36,7 +36,7 @@ import {
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
@@ -143,39 +143,37 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: "Dashboard",
     };
 
-    return json(
-      data({
-        header,
+    return payload({
+      header,
+      assets,
+      locale: getLocale(request),
+      currency: currentOrganization?.currency,
+      totalValuation,
+      newAssets: assets.slice(0, 5),
+      totalAssets: assets.length,
+      skipOnboardingChecklist: cookie.skipOnboardingChecklist,
+      custodiansData: getCustodiansOrderedByTotalCustodies({
         assets,
-        locale: getLocale(request),
-        currency: currentOrganization?.currency,
-        totalValuation,
-        newAssets: assets.slice(0, 5),
-        totalAssets: assets.length,
-        skipOnboardingChecklist: cookie.skipOnboardingChecklist,
-        custodiansData: getCustodiansOrderedByTotalCustodies({
-          assets,
-          bookings,
-        }),
-        mostScannedAssets: getMostScannedAssets({ assets }),
-        mostScannedCategories: getMostScannedAssetsCategories({ assets }),
-        totalAssetsAtEndOfEachMonth: totalAssetsAtEndOfEachMonth({
-          assets,
-        }),
-        assetsByStatus: groupAssetsByStatus({ assets }),
-        assetsByCategory: groupAssetsByCategory({ assets }),
-        announcement: announcement
-          ? {
-              ...announcement,
-              content: parseMarkdownToReact(announcement.content),
-            }
-          : null,
-        checklistOptions: await checklistOptions({ assets, organizationId }),
-      })
-    );
+        bookings,
+      }),
+      mostScannedAssets: getMostScannedAssets({ assets }),
+      mostScannedCategories: getMostScannedAssetsCategories({ assets }),
+      totalAssetsAtEndOfEachMonth: totalAssetsAtEndOfEachMonth({
+        assets,
+      }),
+      assetsByStatus: groupAssetsByStatus({ assets }),
+      assetsByCategory: groupAssetsByCategory({ assets }),
+      announcement: announcement
+        ? {
+            ...announcement,
+            content: parseMarkdownToReact(announcement.content),
+          }
+        : null,
+      checklistOptions: await checklistOptions({ assets, organizationId }),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

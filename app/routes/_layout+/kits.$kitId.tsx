@@ -1,5 +1,5 @@
 import { AssetStatus, BarcodeType, type Prisma } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -43,10 +43,9 @@ import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -146,18 +145,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    let custody = null;
-    if (kit.custody) {
-      const dateDisplay = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(kit.custody.createdAt);
-      custody = {
-        ...kit.custody,
-        dateDisplay,
-      };
-    }
-
     /**
      * We get the first QR code(for now we can only have 1)
      * And using the ID of tha qr code, we find the latest scan
@@ -166,10 +153,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ? parseScanData({
           scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) || null,
           userId,
-          request,
         })
       : null;
-    const currentBooking = getKitCurrentBooking(request, {
+    const currentBooking = getKitCurrentBooking({
       id: kit.id,
       assets: kit.assets,
     });
@@ -183,24 +169,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    return json(
-      data({
-        kit: {
-          ...kit,
-          custody,
-        },
-        currentBooking,
-        header,
-        modelName,
-        qrObj,
-        lastScan,
-        currentOrganization,
-        userId,
-      })
-    );
+    return payload({
+      kit,
+      currentBooking,
+      header,
+      modelName,
+      qrObj,
+      lastScan,
+      currentOrganization,
+      userId,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { kitId, userId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -328,7 +309,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ kit }));
+        return payload({ kit });
       }
 
       case "add-barcode": {
@@ -351,7 +332,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         if (validationError) {
-          return json(data({ error: validationError }), { status: 400 });
+          return data(payload({ error: validationError }), { status: 400 });
         }
 
         try {
@@ -370,7 +351,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             senderId: authSession.userId,
           });
 
-          return json(data({ success: true }));
+          return payload({ success: true });
         } catch (cause) {
           // Handle constraint violations and other barcode creation errors
           const reason = makeShelfError(cause);
@@ -379,15 +360,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const validationErrors = reason.additionalData
             ?.validationErrors as any;
           if (validationErrors && validationErrors["barcodes[0].value"]) {
-            return json(
-              data({ error: validationErrors["barcodes[0].value"].message }),
+            return data(
+              payload({ error: validationErrors["barcodes[0].value"].message }),
               {
                 status: reason.status,
               }
             );
           }
 
-          return json(data({ error: reason.message }), {
+          return data(payload({ error: reason.message }), {
             status: reason.status,
           });
         }
@@ -395,12 +376,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -477,10 +458,9 @@ export default function KitDetails() {
         {/* Right column */}
         <div className="w-full md:w-[360px] lg:ml-4">
           {/* Kit Custody */}
-          <When truthy={!!kit.custody}>
+          <When truthy={!!kit.custody || !!currentBooking}>
             <CustodyCard
               className="mt-0"
-              // @ts-expect-error - we are passing the correct props
               booking={currentBooking || undefined}
               hasPermission={userCanViewSpecificCustody({
                 roles,

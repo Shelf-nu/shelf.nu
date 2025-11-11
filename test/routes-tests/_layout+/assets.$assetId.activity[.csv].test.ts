@@ -119,13 +119,17 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
       })
     );
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/csv");
-    expect(response.headers.get("content-disposition")).toContain(
-      "Test Asset-activity"
+    // Loader returns Response for success
+    expect(response instanceof Response).toBe(true);
+    expect((response as unknown as Response).status).toBe(200);
+    expect((response as unknown as Response).headers.get("content-type")).toBe(
+      "text/csv"
     );
+    expect(
+      (response as unknown as Response).headers.get("content-disposition")
+    ).toContain("Test Asset-activity");
 
-    const csv = await response.text();
+    const csv = await (response as unknown as Response).text();
     const rows = csv.trim().split("\n");
     expect(rows[0]).toBe("Date,Author,Type,Content");
     expect(rows[1]).toBe(

@@ -119,7 +119,6 @@ import type {
   UpdateAssetPayload,
 } from "./types";
 import {
-  formatAssetsRemindersDates,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
@@ -843,7 +842,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       totalAssets,
       perPage: take,
       page,
-      assets: formatAssetsRemindersDates({ assets, request }),
+      assets,
       totalPages,
       cookie,
     };

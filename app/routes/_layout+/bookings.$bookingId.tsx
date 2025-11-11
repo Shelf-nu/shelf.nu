@@ -1,6 +1,6 @@
 import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { redirect, json } from "@remix-run/node";
+import { redirect, data } from "@remix-run/node";
 import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
@@ -31,7 +31,7 @@ import { makeShelfError } from "~/utils/error";
 import {
   error,
   getParams,
-  data,
+  payload,
   getCurrentSearchParams,
 } from "~/utils/http.server";
 import {
@@ -88,15 +88,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: booking.name,
     };
 
-    return json(
-      data({
-        booking,
-        header,
-      })
-    );
+    return payload({
+      booking,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason));
   }
 }
 
@@ -108,10 +106,6 @@ export default function AssetDetailsPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking } = useLoaderData<typeof loader>();
-  /**
-   * Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
-   * Source: https://github.com/prisma/prisma/discussions/14371
-   */
   const { roles } = useUserRoleHelper();
 
   let items = [

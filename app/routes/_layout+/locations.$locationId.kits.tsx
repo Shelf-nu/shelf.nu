@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useParams } from "@remix-run/react";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -20,7 +20,7 @@ import { getLocationKits } from "~/modules/location/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -75,20 +75,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: locationId,
     };
 
-    return json(
-      data({
-        modelName,
-        items: kits,
-        page,
-        totalItems: totalKits,
-        perPage,
-        totalPages,
-        header,
-      })
-    );
+    return payload({
+      modelName,
+      items: kits,
+      page,
+      totalItems: totalKits,
+      perPage,
+      totalPages,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -126,7 +124,7 @@ export default function LocationKits() {
                   width="full"
                   className="whitespace-nowrap"
                 >
-                  Manage kits
+                  Add kits
                 </Button>
               </div>
             </When>

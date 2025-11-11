@@ -1,6 +1,6 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { GenerateBatchQr } from "~/components/admin/generate-batch-qr";
@@ -25,7 +25,7 @@ import {
 } from "~/modules/qr/service.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -56,22 +56,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "qrs",
     };
 
-    return json(
-      data({
-        header,
-        items: qrCodes,
-        search,
-        page,
-        totalItems: totalQrCodes,
-        perPage,
-        totalPages,
-        modelName,
-        batches,
-      })
-    );
+    return payload({
+      header,
+      items: qrCodes,
+      search,
+      page,
+      totalItems: totalQrCodes,
+      perPage,
+      totalPages,
+      modelName,
+      batches,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -91,14 +89,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
     /** Update the QR codes from the batch as printed */
     await markBatchAsPrinted({ batch });
 
-    return json(
-      data({
-        success: true,
-      })
-    );
+    return payload({
+      success: true,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

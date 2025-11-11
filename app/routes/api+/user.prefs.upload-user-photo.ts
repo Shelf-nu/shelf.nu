@@ -1,12 +1,11 @@
 import type { Prisma } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "react-router";
+import { type ActionFunctionArgs, data } from "@remix-run/node";
 import sharp from "sharp";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import { makeShelfError, ShelfError } from "~/utils/error";
 
-import { assertIsPost, data, error } from "~/utils/http.server";
+import { assertIsPost, payload, error } from "~/utils/http.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -60,9 +59,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       profilePicture: getPublicFileURL({ filename: profilePicture }),
     });
 
-    return json(data({ updatedUser }));
+    return payload({ updatedUser });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

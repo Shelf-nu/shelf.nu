@@ -1,10 +1,10 @@
 /* eslint-disable no-console */
 import { useEffect, useState } from "react";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { Button } from "~/components/shared/button";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
@@ -14,10 +14,10 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 export default function SecurityTest() {

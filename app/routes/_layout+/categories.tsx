@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
@@ -33,7 +33,7 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -78,8 +78,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "categories",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: categories,
         search,
@@ -95,7 +95,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -134,10 +134,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -1,5 +1,5 @@
 import type { Organization, SsoDetails } from "@prisma/client";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,

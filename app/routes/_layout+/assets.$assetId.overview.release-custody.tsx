@@ -1,6 +1,6 @@
 import { OrganizationRoles, type Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -15,7 +15,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   wrapCustodianForNote,
   wrapUserLinkForNote,
@@ -92,16 +92,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    return json(
-      data({
-        showModal: true,
-        custody,
-        asset,
-      })
-    );
+    return payload({
+      showModal: true,
+      custody,
+      asset,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -224,7 +222,7 @@ export const action = async ({
     return redirect(`/assets/${assetId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

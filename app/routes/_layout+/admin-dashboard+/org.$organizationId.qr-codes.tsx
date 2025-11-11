@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -9,7 +9,7 @@ import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
 import { generateOrphanedCodes } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -48,10 +48,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    return json(data({ organization }));
+    return payload({ organization });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -93,7 +93,7 @@ export const action = async ({
           amount,
         });
 
-        return json(data({ message: "Generated Orphaned QR codes" }));
+        return payload({ message: "Generated Orphaned QR codes" });
       default:
         throw new ShelfError({
           cause: null,
@@ -105,7 +105,7 @@ export const action = async ({
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
@@ -183,9 +183,9 @@ export default function AdminOrgQrCodes() {
               Print unlinked codes
             </Button>
             <Button
-              to={`/api/${
-                organization.id
-              }/qr-codes-${new Date().getTime()}.zip`}
+              to={`/api/${organization.id}/qr-codes.zip?${new URLSearchParams({
+                timestamp: new Date().getTime().toString(),
+              })}`}
               reloadDocument
               className="whitespace-nowrap"
               variant="secondary"

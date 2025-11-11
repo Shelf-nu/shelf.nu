@@ -8,12 +8,11 @@ import type {
 import _ from "lodash";
 import { z } from "zod";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { parseFilters } from "./query.server";
-import type { AdvancedIndexAsset, ICustomFieldValueJson } from "./types";
+import type { ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 export function getLocationUpdateNoteContent({
@@ -603,35 +602,6 @@ export function validateAdvancedFilterParams(
   });
 
   return validatedParams;
-}
-
-export function formatAssetsRemindersDates({
-  assets,
-  request,
-}: {
-  assets: AdvancedIndexAsset[];
-  request: Request;
-}) {
-  if (!assets.length) {
-    return assets;
-  }
-
-  return assets.map((asset) => {
-    if (!asset.upcomingReminder) {
-      return asset;
-    }
-
-    return {
-      ...asset,
-      upcomingReminder: {
-        ...asset.upcomingReminder,
-        displayDate: getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(new Date(asset.upcomingReminder.alertDateTime)),
-      },
-    };
-  });
 }
 
 export const ASSET_CSV_HEADERS = [

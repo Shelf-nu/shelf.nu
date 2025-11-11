@@ -1,5 +1,5 @@
 import type { Organization } from "@prisma/client";
-import { redirect, json } from "@remix-run/node";
+import { redirect, data } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
@@ -11,7 +11,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -133,7 +133,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -159,10 +159,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ ok: true }));
+    return payload({ ok: true });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

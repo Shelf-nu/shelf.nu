@@ -460,7 +460,7 @@ function UpcomingReminderColumn({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
-            {upcomingReminder.displayDate}
+            <DateS date={upcomingReminder.alertDateTime} includeTime />
           </Button>
         </TooltipTrigger>
 

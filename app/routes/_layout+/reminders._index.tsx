@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -10,9 +10,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
 import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -43,34 +42,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "reminders",
     };
 
-    const assetReminders = reminders.map((reminder) => ({
-      ...reminder,
-      displayDate: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(reminder.alertDateTime),
-    }));
-
-    return json(
-      data({
-        header,
-        modelName,
-        items: assetReminders,
-        totalItems: totalReminders,
-        page,
-        perPage,
-        totalPages,
-        searchFieldLabel: "Search reminders",
-        searchFieldTooltip: {
-          title: "Search reminders",
-          text: "Search reminders by reminder name, message, asset name or team member name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, maintenance' will find reminders matching any of these terms.",
-        },
-        search,
-      })
-    );
+    return payload({
+      header,
+      modelName,
+      items: reminders,
+      totalItems: totalReminders,
+      page,
+      perPage,
+      totalPages,
+      searchFieldLabel: "Search reminders",
+      searchFieldTooltip: {
+        title: "Search reminders",
+        text: "Search reminders by reminder name, message, asset name or team member name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, maintenance' will find reminders matching any of these terms.",
+      },
+      search,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -93,7 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

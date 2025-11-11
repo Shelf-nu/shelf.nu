@@ -1,11 +1,10 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkRemoveFromKitsSchema } from "~/components/assets/bulk-remove-from-kits";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { bulkRemoveAssetsFromKits } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -55,9 +54,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       message: `Successfully removed ${assetIds.length} assets from kits.`,
     });
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

@@ -1,12 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { CalendarCheck } from "lucide-react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 
 import {
   loadBookingsData,
@@ -21,7 +22,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 
 import {
@@ -59,14 +60,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ids: assetId ? [assetId] : undefined,
     });
 
-    return json(data(loaderData), {
+    return data(payload(loaderData), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -146,7 +147,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/assets/${params.assetId}/overview`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -212,7 +213,8 @@ export default function ExistingBooking() {
                     {item.name}
                   </div>
                   <div className="text-sm">
-                    {item.displayFrom} - {item.displayTo}
+                    <DateS date={item.from} includeTime /> -{" "}
+                    <DateS date={item.to} includeTime />
                   </div>
                 </div>
               ) : null
@@ -221,7 +223,7 @@ export default function ExistingBooking() {
           <div className="mt-2 text-gray-500">
             Only <span className="font-medium text-gray-600">Draft</span> and{" "}
             <span className="font-medium text-gray-600">Reserved</span> bookings
-            Shown
+            are visible
           </div>
         </div>
         {actionData?.error && (

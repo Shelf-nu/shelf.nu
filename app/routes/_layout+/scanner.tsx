@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { Link, useNavigate } from "@remix-run/react";
 import { useAtom, useSetAtom } from "jotai";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
@@ -23,7 +23,7 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import { error, getCurrentSearchParams, payload } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -105,14 +105,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
     /** End locations */
 
-    return json({
+    return payload({
       header,
       ...teamMemberData,
       ...locationsData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

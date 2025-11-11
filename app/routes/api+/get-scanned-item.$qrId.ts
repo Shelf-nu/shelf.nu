@@ -1,12 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -115,14 +115,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
-      return json(
-        data({
-          qr: {
-            type: "asset" as const,
-            asset,
-          },
-        })
-      );
+      return payload({
+        qr: {
+          type: "asset" as const,
+          asset,
+        },
+      });
     }
 
     const include = {
@@ -157,21 +155,19 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
-        qr: {
-          ...qr,
-          type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
-        },
-      })
-    );
+    return payload({
+      qr: {
+        ...qr,
+        type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     const sendNotification = reason.additionalData?.shouldSendNotification;
     const shouldSendNotification =
       typeof sendNotification === "boolean" && sendNotification;
 
-    return json(error(reason, shouldSendNotification), {
+    return data(error(reason, shouldSendNotification), {
       status: reason.status,
     });
   }

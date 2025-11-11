@@ -1,6 +1,6 @@
 import type { Asset, Barcode } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -8,16 +8,17 @@ import { BarcodeCard } from "~/components/barcode/barcode-card";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { DateS } from "~/components/shared/date";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import When from "~/components/when/when";
 import { getKitOverviewFields } from "~/modules/kit/fields";
 import { getKit } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams, data } from "~/utils/http.server";
+import { error, getParams, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -66,23 +67,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${kit.name}'s overview`,
     };
 
-    return json(
-      data({
-        kit: {
-          ...kit,
-          createdAt: getDateTimeFormat(request, {
-            dateStyle: "short",
-            timeStyle: "short",
-          }).format(kit.createdAt),
-        },
-        currentOrganization,
-        locale,
-        header,
-      })
-    );
+    return payload({
+      kit,
+      currentOrganization,
+      locale,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -130,7 +123,7 @@ export default function KitOverview() {
             Created
           </span>
           <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-            {kit && kit.createdAt}
+            <DateS date={kit.createdAt} includeTime />
           </div>
         </li>
 

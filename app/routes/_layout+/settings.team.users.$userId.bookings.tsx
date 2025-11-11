@@ -1,8 +1,7 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   setCookie,
@@ -11,7 +10,7 @@ import {
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -90,13 +89,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    /** We format the dates on the server based on the users timezone and locale  */
-    const items = formatBookingsDates(bookings, request);
-
-    return json(
-      data({
+    return data(
+      payload({
         header,
-        items,
+        items: bookings,
         search,
         page,
         totalItems: bookingCount,
@@ -115,7 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

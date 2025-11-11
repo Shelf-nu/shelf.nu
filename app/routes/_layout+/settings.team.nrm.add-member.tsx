@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "@remix-run/node";
 import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -12,7 +12,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -31,14 +31,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    return json(
-      data({
-        showModal: true,
-      })
-    );
+    return payload({
+      showModal: true,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -79,7 +77,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(`/settings/team/nrm`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

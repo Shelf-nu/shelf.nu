@@ -41,9 +41,8 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
+import { getDateTimeFormat } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
@@ -312,6 +311,7 @@ export async function exportAssetsFromIndexToCsv({
       ...(settings.columns as Column[]),
     ],
     currentOrganization,
+    request,
   });
 
   // Join rows with CRLF as per CSV spec
@@ -322,12 +322,14 @@ export async function exportAssetsFromIndexToCsv({
  * Builds CSV export data from assets using the column settings to maintain order
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
   assets,
   columns,
   currentOrganization,
+  request,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -335,6 +337,7 @@ export const buildCsvExportDataFromAssets = ({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
+  request: Request;
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -347,6 +350,13 @@ export const buildCsvExportDataFromAssets = ({
   const headers = visibleColumns.map((col) =>
     formatValueForCsv(parseColumnName(col.name))
   );
+
+  // Create date formatter for reminder dates
+  const formatDate = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
+
   // Create data rows
   const rows = assets.map((asset) =>
     visibleColumns.map((column) => {
@@ -416,7 +426,21 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.availableToBook ? "Yes" : "No";
             break;
           case "upcomingReminder": {
-            value = asset.upcomingReminder?.displayDate;
+            if (asset.upcomingReminder?.alertDateTime) {
+              try {
+                const date = new Date(asset.upcomingReminder.alertDateTime);
+                // Check if date is valid
+                if (!isNaN(date.getTime())) {
+                  value = formatDate(date);
+                } else {
+                  value = "";
+                }
+              } catch {
+                value = "";
+              }
+            } else {
+              value = "";
+            }
             break;
           }
           case "upcomingBookings": {
@@ -620,11 +644,10 @@ export async function exportBookingsFromIndexToCsv({
       });
     }
 
-    bookings = formatBookingsDates(bookings, request);
-
     // Pass both assets and columns to the build function
     const csvData = buildCsvExportDataFromBookings(
-      bookings as FlexibleBooking[]
+      bookings as FlexibleBooking[],
+      request
     );
 
     // Join rows with CRLF as per CSV spec
@@ -793,22 +816,26 @@ type FlexibleAsset = Partial<Asset> & {
 
 type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   assets: FlexibleAsset[];
-  displayFrom?: string;
-  displayTo?: string;
-  displayOriginalFrom?: string;
-  displayOriginalTo?: string;
   tags: Pick<Tag, "name">[];
 };
 
 /**
  * Builds CSV export data from bookings
  * @param bookings - Array of bookings to export
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromBookings = (
-  bookings: FlexibleBooking[]
+  bookings: FlexibleBooking[],
+  request: Request
 ): string[][] => {
   if (!bookings.length) return [];
+
+  // Create date formatter for CSV export
+  const format = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
 
   // Create headers row using column names
   const headers = {
@@ -817,13 +844,13 @@ export const buildCsvExportDataFromBookings = (
     name: "Name", // string
     status: "Status", // string
     from: "Actual start date", // date
+    originalFrom: "Planned start date",
     to: "Actual end date", // date
+    originalTo: "Planned end date",
     custodian: "Custodian",
     description: "Description", // string
     tags: "Tags",
     asset: "Assets", // New column for assets
-    originalFrom: "Planned start date",
-    originalTo: "Planned end date",
   };
 
   // Create data rows with assets
@@ -858,10 +885,25 @@ export const buildCsvExportDataFromBookings = (
             booking.status.slice(1).toLowerCase();
           break;
         case "from":
-          value = booking.displayFrom;
+          value = booking.from ? format(booking.from).split(",") : "";
           break;
+        case "originalFrom":
+          value = booking.originalFrom
+            ? format(booking.originalFrom).split(",")
+            : booking.from
+            ? format(booking.from).split(",")
+            : "";
+          break;
+
         case "to":
-          value = booking.displayTo;
+          value = booking.to ? format(booking.to).split(",") : "";
+          break;
+        case "originalTo":
+          value = booking.originalTo
+            ? format(booking.originalTo).split(",")
+            : booking.to
+            ? format(booking.to).split(",")
+            : "";
           break;
         case "custodian":
           const teamMember = {
@@ -883,17 +925,6 @@ export const buildCsvExportDataFromBookings = (
         case "asset":
           // Include the first asset title in the main booking row
           value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
-          break;
-        case "originalFrom":
-          value = booking.displayOriginalFrom
-            ? booking.displayOriginalFrom
-            : booking.displayFrom;
-          break;
-
-        case "originalTo":
-          value = booking.displayOriginalTo
-            ? booking.displayOriginalTo
-            : booking.displayTo;
           break;
 
         case "tags":
