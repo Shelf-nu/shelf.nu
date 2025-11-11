@@ -1,4 +1,8 @@
-import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from "react-router";
+import type {
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";

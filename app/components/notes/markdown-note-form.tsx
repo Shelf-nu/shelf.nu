@@ -179,7 +179,7 @@ export function MarkdownNoteForm({
   );
 
   return (
-    (<div>
+    <div>
       <fetcher.Form
         action={action}
         method="post"
@@ -217,19 +217,19 @@ export function MarkdownNoteForm({
           </div>
         ) : (
           // Collapsed mode: Simple input that expands on focus
-          (<Input
+          <Input
             icon="write"
             className="text-gray-700"
             label=""
             placeholder={placeholder}
             onFocus={() => setIsEditing(true)}
-          />)
+          />
         )}
 
         {hasError ? (
           <div className="text-sm text-error-500">{hasError}</div>
         ) : null}
       </fetcher.Form>
-    </div>)
+    </div>
   );
 }

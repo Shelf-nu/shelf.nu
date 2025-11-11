@@ -295,7 +295,7 @@ export default function BookingsIndexPage({
 
   return shouldRenderIndex ? (
     //when we are clicking on book actions dropdown. it is picking styles from global scope. to bypass that adding this wrapper.(dailog styles)
-    (<div
+    <div
       className={`${
         isBookingUpdateExisting ? "booking-update-existing-wrapper" : ""
       }`}
@@ -346,7 +346,7 @@ export default function BookingsIndexPage({
         />
       </ListContentWrapper>
       <ContextualModal />
-    </div>)
+    </div>
   ) : (
     <Outlet />
   );

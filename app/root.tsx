@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import {
   Links,
   Meta,

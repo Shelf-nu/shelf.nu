@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { ChevronDownIcon } from "lucide-react";
@@ -249,7 +253,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const organizationName =
       organizationMembership?.organization?.name ??
-      (user.createdWithInvite ? user.businessIntel?.companyName ?? null : null);
+      (user.createdWithInvite
+        ? (user.businessIntel?.companyName ?? null)
+        : null);
 
     const verifiedOrganizationId =
       organizationMembership?.organizationId ?? null;
@@ -488,8 +494,8 @@ export default function Onboarding() {
   const jobTitleDefault = businessIntel?.jobTitle ?? null;
   const teamSizeDefault = businessIntel?.teamSize ?? null;
   const companyNameDefault = requireCompanyName
-    ? businessIntel?.companyName ?? ""
-    : organizationName ?? businessIntel?.companyName ?? "";
+    ? (businessIntel?.companyName ?? "")
+    : (organizationName ?? businessIntel?.companyName ?? "");
   const referralSourceDefault =
     businessIntel?.howDidYouHearAboutUs ?? user?.referralSource ?? "";
 

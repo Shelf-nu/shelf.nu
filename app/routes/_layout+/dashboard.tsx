@@ -1,4 +1,8 @@
-import type { MetaFunction, LoaderFunctionArgs, LinksFunction } from "react-router";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  LinksFunction,
+} from "react-router";
 import { data } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";

@@ -1,5 +1,9 @@
 import { data } from "react-router";
-import type { MetaFunction, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+} from "react-router";
 import RemindersTable from "~/components/asset-reminder/reminders-table";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";

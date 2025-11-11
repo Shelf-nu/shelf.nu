@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import type { InviteStatuses } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 import { Link, Outlet, useMatches } from "react-router";
 import ContextualModal from "~/components/layout/contextual-modal";

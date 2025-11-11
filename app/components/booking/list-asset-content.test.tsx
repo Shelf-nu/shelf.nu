@@ -36,7 +36,7 @@ vi.mock("../assets/category-badge", () => ({
 vi.mock("../shared/button", () => ({
   Button: ({ children }: { children: ReactNode }) => (
     // eslint-disable-next-line jsx-a11y/anchor-is-valid
-    (<a href="#">{children}</a>)
+    <a href="#">{children}</a>
   ),
 }));
 

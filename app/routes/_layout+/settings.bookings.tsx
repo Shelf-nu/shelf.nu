@@ -1,5 +1,9 @@
 import { OrganizationType } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data } from "react-router";
 import { useLoaderData } from "react-router";
 import {

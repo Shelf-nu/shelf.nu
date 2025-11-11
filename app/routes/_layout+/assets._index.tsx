@@ -1,4 +1,9 @@
-import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data } from "react-router";
 import type { ShouldRevalidateFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";

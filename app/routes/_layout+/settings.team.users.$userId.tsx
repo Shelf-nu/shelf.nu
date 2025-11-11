@@ -1,4 +1,8 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data } from "react-router";
 import { Outlet, useLoaderData } from "react-router";
 import { z } from "zod";

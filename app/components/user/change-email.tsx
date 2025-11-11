@@ -187,7 +187,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                     </div>
                   ))
                 ) : serverError ? ( // Other server errors
-                  (<div className="text-error-500">{serverError}</div>)
+                  <div className="text-error-500">{serverError}</div>
                 ) : null}
 
                 <div className="flex justify-end gap-2">

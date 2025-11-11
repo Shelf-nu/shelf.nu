@@ -9,7 +9,7 @@ export default function HorizontalTabs({
   const location = useLocation();
   return (
     // eslint-disable-next-line tailwindcss/enforces-negative-arbitrary-values
-    (<div
+    <div
       className={tw(
         "horizontal-menu -mx-4 mb-5 flex overflow-scroll border-b border-b-gray-200 bg-white pl-4 ",
         className
@@ -32,6 +32,6 @@ export default function HorizontalTabs({
           {item.content}
         </NavLink>
       ))}
-    </div>)
+    </div>
   );
 }

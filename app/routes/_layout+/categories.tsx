@@ -1,5 +1,9 @@
 import type { Category } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data } from "react-router";
 import { Link, Outlet } from "react-router";
 import { z } from "zod";

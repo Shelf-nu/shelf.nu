@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 
 import { useLoaderData } from "react-router";

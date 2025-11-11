@@ -1,6 +1,10 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { AssetStatus, CustomFieldType } from "@prisma/client";
-import type { MetaFunction, ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type {
+  MetaFunction,
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+} from "react-router";
 import { data } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";

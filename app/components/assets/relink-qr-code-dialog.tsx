@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";

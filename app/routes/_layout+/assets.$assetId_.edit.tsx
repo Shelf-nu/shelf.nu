@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 import { useLoaderData } from "react-router";
 import { useAtomValue } from "jotai";

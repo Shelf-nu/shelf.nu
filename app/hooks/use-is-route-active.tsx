@@ -1,6 +1,12 @@
 import { useMemo } from "react";
 import type { Path, UIMatch } from "react-router";
-import { parsePath, resolvePath, useLocation, useMatches, useResolvedPath } from "react-router";
+import {
+  parsePath,
+  resolvePath,
+  useLocation,
+  useMatches,
+  useResolvedPath,
+} from "react-router";
 
 /**
  * This function returns the active state of a route.

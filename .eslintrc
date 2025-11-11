@@ -1,8 +1,11 @@
 {
   "plugins": ["tailwindcss", "no-restricted-imports", "local-rules"],
   "extends": [
-    "@remix-run/eslint-config",
-    "@remix-run/eslint-config/node",
+    "eslint:recommended",
+    "plugin:react/recommended",
+    "plugin:react/jsx-runtime",
+    "plugin:react-hooks/recommended",
+    "plugin:jsx-a11y/recommended",
     "plugin:tailwindcss/recommended",
     "prettier"
   ],
@@ -11,6 +14,9 @@
     "project": ["./tsconfig.json"]
   },
   "settings": {
+    "react": {
+      "version": "detect"
+    },
     // Help eslint-plugin-tailwindcss to parse Tailwind classes outside of className
     "tailwindcss": {
       "callees": ["tw"]

@@ -1,4 +1,9 @@
-import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 import { useLoaderData } from "react-router";
 import { useAtomValue } from "jotai";
@@ -271,7 +276,7 @@ export default function NewBooking() {
 
   const pageTitle = dynamicTitle?.trim().length
     ? dynamicTitle
-    : header?.title ?? newBookingHeader.title;
+    : (header?.title ?? newBookingHeader.title);
 
   return (
     <div className="relative">

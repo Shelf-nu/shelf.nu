@@ -1,7 +1,11 @@
 import { useState } from "react";
 import type { Kit } from "@prisma/client";
 import { data, redirect } from "react-router";
-import type { MetaFunction, LoaderFunctionArgs, LinksFunction } from "react-router";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  LinksFunction,
+} from "react-router";
 import { useFetcher, useLoaderData, useParams } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";

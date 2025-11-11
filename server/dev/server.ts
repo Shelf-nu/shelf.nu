@@ -14,5 +14,5 @@ const viteDevServer =
  * @returns An up to date server build
  */
 export async function importDevBuild() {
-  return viteDevServer?.ssrLoadModule('virtual:react-router/server-build');
+  return viteDevServer?.ssrLoadModule("virtual:react-router/server-build");
 }

@@ -1,5 +1,9 @@
 import { data, redirect } from "react-router";
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { useNavigation } from "react-router";
 import { useSetAtom } from "jotai";
 import { z } from "zod";

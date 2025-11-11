@@ -44,7 +44,7 @@ export default function ContextualSidebar() {
   }, [showSidebar]);
 
   return (
-    (<Sheet open={open} onOpenChange={handleOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         className={tw(
           "flex w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]"
@@ -57,9 +57,9 @@ export default function ContextualSidebar() {
                 title={
                   data?.header?.title && (
                     // We render as child with span to avoid nesting of H2
-                    (<SheetTitle asChild>
+                    <SheetTitle asChild>
                       <span>{data.header.title}</span>
-                    </SheetTitle>)
+                    </SheetTitle>
                   )
                 }
                 subHeading={
@@ -76,6 +76,6 @@ export default function ContextualSidebar() {
           </div>
         )}
       </SheetContent>
-    </Sheet>)
+    </Sheet>
   );
 }

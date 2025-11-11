@@ -204,8 +204,8 @@ export async function simpleModeLoader({
         ? `${user.firstName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
   };
 
   const modelName = {
@@ -403,8 +403,8 @@ export async function advancedModeLoader({
         ? `${user.firstName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
   };
 
   const modelName = {

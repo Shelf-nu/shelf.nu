@@ -1,6 +1,11 @@
 import { OrganizationRoles } from "@prisma/client";
 import { data } from "react-router";
-import type { MetaFunction, LoaderFunctionArgs, ActionFunctionArgs, LinksFunction } from "react-router";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+  LinksFunction,
+} from "react-router";
 import { useNavigation } from "react-router";
 import { useSetAtom } from "jotai";
 import { z } from "zod";

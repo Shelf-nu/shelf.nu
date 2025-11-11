@@ -15,7 +15,6 @@ This guide will walk you through setting up Supabase for your Shelf.nu applicati
 2. **Click "New Project"**
 3. **Choose your organization** (or create one)
 4. **Fill in project details:**
-
    - **Name**: `shelf-nu` (or your preferred name)
    - **Database Password**: Create a strong password (save this! 🔐)
    - **Region**: Choose closest to your location

@@ -1,6 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 import { Link, NavLink, Outlet, useLoaderData } from "react-router";
 import { useAtomValue } from "jotai";

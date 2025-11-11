@@ -1,5 +1,10 @@
 import { BarcodeType } from "@prisma/client";
-import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { redirect, data } from "react-router";
 import { useLoaderData, Outlet } from "react-router";
 import { DateTime } from "luxon";
