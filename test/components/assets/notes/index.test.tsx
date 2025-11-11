@@ -2,10 +2,10 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Notes } from "~/components/assets/notes";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "react-router";
 
 // why: providing stable Remix hooks for rendering Notes component in isolation
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const actual =
     await vi.importActual<typeof import("@remix-run/react")>(
       "@remix-run/react"

@@ -4,7 +4,7 @@ import {
   OrganizationType,
   type QrIdDisplayPreference,
 } from "@prisma/client";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";

@@ -1,6 +1,6 @@
-import { data } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { data } from "react-router";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 
 import { ErrorContent } from "~/components/errors";

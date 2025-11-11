@@ -22,7 +22,7 @@ import {
   Prisma,
   TagUseFor,
 } from "@prisma/client";
-import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, type LoaderFunctionArgs } from "react-router";
 import { LRUCache } from "lru-cache";
 import type {
   SortingDirection,

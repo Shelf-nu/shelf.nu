@@ -5,19 +5,9 @@ import {
   KitStatus,
   type Prisma,
 } from "@prisma/client";
-import type {
-  LinksFunction,
-  LoaderFunctionArgs,
-  ActionFunctionArgs,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import {
-  Form,
-  useLoaderData,
-  useNavigate,
-  useNavigation,
-  useSubmit,
-} from "@remix-run/react";
+import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import { Form, useLoaderData, useNavigate, useNavigation, useSubmit } from "react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {

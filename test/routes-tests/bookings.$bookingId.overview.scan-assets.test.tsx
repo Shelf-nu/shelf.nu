@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { redirect } from "react-router";
 import type { action as scanAssetsAction } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import { requirePermission } from "~/utils/roles.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
@@ -55,7 +55,7 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 }));
 
 // why: mocking redirect and response helpers for testing route handler status codes
-vi.mock("@remix-run/node", async () => {
+vi.mock("@react-router/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   const mockResponse = (data: any, init?: { status?: number }) =>
     new Response(JSON.stringify(data), {

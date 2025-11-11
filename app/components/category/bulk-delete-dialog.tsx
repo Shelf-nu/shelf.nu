@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";

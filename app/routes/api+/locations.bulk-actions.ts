@@ -1,4 +1,4 @@
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkDeleteLocationSchema } from "~/components/location/bulk-delete-dialog";
 import { bulkDeleteLocations } from "~/modules/location/service.server";

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { CalendarIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";

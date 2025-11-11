@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { NotificationIcon } from "~/atoms/notifications";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

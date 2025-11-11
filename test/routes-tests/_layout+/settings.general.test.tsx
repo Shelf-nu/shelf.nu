@@ -14,7 +14,7 @@ import {
   canHideShelfBranding,
 } from "~/utils/subscription.server";
 
-vi.mock("@remix-run/node", async () => {
+vi.mock("@react-router/node", async () => {
   const actual =
     await vi.importActual<typeof import("@remix-run/node")>("@remix-run/node");
 

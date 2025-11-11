@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { useAtom } from "jotai";
 import { updateFileInfoFromFileAtom } from "./atoms";
 import { FileDropzone } from "./file-dropzone";

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 
-import type { Fetcher } from "@remix-run/react";
+import type { Fetcher } from "react-router";
 import { useAtom } from "jotai";
 import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";

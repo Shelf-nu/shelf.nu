@@ -1,12 +1,8 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { AssetStatus, CustomFieldType } from "@prisma/client";
-import type {
-  MetaFunction,
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-} from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import type { MetaFunction, ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";

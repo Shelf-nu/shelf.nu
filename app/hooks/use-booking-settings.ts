@@ -1,5 +1,5 @@
 import type { BookingSettings } from "@prisma/client";
-import { useRouteLoaderData } from "@remix-run/react";
+import { useRouteLoaderData } from "react-router";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 
 /**

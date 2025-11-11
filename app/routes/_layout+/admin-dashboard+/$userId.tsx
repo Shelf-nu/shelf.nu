@@ -9,9 +9,9 @@ import {
   type UserBusinessIntel,
   type Prisma,
 } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { useLoaderData, Link, useFetcher } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { useLoaderData, Link, useFetcher } from "react-router";
 
 import { z } from "zod";
 import { Form } from "~/components/custom-form";

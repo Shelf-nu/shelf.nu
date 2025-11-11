@@ -1,6 +1,6 @@
 import type { Organization } from "@prisma/client";
-import { redirect, data } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, data } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";

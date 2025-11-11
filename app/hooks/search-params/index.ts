@@ -4,7 +4,7 @@ import {
   useLocation,
   // eslint-disable-next-line no-restricted-imports
   useSearchParams as remixUseSearchParams,
-} from "@remix-run/react";
+} from "react-router";
 import Cookies from "js-cookie";
 
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";

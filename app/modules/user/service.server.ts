@@ -7,7 +7,7 @@ import type {
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import sharp from "sharp";
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";

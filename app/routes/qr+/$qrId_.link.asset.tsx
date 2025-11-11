@@ -1,12 +1,8 @@
 import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
-import type {
-  MetaFunction,
-  LoaderFunctionArgs,
-  LinksFunction,
-} from "@remix-run/node";
-import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
+import { data, redirect } from "react-router";
+import type { MetaFunction, LoaderFunctionArgs, LinksFunction } from "react-router";
+import { useFetcher, useLoaderData, useParams } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";

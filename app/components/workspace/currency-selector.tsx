@@ -7,7 +7,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { tw } from "~/utils/tw";

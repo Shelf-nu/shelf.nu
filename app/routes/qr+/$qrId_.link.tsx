@@ -1,10 +1,6 @@
-import type {
-  MetaFunction,
-  LoaderFunctionArgs,
-  ActionFunctionArgs,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import type { MetaFunction, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import { Outlet, useLoaderData, useMatches } from "react-router";
 import { z } from "zod";
 import { UnlinkIcon } from "~/components/icons/library";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";

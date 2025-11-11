@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Form, useActionData, useFetcher } from "@remix-run/react";
+import { Form, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -187,7 +187,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                     </div>
                   ))
                 ) : serverError ? ( // Other server errors
-                  <div className="text-error-500">{serverError}</div>
+                  (<div className="text-error-500">{serverError}</div>)
                 ) : null}
 
                 <div className="flex justify-end gap-2">

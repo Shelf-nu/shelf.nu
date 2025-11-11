@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { Barcode, Kit } from "@prisma/client";
-import { useActionData } from "@remix-run/react";
+import { useActionData } from "react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";

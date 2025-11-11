@@ -1,5 +1,5 @@
 import { useMemo, useEffect } from "react";
-import { useNavigation, useFetchers } from "@remix-run/react";
+import { useNavigation, useFetchers } from "react-router";
 import NProgress from "nprogress";
 
 export function useNprogress() {

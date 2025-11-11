@@ -5,7 +5,7 @@ import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import DynamicSelect from "./dynamic-select";
 
 // why: controlling navigation state to test component without triggering actual Remix navigation
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   const actual = await vi.importActual("@remix-run/react");
   return {

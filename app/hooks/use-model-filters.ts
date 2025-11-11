@@ -1,7 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
 import { transformItemUsingTransformer } from "~/utils/model-filters";

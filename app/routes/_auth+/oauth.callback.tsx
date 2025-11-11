@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from "react";
 
-import { data, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import { data, redirect } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
@@ -199,7 +199,7 @@ export default function LoginCallback() {
   );
 
   return (
-    <div className="flex justify-center text-center">
+    (<div className="flex justify-center text-center">
       {data?.error ? (
         <div>
           {/* If there are validation errors, we map over those and show them */}
@@ -211,7 +211,7 @@ export default function LoginCallback() {
             ))
           ) : (
             // If there are no validation errors, we show the error message returned by the catch in the action
-            <div className="text-sm text-error-500">{data.error.message}</div>
+            (<div className="text-sm text-error-500">{data.error.message}</div>)
           )}
           <Button to="/" className="mt-4">
             Back to login
@@ -220,6 +220,6 @@ export default function LoginCallback() {
       ) : (
         <Spinner />
       )}
-    </div>
+    </div>)
   );
 }

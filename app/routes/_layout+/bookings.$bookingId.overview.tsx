@@ -4,14 +4,9 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
-import type {
-  ActionFunctionArgs,
-  MetaFunction,
-  LoaderFunctionArgs,
-  LinksFunction,
-} from "@remix-run/node";
-import { Outlet, useMatches } from "@remix-run/react";
+import { data, redirect } from "react-router";
+import type { ActionFunctionArgs, MetaFunction, LoaderFunctionArgs, LinksFunction } from "react-router";
+import { Outlet, useMatches } from "react-router";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";

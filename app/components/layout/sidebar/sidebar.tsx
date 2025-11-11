@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { useFetcher, useLocation } from "@remix-run/react";
+import { useFetcher, useLocation } from "react-router";
 import type { VariantProps } from "class-variance-authority";
 import { cva } from "class-variance-authority";
 

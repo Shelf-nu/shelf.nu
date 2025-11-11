@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMatches } from "@remix-run/react";
+import { useMatches } from "react-router";
 import { SearchIcon } from "lucide-react";
 
 import { Button } from "~/components/shared/button";

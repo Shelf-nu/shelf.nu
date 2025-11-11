@@ -1,6 +1,6 @@
 import type { Currency } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData } from "react-router";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
@@ -37,7 +37,7 @@ vi.mock("~/utils/client-hints", () => ({
   useHints: vi.fn(() => ({ locale: "en-GB", timeZone: "UTC" })),
 }));
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const actual = await vi.importActual("@remix-run/react");
 
   return {

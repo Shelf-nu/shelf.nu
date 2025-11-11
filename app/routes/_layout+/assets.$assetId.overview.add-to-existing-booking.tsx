@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { CalendarCheck } from "lucide-react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";

@@ -1,9 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { Link, Outlet, useMatches } from "@remix-run/react";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import type { ShouldRevalidateFunction } from "react-router";
+import { Link, Outlet, useMatches } from "react-router";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";
@@ -295,7 +295,7 @@ export default function BookingsIndexPage({
 
   return shouldRenderIndex ? (
     //when we are clicking on book actions dropdown. it is picking styles from global scope. to bypass that adding this wrapper.(dailog styles)
-    <div
+    (<div
       className={`${
         isBookingUpdateExisting ? "booking-update-existing-wrapper" : ""
       }`}
@@ -315,7 +315,6 @@ export default function BookingsIndexPage({
           />
         </Header>
       ) : null}
-
       <ListContentWrapper className={className}>
         <BookingFilters />
 
@@ -347,7 +346,7 @@ export default function BookingsIndexPage({
         />
       </ListContentWrapper>
       <ContextualModal />
-    </div>
+    </div>)
   ) : (
     <Outlet />
   );

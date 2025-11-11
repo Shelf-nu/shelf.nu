@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
-import type {
-  LinksFunction,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Links,
   Meta,
@@ -13,7 +9,7 @@ import {
   ScrollRestoration,
   useLoaderData,
   useRouteLoaderData,
-} from "@remix-run/react";
+} from "react-router";
 import { withSentry } from "@sentry/remix";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";

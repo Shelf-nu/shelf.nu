@@ -1,6 +1,6 @@
 import { cloneElement, useState } from "react";
 import type { TeamMember } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { CalendarRangeIcon } from "lucide-react";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserData } from "~/hooks/use-user-data";

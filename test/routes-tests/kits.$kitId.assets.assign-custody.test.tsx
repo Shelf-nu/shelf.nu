@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/_layout+/kits.$kitId.assets.assign-custody";
@@ -74,7 +74,7 @@ vi.mock("~/utils/http.server", () => ({
   error: vi.fn((x) => ({ error: x })),
 }));
 
-vi.mock("@remix-run/node", async () => {
+vi.mock("@react-router/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   const mockResponse = (data: any, init?: { status?: number }) =>
     new Response(JSON.stringify(data), {

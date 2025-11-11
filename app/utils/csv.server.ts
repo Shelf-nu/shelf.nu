@@ -12,7 +12,7 @@ import {
   unstable_composeUploadHandlers,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
-} from "@remix-run/node";
+} from "react-router";
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";

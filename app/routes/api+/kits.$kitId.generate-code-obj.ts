@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getKit } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";

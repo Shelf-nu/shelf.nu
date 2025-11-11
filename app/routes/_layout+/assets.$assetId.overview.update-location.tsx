@@ -1,6 +1,6 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import { useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { LocationMarkerIcon } from "~/components/icons/library";

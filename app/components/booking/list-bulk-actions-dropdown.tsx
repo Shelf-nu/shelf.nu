@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { BookingStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck } from "lucide-react";
 import { useHydrated } from "remix-utils/use-hydrated";

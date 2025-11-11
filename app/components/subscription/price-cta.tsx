@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { config } from "~/config/shelf.config";
 import type { loader } from "~/routes/_layout+/account-details.subscription";
 import type { Price } from "./prices";

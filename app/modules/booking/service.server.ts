@@ -10,7 +10,7 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { redirect } from "@remix-run/node";
+import { redirect } from "react-router";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import z from "zod";

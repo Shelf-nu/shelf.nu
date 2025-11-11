@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";

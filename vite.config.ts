@@ -1,4 +1,4 @@
-import { vitePlugin as remix } from "@remix-run/dev";
+import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { devServer } from "react-router-hono-server/dev";
@@ -75,7 +75,7 @@ export default defineConfig({
     }),
     devServer(),
 
-    remix({
+    reactRouter({
       ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"],
       future: {
         v3_fetcherPersist: true,

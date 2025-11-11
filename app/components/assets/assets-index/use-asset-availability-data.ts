@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { useLoaderData } from "@remix-run/react";
+import type { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AdvancedAssetBooking } from "~/modules/asset/types";

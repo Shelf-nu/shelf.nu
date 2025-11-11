@@ -36,7 +36,7 @@ vi.mock("../assets/category-badge", () => ({
 vi.mock("../shared/button", () => ({
   Button: ({ children }: { children: ReactNode }) => (
     // eslint-disable-next-line jsx-a11y/anchor-is-valid
-    <a href="#">{children}</a>
+    (<a href="#">{children}</a>)
   ),
 }));
 
@@ -68,7 +68,7 @@ vi.mock("./availability-label", () => ({
 const mockUseLoaderData = vi.fn();
 
 // why: controlling booking loader data to test different booking status scenarios
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const actual = (await vi.importActual("@remix-run/react")) as Record<
     string,
     unknown

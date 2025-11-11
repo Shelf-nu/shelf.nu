@@ -1,11 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
-import type {
-  MetaFunction,
-  LoaderFunctionArgs,
-  ActionFunctionArgs,
-} from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { data, redirect } from "react-router";
+import type { MetaFunction, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import ContextualModal from "~/components/layout/contextual-modal";
 

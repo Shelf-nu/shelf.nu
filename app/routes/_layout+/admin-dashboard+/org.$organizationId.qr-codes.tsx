@@ -1,6 +1,6 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";

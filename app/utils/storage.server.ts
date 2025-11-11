@@ -1,7 +1,4 @@
-import {
-  unstable_composeUploadHandlers,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+import { unstable_composeUploadHandlers, unstable_parseMultipartFormData } from "react-router";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 

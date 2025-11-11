@@ -1,8 +1,4 @@
-import {
-  defineRoutes,
-  routeManifestToRouteConfig,
-  type RouteConfig,
-} from "@remix-run/dev/dist/config/routes";
+import { defineRoutes, routeManifestToRouteConfig, type RouteConfig } from "@react-router/dev/dist/config/routes";
 import { flatRoutes } from "remix-flat-routes";
 
 // Generate a route config that mirrors the flat-routes convention so Remix can

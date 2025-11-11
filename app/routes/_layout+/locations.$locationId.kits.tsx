@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { useParams } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { useParams } from "react-router";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import KitImage from "~/components/kits/kit-image";

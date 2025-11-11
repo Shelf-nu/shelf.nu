@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect } from "react";
-import { Outlet, useMatches, useNavigate } from "@remix-run/react";
+import { Outlet, useMatches, useNavigate } from "react-router";
 import { AnimatePresence } from "framer-motion";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";

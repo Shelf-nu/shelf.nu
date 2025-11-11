@@ -1,7 +1,7 @@
 import { BookingStatus } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { redirect, data } from "@remix-run/node";
-import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { redirect, data } from "react-router";
+import { useLoaderData, Outlet, useMatches } from "react-router";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";

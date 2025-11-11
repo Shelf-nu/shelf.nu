@@ -1,10 +1,6 @@
-import { data } from "@remix-run/node";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { useNavigation } from "@remix-run/react";
+import { data } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { useNavigation } from "react-router";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";

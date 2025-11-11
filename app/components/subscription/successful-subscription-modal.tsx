@@ -1,5 +1,5 @@
 import { BellIcon } from "@radix-ui/react-icons";
-import { useBlocker } from "@remix-run/react";
+import { useBlocker } from "react-router";
 import { AnimatePresence } from "framer-motion";
 import { useSearchParams } from "~/hooks/search-params";
 

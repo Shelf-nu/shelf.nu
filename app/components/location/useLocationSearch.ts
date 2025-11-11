@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
 import type { Location } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { atom, useAtom, useAtomValue } from "jotai";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 

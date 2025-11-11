@@ -1,9 +1,5 @@
 import { KitStatus } from "@prisma/client";
-import {
-  data,
-  type ActionFunctionArgs,
-  type LoaderFunctionArgs,
-} from "@remix-run/node";
+import { data, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import { BulkAddToKitSchema } from "~/components/assets/bulk-add-to-kit-dialog";
 import { db } from "~/database/db.server";
 import { updateKitAssets } from "~/modules/kit/service.server";

@@ -2,7 +2,7 @@
 // It is important to import it as .js for this to work, even if the file is .ts
 import "./instrument.server.js";
 
-import type { AppLoadContext } from "@remix-run/node";
+import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
@@ -23,7 +23,7 @@ initEnv();
  * So we will import it conditionally in development mode
  * */
 if (env.NODE_ENV !== "production") {
-  void import("@remix-run/web-fetch").then((webFetch) => {
+  void import("@react-router/web-fetch").then((webFetch) => {
     global.File = webFetch.File;
   });
 }

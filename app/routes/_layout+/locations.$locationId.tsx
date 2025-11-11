@@ -1,8 +1,8 @@
-import type { ActionFunctionArgs, LinksFunction } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs, LinksFunction } from "react-router";
+import { data, redirect } from "react-router";
 
-import type { MetaFunction } from "@remix-run/react";
-import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import type { MetaFunction } from "react-router";
+import { Outlet, useLoaderData, useMatches } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";

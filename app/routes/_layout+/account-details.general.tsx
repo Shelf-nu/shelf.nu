@@ -1,12 +1,8 @@
 import type { Prisma } from "@prisma/client";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, redirect } from "react-router";
 
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { createChangeEmailSchema } from "~/components/user/change-email";

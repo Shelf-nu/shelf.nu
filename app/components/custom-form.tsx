@@ -1,8 +1,5 @@
 import React from "react";
-import {
-  Form as RemixForm,
-  type FormProps as RemixFormProps,
-} from "@remix-run/react";
+import { Form as RemixForm, type FormProps as RemixFormProps } from "react-router";
 import { scrollToError } from "~/utils/scroll-to-error";
 
 export const Form = React.forwardRef<HTMLFormElement, RemixFormProps>(

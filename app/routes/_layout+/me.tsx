@@ -1,6 +1,6 @@
-import { data } from "@remix-run/node";
-import type { MetaArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
+import { data } from "react-router";
+import type { MetaArgs, LoaderFunctionArgs } from "react-router";
+import { Outlet, useLoaderData } from "react-router";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";

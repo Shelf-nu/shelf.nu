@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
-import { useNavigate } from "@remix-run/react";
+import { useNavigate } from "react-router";
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";

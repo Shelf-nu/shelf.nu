@@ -1,7 +1,7 @@
 import type { Asset, Barcode } from "@prisma/client";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { BarcodeCard } from "~/components/barcode/barcode-card";

@@ -1,11 +1,7 @@
 import type { Category } from "@prisma/client";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
+import { Link, Outlet } from "react-router";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
 import CategoryQuickActions from "~/components/category/category-quick-actions";

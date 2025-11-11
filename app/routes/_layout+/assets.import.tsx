@@ -1,10 +1,6 @@
-import type {
-  ActionFunctionArgs,
-  MetaFunction,
-  LoaderFunctionArgs,
-} from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import type { ActionFunctionArgs, MetaFunction, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { Link } from "react-router";
 import { z } from "zod";
 import { ImportContent } from "~/components/assets/import-content";
 import Header from "~/components/layout/header";

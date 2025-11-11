@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { generateBulkSequentialIdsEfficient } from "~/modules/asset/sequential-id.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { updateOrganization } from "~/modules/organization/service.server";

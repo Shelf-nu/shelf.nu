@@ -1,5 +1,5 @@
 import { OrganizationRoles, AssetStatus } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -75,7 +75,7 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 }));
 
 // why: mocking redirect, json, and data response helpers for testing route handler status codes
-vi.mock("@remix-run/node", async () => {
+vi.mock("@react-router/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   const mockResponse = (data: any, init?: { status?: number }) =>
     new Response(JSON.stringify(data), {

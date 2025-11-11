@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import type { Color } from "@tremor/react";
 import { DonutChart } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";

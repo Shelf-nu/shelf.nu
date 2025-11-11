@@ -1,6 +1,6 @@
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import type { Asset, Booking, Organization, Prisma } from "@prisma/client";
-import { redirect } from "@remix-run/node";
+import { redirect } from "react-router";
 import { DateTime } from "luxon";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";

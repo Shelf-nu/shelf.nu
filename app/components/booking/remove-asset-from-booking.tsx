@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,

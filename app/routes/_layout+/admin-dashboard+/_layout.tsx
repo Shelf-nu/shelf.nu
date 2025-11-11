@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 
 import HorizontalTabs from "~/components/layout/horizontal-tabs";

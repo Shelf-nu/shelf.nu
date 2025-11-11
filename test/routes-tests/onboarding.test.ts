@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
@@ -18,7 +18,7 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
-vi.mock("@remix-run/node", async () => {
+vi.mock("@react-router/node", async () => {
   const actual = await vi.importActual("@remix-run/node");
   return {
     ...actual,

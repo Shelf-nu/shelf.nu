@@ -1,5 +1,5 @@
 import { AssetStatus, KitStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
