@@ -7,9 +7,7 @@ import { useFetcher, useLoaderData } from "react-router";
 // why: providing stable Remix hooks for rendering Notes component in isolation
 vi.mock("react-router", async () => {
   const actual =
-    await vi.importActual<typeof import("@remix-run/react")>(
-      "@remix-run/react"
-    );
+    await vi.importActual<typeof import("react-router")>("react-router");
 
   return {
     ...actual,

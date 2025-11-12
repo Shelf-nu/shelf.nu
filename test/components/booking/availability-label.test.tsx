@@ -12,9 +12,7 @@ import { useLoaderData } from "react-router";
 // why: controlling booking loader data to test availability label for different booking scenarios
 vi.mock("react-router", async () => {
   const actual =
-    await vi.importActual<typeof import("@remix-run/react")>(
-      "@remix-run/react"
-    );
+    await vi.importActual<typeof import("react-router")>("react-router");
 
   return {
     ...actual,

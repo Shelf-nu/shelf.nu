@@ -45,7 +45,7 @@ export const BookingOverviewPDF = ({
   }, [booking, isDialogOpen]);
 
   const handlePrint = useReactToPrint({
-    content: () => componentRef.current,
+    contentRef: componentRef,
     documentTitle: `booking-${booking.name}-${timeStamp}`,
   });
 
@@ -135,7 +135,7 @@ const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
 }: {
-  componentRef: RefObject<HTMLDivElement>;
+  componentRef: RefObject<HTMLDivElement | null>;
   pdfMeta: PdfDbResult | null;
 }) => {
   if (!pdfMeta) return null;
@@ -311,7 +311,7 @@ const BookingPDFPreview = ({
                         mainImageExpiration: asset.mainImageExpiration,
                       }}
                       alt={`Image of ${asset.title}`}
-                      className="!size-14 object-cover"
+                      className="!size-13 object-cover"
                     />
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">

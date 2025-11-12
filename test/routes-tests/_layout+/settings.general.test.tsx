@@ -1,5 +1,6 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { createLoaderArgs, createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import {
@@ -136,11 +137,13 @@ describe("settings.general loader", () => {
   });
 
   it("includes canHideShelfBranding in the loader payload", async () => {
-    const result = await loader({
-      context: mockContext,
-      request: new Request("http://localhost/settings/general"),
-      params: {},
-    });
+    const result = await loader(
+      createLoaderArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general"),
+        params: {},
+      })
+    );
 
     expect(canHideShelfBrandingMock).toHaveBeenCalledWith(
       expect.objectContaining({

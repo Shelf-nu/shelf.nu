@@ -7,9 +7,7 @@ import { useFetcher, useLoaderData } from "react-router";
 // why: supplying deterministic Remix hooks for BookingNotes component rendering
 vi.mock("react-router", async () => {
   const actual =
-    await vi.importActual<typeof import("@remix-run/react")>(
-      "@remix-run/react"
-    );
+    await vi.importActual<typeof import("react-router")>("react-router");
 
   return {
     ...actual,

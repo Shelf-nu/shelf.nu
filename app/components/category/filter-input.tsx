@@ -8,7 +8,7 @@ export const FilterInput = ({
   filter: string;
   handleFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) => {
-  const inputRef = useRef<HTMLInputElement>();
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef?.current?.focus();
