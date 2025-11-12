@@ -63,7 +63,9 @@ export default defineConfig({
         "react-to-print",
       ],
     }),
-    reactRouterHonoServer(),
+    reactRouterHonoServer({
+      serverEntryPoint: "./server/index.ts",
+    }),
     reactRouter(),
     tsconfigPaths(),
   ],
