@@ -915,7 +915,7 @@ export async function reserveBooking({
         bookingId: bookingFound.id,
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: bookingFound,
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
@@ -934,18 +934,20 @@ export async function reserveBooking({
 
         const adminSubject = `Booking reservation request (${bookingFound.name}) by ${custodian} - shelf.nu`;
 
+        const adminHtml = await bookingUpdatesTemplateString({
+          booking: bookingFound,
+          heading: `Booking reservation request for ${custodian}`,
+          assetCount: bookingFound._count.assets,
+          hints,
+          isAdminEmail: true,
+        });
+
         sendEmail({
           to: adminsEmails.join(","),
           subject: adminSubject,
           text,
           /** We need to invoke this function separately for the admin email as the footer of emails is different */
-          html: bookingUpdatesTemplateString({
-            booking: bookingFound,
-            heading: `Booking reservation request for ${custodian}`,
-            assetCount: bookingFound._count.assets,
-            hints,
-            isAdminEmail: true,
-          }),
+          html: adminHtml,
         });
       }
 
@@ -1146,7 +1148,11 @@ export async function checkoutBooking({
      */
     if (lessThanOneHourToCheckin) {
       if (bookingFound.custodianUser?.email) {
-        sendCheckinReminder(bookingFound, bookingFound._count.assets, hints);
+        await sendCheckinReminder(
+          bookingFound,
+          bookingFound._count.assets,
+          hints
+        );
       }
 
       if (bookingFound.to) {
@@ -1529,7 +1535,7 @@ export async function checkinBooking({
         hints: hints,
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: updatedBooking,
         heading: `Your booking has been completed: "${updatedBooking.name}".`,
         assetCount: updatedBooking._count.assets,
@@ -2149,7 +2155,7 @@ export async function cancelBooking({
         hints,
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: booking,
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
@@ -2427,7 +2433,7 @@ export async function extendBooking({
         timeStyle: "short",
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: updatedBooking,
         heading: `Booking extended from ${format(booking.to!)} to ${format(
           newEndDate
@@ -2458,7 +2464,7 @@ export async function extendBooking({
      */
     if (hours < 1) {
       if (updatedBooking?.custodianUser?.email) {
-        sendCheckinReminder(
+        await sendCheckinReminder(
           updatedBooking,
           updatedBooking._count.assets,
           hints
@@ -3078,7 +3084,7 @@ export async function deleteBooking(
         bookingId: b.id,
         hints: hints,
       });
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: b,
         heading: `Your booking has been deleted: "${b.name}".`,
         assetCount: b._count.assets,
@@ -3604,28 +3610,30 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    const emailConfigs = bookingsToSendEmail.map((b) => ({
-      to: b.custodianUser?.email ?? "",
-      subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-      text: deletedBookingEmailContent({
-        bookingName: b.name,
-        assetsCount: b.assets.length,
-        custodian:
-          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-          (b.custodianTeamMember?.name as string),
-        from: b.from as Date,
-        to: b.to as Date,
-        bookingId: b.id,
-        hints,
-      }),
-      html: bookingUpdatesTemplateString({
-        booking: b,
-        heading: `Your booking as been deleted: "${b.name}"`,
-        assetCount: b.assets.length,
-        hints,
-        hideViewButton: true,
-      }),
-    }));
+    const emailConfigs = await Promise.all(
+      bookingsToSendEmail.map(async (b) => ({
+        to: b.custodianUser?.email ?? "",
+        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
+        text: deletedBookingEmailContent({
+          bookingName: b.name,
+          assetsCount: b.assets.length,
+          custodian:
+            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+            (b.custodianTeamMember?.name as string),
+          from: b.from as Date,
+          to: b.to as Date,
+          bookingId: b.id,
+          hints,
+        }),
+        html: await bookingUpdatesTemplateString({
+          booking: b,
+          heading: `Your booking as been deleted: "${b.name}"`,
+          assetCount: b.assets.length,
+          hints,
+          hideViewButton: true,
+        }),
+      }))
+    );
 
     return emailConfigs.map(sendEmail);
   } catch (cause) {
@@ -3877,7 +3885,7 @@ export async function bulkCancelBookings({
 
     /** Sending cancellation emails */
     await Promise.all(
-      bookingsToSendEmail.map((b) => {
+      bookingsToSendEmail.map(async (b) => {
         const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
@@ -3891,7 +3899,7 @@ export async function bulkCancelBookings({
           hints: hints,
         });
 
-        const html = bookingUpdatesTemplateString({
+        const html = await bookingUpdatesTemplateString({
           booking: b,
           heading: `Your booking has been cancelled: "${b.name}".`,
           assetCount: b._count.assets,

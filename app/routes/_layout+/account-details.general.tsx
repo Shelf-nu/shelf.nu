@@ -287,7 +287,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             otp: linkData.properties.email_otp,
             user,
           }),
-          html: changeEmailAddressHtmlEmail(
+          html: await changeEmailAddressHtmlEmail(
             linkData.properties.email_otp,
             user
           ),

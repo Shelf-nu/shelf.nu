@@ -6,7 +6,7 @@ import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
-import { initEnv, env } from "~/utils/env";
+import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
 import { logger } from "./logger";
@@ -14,10 +14,14 @@ import { protect, refreshSession, urlShortener } from "./middleware";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
+type ServerEnv = {
+  Variables: Record<symbol, unknown>;
+};
+
 // Server will not start if the env is not valid
 initEnv();
 
-export const getLoadContext: HonoServerOptions["getLoadContext"] = (
+export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
   c,
   { build, mode }
 ) => {
@@ -56,7 +60,7 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
   } satisfies AppLoadContext;
 };
 
-export default await createHonoServer({
+export default await createHonoServer<ServerEnv>({
   /** Disable default logger as we have our own */
   defaultLogger: false,
   getLoadContext,

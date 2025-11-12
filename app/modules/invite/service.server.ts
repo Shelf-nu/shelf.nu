@@ -274,7 +274,7 @@ export async function createInvite(
       to: inviteeEmail,
       subject: `✉️ You have been invited to ${invite.organization.name}`,
       text: inviteEmailText({ invite, token, extraMessage }),
-      html: invitationTemplateString({ invite, token, extraMessage }),
+      html: await invitationTemplateString({ invite, token, extraMessage }),
     });
 
     return invite;
@@ -742,9 +742,15 @@ export async function bulkInviteUsers({
           batchIndex * INVITE_EMAIL_BATCH_DELAY_MS +
           positionInBatch * INVITE_EMAIL_SPACING_MS;
 
-        setTimeout(() => {
+        setTimeout(async () => {
           const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
             expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
+          });
+
+          const html = await invitationTemplateString({
+            invite,
+            token,
+            extraMessage: extraInviteMessage,
           });
 
           sendEmail({
@@ -755,11 +761,7 @@ export async function bulkInviteUsers({
               token,
               extraMessage: extraInviteMessage,
             }),
-            html: invitationTemplateString({
-              invite,
-              token,
-              extraMessage: extraInviteMessage,
-            }),
+            html,
           });
         }, delay);
       });
