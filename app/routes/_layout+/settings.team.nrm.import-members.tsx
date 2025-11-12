@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data, parseMultipartFormData } from "react-router";
+import { data } from "react-router";
+import { parseFormData } from "@remix-run/form-data-parser";
 import { useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
@@ -20,7 +21,6 @@ import { WarningBox } from "~/components/shared/warning-box";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
 import { createTeamMemberIfNotExists } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
-import { memoryUploadHandler } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error } from "~/utils/http.server";
@@ -67,8 +67,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await assertUserCanImportNRM({ organizationId, organizations });
 
-    // Upload handler to store file in memory
-    const formData = await parseMultipartFormData(request, memoryUploadHandler);
+    // Files are automatically stored in memory with parseFormData
+    const formData = await parseFormData(request);
 
     const csvFile = formData.get("file") as File;
     const text = await csvFile.text();

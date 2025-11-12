@@ -1,4 +1,4 @@
-import { composeUploadHandlers, parseMultipartFormData } from "react-router";
+import { parseFormData } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -184,54 +184,53 @@ export async function parseFileFormData({
   thumbnailSize?: number;
 }) {
   try {
-    const uploadHandler = composeUploadHandlers(
-      async ({ contentType, data, filename }) => {
-        if (!contentType?.includes("image")) {
-          return undefined;
-        }
-
-        // const fileSize = await calculateAsyncIterableSize(data);
-        // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
-        //   throw new ShelfError({
-        //     cause: null,
-        //     title: "File too large",
-        //     message: `Image file size exceeds maximum allowed size of ${
-        //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-        //     }MB`,
-        //     additionalData: { filename, contentType, bucketName },
-        //     label,
-        //     shouldBeCaptured: false,
-        //   });
-        // }
-
-        const fileExtension = filename?.split(".").pop();
-        const uploadedFilePaths = await uploadFile(data, {
-          filename: `${newFileName}.${fileExtension}`,
-          contentType,
-          bucketName,
-          resizeOptions,
-          generateThumbnail,
-          thumbnailSize,
-        });
-
-        // For profile pictures and other cases that don't need thumbnails,
-        // the uploadFile function returns a string path
-        if (typeof uploadedFilePaths === "string") {
-          return uploadedFilePaths;
-        }
-
-        // For cases where thumbnails are generated, we need to store the object
-        // in a way that FormData can handle. We'll store it as a stringified JSON
-        if (generateThumbnail) {
-          return JSON.stringify(uploadedFilePaths);
-        }
-
-        // This shouldn't happen, but if it does, return the originalPath
-        return (uploadedFilePaths as { originalPath: string }).originalPath;
+    const uploadHandler = async ({ file, type, name }: any) => {
+      // Only process image files
+      if (!type?.includes("image")) {
+        return undefined;
       }
-    );
 
-    const formData = await parseMultipartFormData(request, uploadHandler);
+      // const fileSize = await calculateAsyncIterableSize(file);
+      // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
+      //   throw new ShelfError({
+      //     cause: null,
+      //     title: "File too large",
+      //     message: `Image file size exceeds maximum allowed size of ${
+      //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+      //     }MB`,
+      //     additionalData: { filename: name, contentType: type, bucketName },
+      //     label,
+      //     shouldBeCaptured: false,
+      //   });
+      // }
+
+      const fileExtension = name?.split(".").pop();
+      const uploadedFilePaths = await uploadFile(file, {
+        filename: `${newFileName}.${fileExtension}`,
+        contentType: type,
+        bucketName,
+        resizeOptions,
+        generateThumbnail,
+        thumbnailSize,
+      });
+
+      // For profile pictures and other cases that don't need thumbnails,
+      // the uploadFile function returns a string path
+      if (typeof uploadedFilePaths === "string") {
+        return uploadedFilePaths;
+      }
+
+      // For cases where thumbnails are generated, we need to store the object
+      // in a way that FormData can handle. We'll store it as a stringified JSON
+      if (generateThumbnail) {
+        return JSON.stringify(uploadedFilePaths);
+      }
+
+      // This shouldn't happen, but if it does, return the originalPath
+      return (uploadedFilePaths as { originalPath: string }).originalPath;
+    };
+
+    const formData = await parseFormData(request, uploadHandler);
 
     return formData;
   } catch (cause) {

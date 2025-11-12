@@ -14,17 +14,10 @@ import {
   canHideShelfBranding,
 } from "~/utils/subscription.server";
 
-vi.mock("@react-router/node", async () => {
-  const actual =
-    await vi.importActual<typeof import("@remix-run/node")>("@remix-run/node");
-
-  return {
-    ...actual,
-    redirect: vi.fn((url) => ({ redirect: url })),
-    unstable_createMemoryUploadHandler: vi.fn(() => ({})),
-    unstable_parseMultipartFormData: vi.fn(async () => new FormData()),
-  };
-});
+// why: mock parseFormData to avoid actual file upload in tests
+vi.mock("@remix-run/form-data-parser", () => ({
+  parseFormData: vi.fn(async () => new FormData()),
+}));
 
 vi.mock("~/database/db.server", () => ({
   db: {
