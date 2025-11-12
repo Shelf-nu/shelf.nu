@@ -158,12 +158,9 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
     const fullPath = c.req.path;
 
-    // Remove the URL_SHORTENER part from the beginning of the path
-    const pathWithoutShortener = fullPath.replace(
-      `/${process.env.URL_SHORTENER}`,
-      ""
-    );
-    const pathParts = pathWithoutShortener.split("/").filter(Boolean);
+    // In react-router-hono-server v2, we no longer use getPath to prepend the host
+    // The path is just the regular path, so no need to remove URL_SHORTENER prefix
+    const pathParts = fullPath.split("/").filter(Boolean);
     const pathname = "/" + pathParts.join("/");
 
     // console.log(`urlShortener middleware: Processing ${pathname}`);

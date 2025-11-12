@@ -56,31 +56,25 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
   } satisfies AppLoadContext;
 };
 
-export const server = await createHonoServer({
-  honoOptions: {
-    getPath: (req) => {
-      const url = new URL(req.url);
-      const host = req.headers.get("host");
-
-      if (process.env.URL_SHORTENER && host === process.env.URL_SHORTENER) {
-        return "/" + host + url.pathname;
-      }
-
-      return url.pathname;
-    },
-  },
-  assetsDir: "file-assets",
+export default await createHonoServer({
   /** Disable default logger as we have our own */
   defaultLogger: false,
   getLoadContext,
   configure: (server) => {
-    // Apply the middleware to all routes
-    server.use(
-      `/${process.env.URL_SHORTENER}/:path*`,
-      urlShortener({
-        excludePaths: ["/file-assets", "/healthcheck", "/static"],
-      })
-    );
+    // Apply URL shortener middleware only when host matches
+    // In v2, we check the host inside middleware instead of using getPath
+    server.use("*", async (c, next) => {
+      const host = c.req.header("host");
+
+      // If this is the URL shortener host, handle it
+      if (process.env.URL_SHORTENER && host === process.env.URL_SHORTENER) {
+        return urlShortener({
+          excludePaths: ["/file-assets", "/healthcheck", "/static"],
+        })(c, next);
+      }
+
+      return next();
+    });
 
     /**
      * Add logger middleware
