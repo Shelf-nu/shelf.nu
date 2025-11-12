@@ -1,3 +1,4 @@
+import { JSX } from "react";
 import { tw } from "~/utils/tw";
 
 export const Tag = ({

@@ -64,6 +64,7 @@ import {
   UnavailableIcon,
   ChangeIcon,
 } from "../icons/library";
+import { JSX } from "react";
 
 /** The possible options for icons to be rendered in the button */
 export type IconType =

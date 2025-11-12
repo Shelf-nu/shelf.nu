@@ -13,6 +13,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../shared/tooltip";
+import { JSX } from "react";
 
 export const PriceBox = ({ price }: { price: Price }) => {
   const amount =

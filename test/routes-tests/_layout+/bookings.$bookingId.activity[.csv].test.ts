@@ -4,6 +4,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -94,13 +95,15 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   });
 
   it("returns a CSV response with formatted booking notes", async () => {
-    const response = await loader({
-      context,
-      request: new Request(
-        "https://example.com/bookings/booking-789/activity.csv"
-      ),
-      params: { bookingId: "booking-789" },
-    } as LoaderFunctionArgs);
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/bookings/booking-789/activity.csv"
+        ),
+        params: { bookingId: "booking-789" },
+      })
+    );
 
     expect(requirePermissionMock).toHaveBeenNthCalledWith(
       1,

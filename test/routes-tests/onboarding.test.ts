@@ -3,6 +3,7 @@
 import type { ActionFunctionArgs } from "react-router";
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
+import { createActionArgs } from "@mocks/remix";
 
 // why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
 const createDataMock = vi.hoisted(() => {
@@ -159,11 +160,13 @@ describe("onboarding action validation", () => {
   it("rejects whitespace-only job titles", async () => {
     const request = buildRequest({ jobTitle: "   " });
 
-    const response = (await action({
-      context,
-      request,
-      params: {},
-    })) as Response;
+    const response = (await action(
+      createActionArgs({
+        context,
+        request,
+        params: {},
+      })
+    )) as Response;
 
     expect(response.status).toBe(400);
     expect(updateUser).not.toHaveBeenCalled();
@@ -178,11 +181,13 @@ describe("onboarding action validation", () => {
       { urlSuffix: "?organizationId=fake-org" }
     );
 
-    const response = (await action({
-      context,
-      request,
-      params: {},
-    })) as Response;
+    const response = (await action(
+      createActionArgs({
+        context,
+        request,
+        params: {},
+      })
+    )) as Response;
 
     expect(response.status).toBe(400);
     expect(updateUser).not.toHaveBeenCalled();
@@ -196,11 +201,13 @@ describe("onboarding action validation", () => {
       referralSource: "Google search",
     });
 
-    const response = (await action({
-      context,
-      request,
-      params: {},
-    })) as Response;
+    const response = (await action(
+      createActionArgs({
+        context,
+        request,
+        params: {},
+      })
+    )) as Response;
 
     expect(response.status).toBe(302);
     expect(updateUser).toHaveBeenCalled();
@@ -214,11 +221,13 @@ describe("onboarding action validation", () => {
       referralSource: "Google search",
     });
 
-    const response = (await action({
-      context,
-      request,
-      params: {},
-    })) as Response;
+    const response = (await action(
+      createActionArgs({
+        context,
+        request,
+        params: {},
+      })
+    )) as Response;
 
     expect(response.status).toBe(400);
     expect(updateUser).not.toHaveBeenCalled();
@@ -245,11 +254,13 @@ describe("onboarding action validation", () => {
       { urlSuffix: "?organizationId=org-123" }
     );
 
-    const response = (await action({
-      context,
-      request,
-      params: {},
-    })) as Response;
+    const response = (await action(
+      createActionArgs({
+        context,
+        request,
+        params: {},
+      })
+    )) as Response;
 
     expect(response.status).toBe(302);
     expect(updateUser).toHaveBeenCalled();

@@ -182,11 +182,13 @@ describe("settings.general loader", () => {
       userOrganizations: [],
     });
 
-    const result = await loader({
-      context: mockContext,
-      request: new Request("http://localhost/settings/general"),
-      params: {},
-    });
+    const result = await loader(
+      createLoaderArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general"),
+        params: {},
+      })
+    );
 
     // Even though tier allows hiding, workspace-tier mismatch prevents it
     expect(result).toEqual(
@@ -220,11 +222,13 @@ describe("settings.general loader", () => {
       userOrganizations: [],
     });
 
-    const result = await loader({
-      context: mockContext,
-      request: new Request("http://localhost/settings/general"),
-      params: {},
-    });
+    const result = await loader(
+      createLoaderArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general"),
+        params: {},
+      })
+    );
 
     // Plus tier on personal workspace = allowed
     expect(result).toEqual(
@@ -242,11 +246,13 @@ describe("settings.general loader", () => {
       userOrganizations: [],
     });
 
-    const result = await loader({
-      context: mockContext,
-      request: new Request("http://localhost/settings/general"),
-      params: {},
-    });
+    const result = await loader(
+      createLoaderArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general"),
+        params: {},
+      })
+    );
 
     // Team tier on team workspace = allowed
     expect(result).toEqual(
@@ -305,7 +311,9 @@ describe("settings.general action", () => {
       body: formData,
     });
 
-    await action({ context: mockContext, request, params: {} });
+    await action(
+      createActionArgs({ context: mockContext, request, params: {} })
+    );
 
     expect(canHideShelfBrandingMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -347,7 +355,9 @@ describe("settings.general action", () => {
       body: formData,
     });
 
-    await action({ context: mockContext, request, params: {} });
+    await action(
+      createActionArgs({ context: mockContext, request, params: {} })
+    );
 
     expect(canHideShelfBrandingMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -407,7 +417,9 @@ describe("settings.general action", () => {
       body: formData,
     });
 
-    await action({ context: mockContext, request, params: {} });
+    await action(
+      createActionArgs({ context: mockContext, request, params: {} })
+    );
 
     // Verify branding is turned back ON
     expect(updateOrganizationMock).toHaveBeenCalledWith(
@@ -463,7 +475,9 @@ describe("settings.general action", () => {
       body: formData,
     });
 
-    await action({ context: mockContext, request, params: {} });
+    await action(
+      createActionArgs({ context: mockContext, request, params: {} })
+    );
 
     // Should force branding to stay on due to workspace-tier mismatch
     expect(updateOrganizationMock).toHaveBeenCalledWith(
@@ -519,7 +533,9 @@ describe("settings.general action", () => {
       body: formData,
     });
 
-    await action({ context: mockContext, request, params: {} });
+    await action(
+      createActionArgs({ context: mockContext, request, params: {} })
+    );
 
     // Should allow hiding branding (Plus tier on personal workspace)
     expect(updateOrganizationMock).toHaveBeenCalledWith(
