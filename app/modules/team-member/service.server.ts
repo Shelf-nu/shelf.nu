@@ -1,4 +1,9 @@
-import type { Organization, Prisma, TeamMember } from "@prisma/client";
+import {
+  BookingStatus,
+  Organization,
+  Prisma,
+  TeamMember,
+} from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -329,7 +334,7 @@ export async function getTeamMemberForCustodianFilter({
  * Fetches team member(s) for use in booking form custodian select.
  *
  * Behavior based on booking status:
- * 1. Ongoing/Overdue/Completed/Cancelled/Archived/Reserved: Only fetch current custodian
+ * 1. Ongoing/Overdue/Complete/Cancelled/Archived/Reserved: Only fetch current custodian
  * 2. Draft: Fetch team members list, always including current custodian
  * 3. New booking (no status): Standard fetch without custodian guarantee
  *
@@ -355,7 +360,7 @@ export async function getTeamMemberForForm({
   getAll?: boolean;
   custodianUserId?: string;
   custodianTeamMemberId?: string;
-  bookingStatus?: string;
+  bookingStatus?: BookingStatus;
 }) {
   try {
     // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member
@@ -387,16 +392,16 @@ export async function getTeamMemberForForm({
     }
 
     // For ADMIN users with locked booking statuses, only return the current custodian
+    const lockedStatuses: BookingStatus[] = [
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.COMPLETE,
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+    ];
     const isLockedStatus =
-      bookingStatus &&
-      [
-        "RESERVED",
-        "ONGOING",
-        "OVERDUE",
-        "COMPLETED",
-        "CANCELLED",
-        "ARCHIVED",
-      ].includes(bookingStatus);
+      bookingStatus && lockedStatuses.includes(bookingStatus);
 
     if (isLockedStatus) {
       // Find the custodian's team member (try by team member id first, then by user id)
