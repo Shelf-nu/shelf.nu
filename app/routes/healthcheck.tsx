@@ -12,7 +12,7 @@ export async function loader() {
     await db.user.findFirst({
       select: { id: true },
     });
-    return payload({ status: "OK" });
+    return data(payload({ status: "OK" }));
   } catch (cause) {
     return data(
       error(
