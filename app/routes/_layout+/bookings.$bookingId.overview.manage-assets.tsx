@@ -7,7 +7,9 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { data, redirect ,
+import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
@@ -516,7 +518,7 @@ export default function AddAssetsToNewBooking() {
           return;
         }
 
-        navigate(manageKitsUrl);
+        void navigate(manageKitsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -695,10 +697,10 @@ export default function AddAssetsToNewBooking() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageKitsUrl);
+          void navigate(manageKitsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some assets to the booking but haven't saved it yet. Do

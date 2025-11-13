@@ -3,8 +3,14 @@ import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { MapPin } from "lucide-react";
-import type { ActionFunctionArgs, LoaderFunctionArgs , MetaFunction } from "react-router";
-import { data, redirect ,
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
+import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
@@ -229,7 +235,7 @@ export default function ManageLocationKits() {
           return;
         }
 
-        navigate(manageAssetsUrl);
+        void navigate(manageAssetsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -321,7 +327,7 @@ export default function ManageLocationKits() {
                 if (hasUnsavedChanges) {
                   setIsCascadeAlertOpen(true);
                 } else {
-                  submit(formRef.current);
+                  void submit(formRef.current);
                 }
               }}
             >
@@ -335,10 +341,10 @@ export default function ManageLocationKits() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageAssetsUrl);
+          void navigate(manageAssetsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some kits to the booking but haven't saved it yet. Do you
@@ -383,7 +389,7 @@ export default function ManageLocationKits() {
               <Button
                 onClick={() => {
                   setIsCascadeAlertOpen(false);
-                  submit(formRef.current);
+                  void submit(formRef.current);
                 }}
                 disabled={isSearching}
               >

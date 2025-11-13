@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "react-router";
-import { data, redirect , useLoaderData } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import ContextualModal from "~/components/layout/contextual-modal";
 

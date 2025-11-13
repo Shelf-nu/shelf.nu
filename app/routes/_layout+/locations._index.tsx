@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data , useNavigate } from "react-router";
+import { data, useNavigate } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 import Header from "~/components/layout/header";

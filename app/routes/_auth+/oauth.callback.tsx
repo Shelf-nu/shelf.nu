@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data, redirect , useFetcher } from "react-router";
+import { data, redirect, useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
@@ -182,7 +182,7 @@ export default function LoginCallback() {
           redirectTo
         );
 
-        fetcher.submit(formData, { method: "post" });
+        void fetcher.submit(formData, { method: "post" });
       }
     });
 

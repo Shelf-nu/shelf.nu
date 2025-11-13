@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect , useLoaderData } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 
 import { z } from "zod";
 import { ExportBackupButton } from "~/components/assets/export-backup-button";

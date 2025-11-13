@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect , useActionData, useFetcher } from "react-router";
+import { data, redirect, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -131,7 +131,7 @@ export default function OtpPage() {
     formData.append("mode", mode);
 
     try {
-      fetcher.submit(formData, {
+      void fetcher.submit(formData, {
         method: "POST",
         action: "/resend-otp",
       });

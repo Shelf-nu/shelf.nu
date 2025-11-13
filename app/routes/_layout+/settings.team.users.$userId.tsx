@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data , Outlet, useLoaderData } from "react-router";
+import { data, Outlet, useLoaderData } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";

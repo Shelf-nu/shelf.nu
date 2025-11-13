@@ -11,7 +11,7 @@ import type {
   LoaderFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data, redirect , Outlet, useMatches } from "react-router";
+import { data, redirect, Outlet, useMatches } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -739,7 +739,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
-      case "checkIn":
+      case "checkIn": {
         // Extract specific asset IDs if provided (for enhanced completion messaging)
         const specificAssetIds = formData.getAll(
           "specificAssetIds[]"
@@ -781,6 +781,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ booking, success: true }), {
           headers,
         });
+      }
       case "partial-checkin": {
         return await checkinAssets({
           formData,

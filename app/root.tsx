@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
 import nProgressStyles from "nprogress/nprogress.css?url";
@@ -72,7 +73,7 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
 
 export const shouldRevalidate = () => false;
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children }: { children: ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);

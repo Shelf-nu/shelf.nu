@@ -1,6 +1,6 @@
 import { UpdateStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data , Outlet, useFetcher, useLoaderData } from "react-router";
+import { data, Outlet, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
 import { Badge } from "~/components/shared/badge";
@@ -142,7 +142,7 @@ export default function Updates() {
                     method="post"
                     onChange={(e) => {
                       e.preventDefault();
-                      fetcher.submit(e.currentTarget);
+                      void fetcher.submit(e.currentTarget);
                     }}
                   >
                     <input type="hidden" name="id" value={update.id} />

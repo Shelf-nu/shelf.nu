@@ -1,3 +1,4 @@
+import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 import {
@@ -615,7 +616,7 @@ export function CommandPalette() {
 
   const handleSelect = (href: string) => {
     setOpen(false);
-    navigate(href);
+    void navigate(href);
   };
 
   return (

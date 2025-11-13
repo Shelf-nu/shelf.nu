@@ -1,4 +1,4 @@
-import type { JSX} from "react";
+import type { JSX } from "react";
 import { useState } from "react";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";

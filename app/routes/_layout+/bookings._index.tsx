@@ -1,7 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
-import type { MetaFunction, LoaderFunctionArgs , ShouldRevalidateFunction } from "react-router";
-import { data, redirect , Link, Outlet, useMatches } from "react-router";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ShouldRevalidateFunction,
+} from "react-router";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";

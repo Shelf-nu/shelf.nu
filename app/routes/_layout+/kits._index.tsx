@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import type {
@@ -5,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data, redirect , Link, useLoaderData } from "react-router";
+import { data, redirect, Link, useLoaderData } from "react-router";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -378,7 +379,7 @@ function ListContent({
       }
     >;
   }>;
-  bulkActions?: React.ReactNode;
+  bulkActions?: ReactNode;
 }) {
   return (
     <>

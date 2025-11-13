@@ -3,8 +3,9 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
- ShouldRevalidateFunctionArgs } from "react-router";
-import { data , useLoaderData } from "react-router";
+  ShouldRevalidateFunctionArgs,
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { ImportButton } from "~/components/assets/import-button";

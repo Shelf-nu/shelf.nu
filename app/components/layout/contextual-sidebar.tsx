@@ -33,7 +33,7 @@ export default function ContextualSidebar() {
       if (open) {
         setOpen(true);
       } else {
-        navigate(prevRoute.pathname);
+        void navigate(prevRoute.pathname);
       }
     },
     [navigate, prevRoute.pathname]

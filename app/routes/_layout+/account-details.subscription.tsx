@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect , Link, useLoaderData } from "react-router";
+import { data, redirect, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";

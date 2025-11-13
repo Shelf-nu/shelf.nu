@@ -1,6 +1,6 @@
 import type { Asset, Barcode } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "react-router";
-import { data , useLoaderData } from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { BarcodeCard } from "~/components/barcode/barcode-card";

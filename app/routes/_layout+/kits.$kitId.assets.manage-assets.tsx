@@ -3,7 +3,13 @@ import { AssetStatus, KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircleIcon } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data, redirect , useLoaderData, useNavigation, useSubmit } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  useNavigation,
+  useSubmit,
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -248,7 +254,7 @@ export default function ManageAssetsInKit() {
   }, [items, kitAssetIds, setDisabledBulkItems]);
 
   function handleSubmit() {
-    submit(formRef.current);
+    void submit(formRef.current);
   }
 
   return (

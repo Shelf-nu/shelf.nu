@@ -22,7 +22,7 @@ const Dialog = ({
   const handleBackdropClose = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
-      navigate(prevRoute);
+      void navigate(prevRoute);
     },
     [prevRoute, navigate]
   );
@@ -34,7 +34,7 @@ const Dialog = ({
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        navigate(prevRoute);
+        void navigate(prevRoute);
       }
     };
 

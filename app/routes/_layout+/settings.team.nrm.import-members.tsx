@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { parseFormData } from "@remix-run/form-data-parser";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data , useFetcher } from "react-router";
+import { data, useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -231,7 +231,7 @@ function ImportForm() {
                   type="submit"
                   onClick={() => {
                     // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                    fetcher.submit(formRef.current);
+                    void fetcher.submit(formRef.current);
                   }}
                   disabled={disabled}
                 >

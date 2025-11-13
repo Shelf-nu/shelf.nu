@@ -1,7 +1,13 @@
 import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { redirect, data , useLoaderData, Outlet, useMatches } from "react-router";
+import {
+  redirect,
+  data,
+  useLoaderData,
+  Outlet,
+  useMatches,
+} from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 

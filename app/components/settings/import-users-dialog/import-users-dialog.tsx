@@ -1,4 +1,4 @@
-import { cloneElement, useState } from "react";
+import { cloneElement, ReactElement, useState } from "react";
 import { UploadIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { z } from "zod";
@@ -15,7 +15,7 @@ import ImportUsersSuccessContent from "./import-users-success-content";
 
 type ImportUsersDialogProps = {
   className?: string;
-  trigger?: React.ReactElement<{ onClick: () => void }>;
+  trigger?: ReactElement<{ onClick: () => void }>;
 };
 
 type ImportUser = z.infer<typeof InviteUserFormSchema>;
@@ -63,7 +63,7 @@ export default function ImportUsersDialog({
   }
 
   function goToInvites() {
-    navigate("/settings/team/invites");
+    void navigate("/settings/team/invites");
     closeDialog();
   }
 

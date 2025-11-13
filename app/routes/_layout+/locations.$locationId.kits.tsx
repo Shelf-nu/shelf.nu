@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
-import { data , useParams } from "react-router";
+import { data, useParams } from "react-router";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import KitImage from "~/components/kits/kit-image";

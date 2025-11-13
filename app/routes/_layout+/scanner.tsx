@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data , Link, useNavigate } from "react-router";
+import { data, Link, useNavigate } from "react-router";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -211,7 +211,7 @@ const QRScanner = () => {
             return;
           }
 
-          navigate(`/barcode/${encodeURIComponent(value)}`);
+          void navigate(`/barcode/${encodeURIComponent(value)}`);
           return;
         }
 
@@ -226,7 +226,7 @@ const QRScanner = () => {
           void resolveAssetIdFromSamId(options)
             .then((assetId) => {
               setScanMessage("Redirecting to mapped asset...");
-              navigate(`/assets/${assetId}`);
+              void navigate(`/assets/${assetId}`);
             })
             .catch((samError) => {
               const reason = makeShelfError(
@@ -244,7 +244,7 @@ const QRScanner = () => {
           return;
         }
 
-        navigate(`/qr/${value}`);
+        void navigate(`/qr/${value}`);
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction

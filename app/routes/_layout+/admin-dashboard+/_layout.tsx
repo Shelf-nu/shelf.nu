@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { data , Link, Outlet } from "react-router";
+import { data, Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 
 import HorizontalTabs from "~/components/layout/horizontal-tabs";

@@ -10,7 +10,7 @@ import {
   type Prisma,
 } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data , useLoaderData, Link, useFetcher } from "react-router";
+import { data, useLoaderData, Link, useFetcher } from "react-router";
 
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -314,6 +314,7 @@ export const action = async ({
           });
           return payload({ success: true });
         }
+        break;
       case "createCustomerId": {
         const user = await getUserByID(shelfUserId, {
           select: {
@@ -563,7 +564,7 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
       method="post"
       onChange={(e) => {
         const form = e.currentTarget;
-        fetcher.submit(form);
+        void fetcher.submit(form);
       }}
       className="inline-flex items-center gap-2"
     >
@@ -598,7 +599,7 @@ function SubscriptionCheckUpdateForm({
       method="post"
       onChange={(e) => {
         const form = e.currentTarget;
-        fetcher.submit(form);
+        void fetcher.submit(form);
       }}
       className="inline-flex items-center gap-2"
     >

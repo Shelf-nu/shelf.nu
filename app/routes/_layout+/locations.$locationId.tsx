@@ -1,5 +1,16 @@
-import { data, redirect , Outlet, useLoaderData, useMatches } from "react-router";
-import type { ActionFunctionArgs, LinksFunction , MetaFunction , LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  Outlet,
+  useLoaderData,
+  useMatches,
+} from "react-router";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  MetaFunction,
+  LoaderFunctionArgs,
+} from "react-router";
 
 import { z } from "zod";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";

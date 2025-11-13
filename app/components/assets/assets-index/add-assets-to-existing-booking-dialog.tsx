@@ -46,7 +46,7 @@ export default function AddAssetsToExistingBookingDialog() {
     if (isDialogOpen) {
       setIsFetchingBookings(true);
 
-      fetch("/api/bookings/get-all")
+      void fetch("/api/bookings/get-all")
         .then((response) => response.json())
         .then((data: { bookings: Booking[] }) => {
           setBookings(data.bookings);
@@ -198,7 +198,7 @@ export default function AddAssetsToExistingBookingDialog() {
                   width="full"
                   disabled={disabled}
                   onClick={() => {
-                    navigate(`/bookings/${fetcherData?.bookingId}`);
+                    void navigate(`/bookings/${fetcherData?.bookingId}`);
                   }}
                 >
                   View booking

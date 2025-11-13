@@ -1,7 +1,7 @@
 import { TagUseFor } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, redirect, redirectDocument , useLoaderData } from "react-router";
+import { data, redirect, redirectDocument, useLoaderData } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";

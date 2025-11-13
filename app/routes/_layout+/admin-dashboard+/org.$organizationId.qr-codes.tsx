@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data , Link, useLoaderData } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
@@ -77,7 +77,7 @@ export const action = async ({
     );
 
     switch (intent) {
-      case "createOrphans":
+      case "createOrphans": {
         const { amount, userId: ownerId } = parseData(
           await request.formData(),
           z.object({
@@ -93,6 +93,7 @@ export const action = async ({
         });
 
         return payload({ message: "Generated Orphaned QR codes" });
+      }
       default:
         throw new ShelfError({
           cause: null,

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { data , Link, useLoaderData } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";

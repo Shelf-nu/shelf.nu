@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { redirect, data , useLoaderData, Outlet } from "react-router";
+import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";

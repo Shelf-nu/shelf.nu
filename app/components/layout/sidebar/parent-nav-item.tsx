@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { NavLink, useNavigate } from "react-router";
 import invariant from "tiny-invariant";
@@ -27,7 +28,7 @@ import {
 
 type ParentNavItemProps = {
   route: ParentNavItem;
-  tooltip: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
+  tooltip: ComponentProps<typeof SidebarMenuButton>["tooltip"];
   closeIfMobile?: () => void;
 };
 
@@ -51,7 +52,7 @@ export default function ParentNavItem({
   function handleClick() {
     if (!isMobile) {
       if (state === "collapsed") {
-        navigate(firstChildRoute.to);
+        void navigate(firstChildRoute.to);
       }
       closeIfMobile && closeIfMobile();
     }

@@ -155,9 +155,10 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           >
             <ListHeader
               bulkActions={bulkActions}
-              children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
-            />
+            >
+              {headerChildren}
+            </ListHeader>
             <tbody>
               {items.map((item, i) => (
                 <ListItem
