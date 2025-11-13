@@ -60,7 +60,7 @@ export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
   } satisfies AppLoadContext;
 };
 
-export default await createHonoServer<ServerEnv>({
+export default createHonoServer<ServerEnv>({
   /** Disable default logger as we have our own */
   defaultLogger: false,
   getLoadContext,
