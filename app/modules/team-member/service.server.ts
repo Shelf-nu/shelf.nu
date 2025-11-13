@@ -1,9 +1,5 @@
-import {
-  BookingStatus,
-  Organization,
-  Prisma,
-  TeamMember,
-} from "@prisma/client";
+import type { Organization, Prisma, TeamMember } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
