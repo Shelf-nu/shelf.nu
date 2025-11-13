@@ -20,8 +20,8 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
-vi.mock("@react-router/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),

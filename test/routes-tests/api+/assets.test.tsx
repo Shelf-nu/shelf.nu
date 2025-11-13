@@ -21,8 +21,8 @@ const createDataMock = vitest.hoisted(() => {
     });
 });
 
-vitest.mock("@remix-run/node", async () => {
-  const actual = await vitest.importActual("@remix-run/node");
+vitest.mock("react-router", async () => {
+  const actual = await vitest.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),

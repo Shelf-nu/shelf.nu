@@ -74,8 +74,8 @@ vi.mock("~/utils/http.server", () => ({
   error: vi.fn((x) => ({ error: x })),
 }));
 
-vi.mock("@react-router/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   const mockResponse = (data: any, init?: { status?: number }) =>
     new Response(JSON.stringify(data), {
       status: init?.status || 200,

@@ -7,7 +7,7 @@ import DynamicSelect from "./dynamic-select";
 // why: controlling navigation state to test component without triggering actual Remix navigation
 vi.mock("react-router", async () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-  const actual = await vi.importActual("@remix-run/react");
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     useNavigation: vi.fn(() => ({ state: "idle" })),

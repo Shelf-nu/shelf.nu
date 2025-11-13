@@ -5,7 +5,7 @@ import { Button } from "./button";
 
 // why: testing button variant styles without triggering actual navigation
 vi.mock("react-router", async () => {
-  const actual = (await vi.importActual("@remix-run/react")) as Record<
+  const actual = (await vi.importActual("react-router")) as Record<
     string,
     unknown
   >;

@@ -73,8 +73,8 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
 });
 
 // why: mocking response helpers for testing route handler status codes
-vi.mock("@react-router/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),

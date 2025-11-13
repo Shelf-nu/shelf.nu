@@ -69,7 +69,7 @@ const mockUseLoaderData = vi.fn();
 
 // why: controlling booking loader data to test different booking status scenarios
 vi.mock("react-router", async () => {
-  const actual = (await vi.importActual("@remix-run/react")) as Record<
+  const actual = (await vi.importActual("react-router")) as Record<
     string,
     unknown
   >;

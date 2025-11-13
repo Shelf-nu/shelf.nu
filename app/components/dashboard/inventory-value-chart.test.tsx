@@ -6,7 +6,7 @@ import InventoryValueChart from "./inventory-value-chart";
 
 // why: component reads loader data for currency formatting and display
 vi.mock("react-router", async () => {
-  const actual = await vi.importActual("@remix-run/react");
+  const actual = await vi.importActual("react-router");
 
   return {
     ...(actual as Record<string, unknown>),
