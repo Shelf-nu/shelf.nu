@@ -1,4 +1,4 @@
-import type { useLoaderData } from "@remix-run/react";
+import type { useLoaderData } from "react-router";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import FormRow from "~/components/forms/form-row";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";

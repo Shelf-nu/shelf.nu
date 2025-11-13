@@ -1,6 +1,6 @@
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
+import { useLoaderData } from "react-router";
 import {
   clearSelectedBulkItemsAtom,
   selectedBulkItemsAtom,

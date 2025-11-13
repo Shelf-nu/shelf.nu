@@ -1,6 +1,6 @@
 import { BookingStatus } from "@prisma/client";
-import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";

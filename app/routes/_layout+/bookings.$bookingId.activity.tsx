@@ -2,8 +2,8 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data } from "@remix-run/node";
+} from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { BookingNotes } from "~/components/booking/notes";
 import { ErrorContent } from "~/components/errors";

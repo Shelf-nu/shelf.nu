@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Booking, TeamMember, User } from "@prisma/client";
-import type { useLoaderData } from "@remix-run/react";
+import type { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { KitIndexLoaderData } from "~/routes/_layout+/kits._index";

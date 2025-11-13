@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -6,7 +7,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,

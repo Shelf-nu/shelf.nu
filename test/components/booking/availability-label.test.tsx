@@ -7,14 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 
 // why: controlling booking loader data to test availability label for different booking scenarios
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const actual =
-    await vi.importActual<typeof import("@remix-run/react")>(
-      "@remix-run/react"
-    );
+    await vi.importActual<typeof import("react-router")>("react-router");
 
   return {
     ...actual,

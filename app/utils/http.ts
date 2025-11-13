@@ -1,4 +1,4 @@
-import { isRouteErrorResponse } from "@remix-run/react";
+import { isRouteErrorResponse } from "react-router";
 import type { ZodType } from "zod";
 import { VALIDATION_ERROR } from "./error";
 import type { DataOrErrorResponse, ErrorResponse } from "./http.server";

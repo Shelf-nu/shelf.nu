@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { eventStream } from "remix-utils/sse/server";
 import { emitter } from "~/utils/emitter/emitter.server";
 import { ShelfError } from "~/utils/error";

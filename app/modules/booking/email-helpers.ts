@@ -90,11 +90,21 @@ export const checkinReminderEmailContent = (args: BasicEmailContentArgs) =>
     )}.`,
   });
 
-export function sendCheckinReminder(
+export async function sendCheckinReminder(
   booking: BookingForEmail,
   assetCount: number,
   hints: ClientHint
 ) {
+  const html = await bookingUpdatesTemplateString({
+    booking,
+    heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
+      new Date(booking.to!),
+      new Date()
+    )}.`,
+    assetCount,
+    hints,
+  });
+
   sendEmail({
     to: booking.custodianUser!.email,
     subject: `🔔 Checkin reminder (${booking.name}) - shelf.nu`,
@@ -109,15 +119,7 @@ export function sendCheckinReminder(
       to: booking.to!,
       bookingId: booking.id,
     }),
-    html: bookingUpdatesTemplateString({
-      booking,
-      heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
-        new Date(booking.to!),
-        new Date()
-      )}.`,
-      assetCount,
-      hints,
-    }),
+    html,
   });
 }
 

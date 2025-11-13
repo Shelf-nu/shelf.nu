@@ -1,4 +1,4 @@
-import { data } from "@remix-run/node";
+import { data } from "react-router";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";

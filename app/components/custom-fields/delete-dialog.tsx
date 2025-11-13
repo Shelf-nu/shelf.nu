@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CustomField } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { TrashIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

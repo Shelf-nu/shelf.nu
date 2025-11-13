@@ -94,7 +94,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   let schema = z.object({});
 
   fields.forEach((field) => {
-    let fieldSchema = z.object({
+    const fieldSchema = z.object({
       [`cf-${field.id}`]: getSchema({
         id: field.id,
         params: {

@@ -7,7 +7,7 @@ export function CalendarNavigation({
   calendarRef,
   updateTitle,
 }: {
-  calendarRef: React.RefObject<FullCalendar>;
+  calendarRef: React.RefObject<FullCalendar | null>;
   updateTitle: () => void;
 }) {
   function handleCalendarNavigation(navigateTo: "prev" | "today" | "next") {

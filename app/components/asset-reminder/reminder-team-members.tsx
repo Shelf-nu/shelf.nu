@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {

@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/api+/kits.bulk-actions";
@@ -73,8 +73,8 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
 });
 
 // why: mocking response helpers for testing route handler status codes
-vi.mock("@remix-run/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),

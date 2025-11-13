@@ -1,6 +1,6 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -151,7 +151,7 @@ export async function getTeamMembers(params: {
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.TeamMemberWhereInput = {
+    const where: Prisma.TeamMemberWhereInput = {
       deletedAt: null,
       organizationId,
       ...params.where,

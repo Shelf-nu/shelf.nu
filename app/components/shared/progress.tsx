@@ -1,4 +1,4 @@
-import * as React from "react";
+import type * as React from "react";
 import * as ProgressPrimitive from "@radix-ui/react-progress";
 import { tw } from "~/utils/tw";
 

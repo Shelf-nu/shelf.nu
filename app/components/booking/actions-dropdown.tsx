@@ -1,5 +1,5 @@
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData, useSubmit } from "@remix-run/react";
+import { useLoaderData, useSubmit } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,

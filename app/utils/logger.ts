@@ -1,4 +1,4 @@
-import * as Sentry from "@sentry/remix";
+import * as Sentry from "@sentry/react-router";
 import pino from "pino";
 
 import { SENTRY_DSN, env } from "./env";

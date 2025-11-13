@@ -1,5 +1,6 @@
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import * as bookingService from "~/modules/booking/service.server";
@@ -169,11 +170,13 @@ describe("manage-kits route validation", () => {
       vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
 
-      const response = await action({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Should return error response for checked out kits
       assertIsDataWithResponseInit(response);
@@ -215,11 +218,13 @@ describe("manage-kits route validation", () => {
 
       // Should succeed without validation since no new assets
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
 
       // Should not call validation helper since no newly added kits
@@ -276,11 +281,13 @@ describe("manage-kits route validation", () => {
 
       // Should succeed because kit is partially checked in within booking context
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
 
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
@@ -319,11 +326,13 @@ describe("manage-kits route validation", () => {
       );
 
       // Should return error response because kit is truly checked out
-      const response = await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);
@@ -356,11 +365,13 @@ describe("manage-kits route validation", () => {
 
       // Should succeed because kit status is AVAILABLE
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
 
       // Should not call validation helper since kit is available
@@ -397,11 +408,13 @@ describe("manage-kits route validation", () => {
 
       // Should succeed because DRAFT bookings allow checked out kits
       await expect(
-        action({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        action(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
     });
   });
@@ -447,11 +460,13 @@ describe("manage-kits route validation", () => {
       );
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(true);
 
-      await action({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Verify helper is called with correct parameters
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(

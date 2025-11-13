@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import {
   CalendarCheck,

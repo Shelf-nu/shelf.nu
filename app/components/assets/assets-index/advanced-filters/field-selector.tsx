@@ -6,8 +6,8 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
 import { Search } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {

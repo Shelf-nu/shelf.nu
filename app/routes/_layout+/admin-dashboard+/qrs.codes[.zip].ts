@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { generateUnclaimedCodesForPrint } from "~/modules/qr/service.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";

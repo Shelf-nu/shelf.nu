@@ -1,4 +1,4 @@
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import type { NotificationType } from "~/atoms/notifications";
 
 export function useClientNotification() {

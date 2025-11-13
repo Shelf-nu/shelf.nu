@@ -10,8 +10,8 @@ const mockSearchParams = vi.hoisted(
 const mockSetSearchParams = vi.hoisted(() => vi.fn());
 
 // why: control navigation state to test disabled behavior without actual navigation
-vi.mock("@remix-run/react", async () => {
-  const actual = (await vi.importActual("@remix-run/react")) as Record<
+vi.mock("react-router", async () => {
+  const actual = (await vi.importActual("react-router")) as Record<
     string,
     unknown
   >;

@@ -1,4 +1,4 @@
-import { Link, Outlet } from "@remix-run/react";
+import { Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 
 export function loader() {

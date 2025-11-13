@@ -1,5 +1,5 @@
 import type { Booking, TeamMember, User } from "@prisma/client";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   PermissionAction,

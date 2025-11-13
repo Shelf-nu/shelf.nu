@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
@@ -20,8 +20,8 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
-vi.mock("@remix-run/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),

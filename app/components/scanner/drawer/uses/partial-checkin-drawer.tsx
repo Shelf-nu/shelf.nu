@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData, Form } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData, Form } from "react-router";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,

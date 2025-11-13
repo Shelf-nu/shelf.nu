@@ -5,9 +5,9 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Search } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

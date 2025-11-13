@@ -1,4 +1,4 @@
-import type { UIMatch } from "@remix-run/react";
+import type { UIMatch } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 
 export function Breadcrumb({

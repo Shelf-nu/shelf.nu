@@ -1,6 +1,6 @@
 import type { OrganizationRoles } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
-import { redirect } from "@remix-run/node";
+import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";

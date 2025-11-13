@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { InviteStatuses, User } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import {
   RefreshIcon,
   RemoveUserIcon,

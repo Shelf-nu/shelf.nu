@@ -1,7 +1,12 @@
 import { InviteStatuses } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  Form,
+  useActionData,
+  useLoaderData,
+} from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";

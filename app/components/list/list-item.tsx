@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { MotionProps } from "framer-motion";
 import { motion } from "framer-motion";
 import { tw } from "~/utils/tw";
@@ -9,7 +10,7 @@ export interface ListItemData {
 
 export interface ListItemProps {
   item: ListItemData;
-  children: React.ReactNode;
+  children: ReactNode;
   navigate?: (id: string, item: ListItemData) => void;
   className?: string;
   motionProps?: MotionProps; // Optional animation props passed to the motion component
@@ -49,7 +50,7 @@ export const ListItem = ({
         }
 
         // Call the navigate function if it exists
-        navigate(item.id, item);
+        void navigate(item.id, item);
       }
     }}
     className={tw(

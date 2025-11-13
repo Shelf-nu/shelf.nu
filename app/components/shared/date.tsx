@@ -25,7 +25,7 @@ function formatAbsoluteDate(
   let formatString: string;
 
   if (options) {
-    let parts = [];
+    const parts = [];
 
     // Build format parts in logical order
     if (options.weekday === "long") parts.push("EEEE");

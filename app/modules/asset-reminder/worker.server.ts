@@ -97,7 +97,15 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
 
     /** Sending alert mails to all associated users. */
     await Promise.all([
-      ...usersToSendEmail.map((user) =>
+      ...usersToSendEmail.map(async (user) => {
+        const html = await assetAlertEmailHtmlString({
+          asset: reminder.asset,
+          user,
+          reminder,
+          workspaceName: reminder.organization.name,
+          isOwner: user.isOwner,
+        });
+
         sendEmail({
           subject: "⏰ Asset Reminder Notice - Shelf",
           to: user.email,
@@ -108,15 +116,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             workspaceName: reminder.organization.name,
             isOwner: user.isOwner,
           }),
-          html: assetAlertEmailHtmlString({
-            asset: reminder.asset,
-            user,
-            reminder,
-            workspaceName: reminder.organization.name,
-            isOwner: user.isOwner,
-          }),
-        })
-      ),
+          html,
+        });
+      }),
       createNote({
         assetId: reminder.assetId,
         userId: reminder.createdById,

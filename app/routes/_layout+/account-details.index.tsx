@@ -1,4 +1,4 @@
-import { redirect } from "@remix-run/node";
+import { redirect } from "react-router";
 
 /** We dont render anything on /settings
  * We just redirect to default subroute which is user

@@ -1,11 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Prisma } from "@prisma/client";
-import {
-  data,
-  type LoaderFunctionArgs,
-  type MetaFunction,
-} from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import { useLoaderData, useNavigation } from "react-router";
 import { Form } from "~/components/custom-form";
 import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";

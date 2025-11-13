@@ -1,4 +1,4 @@
-import { Link, useFetcher, useLoaderData } from "@remix-run/react";
+import { Link, useFetcher, useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { tw } from "~/utils/tw";
 import {

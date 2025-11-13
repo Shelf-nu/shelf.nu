@@ -1,12 +1,12 @@
-import { useLoaderData } from "@remix-run/react";
 import { render, screen } from "@testing-library/react";
+import { useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InventoryValueChart from "./inventory-value-chart";
 
 // why: component reads loader data for currency formatting and display
-vi.mock("@remix-run/react", async () => {
-  const actual = await vi.importActual("@remix-run/react");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
 
   return {
     ...(actual as Record<string, unknown>),

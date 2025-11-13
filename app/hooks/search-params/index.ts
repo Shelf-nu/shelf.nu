@@ -1,11 +1,11 @@
 import { useMemo } from "react";
+import Cookies from "js-cookie";
 import {
   useLoaderData,
   useLocation,
   // eslint-disable-next-line no-restricted-imports
   useSearchParams as remixUseSearchParams,
-} from "@remix-run/react";
-import Cookies from "js-cookie";
+} from "react-router";
 
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 

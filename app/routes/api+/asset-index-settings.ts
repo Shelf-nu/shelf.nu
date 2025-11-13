@@ -1,5 +1,5 @@
 import { AssetIndexMode } from "@prisma/client";
-import { data, redirect, type ActionFunctionArgs } from "@remix-run/node";
+import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import type {

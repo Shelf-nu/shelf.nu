@@ -14,10 +14,14 @@ import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
 import { styles } from "../styles";
 
-export const sendTeamTrialWelcomeEmail = ({ email }: { email: string }) => {
+export const sendTeamTrialWelcomeEmail = async ({
+  email,
+}: {
+  email: string;
+}) => {
   try {
     const subject = `Your Shelf Team Trial is Ready - Next Steps`;
-    const html = welcomeToTrialEmailHtml();
+    const html = await welcomeToTrialEmailHtml();
     const text = welcomeToTrialEmailText();
 
     void sendEmail({

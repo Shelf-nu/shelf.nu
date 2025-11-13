@@ -1,11 +1,7 @@
-import {
-  data,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form } from "@remix-run/react";
+import { parseFormData } from "@remix-run/form-data-parser";
 import { useAtom } from "jotai";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, Form } from "react-router";
 import { useZorm } from "react-zorm";
 import invariant from "tiny-invariant";
 import { z } from "zod";
@@ -61,12 +57,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       GenerateLocationSchema.omit({ image: true })
     );
 
-    const formDataFile = await unstable_parseMultipartFormData(
-      request,
-      unstable_createMemoryUploadHandler({
-        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-      })
-    );
+    const formDataFile = await parseFormData(request);
 
     const image = formDataFile.get("image") as File | null;
     invariant(image instanceof File, "file not the right type");
@@ -75,6 +66,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Image is required",
+        status: 400,
+        label: "Admin dashboard",
+      });
+    }
+
+    if (image.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
+      throw new ShelfError({
+        cause: null,
+        message: `Image size exceeds maximum allowed size of ${
+          DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+        }MB`,
         status: 400,
         label: "Admin dashboard",
       });

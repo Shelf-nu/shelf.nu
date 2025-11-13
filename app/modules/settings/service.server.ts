@@ -1,7 +1,7 @@
 import { InviteStatuses } from "@prisma/client";
 import type { Prisma, Organization } from "@prisma/client";
 
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
   organizationRolesMap,

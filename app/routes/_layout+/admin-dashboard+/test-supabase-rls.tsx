@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import { useEffect, useState } from "react";
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { Button } from "~/components/shared/button";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { makeShelfError } from "~/utils/error";

@@ -1,7 +1,7 @@
 import { forwardRef } from "react";
 import type { Prisma } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
 import { TrashIcon } from "lucide-react";
+import { Form, useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,

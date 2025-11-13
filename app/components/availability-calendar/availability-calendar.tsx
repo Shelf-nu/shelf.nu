@@ -6,7 +6,7 @@ import type {
   ResourceLabelContentArg,
 } from "@fullcalendar/resource/index.js";
 import resourceTimelinePlugin from "@fullcalendar/resource-timeline";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";

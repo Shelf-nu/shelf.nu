@@ -1,5 +1,5 @@
 import { AssetIndexMode } from "@prisma/client";
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   exportAssetsBackupToCsv,

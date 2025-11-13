@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, redirect } from "react-router";
 
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
