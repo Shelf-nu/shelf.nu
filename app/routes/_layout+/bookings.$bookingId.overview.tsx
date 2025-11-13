@@ -262,7 +262,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kits,
     ] = await Promise.all([
       /**
-       * We need to fetch the team members to be able to display them in the custodian dropdown.
+       * We need to fetch the team members for the custodian filter in sidebar.
        */
       getTeamMemberForCustodianFilter({
         organizationId,
@@ -272,21 +272,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         selectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        filterByUserId: isSelfServiceOrBase, // If the user is self service or base, they can only see their own. Also if the booking status is not draft, we dont need to load teammembers as the select is disabled. An improvement can be done that if the booking is not draft, we dont need to loading any other teamMember than the currently assigned one
+        filterByUserId: isSelfServiceOrBase,
         userId,
       }),
 
-      // Team members for booking form - BASE/SELF_SERVICE always get their team member
-      isSelfServiceOrBase
-        ? getTeamMemberForForm({
-            organizationId,
-            userId,
-            isSelfServiceOrBase,
-            getAll:
-              searchParams.has("getAll") &&
-              hasGetAllValue(searchParams, "teamMember"),
-          })
-        : Promise.resolve(null),
+      // Team members for booking form - includes custodian based on booking status
+      getTeamMemberForForm({
+        organizationId,
+        userId,
+        isSelfServiceOrBase,
+        custodianUserId: booking.custodianUserId || undefined,
+        custodianTeamMemberId: booking.custodianTeamMemberId || undefined,
+        bookingStatus: booking.status,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+      }),
 
       /**
        * Get detailed asset information with bookings for the paginated assets
@@ -433,20 +434,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header: HeaderData = {
       title: `Edit | ${booking.name}`,
     };
-    // Ensure the booking's current custodian is always in teamMembersForForm
-    // teamMembersData already includes the current custodian (via selectedTeamMembers parameter)
-    // For BASE/SELF_SERVICE, merge it with their team member from teamMembersForFormData
-    const teamMembersForForm = teamMembersForFormData?.teamMembers
-      ? [
-          ...teamMembersForFormData.teamMembers,
-          ...teamMembersData.teamMembers.filter(
-            (tm) =>
-              !teamMembersForFormData.teamMembers.some(
-                (formTm) => formTm.id === tm.id
-              )
-          ),
-        ]
-      : teamMembersData.teamMembers;
+
+    // Always use teamMembersForForm from getTeamMemberForForm - it handles all cases correctly
+    const teamMembersForForm = teamMembersForFormData.teamMembers;
 
     return data(
       payload({

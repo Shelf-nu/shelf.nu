@@ -328,26 +328,37 @@ export async function getTeamMemberForCustodianFilter({
 /**
  * Fetches team member(s) for use in booking form custodian select.
  *
+ * Behavior based on booking status:
+ * 1. Ongoing/Overdue/Completed/Cancelled/Archived/Reserved: Only fetch current custodian
+ * 2. Draft: Fetch team members list, always including current custodian
+ * 3. New booking (no status): Standard fetch without custodian guarantee
+ *
  * For BASE/SELF_SERVICE users: Returns only their team member (optimized single query)
- * For ADMIN users: Returns paginated list (same as filter logic)
+ * For ADMIN users: Returns paginated list with conditional custodian inclusion
  *
  * This is separate from getTeamMemberForCustodianFilter to avoid mixing concerns:
  * - Filter: needs paginated list for sidebar filters
- * - Form: BASE/SELF_SERVICE need guaranteed access to their team member
+ * - Form: Needs conditional fetching based on booking state
  */
 export async function getTeamMemberForForm({
   organizationId,
   userId,
   isSelfServiceOrBase,
   getAll,
+  custodianUserId,
+  custodianTeamMemberId,
+  bookingStatus,
 }: {
   organizationId: Organization["id"];
   userId: string;
   isSelfServiceOrBase: boolean;
   getAll?: boolean;
+  custodianUserId?: string;
+  custodianTeamMemberId?: string;
+  bookingStatus?: string;
 }) {
   try {
-    // BASE/SELF_SERVICE users only need their own team member
+    // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member
     if (isSelfServiceOrBase) {
       const teamMember = await db.teamMember.findFirst({
         where: {
@@ -375,10 +386,94 @@ export async function getTeamMemberForForm({
       };
     }
 
-    // ADMIN users get paginated list (reuse filter logic)
+    // For ADMIN users with locked booking statuses, only return the current custodian
+    const isLockedStatus =
+      bookingStatus &&
+      [
+        "RESERVED",
+        "ONGOING",
+        "OVERDUE",
+        "COMPLETED",
+        "CANCELLED",
+        "ARCHIVED",
+      ].includes(bookingStatus);
+
+    if (isLockedStatus) {
+      // Find the custodian's team member (try by team member id first, then by user id)
+      const custodianTeamMember = custodianTeamMemberId
+        ? await db.teamMember.findFirst({
+            where: {
+              id: custodianTeamMemberId,
+              organizationId,
+              deletedAt: null,
+            },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          })
+        : custodianUserId
+        ? await db.teamMember.findFirst({
+            where: {
+              userId: custodianUserId,
+              organizationId,
+              deletedAt: null,
+            },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          })
+        : null;
+
+      await fixTeamMembersNames(
+        custodianTeamMember ? [custodianTeamMember] : []
+      );
+
+      return {
+        teamMembers: custodianTeamMember ? [custodianTeamMember] : [],
+        totalTeamMembers: custodianTeamMember ? 1 : 0,
+      };
+    }
+
+    // ADMIN users get paginated list
+    // For DRAFT bookings, ensure custodian is included in selectedTeamMembers
+    const selectedTeamMembers: string[] = [];
+
+    if (bookingStatus === "DRAFT") {
+      // Find custodian team member id if we have custodianUserId but no custodianTeamMemberId
+      if (custodianUserId && !custodianTeamMemberId) {
+        const custodian = await db.teamMember.findFirst({
+          where: {
+            userId: custodianUserId,
+            organizationId,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (custodian) {
+          selectedTeamMembers.push(custodian.id);
+        }
+      } else if (custodianTeamMemberId) {
+        selectedTeamMembers.push(custodianTeamMemberId);
+      }
+    }
+
     return await getTeamMemberForCustodianFilter({
       organizationId,
-      selectedTeamMembers: [],
+      selectedTeamMembers,
       getAll,
       userId,
       filterByUserId: false,
