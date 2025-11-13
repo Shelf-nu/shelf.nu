@@ -3,8 +3,7 @@ import type {
   LoaderFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import { data , Link, useLoaderData } from "react-router";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";

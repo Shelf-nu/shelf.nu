@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
-import { useNavigate } from "react-router";
 import { useAtomValue } from "jotai";
+import { useNavigate } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";

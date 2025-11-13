@@ -1,8 +1,8 @@
 import React from "react";
 
-import { HydratedRouter } from "react-router/dom";
 import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
+import { HydratedRouter } from "react-router/dom";
 
 function hydrate() {
   React.startTransition(() => {

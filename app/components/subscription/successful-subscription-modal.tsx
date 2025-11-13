@@ -1,6 +1,6 @@
 import { BellIcon } from "@radix-ui/react-icons";
-import { useBlocker } from "react-router";
 import { AnimatePresence } from "framer-motion";
+import { useBlocker } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 
 import { Button } from "../shared/button";

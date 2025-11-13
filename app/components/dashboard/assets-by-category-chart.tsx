@@ -1,6 +1,6 @@
-import { useLoaderData } from "react-router";
 import type { Color } from "@tremor/react";
 import { DonutChart } from "@tremor/react";
+import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";

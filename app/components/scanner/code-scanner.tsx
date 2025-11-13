@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
-import { Link } from "react-router";
 import { useAtom } from "jotai";
 import {
   ArrowRight,
@@ -10,6 +9,7 @@ import {
   QrCode,
   ScanQrCode,
 } from "lucide-react";
+import { Link } from "react-router";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";

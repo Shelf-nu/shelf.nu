@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
+import { useAtom, useSetAtom } from "jotai";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data } from "react-router";
-import { Link, useNavigate } from "react-router";
-import { useAtom, useSetAtom } from "jotai";
+import { data , Link, useNavigate } from "react-router";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";

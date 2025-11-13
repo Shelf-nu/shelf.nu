@@ -1,7 +1,6 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
-import { Outlet, useLoaderData, useParams } from "react-router";
+import { data , Outlet, useLoaderData, useParams } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";

@@ -1,7 +1,6 @@
-import { redirect } from "react-router";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, useLoaderData } from "react-router";
 import { MapPinIcon } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { redirect , Form, useLoaderData } from "react-router";
 import { z } from "zod";
 import { LocationSelect } from "~/components/location/location-select";
 import { Button } from "~/components/shared/button";

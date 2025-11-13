@@ -1,11 +1,10 @@
-import { data } from "react-router";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useLoaderData } from "react-router";
-import { useAtomValue } from "jotai";
+import { data , useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {

@@ -4,8 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data } from "react-router";
-import { Link, Outlet } from "react-router";
+import { data , Link, Outlet } from "react-router";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
 import CategoryQuickActions from "~/components/category/category-quick-actions";

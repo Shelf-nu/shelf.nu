@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useRouteLoaderData } from "react-router";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
@@ -13,6 +12,7 @@ import {
   UserIcon,
   UserPlus2Icon,
 } from "lucide-react";
+import { useNavigate, useRouteLoaderData } from "react-router";
 
 import {
   CommandDialog,

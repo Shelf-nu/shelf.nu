@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { BookingStatus } from "@prisma/client";
-import { useLoaderData } from "react-router";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";

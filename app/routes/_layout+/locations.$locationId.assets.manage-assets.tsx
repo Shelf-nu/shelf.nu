@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
+import { useAtomValue, useSetAtom } from "jotai";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data, redirect } from "react-router";
-import {
+import { data, redirect ,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
 } from "react-router";
-import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -167,7 +166,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds, redirectTo } = parseData(
+    const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),

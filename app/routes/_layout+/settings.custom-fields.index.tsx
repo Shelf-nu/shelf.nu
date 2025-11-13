@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { data } from "react-router";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import { data , Link, useLoaderData } from "react-router";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";

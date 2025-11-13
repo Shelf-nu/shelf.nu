@@ -1,5 +1,5 @@
-import { useLoaderData } from "react-router";
 import { AreaChart, Title } from "@tremor/react";
+import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import FallbackLoading from "./fallback-loading";

@@ -1,10 +1,9 @@
 import { useEffect, useRef } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
-import { data, redirect } from "react-router";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useNavigation, useSubmit } from "react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircleIcon } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect , useLoaderData, useNavigation, useSubmit } from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -183,7 +182,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds } = parseData(
+    const { assetIds } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),

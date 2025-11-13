@@ -5,8 +5,7 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
 } from "react-router";
-import { data } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { data , useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
@@ -131,13 +130,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
-    let currentBooking: any = null;
+    const currentBooking: any = null;
 
     if (booking && booking.from) {
       asset.bookings = [currentBooking];
     }
     /** We only need customField with same category of asset or without any category */
-    let customFields = asset.categoryId
+    const customFields = asset.categoryId
       ? asset.customFields.filter(
           (cf) =>
             !cf.customField.categories.length ||

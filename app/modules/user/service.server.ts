@@ -972,7 +972,7 @@ async function getUsers({
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = {};
 
     /** If the search string exists, add it to the where object */
     if (search) {

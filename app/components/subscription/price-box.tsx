@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { tw } from "~/utils/tw";
 import type { Price } from "./prices";
 import {
@@ -13,7 +14,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../shared/tooltip";
-import { JSX } from "react";
 
 export const PriceBox = ({ price }: { price: Price }) => {
   const amount =

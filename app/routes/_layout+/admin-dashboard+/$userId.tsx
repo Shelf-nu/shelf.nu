@@ -10,8 +10,7 @@ import {
   type Prisma,
 } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
-import { useLoaderData, Link, useFetcher } from "react-router";
+import { data , useLoaderData, Link, useFetcher } from "react-router";
 
 import { z } from "zod";
 import { Form } from "~/components/custom-form";

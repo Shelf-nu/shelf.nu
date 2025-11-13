@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import {
   CalendarCheck,
@@ -64,7 +65,6 @@ import {
   UnavailableIcon,
   ChangeIcon,
 } from "../icons/library";
-import { JSX } from "react";
 
 /** The possible options for icons to be rendered in the button */
 export type IconType =

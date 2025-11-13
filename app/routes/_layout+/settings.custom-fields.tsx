@@ -1,6 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
-import { Link, Outlet } from "react-router";
+import { data , Link, Outlet } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import {

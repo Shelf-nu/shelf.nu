@@ -1,6 +1,6 @@
 import type { Location } from "@prisma/client";
-import { useActionData, useNavigation } from "react-router";
 import { useAtom, useAtomValue } from "jotai";
+import { useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";

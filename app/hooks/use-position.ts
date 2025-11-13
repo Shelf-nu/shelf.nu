@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useFetcher, useParams } from "react-router";
 import { atom, useAtom } from "jotai";
+import { useFetcher, useParams } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 
 const positionAtom = atom<GeolocationCoordinates | null>(null);

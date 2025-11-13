@@ -8,11 +8,11 @@ import {
   useState,
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { useFetcher, useLocation } from "react-router";
 import type { VariantProps } from "class-variance-authority";
 import { cva } from "class-variance-authority";
 
 import { MenuIcon } from "lucide-react";
+import { useFetcher, useLocation } from "react-router";
 import Input from "~/components/forms/input";
 import { SwitchIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

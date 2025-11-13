@@ -6,9 +6,8 @@ import {
   NoteType,
   OrganizationRoles,
 } from "@prisma/client";
-import { data, redirect } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import {
+import { data, redirect ,
   Link,
   useActionData,
   useLoaderData,

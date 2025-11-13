@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo } from "react";
 
-import type { Fetcher } from "react-router";
 import { useAtom } from "jotai";
 import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
+import type { Fetcher } from "react-router";
 
 import { FileUploadIcon } from "~/components/icons/library";
 import { isFormProcessing } from "~/utils/form";

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { NavLink, useFetcher, useLoaderData } from "react-router";
 import { LogOutIcon, UserPenIcon, UserRoundIcon } from "lucide-react";
+import { NavLink, useFetcher, useLoaderData } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,

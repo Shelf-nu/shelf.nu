@@ -1,6 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data } from "react-router";
-import { Link, Outlet, useLoaderData, useMatches } from "react-router";
+import { data , Link, Outlet, useLoaderData, useMatches } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";

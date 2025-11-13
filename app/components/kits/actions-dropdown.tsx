@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { useLoaderData } from "react-router";
 import { MapPinIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";

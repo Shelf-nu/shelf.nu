@@ -1,6 +1,6 @@
+import { atom } from "jotai";
 import type { FetcherWithComponents } from "react-router";
 import { useParams } from "react-router";
-import { atom } from "jotai";
 import { MarkdownNoteForm } from "~/components/notes/markdown-note-form";
 
 const isEditingAtom = atom(false);

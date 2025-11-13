@@ -11,6 +11,7 @@ export function BookingPageContent() {
   const {
     booking,
     teamMembers,
+    teamMembersForForm,
     bookingFlags,
     totalAssets,
     totalKits,
@@ -19,11 +20,15 @@ export function BookingPageContent() {
     assetsCount,
     partialCheckinProgress,
   } = useLoaderData<BookingPageLoaderData>();
-  const custodian = teamMembers.find((member) =>
-    booking.custodianUserId
-      ? booking.custodianUserId === member?.userId
-      : booking.custodianTeamMemberId === member.id
+
+  // For finding the custodian, use teamMembersForForm which guarantees custodian availability
+  // Prioritize custodianTeamMemberId if it exists, otherwise match by userId
+  const custodian = (teamMembersForForm || teamMembers).find((member) =>
+    booking.custodianTeamMemberId
+      ? booking.custodianTeamMemberId === member.id
+      : booking.custodianUserId === member?.userId
   );
+
   return (
     <div className="md:mt-4">
       <div className="mb-8 flex h-full flex-col items-stretch gap-2 lg:mb-2 lg:flex-row">

@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
 import type { Category } from "@prisma/client";
-import { useLoaderData } from "react-router";
 import { atom, useAtom, useAtomValue } from "jotai";
+import { useLoaderData } from "react-router";
 
 const searchAtom = atom("");
 const isSearchingAtom = atom((get) => get(searchAtom) !== "");

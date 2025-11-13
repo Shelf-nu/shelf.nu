@@ -1,11 +1,10 @@
-import { data } from "react-router";
+import { useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { useNavigation } from "react-router";
-import { useSetAtom } from "jotai";
+import { data , useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";

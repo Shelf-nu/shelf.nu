@@ -58,7 +58,7 @@ export function protect({
 
       return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
     }
-    let isValidSession = await validateSession(auth.refreshToken);
+    const isValidSession = await validateSession(auth.refreshToken);
 
     if (!isValidSession) {
       session.flash(

@@ -1,7 +1,6 @@
 import { UpdateStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
-import { Outlet, useFetcher, useLoaderData } from "react-router";
+import { data , Outlet, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
 import { Badge } from "~/components/shared/badge";

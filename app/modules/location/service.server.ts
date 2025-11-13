@@ -77,7 +77,7 @@ export async function getLocation(
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Build where object for querying related assets */
-    let assetsWhere: Prisma.AssetWhereInput = {};
+    const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
       assetsWhere.title = {
@@ -197,7 +197,7 @@ export async function getLocations(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    let where: Prisma.LocationWhereInput = { organizationId };
+    const where: Prisma.LocationWhereInput = { organizationId };
 
     /** If the search string exists, add it to the where object */
     if (search) {

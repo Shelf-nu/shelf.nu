@@ -1,6 +1,6 @@
-import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { motion } from "framer-motion";
 import { Package } from "lucide-react";
+import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";

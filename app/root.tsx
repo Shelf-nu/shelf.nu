@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
+import nProgressStyles from "nprogress/nprogress.css?url";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -14,7 +15,6 @@ import {
   useLoaderData,
   useRouteLoaderData,
 } from "react-router";
-import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";

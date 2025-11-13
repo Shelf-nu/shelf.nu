@@ -4,9 +4,8 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect } from "react-router";
+import { data, redirect , useLoaderData } from "react-router";
 
-import { useLoaderData } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { createChangeEmailSchema } from "~/components/user/change-email";

@@ -4,8 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data } from "react-router";
-import { useLoaderData } from "react-router";
+import { data , useLoaderData } from "react-router";
 import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,

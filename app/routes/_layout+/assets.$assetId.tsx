@@ -1,13 +1,12 @@
 import { BarcodeType } from "@prisma/client";
+import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { redirect, data } from "react-router";
-import { useLoaderData, Outlet } from "react-router";
-import { DateTime } from "luxon";
+import { redirect, data , useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -313,7 +312,7 @@ export default function AssetDetailsPage() {
 
   const { roles } = useUserRoleHelper();
 
-  let items = [
+  const items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },

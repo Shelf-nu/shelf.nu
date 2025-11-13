@@ -1,12 +1,11 @@
 import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import { data, redirect } from "react-router";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { useFetcher, useLoaderData, useParams } from "react-router";
+import { data, redirect , useFetcher, useLoaderData, useParams } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -88,7 +87,7 @@ export const loader = async ({
       action: PermissionAction.update,
     });
 
-    let {
+    const {
       search,
       totalAssets,
       perPage,
@@ -219,7 +218,7 @@ export default function QrLinkExisting() {
     setSelectedAssetId(assetId);
   }
 
-  let isHydrated = useHydrated();
+  const isHydrated = useHydrated();
   const { vh } = useViewportHeight();
   const maxHeight = isHydrated ? vh - 12 - 45 + "px" : "100%"; // We need to handle SSR and we are also substracting 12px to properly handle spacing on the bottom and 45px to handle the horizontal tabs
 

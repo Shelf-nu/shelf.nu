@@ -343,7 +343,7 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 export async function validateSession(token: string) {
   try {
     // const t0 = performance.now();
-    const result = await db.$queryRaw<{ id: String; revoked: boolean }[]>`
+    const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
       SELECT id, revoked FROM auth.refresh_tokens 
       WHERE token = ${token} 
       AND revoked = false

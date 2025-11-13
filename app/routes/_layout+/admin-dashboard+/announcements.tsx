@@ -1,6 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
-import { Outlet, useFetcher, useLoaderData } from "react-router";
+import { data , Outlet, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";

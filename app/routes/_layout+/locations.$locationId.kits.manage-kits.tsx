@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data, redirect } from "react-router";
-import type { MetaFunction } from "react-router";
-import {
+import { useAtomValue, useSetAtom } from "jotai";
+import { MapPin } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs , MetaFunction } from "react-router";
+import { data, redirect ,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
 } from "react-router";
-import { useAtomValue, useSetAtom } from "jotai";
-import { MapPin } from "lucide-react";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -148,7 +146,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { kitIds, removedKitIds, redirectTo } = parseData(
+    const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         kitIds: z.array(z.string()).optional().default([]),

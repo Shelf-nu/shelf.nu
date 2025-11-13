@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 
-import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkDialogAtom,
   closeBulkDialogAtom,

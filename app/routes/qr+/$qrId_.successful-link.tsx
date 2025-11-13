@@ -1,6 +1,5 @@
-import { data } from "react-router";
 import type { MetaFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { data , useLoaderData } from "react-router";
 import { z } from "zod";
 
 import { ErrorContent } from "~/components/errors";

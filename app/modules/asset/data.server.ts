@@ -332,7 +332,7 @@ export async function advancedModeLoader({
   });
 
   /** Query tierLimit, assets & Asset index settings */
-  let [
+  const [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,

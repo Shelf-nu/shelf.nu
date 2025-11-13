@@ -76,7 +76,7 @@ export async function updateCookieWithPerPage(
   /* Get the cookie header */
   const cookieHeader = request.headers.get("Cookie");
 
-  let cookie = (await userPrefs.parse(cookieHeader)) || {};
+  const cookie = (await userPrefs.parse(cookieHeader)) || {};
   /** If the cookie doesn't have perPage, adding perPage attribute and setting it to its default value 20*/
   if (!cookie.perPage) {
     cookie.perPage = 20;

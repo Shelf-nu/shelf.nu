@@ -631,7 +631,7 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    let where: Prisma.AssetWhereInput = { organizationId, kitId };
+    const where: Prisma.AssetWhereInput = { organizationId, kitId };
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();

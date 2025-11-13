@@ -1,9 +1,8 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
 import { parseFormData } from "@remix-run/form-data-parser";
-import { useFetcher } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data , useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

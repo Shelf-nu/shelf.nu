@@ -51,3 +51,5 @@ desktop-app/portable
 docs/.vitepress/cache
 docs/.vitepress/dist
 .vercel
+
+.react-router/types

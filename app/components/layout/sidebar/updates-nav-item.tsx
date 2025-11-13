@@ -5,8 +5,8 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useFetcher, useLoaderData } from "react-router";
 import { BellIcon, ExternalLinkIcon } from "lucide-react";
+import { useFetcher, useLoaderData } from "react-router";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";

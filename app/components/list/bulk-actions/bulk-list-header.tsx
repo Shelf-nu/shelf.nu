@@ -1,5 +1,5 @@
-import { useLoaderData } from "react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData } from "react-router";
 import {
   clearSelectedBulkItemsAtom,
   selectedBulkItemsCountAtom,

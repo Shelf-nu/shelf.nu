@@ -10,9 +10,9 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { redirect } from "react-router";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
+import { redirect } from "react-router";
 import z from "zod";
 import type { AuthSession } from "@server/session";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -2647,7 +2647,7 @@ export async function getBookings(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assetss belonging to current org */
-    let where: Prisma.BookingWhereInput = { organizationId };
+    const where: Prisma.BookingWhereInput = { organizationId };
 
     /** The idea is that only the creator of a draft booking can see it
      * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId

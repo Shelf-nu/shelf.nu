@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect } from "react";
-import { Outlet, useMatches, useNavigate } from "react-router";
 import { AnimatePresence } from "framer-motion";
+import { Outlet, useMatches, useNavigate } from "react-router";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";

@@ -1,5 +1,5 @@
-import { useLoaderData } from "react-router";
 import { render, screen } from "@testing-library/react";
+import { useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InventoryValueChart from "./inventory-value-chart";

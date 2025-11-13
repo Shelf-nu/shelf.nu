@@ -7,9 +7,9 @@ import type {
 } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import type { AppLoadContext, LoaderFunctionArgs } from "react-router";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
+import type { AppLoadContext, LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";

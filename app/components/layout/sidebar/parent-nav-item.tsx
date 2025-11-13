@@ -1,5 +1,5 @@
-import { NavLink, useNavigate } from "react-router";
 import { ChevronDownIcon } from "lucide-react";
+import { NavLink, useNavigate } from "react-router";
 import invariant from "tiny-invariant";
 import {
   Collapsible,

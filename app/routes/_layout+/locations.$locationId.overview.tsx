@@ -1,6 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data } from "react-router";
-import { useLoaderData } from "react-router";
+import { data , useLoaderData } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Card } from "~/components/shared/card";

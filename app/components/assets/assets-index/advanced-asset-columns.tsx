@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
