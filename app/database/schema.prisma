@@ -545,10 +545,16 @@ model Location {
   assets Asset[]
   kits   Kit[]
 
+  // Self-relation for nested locations
+  parentId String?
+  parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Location[] @relation("LocationHierarchy")
+
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, parentId])
 }
 
 // Master data for roles
