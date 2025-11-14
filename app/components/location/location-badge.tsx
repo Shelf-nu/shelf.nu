@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Location } from "@prisma/client";
+import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ListTree } from "lucide-react";
 import useApiQuery from "~/hooks/use-api-query";
 import type { LocationTreePayload } from "~/routes/api+/locations.$locationId.tree";
 import { tw } from "~/utils/tw";
 import { LocationTree, type LocationTreeNode } from "./location-tree";
+import { Button } from "../shared/button";
 import {
   HoverCard,
   HoverCardContent,
@@ -51,7 +53,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
 
   if (!hasHierarchy) {
     return (
-      <Tag className={tw("ml-2 flex items-center gap-1", className)}>
+      <Tag className={tw("ml-2 inline-flex items-center gap-1", className)}>
         {location.name}
       </Tag>
     );
@@ -91,19 +93,19 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
     return (
       <div className="space-y-3 text-sm">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Current location
-          </p>
-          <p className="mt-1 font-semibold text-gray-900">
+          <p className="font-semibold text-gray-500">Current location</p>
+          <Button
+            to={`/locations/${currentLocation.id}`}
+            variant="block-link"
+            target="_blank"
+          >
             {currentLocation.name}
-          </p>
+          </Button>
         </div>
 
         {hasAncestors ? (
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Parent chain
-            </p>
+            <p className="font-semibold text-gray-500">Parent chain</p>
             <div className="mt-2">
               <LocationTree
                 nodes={buildParentChainTree(ancestors, currentLocation)}
@@ -114,9 +116,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
         ) : null}
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Child locations
-          </p>
+          <p className="font-semibold text-gray-500">Child locations</p>
           {hasChildren ? (
             <div className="mt-2">
               <LocationTree nodes={descendants} />
@@ -145,12 +145,14 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
           </>
         </Tag>
       </HoverCardTrigger>
-      <HoverCardContent
-        className="max-w-md"
-        style={{ width: "max-content", minWidth: "18rem" }}
-      >
-        {content}
-      </HoverCardContent>
+      <HoverCardPortal>
+        <HoverCardContent
+          className="max-w-md"
+          style={{ width: "max-content", minWidth: "18rem" }}
+        >
+          {content}
+        </HoverCardContent>
+      </HoverCardPortal>
     </HoverCard>
   );
 }

@@ -220,7 +220,9 @@ export default function LocationPage() {
           ),
         }}
       >
-        <ActionsDropdown location={location} />
+        <ActionsDropdown
+          location={{ ...location, childCount: childLocations?.length }}
+        />
       </Header>
 
       <HorizontalTabs items={items} />

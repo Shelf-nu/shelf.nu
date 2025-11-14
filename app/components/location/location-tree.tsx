@@ -29,7 +29,7 @@ export function LocationTree({
       {nodes.map((node) => {
         const isActive = node.id === activeId;
         return (
-          <li key={node.id}>
+          <li key={node.id} className="space-y-1">
             {isActive ? (
               <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-900">
                 {node.name}

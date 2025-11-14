@@ -813,7 +813,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
+        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
       ), 
       sorted_asset_query AS (
         SELECT * FROM asset_query
