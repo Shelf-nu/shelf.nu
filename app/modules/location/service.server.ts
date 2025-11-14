@@ -226,12 +226,20 @@ export async function getLocationHierarchy(params: {
   `;
 }
 
+/** Represents a node in the descendant tree rendered on location detail pages. */
 export type LocationTreeNode = Pick<Location, "id" | "name"> & {
   children: LocationTreeNode[];
 };
 
+/** Raw row returned when querying descendants via recursive CTE. */
 type LocationDescendantRow = Pick<Location, "id" | "name" | "parentId">;
+/** Aggregate row holding the maximum depth returned from subtree depth query. */
+type SubtreeDepthRow = { maxDepth: number | null };
 
+/**
+ * Fetches a nested tree of all descendants for the provided location.
+ * Used to render the hierarchical child list on the location page sidebar.
+ */
 export async function getLocationDescendantsTree(params: {
   organizationId: Organization["id"];
   locationId: Location["id"];
@@ -283,6 +291,42 @@ export async function getLocationDescendantsTree(params: {
   }
 
   return rootNodes;
+}
+
+/**
+ * Returns the maximum depth (root node counted as 0) for a location's subtree.
+ * Used by validation to ensure re-parent operations do not exceed the configured max depth.
+ */
+export async function getLocationSubtreeDepth(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}): Promise<number> {
+  const { organizationId, locationId } = params;
+
+  const [result] = await db.$queryRaw<SubtreeDepthRow[]>`
+    WITH RECURSIVE location_subtree AS (
+      SELECT
+        id,
+        "parentId",
+        "organizationId",
+        0 AS depth
+      FROM "Location"
+      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l."parentId",
+        l."organizationId",
+        ls.depth + 1 AS depth
+      FROM "Location" l
+      INNER JOIN location_subtree ls ON l."parentId" = ls.id
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT MAX(depth) AS "maxDepth"
+    FROM location_subtree
+  `;
+
+  return result?.maxDepth ?? 0;
 }
 
 export async function getLocations(params: {
@@ -409,11 +453,25 @@ async function validateParentLocation({
     0
   );
 
-  if (parentDepth + 1 > MAX_LOCATION_DEPTH) {
+  const subtreeDepth =
+    currentLocationId === undefined
+      ? 0
+      : await getLocationSubtreeDepth({
+          organizationId,
+          locationId: currentLocationId,
+        });
+
+  if (parentDepth + 1 + subtreeDepth > MAX_LOCATION_DEPTH) {
     throw new ShelfError({
       cause: null,
+      title: "Not allowed",
       message: `Locations cannot be nested deeper than ${MAX_LOCATION_DEPTH} levels.`,
-      additionalData: { parentId, organizationId, parentDepth },
+      additionalData: {
+        parentId,
+        organizationId,
+        parentDepth,
+        subtreeDepth,
+      },
       label,
       status: 400,
       shouldBeCaptured: false,
@@ -485,6 +543,9 @@ export async function createLocation({
       },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
     });
@@ -581,6 +642,9 @@ export async function updateLocation(payload: {
       },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: {
         id,
