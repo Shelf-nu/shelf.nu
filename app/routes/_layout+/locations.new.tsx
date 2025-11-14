@@ -12,6 +12,7 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   createLocation,
   updateLocationImage,
@@ -32,18 +33,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
       action: PermissionAction.create,
     });
 
+    const { locations, totalLocations } = await getLocationsForCreateAndEdit({
+      organizationId,
+      request,
+    });
+
     const header = {
       title,
     };
 
-    return payload({ header });
+    return payload({ header, locations, totalLocations });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });
@@ -86,7 +92,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address, addAnother } = payload;
+    const { name, description, address, addAnother, parentId } = payload;
 
     const location = await createLocation({
       name,
@@ -94,6 +100,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       address,
       userId: authSession.userId,
       organizationId,
+      parentId,
     });
 
     await updateLocationImage({

@@ -15,6 +15,7 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 import { Button } from "~/components/shared/button";
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getLocation,
   updateLocation,
@@ -64,6 +65,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy: "createdAt",
     });
 
+    const { locations, totalLocations } = await getLocationsForCreateAndEdit({
+      organizationId,
+      request,
+      defaultLocation: location.parentId,
+    });
+
     const header: HeaderData = {
       title: `Edit | ${location.name}`,
       subHeading: location.id,
@@ -71,6 +78,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       location,
+      locations,
+      totalLocations,
       header,
       referer: getRefererPath(request),
     });
@@ -116,7 +125,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address } = parsedData;
+    const { name, description, address, parentId } = parsedData;
 
     const location = await updateLocation({
       id,
@@ -125,6 +134,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       description,
       address,
       organizationId,
+      parentId,
     });
 
     await updateLocationImage({
@@ -173,7 +183,9 @@ export default function LocationEditPage() {
           name={location.name}
           description={location.description}
           address={location.address}
+          parentId={location.parentId}
           referer={referer}
+          excludeLocationId={location.id}
         />
       </div>
     </div>

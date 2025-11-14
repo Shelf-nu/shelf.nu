@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Package } from "lucide-react";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -30,7 +31,6 @@ import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 import BulkActionsDropdown from "../bulk-actions-dropdown";
-// eslint-disable-next-line import/no-cycle
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
@@ -294,8 +294,15 @@ export const ListAssetContent = ({
 
       {/* Location */}
       <Td>
-        {location?.name ? (
-          <GrayBadge>{location.name}</GrayBadge>
+        {location ? (
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
         ) : (
           <EmptyTableValue />
         )}

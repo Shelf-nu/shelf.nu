@@ -16,6 +16,9 @@ export interface HeaderData {
 
   /** Subheading rendered below the heading */
   subHeading?: string;
+
+  /** Optional text rendered above the heading */
+  preHeading?: string;
 }
 
 export type Action = {

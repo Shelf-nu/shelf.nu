@@ -24,17 +24,18 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
-import { Tag } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getPaginatedAndFilterableKits,
@@ -129,7 +130,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
           category: true,
-          location: true,
+          location: LOCATION_WITH_HIERARCHY,
         },
       }),
       db.teamMember
@@ -375,12 +376,16 @@ function ListContent({
           select: { id: true; availableToBook: true; status: true };
         };
         category: true;
-        location: true;
+        location: typeof LOCATION_WITH_HIERARCHY;
       }
     >;
   }>;
   bulkActions?: React.ReactNode;
 }) {
+  const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
+    typeof LOCATION_WITH_HIERARCHY
+  > | null;
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -423,8 +428,15 @@ function ListContent({
       </Td>
 
       <Td>
-        {item.location ? (
-          <Tag className="mb-0">{item.location.name}</Tag>
+        {locationWithHierarchy ? (
+          <LocationBadge
+            location={{
+              id: locationWithHierarchy.id,
+              name: locationWithHierarchy.name,
+              parentId: locationWithHierarchy.parentId ?? undefined,
+              childCount: locationWithHierarchy._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
 

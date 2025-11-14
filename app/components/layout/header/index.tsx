@@ -14,6 +14,7 @@ export default function Header({
   title = null,
   children,
   subHeading,
+  preHeading,
   hidePageDescription = false,
   hideBreadcrumbs = false,
   classNames,
@@ -25,6 +26,7 @@ export default function Header({
   title?: string | ReactNode | null;
   children?: React.ReactNode;
   subHeading?: React.ReactNode;
+  preHeading?: React.ReactNode;
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;
@@ -65,6 +67,17 @@ export default function Header({
             <div className="relative">{slots["left-of-title"]}</div>
           ) : null}
           <div>
+            {preHeading ? (
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {preHeading}
+              </div>
+            ) : (
+              header?.preHeading && (
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {header.preHeading}
+                </div>
+              )
+            )}
             <div className="flex items-center gap-2">
               <Heading as="h2" className="break-all text-[20px] font-semibold">
                 {title || header?.title}

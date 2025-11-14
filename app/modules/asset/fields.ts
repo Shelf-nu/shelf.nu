@@ -1,5 +1,18 @@
 import type { BookingStatus, Prisma } from "@prisma/client";
 
+export const LOCATION_WITH_HIERARCHY = {
+  select: {
+    id: true,
+    name: true,
+    parentId: true,
+    _count: {
+      select: {
+        children: true,
+      },
+    },
+  },
+} satisfies Prisma.LocationDefaultArgs;
+
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },
   custody: {
@@ -29,7 +42,7 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
-    location: true,
+    location: LOCATION_WITH_HIERARCHY,
     custody: {
       select: {
         createdAt: true,
@@ -123,11 +136,7 @@ export const assetIndexFields = ({
     kit: true,
     category: true,
     tags: true,
-    location: {
-      select: {
-        name: true,
-      },
-    },
+    location: LOCATION_WITH_HIERARCHY,
     custody: {
       select: {
         custodian: {

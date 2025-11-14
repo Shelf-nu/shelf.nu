@@ -21,6 +21,7 @@ export const DeleteLocation = ({
 }: {
   location: {
     name: Location["name"];
+    childCount?: number;
   };
 }) => {
   const navigation = useNavigation();
@@ -34,7 +35,6 @@ export const DeleteLocation = ({
           icon="trash"
           className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
           width="full"
-          disabled={disabled}
         >
           Delete
         </Button>
@@ -52,6 +52,13 @@ export const DeleteLocation = ({
             Are you sure you want to delete this Location? This action cannot be
             undone.
           </AlertDialogDescription>
+          {location.childCount && location.childCount > 0 ? (
+            <div className="rounded border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">
+              This location has <strong>{location.childCount}</strong> child
+              {location.childCount > 1 ? " locations" : " location"}. They will
+              move to the root level if you delete this location.
+            </div>
+          ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
