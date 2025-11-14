@@ -10,6 +10,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
+import { LocationTree } from "~/components/location/location-tree";
 import { ShelfMap } from "~/components/location/map";
 import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Button } from "~/components/shared/button";
@@ -22,7 +23,6 @@ import {
   getLocationDescendantsTree,
   getLocationHierarchy,
 } from "~/modules/location/service.server";
-import type { LocationTreeNode } from "~/modules/location/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -239,7 +239,7 @@ export default function LocationPage() {
                 Child locations
               </div>
               <div className="mt-3 text-sm text-gray-700">
-                <ChildLocationTree nodes={childLocations} />
+                <LocationTree nodes={childLocations} />
               </div>
             </Card>
           ) : null}
@@ -329,32 +329,5 @@ function LocationBreadcrumbs({
         </span>
       ))}
     </div>
-  );
-}
-
-function ChildLocationTree({ nodes }: { nodes: LocationTreeNode[] }) {
-  if (!nodes.length) {
-    return <p className="text-gray-500">No child locations.</p>;
-  }
-
-  return (
-    <ul className="space-y-1">
-      {nodes.map((node) => (
-        <li key={node.id}>
-          <Button
-            to={`/locations/${node.id}`}
-            variant="block-link"
-            target="_blank"
-          >
-            {node.name}
-          </Button>
-          {node.children.length ? (
-            <div className="ml-4 border-l border-gray-200 pl-4">
-              <ChildLocationTree nodes={node.children} />
-            </div>
-          ) : null}
-        </li>
-      ))}
-    </ul>
   );
 }
