@@ -149,10 +149,12 @@ export type AdvancedIndexAsset = Pick<
   kit: Pick<Kit, "id" | "name"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name">[];
-  location: (Pick<Location, "id" | "name"> & {
-    parentId?: Location["parentId"];
-    childCount?: number;
-  }) | null;
+  location:
+    | (Pick<Location, "id" | "name"> & {
+        parentId?: Location["parentId"];
+        childCount?: number;
+      })
+    | null;
   custody: {
     custodian: {
       name: string;
