@@ -130,7 +130,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
   })();
 
   return (
-    <HoverCard onOpenChange={handleOpenChange}>
+    <HoverCard onOpenChange={handleOpenChange} openDelay={0}>
       <HoverCardTrigger asChild>
         <Tag
           className={tw(

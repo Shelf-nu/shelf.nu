@@ -28,6 +28,7 @@ import {
   parseFileFormData,
   removePublicFile,
 } from "~/utils/storage.server";
+import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
@@ -362,7 +363,8 @@ export async function getLocations(params: {
         where,
         orderBy: { updatedAt: "desc" },
         include: {
-          _count: { select: { kits: true, assets: true } },
+          _count: { select: { kits: true, assets: true, children: true } },
+          parent: LOCATION_WITH_HIERARCHY,
           image: {
             select: {
               updatedAt: true,

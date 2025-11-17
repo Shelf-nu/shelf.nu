@@ -10,10 +10,12 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
+import { LocationBadge } from "~/components/location/location-badge";
 import { LocationDescriptionColumn } from "~/components/location/location-description-column";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocations } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -29,6 +31,12 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+const LOCATION_LIST_INCLUDE = {
+  _count: { select: { kits: true, assets: true, children: true } },
+  parent: LOCATION_WITH_HIERARCHY,
+  image: { select: { updatedAt: true } },
+} satisfies Prisma.LocationInclude;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -115,6 +123,8 @@ export default function LocationsIndexPage() {
           headerChildren={
             <>
               <Th>Description</Th>
+              <Th>Parent location</Th>
+              <Th className="whitespace-nowrap">Child locations</Th>
               <Th>Assets</Th>
               <Th>Kits</Th>
             </>
@@ -128,12 +138,7 @@ export default function LocationsIndexPage() {
 const ListItemContent = ({
   item,
 }: {
-  item: Prisma.LocationGetPayload<{
-    include: {
-      _count: { select: { kits: true; assets: true } };
-      image: { select: { updatedAt: true } };
-    };
-  }>;
+  item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">
@@ -158,6 +163,22 @@ const ListItemContent = ({
     ) : (
       <Td>-</Td>
     )}
+    <Td>
+      {item.parent ? (
+        <LocationBadge
+          location={{
+            id: item.parent.id,
+            name: item.parent.name,
+            parentId: item.parent.parentId ?? undefined,
+            childCount: item.parent._count?.children ?? 0,
+          }}
+          className="m-0"
+        />
+      ) : (
+        "-"
+      )}
+    </Td>
+    <Td>{item._count.children}</Td>
     <Td>{item._count.assets}</Td>
     <Td>{item._count.kits}</Td>
   </>

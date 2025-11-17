@@ -26,6 +26,7 @@ import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -46,6 +47,7 @@ import {
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { updateLocationKits } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -100,7 +102,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         extraInclude: {
-          location: { select: { id: true, name: true } },
+          location: LOCATION_WITH_HIERARCHY,
         },
       });
 
@@ -403,7 +405,7 @@ const RowComponent = ({
   item,
 }: {
   item: Prisma.KitGetPayload<{
-    include: { category: true; location: { select: { id: true; name: true } } };
+    include: { category: true; location: typeof LOCATION_WITH_HIERARCHY };
   }>;
 }) => {
   const { category } = item;
@@ -438,13 +440,14 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {item.location ? (
-          <div
-            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-            title={`Current location: ${item.location.name}`}
-          >
-            <div className="size-2 rounded-full bg-gray-500"></div>
-            <span>{item.location.name}</span>
-          </div>
+          <LocationBadge
+            location={{
+              id: item.location.id,
+              name: item.location.name,
+              parentId: item.location.parentId ?? undefined,
+              childCount: item.location._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
 

@@ -27,9 +27,9 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
+import { LocationBadge } from "~/components/location/location-badge";
 import SelectWithSearchParams from "~/components/select-with-search-params/select-with-search-params";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -603,7 +603,16 @@ const RowComponent = ({
 
       {/* Location */}
       <Td className={allowCursor}>
-        {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
+        {location ? (
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
+        ) : null}
       </Td>
     </>
   );
