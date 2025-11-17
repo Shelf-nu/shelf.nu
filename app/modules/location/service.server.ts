@@ -87,6 +87,42 @@ export async function getLocation(
       };
     }
 
+    const parentInclude = {
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        _count: { select: { children: true } },
+      },
+    } satisfies Prisma.LocationInclude["parent"];
+
+    const locationInclude: Prisma.LocationInclude = include
+      ? { ...include, parent: parentInclude }
+      : {
+          assets: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
+                },
+              },
+              tags: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+            skip,
+            take,
+            where: assetsWhere,
+            orderBy: { [orderBy]: orderDirection },
+          },
+          parent: parentInclude,
+        };
+
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
@@ -98,31 +134,7 @@ export async function getLocation(
               : []),
           ],
         },
-        include: include
-          ? include
-          : {
-              assets: {
-                include: {
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  tags: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
-                },
-                skip,
-                take,
-                where: assetsWhere,
-                orderBy: { [orderBy]: orderDirection },
-              },
-            },
+        include: locationInclude,
       }),
 
       /** Count them */
