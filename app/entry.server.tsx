@@ -79,7 +79,7 @@ const ABORT_DELAY = 5000;
 // Stream timeout for v3_singleFetch
 export const streamTimeout = 5000;
 
-export default function handleRequest(
+function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
@@ -195,3 +195,6 @@ function handleBrowserRequest(
     setTimeout(abort, ABORT_DELAY);
   });
 }
+
+// Wrap with Sentry so server errors/transactions are reported.
+export default Sentry.wrapSentryHandleRequest(handleRequest);
