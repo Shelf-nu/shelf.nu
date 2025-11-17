@@ -15,7 +15,6 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocations } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -34,7 +33,14 @@ import { requirePermission } from "~/utils/roles.server";
 
 const LOCATION_LIST_INCLUDE = {
   _count: { select: { kits: true, assets: true, children: true } },
-  parent: LOCATION_WITH_HIERARCHY,
+  parent: {
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      _count: { select: { children: true } },
+    },
+  },
   image: { select: { updatedAt: true } },
 } satisfies Prisma.LocationInclude;
 
