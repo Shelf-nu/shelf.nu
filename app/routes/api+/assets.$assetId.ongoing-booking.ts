@@ -27,7 +27,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return payload(booking);
+    return data(payload(booking));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     throw data(error(reason), { status: reason.status });

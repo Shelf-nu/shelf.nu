@@ -13,7 +13,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await request.formData();
     const markdown = formData.get("content") as string;
 
-    return payload({ content: parseMarkdownToReact(markdown) });
+    return data(payload({ content: parseMarkdownToReact(markdown) }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

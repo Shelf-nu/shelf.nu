@@ -140,15 +140,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : undefined,
     })) as Array<Record<string, string>>;
 
-    return payload({
-      filters: queryData.map((item) => ({
-        id: item.id,
-        name: item[queryKey],
-        color: item?.color,
-        metadata: item,
-        user: item?.user as any,
-      })),
-    });
+    return data(
+      payload({
+        filters: queryData.map((item) => ({
+          id: item.id,
+          name: item[queryKey],
+          color: item?.color,
+          metadata: item,
+          user: item?.user as any,
+        })),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

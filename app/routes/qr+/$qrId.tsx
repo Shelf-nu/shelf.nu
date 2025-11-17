@@ -159,7 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return payload({ ok: true });
+    return data(payload({ ok: true }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

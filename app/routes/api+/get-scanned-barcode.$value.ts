@@ -139,12 +139,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return payload({
-      barcode: {
-        ...barcode,
-        type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
-      },
-    });
+    return data(
+      payload({
+        barcode: {
+          ...barcode,
+          type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
+        },
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     const sendNotification = reason.additionalData?.shouldSendNotification;

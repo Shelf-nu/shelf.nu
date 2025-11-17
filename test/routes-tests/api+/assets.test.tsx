@@ -114,8 +114,10 @@ describe("/api/assets", () => {
         },
       });
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: mockAssets,
       });
@@ -132,8 +134,10 @@ describe("/api/assets", () => {
         })
       );
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: [],
       });
@@ -152,8 +156,10 @@ describe("/api/assets", () => {
         })
       );
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: [],
       });
@@ -223,8 +229,10 @@ describe("/api/assets", () => {
         },
       });
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: singleAsset,
       });

@@ -82,7 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (!invite) {
-      return payload(null);
+      return data(payload(null));
     }
 
     sendNotification({
@@ -93,7 +93,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return payload({ success: true });
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

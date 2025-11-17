@@ -41,7 +41,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return payload({ kits });
+    return data(payload({ kits }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -85,7 +85,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       message: `Successfully added ${assetIds.length} assets to kit "${updatedKit.name}".`,
     });
 
-    return payload({ success: true });
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

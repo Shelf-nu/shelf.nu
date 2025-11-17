@@ -63,7 +63,7 @@ export const loader = async ({
       pdfMeta.originalTo = dateTimeFormat.format(new Date(originalTo));
     }
 
-    return payload({ pdfMeta });
+    return data(payload({ pdfMeta }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw data(error(reason), { status: reason.status });

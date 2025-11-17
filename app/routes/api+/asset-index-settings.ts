@@ -106,7 +106,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "changeFreeze": {
@@ -122,7 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { freezeColumn },
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "changeShowImage": {
@@ -138,12 +138,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           data: { showAssetImage },
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return payload(null);
+        return data(payload(null));
       }
     }
   } catch (cause) {

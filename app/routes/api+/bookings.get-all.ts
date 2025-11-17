@@ -32,7 +32,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(isSelfServiceOrBase && { custodianUserId: userId }),
     });
 
-    return payload({ bookings });
+    return data(payload({ bookings }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });

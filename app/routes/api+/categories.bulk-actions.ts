@@ -50,12 +50,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return payload(null);
+        return data(payload(null));
       }
     }
   } catch (cause) {

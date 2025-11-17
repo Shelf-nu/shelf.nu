@@ -63,7 +63,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       include: TEAM_MEMBER_INCLUDE,
     });
 
-    return payload({ teamMembers });
+    return data(payload({ teamMembers }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

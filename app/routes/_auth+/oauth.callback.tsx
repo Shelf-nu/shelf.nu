@@ -152,7 +152,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading });
+  return data(payload({ title, subHeading }));
 }
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();

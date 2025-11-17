@@ -96,11 +96,13 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return payload({
-      assets: assetsWithQrObj,
-      qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
-      showShelfBranding: currentOrganization.showShelfBranding,
-    });
+    return data(
+      payload({
+        assets: assetsWithQrObj,
+        qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+        showShelfBranding: currentOrganization.showShelfBranding,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

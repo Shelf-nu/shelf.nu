@@ -54,7 +54,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading, disableSignup, disableSSO });
+  return data(payload({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({

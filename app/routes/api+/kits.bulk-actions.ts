@@ -78,7 +78,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "bulk-assign-custody": {
@@ -130,7 +130,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "bulk-release-custody": {
@@ -169,7 +169,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "bulk-update-location": {
@@ -193,12 +193,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return payload(null);
+        return data(payload(null));
       }
     }
   } catch (cause) {

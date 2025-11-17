@@ -50,12 +50,14 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    return payload({
-      qrObj,
-      barcodes: asset.barcodes,
-      sequentialId: asset.sequentialId,
-      showShelfBranding: currentOrganization.showShelfBranding,
-    });
+    return data(
+      payload({
+        qrObj,
+        barcodes: asset.barcodes,
+        sequentialId: asset.sequentialId,
+        showShelfBranding: currentOrganization.showShelfBranding,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     return data(error(reason), { status: reason.status });

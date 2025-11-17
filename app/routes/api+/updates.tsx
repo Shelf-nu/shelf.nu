@@ -34,12 +34,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userRole: role,
     });
 
-    return payload({
-      updates: updates.map((update) => ({
-        ...update,
-        content: parseMarkdownToReact(update.content),
-      })),
-    });
+    return data(
+      payload({
+        updates: updates.map((update) => ({
+          ...update,
+          content: parseMarkdownToReact(update.content),
+        })),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(reason, { status: reason.status });
@@ -68,12 +70,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Update ID is required");
         }
         await markUpdateAsRead({ updateId, userId });
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "markAllAsRead": {
         await markAllUpdatesAsRead({ userId, userRole: role });
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "trackClick": {
@@ -82,7 +84,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Update ID is required");
         }
         await trackUpdateClick({ updateId });
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "clickUpdate": {
@@ -93,7 +95,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Mark as read (creates read record, increments view count) AND track click (increments click count)
         await markUpdateAsRead({ updateId, userId });
         await trackUpdateClick({ updateId });
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "trackViews": {
@@ -107,7 +109,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await Promise.all(
           updateIds.map((updateId) => trackUpdateView({ updateId }))
         );
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       default:

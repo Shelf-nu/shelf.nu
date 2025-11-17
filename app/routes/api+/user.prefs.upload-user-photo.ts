@@ -59,7 +59,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       profilePicture: getPublicFileURL({ filename: profilePicture }),
     });
 
-    return payload({ updatedUser });
+    return data(payload({ updatedUser }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

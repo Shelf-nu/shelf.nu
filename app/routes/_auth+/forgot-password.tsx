@@ -73,7 +73,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading });
+  return data(payload({ title, subHeading }));
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {

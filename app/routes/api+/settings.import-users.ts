@@ -54,10 +54,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (!response) {
-      return payload({ success: true });
+      return data(payload({ success: true }));
     }
 
-    return payload({ success: true, ...response });
+    return data(payload({ success: true, ...response }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

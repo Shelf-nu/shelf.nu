@@ -55,7 +55,7 @@ export function loader({ context }: LoaderFunctionArgs) {
       return redirect("/assets");
     }
 
-    return payload({ title, subHeading });
+    return data(payload({ title, subHeading }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

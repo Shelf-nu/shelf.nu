@@ -59,7 +59,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return payload({ kit });
+    return data(payload({ kit }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(error(reason), { status: reason.status });

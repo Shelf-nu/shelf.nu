@@ -178,8 +178,10 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const response = (await action(createActionArgs({ request }))) as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -259,7 +261,9 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const response = (await action(createActionArgs({ request }))) as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
   });
 });

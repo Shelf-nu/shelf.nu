@@ -178,8 +178,10 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       createActionArgs({ request })
     )) as unknown as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -257,8 +259,10 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       createActionArgs({ request })
     )) as unknown as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
   });
 
   it("does not validate custodian for non-custody operations", async () => {
@@ -280,8 +284,10 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       createActionArgs({ request })
     )) as unknown as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
 
     // Should not call teamMember.findUnique for non-custody operations
     expect(mockGetTeamMember).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "react-router";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -255,7 +255,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return payload({ asset: updatedAsset });
+    return data(payload({ asset: updatedAsset }));
   } catch (cause) {
     // Log the error for debugging
     Logger.error(
@@ -272,9 +272,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     );
 
     // Return a successful response with error flag
-    return payload({
-      asset: null,
-      error: "Error refreshing image.",
-    });
+    return data(
+      payload({
+        asset: null,
+        error: "Error refreshing image.",
+      })
+    );
   }
 }
