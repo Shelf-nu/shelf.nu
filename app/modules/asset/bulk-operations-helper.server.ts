@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
-import { generateWhereClause, parseFilters } from "./query.server";
+import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
 import { getAssetsWhereInput } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -41,7 +41,11 @@ async function getAdvancedFilteredAssetIds({
     const { search } = paramsValues;
 
     const settingColumns = settings.columns as Column[];
-    const parsedFilters = parseFilters(filters, settingColumns);
+    const parsedFilters = await parseFiltersWithHierarchy(
+      filters,
+      settingColumns,
+      organizationId,
+    );
 
     // Generate WHERE clause (reuses existing logic)
     const whereClause = generateWhereClause(

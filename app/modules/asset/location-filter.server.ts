@@ -1,5 +1,5 @@
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
-import { getLocationDescendantIds } from "../location/service.server";
+import { getLocationDescendantIds } from "../location/descendants.server";
 
 /**
  * Utilities to adapt advanced location filters. When the user selects the

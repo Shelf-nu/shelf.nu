@@ -107,7 +107,7 @@ import {
   assetReturnFragment,
   generateCustomFieldSelect,
   generateWhereClause,
-  parseFilters,
+  parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
 import { getNextSequentialId } from "./sequential-id.server";
@@ -788,10 +788,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = await expandLocationHierarchyFilters({
-      filters: parseFilters(filters, settingColumns),
+    const parsedFilters = await parseFiltersWithHierarchy(
+      filters,
+      settingColumns,
       organizationId,
-    });
+    );
 
     const whereClause = generateWhereClause(
       organizationId,

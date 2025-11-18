@@ -6,6 +6,7 @@ import type {
 } from "~/components/assets/assets-index/advanced-filters/schema";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
+import { expandLocationHierarchyFilters } from "./location-filter.server";
 
 export const CUSTOM_FIELD_SEARCH_PATHS = [
   "valueText",
@@ -1765,3 +1766,13 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
     ) AS assets
   `;
 };
+
+export async function parseFiltersWithHierarchy(
+  filtersString: string,
+  columns: Column[],
+  organizationId?: string
+): Promise<Filter[]> {
+  const parsed = parseFilters(filtersString, columns);
+  if (!organizationId) return parsed;
+  return expandLocationHierarchyFilters({ filters: parsed, organizationId });
+}
