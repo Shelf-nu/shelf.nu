@@ -10,7 +10,7 @@ import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
 import { isQrId } from "~/utils/id";
 import { Logger } from "~/utils/logger";
-import type { FlashData } from "./session";
+import type { FlashData, SessionData } from "./session";
 import { authSessionKey } from "./session";
 
 /**
@@ -46,7 +46,6 @@ export function protect({
     if (isPublic) {
       return next();
     }
-    //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
@@ -106,7 +105,6 @@ function isExpiringSoon(expiresAt: number | undefined) {
  */
 export function refreshSession() {
   return createMiddleware(async (c, next) => {
-    //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
@@ -116,7 +114,7 @@ export function refreshSession() {
 
     try {
       session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
-    } catch (cause) {
+    } catch (_cause) {
       session.flash(
         "errorMessage",
         "You have been logged out. Please log in again."
