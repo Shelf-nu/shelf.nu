@@ -99,6 +99,7 @@ import {
 import { resolveTeamMemberName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
+import { expandLocationHierarchyFilters } from "./location-filter.server";
 import {
   CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
@@ -787,7 +788,10 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = parseFilters(filters, settingColumns);
+    const parsedFilters = await expandLocationHierarchyFilters({
+      filters: parseFilters(filters, settingColumns),
+      organizationId,
+    });
 
     const whereClause = generateWhereClause(
       organizationId,
