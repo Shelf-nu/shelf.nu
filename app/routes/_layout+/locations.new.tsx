@@ -100,6 +100,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
       locationId: location.id,
       organizationId,
+      userId: authSession.userId,
     });
 
     sendNotification({
