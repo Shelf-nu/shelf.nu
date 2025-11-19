@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
+import { mockLocationDescendants } from "@mocks/location-descendants";
+
+mockLocationDescendants();
+
 import type { action as scanAssetsAction } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import { requirePermission } from "~/utils/roles.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";

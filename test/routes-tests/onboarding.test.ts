@@ -3,6 +3,10 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
+import { mockLocationDescendants } from "@mocks/location-descendants";
+
+mockLocationDescendants();
+
 
 // why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
 const createDataMock = vi.hoisted(() => {

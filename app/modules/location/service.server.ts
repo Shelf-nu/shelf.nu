@@ -307,43 +307,6 @@ export async function getLocationDescendantsTree(params: {
 }
 
 /**
- * Returns a flat list of descendant location IDs for the provided location.
- * Used when filters need to include entire location hierarchies (e.g. assets within a branch).
- */
-export async function getLocationDescendantIds(params: {
-  organizationId: Organization["id"];
-  locationId: Location["id"];
-  includeSelf?: boolean;
-}): Promise<string[]> {
-  const { organizationId, locationId, includeSelf = true } = params;
-
-  const rows = await db.$queryRaw<LocationDescendantIdRow[]>`
-    WITH RECURSIVE location_descendants AS (
-      SELECT
-        id,
-        "parentId",
-        "organizationId"
-      FROM "Location"
-      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l."parentId",
-        l."organizationId"
-      FROM "Location" l
-      INNER JOIN location_descendants ld ON ld.id = l."parentId"
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT id, "parentId"
-    FROM location_descendants
-  `;
-
-  return rows
-    .filter((row) => includeSelf || row.id !== locationId)
-    .map((row) => row.id);
-}
-
-/**
  * Returns the maximum depth (root node counted as 0) for a location's subtree.
  * Used by validation to ensure re-parent operations do not exceed the configured max depth.
  */
