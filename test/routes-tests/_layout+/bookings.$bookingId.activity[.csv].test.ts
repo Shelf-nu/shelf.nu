@@ -4,9 +4,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mockLocationDescendants } from "@mocks/location-descendants";
-mockLocationDescendants();
+import { locationDescendantsMock } from "@mocks/location-descendants";
 
+// why: mocking location descendants to avoid database queries during tests
+vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
 
 import { db } from "~/database/db.server";
 import { getDateTimeFormat } from "~/utils/client-hints";
