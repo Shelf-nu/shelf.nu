@@ -7,6 +7,7 @@ import {
   wrapLinkForNote,
   wrapCustodianForNote,
   wrapDescriptionForNote,
+  wrapTagForNote,
   extractDateTags,
   extractAssetsListTags,
   DATE_TAG_REGEX,
@@ -17,6 +18,24 @@ import {
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 describe("markdoc-wrappers", () => {
+
+  describe("wrapTagForNote", () => {
+    it("should wrap tag name and optional id", () => {
+      const result = wrapTagForNote({ id: "tag-1", name: "Operations" });
+      expect(result).toBe('{% tag name="Operations" id="tag-1" /%}');
+    });
+
+    it("should omit id attribute when not provided", () => {
+      const result = wrapTagForNote({ id: undefined, name: "Logistics" });
+      expect(result).toBe('{% tag name="Logistics" /%}');
+    });
+
+    it("should escape quotes in tag name", () => {
+      const result = wrapTagForNote({ id: "tag-2", name: 'Quality "Control"' });
+      expect(result).toBe('{% tag name="Quality &quot;Control&quot;" id="tag-2" /%}');
+    });
+  });
+
   describe("wrapDateForNote", () => {
     it("should wrap date with Markdoc date tag", () => {
       const date = new Date("2023-12-25T10:30:00.000Z");
