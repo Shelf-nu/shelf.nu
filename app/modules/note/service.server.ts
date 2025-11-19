@@ -1,12 +1,16 @@
-import type { Asset, Kit, Note, Prisma, User } from "@prisma/client";
+import type { Asset, Kit, Note, Prisma, Tag, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
   wrapUserLinkForNote,
+  wrapTagForNote,
 } from "~/utils/markdoc-wrappers";
 
 const label = "Note";
+
+export type BasicUserName = { firstName: string | null; lastName: string | null };
+export type TagSummary = Pick<Tag, "id" | "name">;
 
 /** Creates a singular note */
 export async function createNote({
@@ -239,4 +243,76 @@ export async function createKitChangeNote({
       label,
     });
   }
+}
+
+export async function createTagChangeNoteIfNeeded({
+  assetId,
+  userId,
+  previousTags,
+  currentTags,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  previousTags: TagSummary[];
+  currentTags: TagSummary[];
+  loadUserForNotes: () => Promise<BasicUserName>;
+}) {
+  const previousTagIds = new Set(previousTags.map((tag) => tag.id));
+  const currentTagIds = new Set(currentTags.map((tag) => tag.id));
+
+  const addedTags = currentTags.filter((tag) => !previousTagIds.has(tag.id));
+  const removedTags = previousTags.filter((tag) => !currentTagIds.has(tag.id));
+
+  if (addedTags.length === 0 && removedTags.length === 0) {
+    return;
+  }
+
+  const user = await loadUserForNotes();
+  const userLink = wrapUserLinkForNote({
+    id: userId,
+    firstName: user.firstName ?? "",
+    lastName: user.lastName ?? "",
+  });
+
+  const formatTagNames = (tagList: TagSummary[]) =>
+    tagList
+      .map((tag) =>
+        wrapTagForNote({
+          id: tag.id,
+          name: (tag.name ?? "Unnamed tag").trim(),
+        })
+      )
+      .join(tagList.length > 1 ? ", " : "");
+
+  const actions: string[] = [];
+
+  if (addedTags.length > 0) {
+    actions.push(
+      `added tag${addedTags.length > 1 ? "s" : ""} ${formatTagNames(
+        addedTags
+      )}`
+    );
+  }
+
+  if (removedTags.length > 0) {
+    actions.push(
+      `removed tag${removedTags.length > 1 ? "s" : ""} ${formatTagNames(
+        removedTags
+      )}`
+    );
+  }
+
+  if (actions.length === 0) {
+    return;
+  }
+
+  const content = `${userLink} ${actions.join(" and ")}.`;
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
 }
