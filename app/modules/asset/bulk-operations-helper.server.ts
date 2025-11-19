@@ -44,7 +44,7 @@ async function getAdvancedFilteredAssetIds({
     const parsedFilters = await parseFiltersWithHierarchy(
       filters,
       settingColumns,
-      organizationId,
+      organizationId
     );
 
     // Generate WHERE clause (reuses existing logic)

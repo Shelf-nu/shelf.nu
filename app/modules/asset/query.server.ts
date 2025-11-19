@@ -4,9 +4,9 @@ import type {
   Filter,
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/schema";
+import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
-import { expandLocationHierarchyFilters } from "./location-filter.server";
 
 export const CUSTOM_FIELD_SEARCH_PATHS = [
   "valueText",

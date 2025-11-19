@@ -99,7 +99,6 @@ import {
 import { resolveTeamMemberName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
-import { expandLocationHierarchyFilters } from "./location-filter.server";
 import {
   CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
@@ -791,7 +790,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const parsedFilters = await parseFiltersWithHierarchy(
       filters,
       settingColumns,
-      organizationId,
+      organizationId
     );
 
     const whereClause = generateWhereClause(
