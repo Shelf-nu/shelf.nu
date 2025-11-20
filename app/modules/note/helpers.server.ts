@@ -85,16 +85,20 @@ export function buildNameChangeNote({
   const normalizedPrevious = normalizeText(previous);
   const normalizedNext = normalizeText(next);
 
+  if (!normalizedPrevious || !normalizedNext) {
+    return null;
+  }
+
   if (normalizedPrevious === normalizedNext) {
     return null;
   }
 
   const formatName = (value: string) => {
-    const escaped = value.replace(/([*_`~])/g, "\\$1");
+    const escaped = value.replace(/([*_`~])/g, "\$1");
     return `**${escaped}**`;
   };
 
-  return `${userLink} updated the asset name from ${formatName(normalizedPrevious!)} to ${formatName(normalizedNext!)}.`;
+  return `${userLink} updated the asset name from ${formatName(normalizedPrevious)} to ${formatName(normalizedNext)}.`;
 }
 
 /**
