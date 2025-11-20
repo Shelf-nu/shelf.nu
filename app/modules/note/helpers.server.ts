@@ -1,5 +1,5 @@
-import type { LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
 import type { Category, Currency, Prisma, User } from "@prisma/client";
+import type { LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
 
 import { formatCurrency } from "~/utils/currency";
 import {
@@ -94,17 +94,21 @@ export function buildNameChangeNote({
   }
 
   const formatName = (value: string) => {
-    const escaped = value.replace(/([*_`~])/g, "\$1");
+    const escaped = value.replace(/([*_`~])/g, "$1");
     return `**${escaped}**`;
   };
 
-  return `${userLink} updated the asset name from ${formatName(normalizedPrevious)} to ${formatName(normalizedNext)}.`;
+  return `${userLink} updated the asset name from ${formatName(
+    normalizedPrevious
+  )} to ${formatName(normalizedNext)}.`;
 }
 
 /**
  * Convert a category into a link / bold text for notes.
  */
-export function formatCategoryForNote(category?: Pick<Category, "id" | "name"> | null) {
+export function formatCategoryForNote(
+  category?: Pick<Category, "id" | "name"> | null
+) {
   if (!category) {
     return null;
   }
@@ -114,7 +118,9 @@ export function formatCategoryForNote(category?: Pick<Category, "id" | "name"> |
     return null;
   }
 
-  return category.id ? wrapLinkForNote(`/categories/${category.id}`, name) : `**${name}**`;
+  return category.id
+    ? wrapLinkForNote(`/categories/${category.id}`, name)
+    : `**${name}**`;
 }
 
 /**
@@ -231,6 +237,6 @@ export function buildValuationChangeNote({
   if (formattedNext) {
     return `${userLink} set the asset value to ${formattedNext}.`;
   }
-  
+
   return `${userLink} removed the asset value.`;
 }

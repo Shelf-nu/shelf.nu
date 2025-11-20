@@ -1,4 +1,3 @@
-import { getLocale } from "~/utils/client-hints";
 import type {
   Category,
   Location,
@@ -56,6 +55,7 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { getLocale } from "~/utils/client-hints";
 import { LEGACY_CUID_LENGTH } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -1162,7 +1162,7 @@ export async function updateAsset({
   customFieldsValues: customFieldsValuesFromForm,
   barcodes,
   organizationId,
-  request
+  request,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
@@ -1348,7 +1348,12 @@ export async function updateAsset({
     const asset = await db.asset.update({
       where: { id, organizationId },
       data,
-      include: { location: true, tags: true, category: true, organization: true },
+      include: {
+        location: true,
+        tags: true,
+        category: true,
+        organization: true,
+      },
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */
@@ -1426,7 +1431,8 @@ export async function updateAsset({
           previousValuation: assetBeforeUpdate.valuation,
           newValuation: asset.valuation,
           currency:
-            assetBeforeUpdate.organization?.currency || asset.organization.currency,
+            assetBeforeUpdate.organization?.currency ||
+            asset.organization.currency,
           locale: getLocale(request),
           loadUserForNotes,
         }),
@@ -1603,7 +1609,7 @@ export async function updateAssetMainImage({
       mainImageExpiration: oneDayFromNow(),
       userId,
       organizationId,
-      request
+      request,
     });
 
     /**
