@@ -5,6 +5,7 @@ import {
   wrapKitsWithDataForNote,
   wrapUserLinkForNote,
   wrapTagForNote,
+  wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 
 const label = "Note";

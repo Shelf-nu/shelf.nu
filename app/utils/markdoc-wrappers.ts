@@ -282,3 +282,44 @@ export function wrapDescriptionForNote(
 
   return `{% description${oldAttr}${newAttr} /%}`;
 }
+
+/**
+ * Wraps freeform text changes in a Markdoc text_diff tag for note activity.
+ *
+ * @param previousText - The previous value to render in the diff (optional)
+ * @param newText - The new value to render in the diff (optional)
+ * @param label - Optional label describing the field (e.g. "Name")
+ * @returns String containing a self-closing {% text_diff %} tag or empty string when nothing to render
+ */
+export function wrapTextDiffForNote(
+  previousText?: string | null,
+  newText?: string | null,
+  label?: string
+): string {
+  const hasPrevious = typeof previousText === "string" && previousText.length > 0;
+  const hasNew = typeof newText === "string" && newText.length > 0;
+
+  if (!hasPrevious && !hasNew) {
+    return "";
+  }
+
+  const sanitize = (value: string) => value.replace(/"/g, "&quot;");
+
+  const parts: string[] = ["{% text_diff"];
+
+  if (label && label.length > 0) {
+    parts.push(` label="${sanitize(label)}"`);
+  }
+
+  if (hasPrevious) {
+    parts.push(` previous="${sanitize(previousText!)}"`);
+  }
+
+  if (hasNew) {
+    parts.push(` new="${sanitize(newText!)}"`);
+  }
+
+  parts.push(" /%}");
+
+  return parts.join("");
+}

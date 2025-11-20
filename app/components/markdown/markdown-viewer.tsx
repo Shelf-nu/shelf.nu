@@ -8,6 +8,7 @@ import { AssetsListComponent } from "./assets-list-component";
 import { BookingStatusComponent } from "./booking-status-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
+import { TextDiffComponent } from "./text-diff-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
 import { TagComponent } from "./tag-component";
@@ -43,6 +44,7 @@ const defaultComponents = {
   LinkComponent,
   BookingStatusComponent,
   DescriptionComponent,
+  TextDiffComponent,
   RawBlock: RawBlockComponent,
   TagComponent,
 };
