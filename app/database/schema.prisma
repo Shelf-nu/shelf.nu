@@ -884,6 +884,7 @@ enum Currency {
   UGX // Ugandan Shilling
   ZAR // South African Rand
   PKR // Pakistani Rupee
+  RON // Romanian Leu
 }
 
 enum InviteStatuses {
