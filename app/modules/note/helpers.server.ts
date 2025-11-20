@@ -58,16 +58,16 @@ export function buildDescriptionChangeNote({
 
   if (!normalizedPrevious && normalizedNext) {
     const tag = wrapDescriptionForNote(undefined, normalizedNext);
-    return `${userLink} added a description ${tag}.`;
+    return `${userLink} added an asset description ${tag}.`;
   }
 
   if (normalizedPrevious && !normalizedNext) {
     const tag = wrapDescriptionForNote(normalizedPrevious, undefined);
-    return `${userLink} removed the description ${tag}.`;
+    return `${userLink} removed the asset description ${tag}.`;
   }
 
   const tag = wrapDescriptionForNote(normalizedPrevious, normalizedNext);
-  return `${userLink} updated the description ${tag}.`;
+  return `${userLink} updated the asset description ${tag}.`;
 }
 
 /**

@@ -19,7 +19,7 @@ describe("buildDescriptionChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} added a description {% description newText="New details" /%}.`
+      `${userLink} added an asset description {% description newText="New details" /%}.`
     );
   });
 
@@ -31,7 +31,7 @@ describe("buildDescriptionChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} removed the description {% description oldText="Old details" /%}.`
+      `${userLink} removed the asset description {% description oldText="Old details" /%}.`
     );
   });
 
@@ -43,7 +43,7 @@ describe("buildDescriptionChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} updated the description {% description oldText="Old description" newText="Updated description" /%}.`
+      `${userLink} updated the asset description {% description oldText="Old description" newText="Updated description" /%}.`
     );
   });
 });
