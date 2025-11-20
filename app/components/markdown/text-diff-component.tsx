@@ -1,5 +1,3 @@
-import clsx from "clsx";
-
 interface TextDiffComponentProps {
   label?: string;
   previous?: string;
@@ -32,18 +30,16 @@ export function TextDiffComponent({
       ) : null}
 
       {hasPrevious ? (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-red-800">
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
           <span className="font-medium uppercase tracking-wide text-red-600">
             Previous
           </span>
-          <p className={clsx("mt-1 break-words", hasNew && "line-through")}>
-            {previous}
-          </p>
+          <p className="mt-1 break-words">{previous}</p>
         </div>
       ) : null}
 
       {hasNew ? (
-        <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">
           <span className="font-medium uppercase tracking-wide text-emerald-600">
             New
           </span>

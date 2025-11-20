@@ -1,19 +1,18 @@
-import type { Asset, Kit, Note, Prisma, Tag, User } from "@prisma/client";
+import type { Asset, Category, Currency, Kit, Note, Prisma, Tag, User } from "@prisma/client";
+import type { BasicUserName, LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { wrapKitsWithDataForNote, wrapUserLinkForNote, wrapTagForNote } from "~/utils/markdoc-wrappers";
 import {
-  wrapKitsWithDataForNote,
-  wrapUserLinkForNote,
-  wrapTagForNote,
-  wrapDescriptionForNote,
-} from "~/utils/markdoc-wrappers";
+  buildCategoryChangeNote,
+  buildDescriptionChangeNote,
+  buildNameChangeNote,
+  buildValuationChangeNote,
+  resolveUserLink,
+} from "~/modules/note/helpers.server";
 
 const label = "Note";
 
-export type BasicUserName = {
-  firstName: string | null;
-  lastName: string | null;
-};
 export type TagSummary = Pick<Tag, "id" | "name">;
 
 /** Creates a singular note */
@@ -310,6 +309,152 @@ export async function createTagChangeNoteIfNeeded({
   }
 
   const content = `${userLink} ${actions.join(" and ")}.`;
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
+}
+
+/**
+ * Persist a note capturing asset name changes using the text diff helper.
+ */
+export async function createAssetNameChangeNote({
+  assetId,
+  userId,
+  previousName,
+  newName,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  previousName?: string | null;
+  newName?: string | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = buildNameChangeNote({
+    userLink,
+    previous: previousName,
+    next: newName,
+  });
+
+  if (!content) {
+    return;
+  }
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
+}
+
+/**
+ * Persist a note describing updates to the asset description.
+ */
+export async function createAssetDescriptionChangeNote({
+  assetId,
+  userId,
+  previousDescription,
+  newDescription,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  previousDescription?: string | null;
+  newDescription?: string | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = buildDescriptionChangeNote({
+    userLink,
+    previous: previousDescription,
+    next: newDescription,
+  });
+
+  if (!content) {
+    return;
+  }
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
+}
+
+/**
+ * Persist a note when the asset category is added, changed, or removed.
+ */
+export async function createAssetCategoryChangeNote({
+  assetId,
+  userId,
+  previousCategory,
+  newCategory,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  previousCategory?: Pick<Category, "id" | "name"> | null;
+  newCategory?: Pick<Category, "id" | "name"> | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = buildCategoryChangeNote({
+    userLink,
+    previous: previousCategory,
+    next: newCategory,
+  });
+
+  if (!content) {
+    return;
+  }
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
+}
+
+/**
+ * Persist a note highlighting valuation adjustments with formatted currency values.
+ */
+export async function createAssetValuationChangeNote({
+  assetId,
+  userId,
+  previousValuation,
+  newValuation,
+  currency,
+  locale,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  previousValuation?: Prisma.Decimal | number | null;
+  newValuation?: Prisma.Decimal | number | null;
+  currency: Currency;
+  locale: string;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = buildValuationChangeNote({
+    userLink,
+    previous: previousValuation,
+    next: newValuation,
+    currency,
+    locale,
+  });
+
+  if (!content) {
+    return;
+  }
 
   await createNote({
     content,
