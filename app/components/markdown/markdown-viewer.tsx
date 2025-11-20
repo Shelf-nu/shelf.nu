@@ -11,7 +11,6 @@ import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
 import { TagComponent } from "./tag-component";
-import { TextDiffComponent } from "./text-diff-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
   <div className="raw-block rounded border border-dashed border-gray-300 bg-gray-50">
@@ -44,7 +43,6 @@ const defaultComponents = {
   LinkComponent,
   BookingStatusComponent,
   DescriptionComponent,
-  TextDiffComponent,
   RawBlock: RawBlockComponent,
   TagComponent,
 };

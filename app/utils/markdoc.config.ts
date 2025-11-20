@@ -171,28 +171,5 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
-    text_diff: {
-      render: "TextDiffComponent",
-      description:
-        "Displays before/after text changes with optional labels in activity notes",
-      attributes: {
-        label: {
-          type: String,
-          required: false,
-          description: "Optional label describing the field being changed",
-        },
-        previous: {
-          type: String,
-          required: false,
-          description: "Previous value before the change",
-        },
-        new: {
-          type: String,
-          required: false,
-          description: "New value after the change",
-        },
-      },
-      selfClosing: true,
-    },
   },
 };

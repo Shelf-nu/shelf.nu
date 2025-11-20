@@ -5,7 +5,6 @@ import { formatCurrency } from "~/utils/currency";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
-  wrapTextDiffForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
@@ -57,16 +56,22 @@ export function buildDescriptionChangeNote({
     return null;
   }
 
-  const tag = wrapDescriptionForNote(
-    normalizedPrevious ?? undefined,
-    normalizedNext ?? undefined
-  );
+  if (!normalizedPrevious && normalizedNext) {
+    const tag = wrapDescriptionForNote(undefined, normalizedNext);
+    return `${userLink} added a description ${tag}.`;
+  }
 
+  if (normalizedPrevious && !normalizedNext) {
+    const tag = wrapDescriptionForNote(normalizedPrevious, undefined);
+    return `${userLink} removed the description ${tag}.`;
+  }
+
+  const tag = wrapDescriptionForNote(normalizedPrevious, normalizedNext);
   return `${userLink} updated the description ${tag}.`;
 }
 
 /**
- * Build the name change Markdoc snippet via text_diff tag.
+ * Build the name change note using inline bold formatting.
  */
 export function buildNameChangeNote({
   userLink,
@@ -84,8 +89,12 @@ export function buildNameChangeNote({
     return null;
   }
 
-  const diffTag = wrapTextDiffForNote(normalizedPrevious, normalizedNext, "Name");
-  return `${userLink} updated the asset name. ${diffTag}`;
+  const formatName = (value: string) => {
+    const escaped = value.replace(/([*_`~])/g, "\\$1");
+    return `**${escaped}**`;
+  };
+
+  return `${userLink} updated the asset name from ${formatName(normalizedPrevious!)} to ${formatName(normalizedNext!)}.`;
 }
 
 /**
@@ -131,7 +140,7 @@ export function buildCategoryChangeNote({
     return `${userLink} set the category to ${formattedNext}.`;
   }
 
-  return `${userLink} removed the category.`;
+  return `${userLink} removed the asset category.`;
 }
 
 /**
@@ -212,12 +221,12 @@ export function buildValuationChangeNote({
   });
 
   if (formattedPrevious && formattedNext) {
-    return `${userLink} changed the valuation from ${formattedPrevious} to ${formattedNext}.`;
+    return `${userLink} changed the asset value from ${formattedPrevious} to ${formattedNext}.`;
   }
 
   if (formattedNext) {
-    return `${userLink} set the valuation to ${formattedNext}.`;
+    return `${userLink} set the asset value to ${formattedNext}.`;
   }
-
-  return `${userLink} removed the valuation.`;
+  
+  return `${userLink} removed the asset value.`;
 }
