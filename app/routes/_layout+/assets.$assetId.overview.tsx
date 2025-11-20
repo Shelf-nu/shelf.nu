@@ -17,6 +17,7 @@ import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
+import { LocationBadge } from "~/components/location/location-badge";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
@@ -339,9 +340,18 @@ export default function AssetOverview() {
                     Location
                   </span>
                   <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                    <Tag key={location.id} className="ml-2">
-                      {location.name}
-                    </Tag>
+                    <LocationBadge
+                      location={
+                        location
+                          ? {
+                              id: location.id,
+                              name: location.name,
+                              parentId: location.parentId,
+                              childCount: location._count?.children ?? 0,
+                            }
+                          : null
+                      }
+                    />
                   </div>
                 </li>
               ) : null}

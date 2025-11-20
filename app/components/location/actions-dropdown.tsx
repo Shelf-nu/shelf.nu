@@ -14,6 +14,7 @@ import { Button } from "../shared/button";
 interface Props {
   location: {
     name: Location["name"];
+    childCount?: number;
   };
   fullWidth?: boolean;
 }

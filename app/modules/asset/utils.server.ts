@@ -11,7 +11,7 @@ import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
-import { parseFilters } from "./query.server";
+import { parseFiltersWithHierarchy } from "./query.server";
 import type { ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -634,11 +634,16 @@ type AllSelectedValues = {
  *
  * @returns {AllSelectedValues}
  */
-export function getAllSelectedValuesFromFilters(
+export async function getAllSelectedValuesFromFilters(
   filters: string = "",
-  columns: Column[]
+  columns: Column[],
+  organizationId?: string
 ) {
-  const parsedFilters = parseFilters(filters, columns);
+  const parsedFilters = await parseFiltersWithHierarchy(
+    filters,
+    columns,
+    organizationId
+  );
   return parsedFilters.reduce((acc, curr) => {
     /*
      * We only have to take care of string values because most dropdown has string values only.
