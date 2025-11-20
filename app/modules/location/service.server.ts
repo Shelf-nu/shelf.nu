@@ -245,7 +245,6 @@ export type LocationTreeNode = Pick<Location, "id" | "name"> & {
 
 /** Raw row returned when querying descendants via recursive CTE. */
 type LocationDescendantRow = Pick<Location, "id" | "name" | "parentId">;
-type LocationDescendantIdRow = Pick<Location, "id" | "parentId">;
 /** Aggregate row holding the maximum depth returned from subtree depth query. */
 type SubtreeDepthRow = { maxDepth: number | null };
 
