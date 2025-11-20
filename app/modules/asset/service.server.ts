@@ -107,7 +107,7 @@ import {
   assetReturnFragment,
   generateCustomFieldSelect,
   generateWhereClause,
-  parseFilters,
+  parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
 import { getNextSequentialId } from "./sequential-id.server";
@@ -792,7 +792,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = parseFilters(filters, settingColumns);
+    const parsedFilters = await parseFiltersWithHierarchy(
+      filters,
+      settingColumns,
+      organizationId
+    );
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -818,7 +822,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
+        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
       ), 
       sorted_asset_query AS (
         SELECT * FROM asset_query

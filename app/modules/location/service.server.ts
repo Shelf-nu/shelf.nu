@@ -39,6 +39,7 @@ import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
+const MAX_LOCATION_DEPTH = 12;
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
@@ -86,6 +87,42 @@ export async function getLocation(
       };
     }
 
+    const parentInclude = {
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        _count: { select: { children: true } },
+      },
+    } satisfies Prisma.LocationInclude["parent"];
+
+    const locationInclude: Prisma.LocationInclude = include
+      ? { ...include, parent: parentInclude }
+      : {
+          assets: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
+                },
+              },
+              tags: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+            skip,
+            take,
+            where: assetsWhere,
+            orderBy: { [orderBy]: orderDirection },
+          },
+          parent: parentInclude,
+        };
+
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
@@ -97,31 +134,7 @@ export async function getLocation(
               : []),
           ],
         },
-        include: include
-          ? include
-          : {
-              assets: {
-                include: {
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  tags: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
-                },
-                skip,
-                take,
-                where: assetsWhere,
-                orderBy: { [orderBy]: orderDirection },
-              },
-            },
+        include: locationInclude,
       }),
 
       /** Count them */
@@ -182,6 +195,152 @@ export async function getLocation(
   }
 }
 
+export type LocationHierarchyEntry = Pick<
+  Location,
+  "id" | "name" | "parentId"
+> & {
+  depth: number;
+};
+
+/**
+ * Returns the ancestor chain for a given location ordered from the root down to the provided node.
+ */
+export async function getLocationHierarchy(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}) {
+  const { organizationId, locationId } = params;
+
+  return db.$queryRaw<LocationHierarchyEntry[]>`
+    WITH RECURSIVE location_hierarchy AS (
+      SELECT
+        id,
+        name,
+        "parentId",
+        "organizationId",
+        0 AS depth
+      FROM "Location"
+      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l.name,
+        l."parentId",
+        l."organizationId",
+        lh.depth + 1 AS depth
+      FROM "Location" l
+      INNER JOIN location_hierarchy lh ON lh."parentId" = l.id
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT id, name, "parentId", depth
+    FROM location_hierarchy
+    ORDER BY depth DESC
+  `;
+}
+
+/** Represents a node in the descendant tree rendered on location detail pages. */
+export type LocationTreeNode = Pick<Location, "id" | "name"> & {
+  children: LocationTreeNode[];
+};
+
+/** Raw row returned when querying descendants via recursive CTE. */
+type LocationDescendantRow = Pick<Location, "id" | "name" | "parentId">;
+/** Aggregate row holding the maximum depth returned from subtree depth query. */
+type SubtreeDepthRow = { maxDepth: number | null };
+
+/**
+ * Fetches a nested tree of all descendants for the provided location.
+ * Used to render the hierarchical child list on the location page sidebar.
+ */
+export async function getLocationDescendantsTree(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}): Promise<LocationTreeNode[]> {
+  const { organizationId, locationId } = params;
+
+  const descendants = await db.$queryRaw<LocationDescendantRow[]>`
+    WITH RECURSIVE location_descendants AS (
+      SELECT
+        id,
+        name,
+        "parentId",
+        "organizationId"
+      FROM "Location"
+      WHERE "parentId" = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l.name,
+        l."parentId",
+        l."organizationId"
+      FROM "Location" l
+      INNER JOIN location_descendants ld ON ld.id = l."parentId"
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT id, name, "parentId"
+    FROM location_descendants
+  `;
+
+  const nodes = new Map<string, LocationTreeNode>();
+  const rootNodes: LocationTreeNode[] = [];
+
+  for (const row of descendants) {
+    nodes.set(row.id, { id: row.id, name: row.name, children: [] });
+  }
+
+  for (const row of descendants) {
+    const node = nodes.get(row.id);
+    if (!node) continue;
+
+    if (row.parentId === locationId) {
+      rootNodes.push(node);
+    }
+
+    const parentNode = row.parentId ? nodes.get(row.parentId) : null;
+    if (parentNode) {
+      parentNode.children.push(node);
+    }
+  }
+
+  return rootNodes;
+}
+
+/**
+ * Returns the maximum depth (root node counted as 0) for a location's subtree.
+ * Used by validation to ensure re-parent operations do not exceed the configured max depth.
+ */
+export async function getLocationSubtreeDepth(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}): Promise<number> {
+  const { organizationId, locationId } = params;
+
+  const [result] = await db.$queryRaw<SubtreeDepthRow[]>`
+    WITH RECURSIVE location_subtree AS (
+      SELECT
+        id,
+        "parentId",
+        "organizationId",
+        0 AS depth
+      FROM "Location"
+      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l."parentId",
+        l."organizationId",
+        ls.depth + 1 AS depth
+      FROM "Location" l
+      INNER JOIN location_subtree ls ON l."parentId" = ls.id
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT MAX(depth) AS "maxDepth"
+    FROM location_subtree
+  `;
+
+  return result?.maxDepth ?? 0;
+}
+
 export async function getLocations(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -215,7 +374,15 @@ export async function getLocations(params: {
         where,
         orderBy: { updatedAt: "desc" },
         include: {
-          _count: { select: { kits: true, assets: true } },
+          _count: { select: { kits: true, assets: true, children: true } },
+          parent: {
+            select: {
+              id: true,
+              name: true,
+              parentId: true,
+              _count: { select: { children: true } },
+            },
+          },
           image: {
             select: {
               updatedAt: true,
@@ -252,15 +419,110 @@ export async function getLocationTotalValuation({
   return result._sum.valuation ?? 0;
 }
 
+/**
+ * Validates that a parent location belongs to the same organization, does not create cycles,
+ * and keeps the tree depth under {@link MAX_LOCATION_DEPTH}.
+ */
+async function validateParentLocation({
+  organizationId,
+  parentId,
+  currentLocationId,
+}: {
+  organizationId: Organization["id"];
+  parentId?: Location["parentId"];
+  currentLocationId?: Location["id"];
+}) {
+  if (!parentId) {
+    return null;
+  }
+
+  if (currentLocationId && parentId === currentLocationId) {
+    throw new ShelfError({
+      cause: null,
+      message: "A location cannot be its own parent.",
+      additionalData: { currentLocationId, parentId, organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const parentLocation = await db.location.findFirst({
+    where: { id: parentId, organizationId },
+    select: { id: true },
+  });
+
+  if (!parentLocation) {
+    throw new ShelfError({
+      cause: null,
+      message: "Parent location not found.",
+      additionalData: { parentId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const hierarchy = await getLocationHierarchy({
+    organizationId,
+    locationId: parentId,
+  });
+
+  const parentDepth = hierarchy.reduce(
+    (maxDepth, location) => Math.max(maxDepth, location.depth),
+    0
+  );
+
+  const subtreeDepth =
+    currentLocationId === undefined
+      ? 0
+      : await getLocationSubtreeDepth({
+          organizationId,
+          locationId: currentLocationId,
+        });
+
+  if (parentDepth + 1 + subtreeDepth > MAX_LOCATION_DEPTH) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message: `Locations cannot be nested deeper than ${MAX_LOCATION_DEPTH} levels.`,
+      additionalData: {
+        parentId,
+        organizationId,
+        parentDepth,
+        subtreeDepth,
+      },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (currentLocationId && hierarchy.some((l) => l.id === currentLocationId)) {
+    throw new ShelfError({
+      cause: null,
+      message: "A location cannot be assigned to one of its descendants.",
+      additionalData: { parentId, currentLocationId, organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  return parentLocation.id;
+}
+
 export async function createLocation({
   name,
   description,
   address,
   userId,
   organizationId,
+  parentId,
 }: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
   organizationId: Organization["id"];
+  parentId?: Location["parentId"];
 }) {
   try {
     // Geocode the address if provided
@@ -268,6 +530,11 @@ export async function createLocation({
     if (address) {
       coordinates = await geolocate(address);
     }
+
+    const validatedParentId = await validateParentLocation({
+      organizationId,
+      parentId,
+    });
 
     return await db.location.create({
       data: {
@@ -286,9 +553,19 @@ export async function createLocation({
             id: organizationId,
           },
         },
+        ...(validatedParentId && {
+          parent: {
+            connect: {
+              id: validatedParentId,
+            },
+          },
+        }),
       },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
     });
@@ -328,8 +605,10 @@ export async function updateLocation(payload: {
   description?: Location["description"];
   userId: User["id"];
   organizationId: Organization["id"];
+  parentId?: Location["parentId"];
 }) {
-  const { id, name, address, description, userId, organizationId } = payload;
+  const { id, name, address, description, userId, organizationId, parentId } =
+    payload;
 
   try {
     // Get the current location to check if address changed
@@ -352,6 +631,15 @@ export async function updateLocation(payload: {
       }
     }
 
+    const validatedParentId =
+      parentId === undefined
+        ? undefined
+        : await validateParentLocation({
+            organizationId,
+            parentId,
+            currentLocationId: id,
+          });
+
     return await db.location.update({
       where: { id, organizationId },
       data: {
@@ -362,9 +650,21 @@ export async function updateLocation(payload: {
           latitude: coordinates?.lat || null,
           longitude: coordinates?.lon || null,
         }),
+        ...(validatedParentId !== undefined && {
+          parent: validatedParentId
+            ? {
+                connect: {
+                  id: validatedParentId,
+                },
+              }
+            : { disconnect: true },
+        }),
       },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: {
         id,

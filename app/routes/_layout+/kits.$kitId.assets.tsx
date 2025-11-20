@@ -12,8 +12,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -192,9 +192,14 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
 
       <Td>
         {location ? (
-          <GrayBadge>
-            <span>{location.name}</span>
-          </GrayBadge>
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
       {/* Tags */}

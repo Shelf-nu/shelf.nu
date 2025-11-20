@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
+import { locationDescendantsMock } from "@mocks/location-descendants";
+
+// why: mocking location descendants to avoid database queries during tests
+vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
+
 import type { action as scanAssetsAction } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import { requirePermission } from "~/utils/roles.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
