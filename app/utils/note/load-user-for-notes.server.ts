@@ -12,11 +12,10 @@ export function createLoadUserForNotes(userId: User["id"]) {
 
   return async (): Promise<BasicUserName> => {
     if (!cachedUser) {
-      cachedUser =
-        (await db.user.findFirst({
-          where: { id: userId },
-          select: { firstName: true, lastName: true },
-        })) ?? { firstName: null, lastName: null };
+      cachedUser = (await db.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true },
+      })) ?? { firstName: null, lastName: null };
     }
 
     return cachedUser;
