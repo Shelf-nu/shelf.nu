@@ -306,8 +306,8 @@ export default function BulkPartialCheckinDialog({
                 booking={{
                   id: booking.id,
                   name: booking.name,
-                  to: booking.to!,
-                  from: booking.from!,
+                  to: booking.to,
+                  from: booking.from,
                 }}
                 label={`Check in  item${totalSelectedItems !== 1 ? "s" : ""}`}
                 variant="primary"

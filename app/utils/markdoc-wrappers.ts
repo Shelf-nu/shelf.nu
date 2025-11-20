@@ -170,7 +170,10 @@ export function wrapLinkForNote(to: string, text: string): string {
   return `{% link to="${to}" text="${text.replace(/"/g, "&quot;")}" /%}`;
 }
 
-export function wrapTagForNote(tag: { id?: string | null; name: string }): string {
+export function wrapTagForNote(tag: {
+  id?: string | null;
+  name: string;
+}): string {
   const sanitizedName = tag.name.replace(/"/g, "&quot;");
   const idAttr = tag.id ? ` id="${tag.id}"` : "";
   return `{% tag name="${sanitizedName}"${idAttr} /%}`;
