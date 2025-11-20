@@ -13,10 +13,7 @@ import {
 
 type CheckinDropdownProps = {
   disabled?: boolean;
-  booking: Pick<Booking, "id" | "name"> & {
-    to: string | Date;
-    from: string | Date;
-  };
+  booking: Pick<Booking, "id" | "name" | "from" | "to">;
   portalContainer?: HTMLElement;
 };
 

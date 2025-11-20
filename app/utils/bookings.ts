@@ -4,10 +4,7 @@ import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
 
 export function canUserManageBookingAssets(
-  booking: Pick<Booking, "status"> & {
-    from?: string | Date | null; // from is string in case if it is formatted
-    to?: string | Date | null; // to is string in case if it is formatted
-  },
+  booking: Pick<Booking, "status" | "from" | "to">,
   isSelfService: boolean
 ) {
   const isCompleted = booking.status === BookingStatus.COMPLETE;
@@ -18,8 +15,6 @@ export function canUserManageBookingAssets(
     isSelfService && booking.status !== BookingStatus.DRAFT;
 
   return (
-    !!booking.from &&
-    !!booking.to &&
     !isCompleted &&
     !isArchived &&
     !isCancelled &&

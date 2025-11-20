@@ -1,8 +1,14 @@
-import type { Asset, Category, Currency, Kit, Note, Prisma, Tag, User } from "@prisma/client";
-import type { BasicUserName, LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
+import type {
+  Asset,
+  Category,
+  Currency,
+  Kit,
+  Note,
+  Prisma,
+  Tag,
+  User,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
-import { wrapKitsWithDataForNote, wrapUserLinkForNote, wrapTagForNote } from "~/utils/markdoc-wrappers";
 import {
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
@@ -10,6 +16,16 @@ import {
   buildValuationChangeNote,
   resolveUserLink,
 } from "~/modules/note/helpers.server";
+import type {
+  BasicUserName,
+  LoadUserForNotesFn,
+} from "~/modules/note/load-user-for-notes.server";
+import { ShelfError } from "~/utils/error";
+import {
+  wrapKitsWithDataForNote,
+  wrapUserLinkForNote,
+  wrapTagForNote,
+} from "~/utils/markdoc-wrappers";
 
 const label = "Note";
 

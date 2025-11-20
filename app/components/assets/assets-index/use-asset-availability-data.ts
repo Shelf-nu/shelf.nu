@@ -60,8 +60,8 @@ export function useAssetAvailabilityData(items: Items) {
               title,
               resourceId: asset.id,
               url: `/bookings/${booking.id}`,
-              start: toIsoDateTimeToUserTimezone(booking.from!, timeZone),
-              end: toIsoDateTimeToUserTimezone(booking.to!, timeZone),
+              start: toIsoDateTimeToUserTimezone(booking.from, timeZone),
+              end: toIsoDateTimeToUserTimezone(booking.to, timeZone),
               classNames: [
                 `bookingId-${booking.id}`,
                 ...getStatusClasses(

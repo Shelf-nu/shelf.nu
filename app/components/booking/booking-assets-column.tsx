@@ -62,14 +62,12 @@ export function BookingAssetsColumn() {
   const manageAssetsUrl = useMemo(
     () =>
       `manage-assets?${new URLSearchParams({
-        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
-        // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from!).toISOString(),
-        bookingTo: new Date(booking.to!).toISOString(),
+        bookingFrom: new Date(booking.from).toISOString(),
+        bookingTo: new Date(booking.to).toISOString(),
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`,
-    [booking]
+    [booking.from, booking.to, booking.id]
   );
 
   // Self service can only manage assets for bookings that are DRAFT
@@ -98,12 +96,7 @@ export function BookingAssetsColumn() {
 
   const manageAssetsButtonDisabled = useMemo(
     () =>
-      !booking.from ||
-      !booking.to ||
-      isCompleted ||
-      isArchived ||
-      isCancelled ||
-      cantManageAssetsAsBase
+      isCompleted || isArchived || isCancelled || cantManageAssetsAsBase
         ? {
             reason: isCompleted
               ? "Booking is completed. You cannot change the assets anymore"
@@ -116,14 +109,7 @@ export function BookingAssetsColumn() {
               : "You need to select a start and end date and save your booking before you can add assets to your booking",
           }
         : false,
-    [
-      booking.from,
-      booking.to,
-      isCompleted,
-      isArchived,
-      isCancelled,
-      cantManageAssetsAsBase,
-    ]
+    [isCompleted, isArchived, isCancelled, cantManageAssetsAsBase]
   );
 
   /**
