@@ -36,7 +36,9 @@ export function TextDiffComponent({
           <span className="font-medium uppercase tracking-wide text-red-600">
             Previous
           </span>
-          <p className={clsx("mt-1 break-words", hasNew && "line-through")}>{previous}</p>
+          <p className={clsx("mt-1 break-words", hasNew && "line-through")}>
+            {previous}
+          </p>
         </div>
       ) : null}
 

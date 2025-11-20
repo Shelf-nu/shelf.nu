@@ -8,10 +8,10 @@ import { AssetsListComponent } from "./assets-list-component";
 import { BookingStatusComponent } from "./booking-status-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
-import { TextDiffComponent } from "./text-diff-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
 import { TagComponent } from "./tag-component";
+import { TextDiffComponent } from "./text-diff-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
   <div className="raw-block rounded border border-dashed border-gray-300 bg-gray-50">

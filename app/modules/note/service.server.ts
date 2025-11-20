@@ -10,7 +10,10 @@ import {
 
 const label = "Note";
 
-export type BasicUserName = { firstName: string | null; lastName: string | null };
+export type BasicUserName = {
+  firstName: string | null;
+  lastName: string | null;
+};
 export type TagSummary = Pick<Tag, "id" | "name">;
 
 /** Creates a singular note */
@@ -290,9 +293,7 @@ export async function createTagChangeNoteIfNeeded({
 
   if (addedTags.length > 0) {
     actions.push(
-      `added tag${addedTags.length > 1 ? "s" : ""} ${formatTagNames(
-        addedTags
-      )}`
+      `added tag${addedTags.length > 1 ? "s" : ""} ${formatTagNames(addedTags)}`
     );
   }
 
