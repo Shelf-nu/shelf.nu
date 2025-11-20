@@ -104,7 +104,7 @@ export default function PartialCheckinDrawer({
 
   // Check if it's an early check-in (only relevant for final check-ins)
   const isEarlyCheckin = Boolean(
-    isFinalCheckin &&  isBookingEarlyCheckin(booking.to)
+    isFinalCheckin && isBookingEarlyCheckin(booking.to)
   );
 
   // Setup blockers
@@ -318,20 +318,20 @@ export default function PartialCheckinDrawer({
         {/* Right side: Dates and progress */}
         <div className="flex items-center gap-6 text-sm">
           {/* From date */}
-            <div className="text-right">
-              <span className="block text-gray-600">From</span>
-              <span className="block font-medium text-gray-900">
-                <DateS date={booking.from} includeTime />
-              </span>
-            </div>
+          <div className="text-right">
+            <span className="block text-gray-600">From</span>
+            <span className="block font-medium text-gray-900">
+              <DateS date={booking.from} includeTime />
+            </span>
+          </div>
 
           {/* To date */}
-            <div className="text-right">
-              <span className="block text-gray-600">To</span>
-              <span className="block font-medium text-gray-900">
-                <DateS date={booking.to} includeTime />
-              </span>
-            </div>
+          <div className="text-right">
+            <span className="block text-gray-600">To</span>
+            <span className="block font-medium text-gray-900">
+              <DateS date={booking.to} includeTime />
+            </span>
+          </div>
         </div>
       </div>
     </div>

@@ -284,7 +284,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             >
               <CheckinDropdown
                 portalContainer={zo.form}
-                booking={{ id, name: name!, to: new Date(endDate!), from: new Date(startDate!) }}
+                booking={{
+                  id,
+                  name: name!,
+                  to: new Date(endDate),
+                  from: new Date(startDate),
+                }}
                 disabled={disabled || isLoadingWorkingHours}
               />
             </When>
