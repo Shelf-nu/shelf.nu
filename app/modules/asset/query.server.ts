@@ -4,6 +4,7 @@ import type {
   Filter,
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/schema";
+import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -1583,6 +1584,15 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       c.id AS "categoryId",
       c.name AS "categoryName",
       c.color AS "categoryColor",
+      l."parentId" AS "locationParentId",
+      CASE
+        WHEN l.id IS NOT NULL THEN (
+          SELECT COUNT(*)::integer
+          FROM public."Location" lc
+          WHERE lc."parentId" = l.id
+        )
+        ELSE 0
+      END AS "locationChildCount",
       CASE 
         WHEN l.name IS NOT NULL THEN l.name
         ELSE NULL
@@ -1738,7 +1748,15 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
           'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
           'tags', aq.tags,
-          'location', jsonb_build_object('name', aq."locationName"),
+          'location', CASE 
+            WHEN aq."assetLocationId" IS NOT NULL THEN jsonb_build_object(
+              'id', aq."assetLocationId",
+              'name', aq."locationName",
+              'parentId', aq."locationParentId",
+              'childCount', aq."locationChildCount"
+            )
+            ELSE NULL
+          END,
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
           'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
@@ -1748,3 +1766,13 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
     ) AS assets
   `;
 };
+
+export async function parseFiltersWithHierarchy(
+  filtersString: string,
+  columns: Column[],
+  organizationId?: string
+): Promise<Filter[]> {
+  const parsed = parseFilters(filtersString, columns);
+  if (!organizationId) return parsed;
+  return expandLocationHierarchyFilters({ filters: parsed, organizationId });
+}

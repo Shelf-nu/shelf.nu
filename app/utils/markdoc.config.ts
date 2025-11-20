@@ -154,5 +154,22 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
+    tag: {
+      render: "TagComponent",
+      description: "Renders an asset tag badge",
+      attributes: {
+        id: {
+          type: String,
+          required: false,
+          description: "Tag identifier",
+        },
+        name: {
+          type: String,
+          required: true,
+          description: "Tag display name",
+        },
+      },
+      selfClosing: true,
+    },
   },
 };

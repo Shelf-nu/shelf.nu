@@ -177,7 +177,7 @@ const AddToCalendar = () => {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              to={`cal.ics`}
+              to={`overview/cal.ics`}
               download={true}
               reloadDocument={true}
               disabled={disabled || isArchived}

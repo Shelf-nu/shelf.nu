@@ -39,6 +39,7 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 
@@ -53,6 +54,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
@@ -129,6 +131,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      extraInclude: {
+        location: LOCATION_WITH_HIERARCHY,
+      },
     });
 
     const modelName = {
@@ -710,7 +715,13 @@ export default function AddAssetsToNewBooking() {
   );
 }
 
-const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
+const RowComponent = ({
+  item,
+}: {
+  item: AssetsFromViewItem & {
+    location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
+  };
+}) => {
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
   const { category, tags, location } = item;
@@ -774,7 +785,18 @@ const RowComponent = ({ item }: { item: AssetsFromViewItem }) => {
       </Td>
 
       {/* Location */}
-      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+      <Td>
+        {location ? (
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
+        ) : null}
+      </Td>
     </>
   );
 };

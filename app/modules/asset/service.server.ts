@@ -89,6 +89,7 @@ import {
   wrapCustodianForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
+import { createLoadUserForNotes } from "~/utils/note/load-user-for-notes.server";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
   createSignedUrl,
@@ -106,7 +107,7 @@ import {
   assetReturnFragment,
   generateCustomFieldSelect,
   generateWhereClause,
-  parseFilters,
+  parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
 import { getNextSequentialId } from "./sequential-id.server";
@@ -129,7 +130,11 @@ import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 
-import { createNote } from "../note/service.server";
+import {
+  createNote,
+  createTagChangeNoteIfNeeded,
+  type TagSummary,
+} from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -787,7 +792,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = parseFilters(filters, settingColumns);
+    const parsedFilters = await parseFiltersWithHierarchy(
+      filters,
+      settingColumns,
+      organizationId
+    );
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -813,7 +822,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
+        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
       ), 
       sorted_asset_query AS (
         SELECT * FROM asset_query
@@ -1182,6 +1191,26 @@ export async function updateAsset({
       }
     }
 
+    const isTagUpdate = Boolean(tags?.set);
+    let previousTags: TagSummary[] = [];
+    if (isTagUpdate) {
+      const assetBeforeUpdate = await db.asset.findUnique({
+        where: { id, organizationId },
+        select: {
+          tags: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      previousTags = assetBeforeUpdate?.tags ?? [];
+    }
+
+    const loadUserForNotes = createLoadUserForNotes(userId);
+
     const data: Prisma.AssetUpdateInput = {
       title,
       description,
@@ -1232,7 +1261,7 @@ export async function updateAsset({
     }
 
     /** If a tags is passed, link the category to the asset. */
-    if (tags && tags?.set) {
+    if (isTagUpdate) {
       Object.assign(data, {
         tags,
       });
@@ -1320,15 +1349,7 @@ export async function updateAsset({
        * Here we actually need to query the locations so we can print their names
        * */
 
-      const user = await db.user.findFirst({
-        where: {
-          id: userId,
-        },
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      });
+      const user = await loadUserForNotes();
 
       const currentLocation = currentLocationId
         ? await db.location.findFirst({
@@ -1349,11 +1370,21 @@ export async function updateAsset({
       await createLocationChangeNote({
         currentLocation,
         newLocation,
-        firstName: user?.firstName || "",
-        lastName: user?.lastName || "",
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
         assetId: asset.id,
         userId,
         isRemoving: newLocationId === null,
+      });
+    }
+
+    if (isTagUpdate) {
+      await createTagChangeNoteIfNeeded({
+        assetId: asset.id,
+        userId,
+        previousTags,
+        currentTags: asset.tags ?? [],
+        loadUserForNotes,
       });
     }
 
@@ -3368,18 +3399,69 @@ export async function bulkAssignAssetTags({
       settings,
     });
 
+    if (resolvedIds.length === 0) {
+      return true;
+    }
+
+    const loadUserForNotes = createLoadUserForNotes(userId);
+
+    const previousTagsByAssetId = await db.asset
+      .findMany({
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
+        select: {
+          id: true,
+          tags: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      })
+      .then((assets) =>
+        assets.reduce<Map<string, TagSummary[]>>((acc, asset) => {
+          acc.set(asset.id, asset.tags);
+          return acc;
+        }, new Map())
+      );
+
     const updatePromises = resolvedIds.map((id) =>
       db.asset.update({
         where: { id, organizationId },
         data: {
           tags: {
-            [remove ? "disconnect" : "connect"]: tagsIds.map((id) => ({ id })), // IDs of tags you want to connect
+            [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
+              id: tagId,
+            })),
+          },
+        },
+        include: {
+          tags: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
       })
     );
 
-    await Promise.all(updatePromises);
+    const updatedAssets = await Promise.all(updatePromises);
+
+    await Promise.all(
+      updatedAssets.map((asset) =>
+        createTagChangeNoteIfNeeded({
+          assetId: asset.id,
+          userId,
+          previousTags: previousTagsByAssetId.get(asset.id) ?? [],
+          currentTags: asset.tags,
+          loadUserForNotes,
+        })
+      )
+    );
 
     return true;
   } catch (cause) {

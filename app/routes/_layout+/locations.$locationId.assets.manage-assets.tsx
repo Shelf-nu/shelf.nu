@@ -30,6 +30,7 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -41,6 +42,7 @@ import {
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
+import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { updateLocationAssets } from "~/modules/location/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -428,7 +430,7 @@ const RowComponent = ({
 }: {
   item: Prisma.AssetGetPayload<{
     include: {
-      location: true;
+      location: typeof LOCATION_WITH_HIERARCHY;
       category: true;
       tags: true;
     };
@@ -471,13 +473,14 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {item.location ? (
-          <div
-            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-            title={`Current location: ${item.location.name}`}
-          >
-            <div className="size-2 rounded-full bg-gray-500"></div>
-            <span>{item.location.name}</span>
-          </div>
+          <LocationBadge
+            location={{
+              id: item.location.id,
+              name: item.location.name,
+              parentId: item.location.parentId ?? undefined,
+              childCount: item.location._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
 

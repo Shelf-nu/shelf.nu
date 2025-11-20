@@ -314,7 +314,11 @@ export async function advancedModeLoader({
   }
 
   const { selectedTags, selectedCategory, selectedLocation } =
-    getAllSelectedValuesFromFilters(filters, settings.columns as Column[]);
+    await getAllSelectedValuesFromFilters(
+      filters,
+      settings.columns as Column[],
+      organizationId
+    );
 
   const {
     tags,

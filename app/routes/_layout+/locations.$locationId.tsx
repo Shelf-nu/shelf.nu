@@ -18,13 +18,19 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
+import { LocationTree } from "~/components/location/location-tree";
 import { ShelfMap } from "~/components/location/map";
 import { MapPlaceholder } from "~/components/location/map-placeholder";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
-import { deleteLocation, getLocation } from "~/modules/location/service.server";
+import {
+  deleteLocation,
+  getLocation,
+  getLocationDescendantsTree,
+  getLocationHierarchy,
+} from "~/modules/location/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -69,21 +75,28 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { location } = await getLocation({
-      organizationId,
-      id: locationId,
-      page,
-      perPage,
-      search,
-      orderBy,
-      orderDirection,
-      userOrganizations,
-      request,
-    });
+    const [{ location }, hierarchy, childLocations] = await Promise.all([
+      getLocation({
+        organizationId,
+        id: locationId,
+        page,
+        perPage,
+        search,
+        orderBy,
+        orderDirection,
+        userOrganizations,
+        request,
+      }),
+      getLocationHierarchy({ organizationId, locationId }),
+      getLocationDescendantsTree({ organizationId, locationId }),
+    ]);
+
+    const allBreadcrumbs = hierarchy.map(({ id, name }) => ({ id, name }));
+    const parentBreadcrumbs =
+      allBreadcrumbs.length > 1 ? allBreadcrumbs.slice(0, -1) : [];
 
     const header: HeaderData = {
       title: location.name,
-      subHeading: location.id,
     };
 
     // Use cached coordinates from database, or geocode and cache if not available
@@ -110,6 +123,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         location,
         header,
         mapData,
+        breadcrumbs: parentBreadcrumbs,
+        childLocations,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -168,8 +183,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+type LocationBreadcrumb = {
+  id: string;
+  name: string;
+};
+
 export default function LocationPage() {
-  const { location, mapData } = useLoaderData<typeof loader>();
+  const { location, mapData, breadcrumbs, childLocations } =
+    useLoaderData<typeof loader>();
 
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
@@ -190,6 +211,11 @@ export default function LocationPage() {
   return (
     <div>
       <Header
+        preHeading={
+          breadcrumbs?.length ? (
+            <LocationBreadcrumbs breadcrumbs={breadcrumbs} />
+          ) : undefined
+        }
         slots={{
           "left-of-title": (
             <ImageWithPreview
@@ -202,7 +228,9 @@ export default function LocationPage() {
           ),
         }}
       >
-        <ActionsDropdown location={location} />
+        <ActionsDropdown
+          location={{ ...location, childCount: childLocations?.length }}
+        />
       </Header>
 
       <HorizontalTabs items={items} />
@@ -214,9 +242,20 @@ export default function LocationPage() {
         </div>
 
         {/* Right Column - Location info */}
-        <div className="w-full md:w-[360px] lg:ml-4">
+        <div className="w-full space-y-4 md:w-[360px] lg:ml-4">
+          {childLocations?.length ? (
+            <Card>
+              <div className="text-sm font-semibold text-gray-900">
+                Child locations
+              </div>
+              <div className="mt-3 text-sm text-gray-700">
+                <LocationTree nodes={childLocations} />
+              </div>
+            </Card>
+          ) : null}
+
           {location.description ? (
-            <Card className=" mt-0 md:rounded-t-none">
+            <Card className="md:rounded-t-none">
               <p className=" text-gray-600">{location.description}</p>
             </Card>
           ) : null}
@@ -268,6 +307,37 @@ export default function LocationPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function LocationBreadcrumbs({
+  breadcrumbs,
+}: {
+  breadcrumbs: LocationBreadcrumb[];
+}) {
+  if (!breadcrumbs.length) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+      {breadcrumbs.map((crumb, index) => (
+        <span key={crumb.id} className="flex items-center gap-1">
+          <Button
+            to={`/locations/${crumb.id}`}
+            variant="link"
+            className="h-auto p-0 text-[11px] text-gray-600 hover:text-primary-600"
+          >
+            {crumb.name}
+          </Button>
+          {index < breadcrumbs.length - 1 && (
+            <span className="text-gray-400" aria-hidden="true">
+              ›
+            </span>
+          )}
+        </span>
+      ))}
     </div>
   );
 }

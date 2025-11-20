@@ -12,6 +12,7 @@ import {
 import { Link, useLoaderData } from "react-router";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
+import { LocationBadge } from "~/components/location/location-badge";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -237,14 +238,20 @@ export function AdvancedIndexColumn({
       return (
         <TextColumn
           value={
-            item?.location?.name ? (
+            item.location ? (
               <Button
-                to={`/locations/${item.locationId}`}
-                title={item.location.name}
-                target="_blank"
-                variant="link-gray"
+                to={`/locations/${item.location.id}`}
+                variant="inherit"
+                className={"hover:no-underline"}
               >
-                {item.location.name}
+                <LocationBadge
+                  location={{
+                    id: item.location.id ?? item.locationId,
+                    name: item.location.name,
+                    parentId: item.location.parentId ?? undefined,
+                    childCount: item.location.childCount ?? 0,
+                  }}
+                />
               </Button>
             ) : (
               <EmptyTableValue />

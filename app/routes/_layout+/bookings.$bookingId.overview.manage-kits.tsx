@@ -40,6 +40,7 @@ import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -52,6 +53,7 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -76,6 +78,7 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export type KitForBooking = Prisma.KitGetPayload<{
   include: {
+    location: typeof LOCATION_WITH_HIERARCHY;
     _count: { select: { assets: true } };
     assets: {
       select: {
@@ -154,6 +157,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         currentBookingId: bookingId,
         extraInclude: {
+          location: LOCATION_WITH_HIERARCHY,
           assets: {
             select: {
               id: true,
@@ -571,7 +575,9 @@ export default function AddKitsToBooking() {
           disableSelectAllItems
           headerChildren={
             <>
+              <Th></Th>
               <Th>Description</Th>
+              <Th>Location</Th>
               <Th>Assets</Th>
             </>
           }
@@ -712,6 +718,18 @@ function Row({ item: kit }: { item: KitForBooking }) {
             text={kit.description}
             numberOfLines={3}
             charactersPerLine={60}
+          />
+        ) : null}
+      </Td>
+      <Td>
+        {kit.location ? (
+          <LocationBadge
+            location={{
+              id: kit.location.id,
+              name: kit.location.name,
+              parentId: kit.location.parentId ?? undefined,
+              childCount: kit.location._count?.children ?? 0,
+            }}
           />
         ) : null}
       </Td>

@@ -44,6 +44,7 @@ export const operatorsMap: Record<FilterOperator, string[]> = {
   matchesAny: ["≈", "Matches any"],
   inDates: ["∈", "In dates"],
   excludeAny: ["⊄", "Exclude any of"], // New operator with clear meaning for tag exclusion
+  withinHierarchy: ["↳", "Is in (incl. sub-locations)"],
 };
 
 // Define the allowed operators for each field type
@@ -54,7 +55,7 @@ export const operatorsPerType: FilterDefinition = {
   date: ["is", "isNot", "before", "after", "between", "inDates"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
   amount: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
-  enum: ["is", "isNot", "containsAny"],
+  enum: ["is", "isNot", "containsAny", "withinHierarchy"],
   array: ["contains", "containsAll", "containsAny", "excludeAny"],
   customField: [], // empty array as customField operators are determined by the actual field type
 };
@@ -77,7 +78,17 @@ export function OperatorSelector({
   }, [filter.operator]);
 
   /** Get the correct operators, based on the field type */
-  const operators = operatorsPerType[filter.type];
+  const baseOperators = operatorsPerType[filter.type];
+  const locationOperatorOrder: FilterOperator[] = [
+    "is",
+    "withinHierarchy",
+    "containsAny",
+    "isNot",
+  ];
+  const operators =
+    filter.name === "location"
+      ? locationOperatorOrder.filter((op) => baseOperators.includes(op))
+      : baseOperators.filter((op) => op !== "withinHierarchy");
 
   // Reset selected index when popover opens
   useEffect(() => {
