@@ -6,7 +6,7 @@ import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
  * This function checks if the booking is being early checkout.
  * It only considers it early if it's more than 15 minutes before the booking start time.
  */
-export function isBookingEarlyCheckout(from: string | Date): boolean {
+export function isBookingEarlyCheckout(from: Date): boolean {
   const now = new Date();
   const fromWithBuffer = subMinutes(from, 15);
   return isAfter(fromWithBuffer, now);
@@ -16,15 +16,15 @@ export function isBookingEarlyCheckout(from: string | Date): boolean {
  * This function checks if the booking is being early checkin.
  * It only considers it early if it's more than 15 minutes before the booking end time.
  */
-export function isBookingEarlyCheckin(to: string | Date) {
+export function isBookingEarlyCheckin(to: Date) {
   const nowWithBuffer = addMinutes(new Date(), 15);
   return isBefore(nowWithBuffer, to);
 }
 
 // Calculate and format booking duration
 export function formatBookingDuration(
-  from: string | Date,
-  to: string | Date
+  from: Date,
+  to: Date
 ): string {
   const start = new Date(from);
   const end = new Date(to);

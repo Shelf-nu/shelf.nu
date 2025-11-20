@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { AssetStatus } from "@prisma/client";
+import type { Booking } from "@prisma/client";
 import { useLoaderData, Form } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
@@ -103,7 +104,7 @@ export default function PartialCheckinDrawer({
 
   // Check if it's an early check-in (only relevant for final check-ins)
   const isEarlyCheckin = Boolean(
-    isFinalCheckin && booking.to && isBookingEarlyCheckin(booking.to)
+    isFinalCheckin &&  isBookingEarlyCheckin(booking.to)
   );
 
   // Setup blockers
@@ -317,24 +318,20 @@ export default function PartialCheckinDrawer({
         {/* Right side: Dates and progress */}
         <div className="flex items-center gap-6 text-sm">
           {/* From date */}
-          {booking.from && (
             <div className="text-right">
               <span className="block text-gray-600">From</span>
               <span className="block font-medium text-gray-900">
                 <DateS date={booking.from} includeTime />
               </span>
             </div>
-          )}
 
           {/* To date */}
-          {booking.to && (
             <div className="text-right">
               <span className="block text-gray-600">To</span>
               <span className="block font-medium text-gray-900">
                 <DateS date={booking.to} includeTime />
               </span>
             </div>
-          )}
         </div>
       </div>
     </div>
@@ -635,12 +632,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
 type CustomFormProps = {
   assetIdsForCheckin: string[];
   isEarlyCheckin: boolean;
-  booking: {
-    id: string;
-    name: string;
-    to: string | Date | null;
-    from: string | Date | null;
-  };
+  booking: Pick<Booking, "id" | "name" | "from" | "to">;
   isLoading?: boolean;
   hasBlockers: boolean;
 };
@@ -678,8 +670,8 @@ const CustomForm = ({
             booking={{
               id: booking.id,
               name: booking.name,
-              to: booking.to!,
-              from: booking.from!,
+              to: booking.to,
+              from: booking.from,
             }}
             label="Check in assets"
             variant="default"
