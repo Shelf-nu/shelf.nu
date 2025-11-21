@@ -157,6 +157,31 @@ export const CodePreview = ({
     (code) => code.id === selectedCodeId
   );
 
+  useEffect(() => {
+    // Keep selection in sync when codes change (e.g., new QR after relink)
+    const hasSelectedCode = availableCodes.some(
+      (code) => code.id === selectedCodeId
+    );
+
+    if (hasSelectedCode) return;
+
+    // Prefer the externally requested barcode, then fallback to QR, then any barcode
+    const selectedBarcode = selectedBarcodeId
+      ? availableCodes.find((code) => code.id === selectedBarcodeId)
+      : undefined;
+
+    if (selectedBarcode) {
+      setSelectedCodeId(selectedBarcode.id);
+      return;
+    }
+
+    const fallbackQr = availableCodes.find((code) => code.type === "qr");
+    const fallbackBarcode = availableCodes.find(
+      (code) => code.type === "barcode"
+    );
+    setSelectedCodeId(fallbackQr?.id || fallbackBarcode?.id || "");
+  }, [availableCodes, selectedBarcodeId, selectedCodeId]);
+
   const fileName = useMemo(() => {
     if (!selectedCode) return "";
 

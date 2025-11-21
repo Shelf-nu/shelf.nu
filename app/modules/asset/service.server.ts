@@ -3621,7 +3621,11 @@ export async function bulkMarkAvailability({
   }
 }
 
-export async function relinkQrCode({
+/**
+ * Relinks an asset to a different QR code, unlinking any previous code.
+ * Throws if the QR belongs to another org, asset, or kit.
+ */
+export async function relinkAssetQrCode({
   qrId,
   assetId,
   organizationId,
@@ -3654,6 +3658,17 @@ export async function relinkQrCode({
       title: "QR not valid.",
       message: "This QR code does not belong to your organization",
       label: "QR",
+    });
+  }
+
+  if (qr.kitId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+      label: "QR",
+      shouldBeCaptured: false,
     });
   }
 

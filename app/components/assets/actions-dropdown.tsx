@@ -326,6 +326,7 @@ const ConditionalActionsDropdown = () => {
 
       <When truthy={isRelinkQrDialogOpen}>
         <RelinkQrCodeDialog
+          key={asset.qrCodes[0]?.id || asset.id}
           open={isRelinkQrDialogOpen}
           onClose={() => {
             setIsRelinkQrDialogOpen(false);

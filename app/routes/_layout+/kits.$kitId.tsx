@@ -32,6 +32,7 @@ import {
   deleteKitImage,
   getKit,
   getKitCurrentBooking,
+  relinkKitQrCode,
 } from "~/modules/kit/service.server";
 import { createNote } from "~/modules/note/service.server";
 
@@ -209,13 +210,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["removeAsset", "delete", "add-barcode"]) })
+      z.object({
+        intent: z.enum([
+          "removeAsset",
+          "delete",
+          "add-barcode",
+          "relink-qr-code",
+        ]),
+      })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
       removeAsset: PermissionAction.update,
       "add-barcode": PermissionAction.update,
+      "relink-qr-code": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -372,6 +381,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: reason.status,
           });
         }
+      }
+
+      case "relink-qr-code": {
+        const { newQrId } = parseData(
+          formData,
+          z.object({ newQrId: z.string() })
+        );
+
+        await relinkKitQrCode({
+          qrId: newQrId,
+          kitId,
+          organizationId,
+          userId,
+        });
+
+        sendNotification({
+          title: "QR Relinked",
+          message: "A new qr code has been linked to your kit.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
       }
 
       default: {
