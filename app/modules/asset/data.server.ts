@@ -24,12 +24,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
+import { ENABLE_SAVED_ASSET_FILTERS } from "~/utils/env";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
+import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
+import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import { getAllSelectedValuesFromFilters } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
@@ -204,8 +207,8 @@ export async function simpleModeLoader({
         ? `${user.firstName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
   };
 
   const modelName = {
@@ -218,6 +221,11 @@ export async function simpleModeLoader({
     setCookie(userPrefsCookie),
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
+
+  // Load saved filter presets if feature is enabled
+  const savedFilterPresets = ENABLE_SAVED_ASSET_FILTERS
+    ? await listPresetsForUser({ organizationId, ownerId: userId })
+    : [];
 
   return data(
     payload({
@@ -266,6 +274,10 @@ export async function simpleModeLoader({
       kits: [] as Kit[],
       // Those tags are used for the tags autocomplete on the booking form
       tagsData,
+      // Saved filter presets
+      savedFilterPresets,
+      savedFilterPresetsEnabled: ENABLE_SAVED_ASSET_FILTERS,
+      savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {
       headers,
@@ -407,8 +419,8 @@ export async function advancedModeLoader({
         ? `${user.firstName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
   };
 
   const modelName = {
@@ -421,6 +433,11 @@ export async function advancedModeLoader({
     setCookie(userPrefsCookie),
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
+
+  // Load saved filter presets if feature is enabled
+  const savedFilterPresets = ENABLE_SAVED_ASSET_FILTERS
+    ? await listPresetsForUser({ organizationId, ownerId: userId })
+    : [];
 
   return data(
     payload({
@@ -466,6 +483,10 @@ export async function advancedModeLoader({
       tags,
       totalTags,
       tagsData,
+      // Saved filter presets
+      savedFilterPresets,
+      savedFilterPresetsEnabled: ENABLE_SAVED_ASSET_FILTERS,
+      savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {
       headers,

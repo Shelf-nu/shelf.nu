@@ -19,6 +19,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
 export const ASSET_SORTING_OPTIONS = {
@@ -63,6 +64,7 @@ export function AssetIndexFilters({
               />
 
               <AvailabilityViewToggle />
+              <SavedFilterPresetsControls />
             </div>
           ),
         }}
@@ -181,7 +183,12 @@ function AdvancedAssetIndexFilters() {
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
-        "right-of-search": <AvailabilityViewToggle modeIsSimple={false} />,
+        "right-of-search": (
+          <div className="flex items-center gap-2">
+            <AvailabilityViewToggle modeIsSimple={false} />
+            <SavedFilterPresetsControls />
+          </div>
+        ),
       }}
       searchClassName="leading-5"
     >
