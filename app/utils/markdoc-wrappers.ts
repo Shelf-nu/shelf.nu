@@ -307,13 +307,3 @@ export function wrapDescriptionForNote(
 
   return `{% description${oldAttr}${newAttr} /%}`;
 }
-
-/**
- * Wraps freeform text changes in a Markdoc text_diff tag for note activity.
- *
- * @param previousText - The previous value to render in the diff (optional)
- * @param newText - The new value to render in the diff (optional)
- * @param label - Optional label describing the field (e.g. "Name")
- * @returns String containing a self-closing {% text_diff %} tag or empty string when nothing to render
- */
-// wrapTextDiffForNote has been removed because notes now render inline values directly.
