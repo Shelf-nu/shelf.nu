@@ -7,8 +7,9 @@ import type { loader } from "~/routes/_layout+/_layout";
  * It also returns some helper boolean values to make it easier to check for specific roles
  */
 export function useUserRoleHelper() {
-  const roles = useRouteLoaderData<typeof loader>("routes/_layout+/_layout")
-    ?.currentOrganizationUserRoles;
+  const roles = useRouteLoaderData<typeof loader>(
+    "routes/_layout+/_layout"
+  )?.currentOrganizationUserRoles;
 
   const isAdministrator = roles?.includes(OrganizationRoles.ADMIN) || false;
   const isOwner = roles?.includes(OrganizationRoles.OWNER) || false;

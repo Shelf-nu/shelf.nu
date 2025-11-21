@@ -43,12 +43,10 @@ Natural sorting ensures these are displayed in a logical order that matches how 
 Our system implements several rules to make sorting intuitive:
 
 1. **Case Insensitive**
-
    - "scanner" and "Scanner" are treated the same
    - This prevents items from being split up based on capitalization
 
 2. **Number Recognition**
-
    - Numbers within text are recognized and sorted numerically
    - "Room 2" comes before "Room 10"
 
@@ -92,17 +90,14 @@ CT-10000
 ## Benefits of Natural Sorting
 
 1. **Reduced Errors**
-
    - Items appear in an order that makes sense
    - Less likely to miss items when scanning a list
 
 2. **Faster Scanning**
-
    - Users can quickly find items in expected positions
    - No need to mentally reorder numbers
 
 3. **Consistent Organization**
-
    - All lists follow the same logical ordering
    - Makes inventory management more intuitive
 

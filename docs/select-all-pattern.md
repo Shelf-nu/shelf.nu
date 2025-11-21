@@ -353,37 +353,30 @@ All asset bulk operations now use the `resolveAssetIdsForBulkOperation` helper p
 All these operations follow the same pattern shown above:
 
 1. **bulkMarkAvailability** - Mark assets as available/unavailable
-
    - Route: `app/routes/api+/assets.bulk-mark-availability.ts`
    - Service: `app/modules/asset/service.server.ts`
 
 2. **bulkUpdateAssetLocation** - Update location for multiple assets
-
    - Route: `app/routes/api+/assets.bulk-update-location.ts`
    - Service: `app/modules/asset/service.server.ts`
 
 3. **bulkUpdateAssetCategory** - Update category for multiple assets
-
    - Route: `app/routes/api+/assets.bulk-update-category.ts`
    - Service: `app/modules/asset/service.server.ts`
 
 4. **bulkAssignAssetTags** - Assign/remove tags for multiple assets
-
    - Route: `app/routes/api+/assets.bulk-assign-tags.ts`
    - Service: `app/modules/asset/service.server.ts`
 
 5. **bulkCheckOutAssets** (bulkAssignCustody) - Assign custody
-
    - Route: `app/routes/api+/assets.bulk-assign-custody.ts`
    - Service: `app/modules/asset/service.server.ts`
 
 6. **bulkCheckInAssets** (bulkReleaseCustody) - Release custody
-
    - Route: `app/routes/api+/assets.bulk-release-custody.ts`
    - Service: `app/modules/asset/service.server.ts`
 
 7. **bulkRemoveAssetsFromKits** - Remove assets from kits
-
    - Route: `app/routes/api+/assets.bulk-remove-from-kits.ts`
    - Service: `app/modules/kit/service.server.ts`
 
@@ -397,17 +390,14 @@ All these operations follow the same pattern shown above:
 These use different patterns appropriate to their use case:
 
 - **Export Assets** - Uses advanced filtering directly
-
   - Button: `app/components/assets/assets-index/export-assets-button.tsx`
   - Route: `app/routes/_layout+/assets.export.$fileName[.csv].tsx`
   - Service: `app/utils/csv.server.ts` → `exportAssetsFromIndexToCsv`
 
 - **Bulk QR Code Download** - Uses `getAssetsWhereInput` directly
-
   - API: `app/routes/api+/assets.get-assets-for-bulk-qr-download.ts`
 
 - **Export Bookings**
-
   - Button: `app/components/booking/export-bookings-button.tsx`
   - Service: `app/utils/csv.server.ts` → `exportBookingsFromIndexToCsv`
 

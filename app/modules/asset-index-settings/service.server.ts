@@ -63,7 +63,7 @@ export async function createUserAssetIndexSettings({
       data: {
         userId,
         organizationId,
-        mode: "SIMPLE",
+        mode: "ADVANCED",
         columns,
       },
     });

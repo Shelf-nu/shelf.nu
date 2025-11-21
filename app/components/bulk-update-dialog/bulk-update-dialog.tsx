@@ -76,8 +76,8 @@ function BulkUpdateDialogTrigger({
     disabled === undefined // If it is undefined, then it is not disabled
       ? false
       : typeof disabled === "boolean"
-      ? disabled
-      : true; // If it is an object, then it is disabled
+        ? disabled
+        : true; // If it is an object, then it is disabled
   const reason = typeof disabled === "object" ? disabled.reason : "";
 
   const openBulkDialog = useSetAtom(openBulkDialogAtom);
