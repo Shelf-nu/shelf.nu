@@ -6,11 +6,11 @@ import { parseMarkdownToReact } from "~/utils/md";
 import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
 import { BookingStatusComponent } from "./booking-status-component";
+import { CategoryBadgeComponent } from "./category-badge-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
-import { CategoryBadgeComponent } from "./category-badge-component";
 import { TagComponent } from "./tag-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (

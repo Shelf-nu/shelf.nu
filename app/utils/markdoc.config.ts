@@ -188,6 +188,5 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
-
   },
 };

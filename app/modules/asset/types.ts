@@ -51,7 +51,7 @@ export interface UpdateAssetPayload {
   barcodes?: { id?: string; type: BarcodeType; value: string }[];
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
-  request: Request
+  request: Request;
 }
 
 export interface CreateAssetFromContentImportPayload

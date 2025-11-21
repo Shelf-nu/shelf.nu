@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildDescriptionChangeNote } from "./helpers.server";
 
-const userLink = "{% user id=\"user-1\" /%}";
+const userLink = '{% user id="user-1" /%}';
 
 describe("buildDescriptionChangeNote", () => {
   it("returns null when description did not change", () => {
