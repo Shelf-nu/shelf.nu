@@ -14,6 +14,7 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -29,19 +30,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-const LOCATION_LIST_INCLUDE = {
-  _count: { select: { kits: true, assets: true, children: true } },
-  parent: {
-    select: {
-      id: true,
-      name: true,
-      parentId: true,
-      _count: { select: { children: true } },
-    },
-  },
-  image: { select: { updatedAt: true } },
-} satisfies Prisma.LocationInclude;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

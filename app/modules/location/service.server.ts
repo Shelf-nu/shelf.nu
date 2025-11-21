@@ -341,6 +341,19 @@ export async function getLocationSubtreeDepth(params: {
   return result?.maxDepth ?? 0;
 }
 
+export const LOCATION_LIST_INCLUDE = {
+  _count: { select: { kits: true, assets: true, children: true } },
+  parent: {
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      _count: { select: { children: true } },
+    },
+  },
+  image: { select: { updatedAt: true } },
+} satisfies Prisma.LocationInclude;
+
 export async function getLocations(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -373,22 +386,7 @@ export async function getLocations(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        include: {
-          _count: { select: { kits: true, assets: true, children: true } },
-          parent: {
-            select: {
-              id: true,
-              name: true,
-              parentId: true,
-              _count: { select: { children: true } },
-            },
-          },
-          image: {
-            select: {
-              updatedAt: true,
-            },
-          },
-        },
+        include: LOCATION_LIST_INCLUDE,
       }),
 
       /** Count them */
@@ -837,7 +835,7 @@ export async function updateLocationImage({
       } else {
         imagePath = image;
       }
-    } catch (error) {
+    } catch (_error) {
       imagePath = image;
     }
 
