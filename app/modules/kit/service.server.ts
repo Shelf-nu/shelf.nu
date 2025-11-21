@@ -1374,7 +1374,6 @@ export async function updateKitQrCode({
   kitId: string;
   newQrId: string;
 }) {
-  // Disconnect all existing QR codes
   try {
     // Disconnect all existing QR codes
     await db.kit
@@ -1416,11 +1415,90 @@ export async function updateKitQrCode({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating asset QR code",
+      message: "Something went wrong while updating kit QR code",
       label,
       additionalData: { kitId, organizationId, newQrId },
     });
   }
+}
+
+export async function relinkKitQrCode({
+  qrId,
+  kitId,
+  organizationId,
+  userId,
+}: {
+  qrId: Qr["id"];
+  kitId: Kit["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}) {
+  const [qr, kit] = await Promise.all([
+    getQr({ id: qrId }),
+    db.kit.findFirst({
+      where: { id: kitId, organizationId },
+      select: { qrCodes: { select: { id: true } } },
+    }),
+  ]);
+
+  if (!kit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Kit not found.",
+      label,
+      additionalData: { kitId, organizationId, qrId },
+    });
+  }
+
+  if (qr.organizationId && qr.organizationId !== organizationId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR not valid.",
+      message: "This QR code does not belong to your organization",
+      label,
+    });
+  }
+
+  if (qr.assetId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (qr.kitId && qr.kitId !== kitId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const oldQrCode = kit.qrCodes[0];
+
+  await Promise.all([
+    db.qr.update({
+      where: { id: qr.id },
+      data: { organizationId, userId },
+    }),
+    updateKitQrCode({
+      kitId,
+      newQrId: qr.id,
+      organizationId,
+    }),
+  ]);
+
+  return {
+    oldQrCodeId: oldQrCode?.id,
+    newQrId: qr.id,
+  };
 }
 
 export async function getAvailableKitAssetForBooking(

@@ -3657,6 +3657,17 @@ export async function relinkQrCode({
     });
   }
 
+  if (qr.kitId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+      label: "QR",
+      shouldBeCaptured: false,
+    });
+  }
+
   if (qr.assetId && qr.assetId !== assetId) {
     throw new ShelfError({
       cause: null,
