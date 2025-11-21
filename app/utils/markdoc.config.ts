@@ -171,5 +171,22 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
+    category_badge: {
+      render: "CategoryBadgeComponent",
+      description: "Renders an asset category badge",
+      attributes: {
+        name: {
+          type: String,
+          required: false,
+          description: "Category display name",
+        },
+        color: {
+          type: String,
+          required: false,
+          description: "Hex color for the badge",
+        },
+      },
+      selfClosing: true,
+    },
   },
 };

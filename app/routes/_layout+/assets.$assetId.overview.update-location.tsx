@@ -97,6 +97,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       currentLocationId,
       userId: authSession.userId,
       organizationId,
+      request,
     });
 
     sendNotification({

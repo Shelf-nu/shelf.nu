@@ -66,6 +66,37 @@ export function DescriptionComponent({
     );
   }
 
+  if (newText && !oldText) {
+    const isLong = newText.length > MAX_DISPLAY_LENGTH;
+    if (!isLong) {
+      return <span className="font-semibold">{newText}</span>;
+    }
+
+    return (
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="link"
+            className="h-auto p-0 font-semibold text-black underline hover:text-primary"
+            onClick={() => setIsOpen(!isOpen)}
+          >
+            {truncateText(newText, MAX_DISPLAY_LENGTH)}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="z-[999999] w-80 rounded-md border bg-white p-3 shadow-lg"
+          side="top"
+          sideOffset={8}
+        >
+          <div className="text-sm">
+            <div className="font-semibold text-gray-900">Full Description:</div>
+            <div className="mt-1 text-gray-700">{newText}</div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
   // Show both old and new descriptions (change scenario)
   if (oldText && newText) {
     const oldIsLong = oldText.length > MAX_DISPLAY_LENGTH;

@@ -47,6 +47,7 @@ import {
   createLocationChangeNote,
   createLocationsIfNotExists,
 } from "~/modules/location/service.server";
+import { createLoadUserForNotes } from "~/modules/note/load-user-for-notes.server";
 import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
@@ -54,7 +55,7 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
-
+import { getLocale } from "~/utils/client-hints";
 import { LEGACY_CUID_LENGTH } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -89,14 +90,12 @@ import {
   wrapCustodianForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
-import { createLoadUserForNotes } from "~/utils/note/load-user-for-notes.server";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
   createSignedUrl,
   parseFileFormData,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
-
 import { resolveTeamMemberName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
@@ -129,8 +128,11 @@ import {
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
-
 import {
+  createAssetCategoryChangeNote,
+  createAssetDescriptionChangeNote,
+  createAssetNameChangeNote,
+  createAssetValuationChangeNote,
   createNote,
   createTagChangeNoteIfNeeded,
   type TagSummary,
@@ -138,6 +140,52 @@ import {
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
+
+const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
+  title: true,
+  description: true,
+  category: {
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  },
+  valuation: true,
+  organization: {
+    select: {
+      currency: true,
+    },
+  },
+  tags: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+});
+
+/**
+ * Fetches the snapshot of fields required to build change notes before an update.
+ */
+async function fetchAssetBeforeUpdate({
+  id,
+  organizationId,
+  shouldFetch,
+}: {
+  id: Asset["id"];
+  organizationId: Asset["organizationId"];
+  shouldFetch: boolean;
+}) {
+  if (!shouldFetch) {
+    return null;
+  }
+
+  return db.asset.findUnique({
+    where: { id, organizationId },
+    select: ASSET_BEFORE_UPDATE_SELECT,
+  });
+}
 
 /**
  * Sets kit custody for imported assets after all assets have been created
@@ -1160,6 +1208,7 @@ export async function updateAsset({
   customFieldsValues: customFieldsValuesFromForm,
   barcodes,
   organizationId,
+  request,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
@@ -1192,22 +1241,26 @@ export async function updateAsset({
     }
 
     const isTagUpdate = Boolean(tags?.set);
-    let previousTags: TagSummary[] = [];
-    if (isTagUpdate) {
-      const assetBeforeUpdate = await db.asset.findUnique({
-        where: { id, organizationId },
-        select: {
-          tags: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      });
 
-      previousTags = assetBeforeUpdate?.tags ?? [];
-    }
+    const trackedFieldUpdates = Boolean(
+      typeof title !== "undefined" ||
+        typeof description !== "undefined" ||
+        typeof categoryId !== "undefined" ||
+        typeof valuation !== "undefined"
+    );
+
+    const assetBeforeUpdate = await fetchAssetBeforeUpdate({
+      id,
+      organizationId,
+      shouldFetch: trackedFieldUpdates || isTagUpdate,
+    });
+
+    const previousTags: TagSummary[] = isTagUpdate
+      ? (assetBeforeUpdate?.tags ?? []).map((tag) => ({
+          id: tag.id,
+          name: tag.name ?? "",
+        }))
+      : [];
 
     const loadUserForNotes = createLoadUserForNotes(userId);
 
@@ -1329,7 +1382,12 @@ export async function updateAsset({
     const asset = await db.asset.update({
       where: { id, organizationId },
       data,
-      include: { location: true, tags: true },
+      include: {
+        location: true,
+        tags: true,
+        category: true,
+        organization: true,
+      },
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */
@@ -1376,6 +1434,47 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+    }
+
+    if (assetBeforeUpdate && trackedFieldUpdates) {
+      await Promise.all([
+        createAssetNameChangeNote({
+          assetId: asset.id,
+          userId,
+          previousName: assetBeforeUpdate.title,
+          newName: title,
+          loadUserForNotes,
+        }),
+        createAssetDescriptionChangeNote({
+          assetId: asset.id,
+          userId,
+          previousDescription: assetBeforeUpdate.description,
+          newDescription: description,
+          loadUserForNotes,
+        }),
+        createAssetCategoryChangeNote({
+          assetId: asset.id,
+          userId,
+          previousCategory: assetBeforeUpdate.category,
+          newCategory: asset.category
+            ? {
+                id: asset.category.id,
+                name: asset.category.name ?? "Unnamed category",
+                color: asset.category.color ?? "#575757",
+              }
+            : null,
+          loadUserForNotes,
+        }),
+        createAssetValuationChangeNote({
+          assetId: asset.id,
+          userId,
+          previousValuation: assetBeforeUpdate.valuation,
+          newValuation: asset.valuation,
+          currency: assetBeforeUpdate.organization.currency,
+          locale: getLocale(request),
+          loadUserForNotes,
+        }),
+      ]);
     }
 
     if (isTagUpdate) {
@@ -1548,6 +1647,7 @@ export async function updateAssetMainImage({
       mainImageExpiration: oneDayFromNow(),
       userId,
       organizationId,
+      request,
     });
 
     /**
