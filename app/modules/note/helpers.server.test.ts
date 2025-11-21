@@ -121,13 +121,22 @@ describe("buildNameChangeNote", () => {
 });
 
 describe("buildCategoryChangeNote", () => {
-  it("returns null when categories are identical", () => {
-    const category = { id: "1", name: "Electronics", color: "#FF0000" };
+  it("returns null when categories have the same ID", () => {
     expect(
       buildCategoryChangeNote({
         userLink,
-        previous: category,
-        next: category,
+        previous: { id: "1", name: "Electronics", color: "#FF0000" },
+        next: { id: "1", name: "Electronics", color: "#FF0000" },
+      })
+    ).toBeNull();
+  });
+
+  it("returns null when both categories are null", () => {
+    expect(
+      buildCategoryChangeNote({
+        userLink,
+        previous: null,
+        next: null,
       })
     ).toBeNull();
   });

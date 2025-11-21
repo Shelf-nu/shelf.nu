@@ -133,21 +133,33 @@ export function buildCategoryChangeNote({
   previous?: Pick<Category, "id" | "name" | "color"> | null;
   next?: Pick<Category, "id" | "name" | "color"> | null;
 }) {
-  const formattedPrevious = wrapCategoryForNote(previous);
-  const formattedNext = wrapCategoryForNote(next);
+  // Check for null before formatting since wrapCategoryForNote always returns a string
+  const hasPrevious = previous != null;
+  const hasNext = next != null;
 
-  if (formattedPrevious === formattedNext) {
+  // No change if both are null or both point to the same category
+  if (!hasPrevious && !hasNext) {
     return null;
   }
 
-  if (formattedPrevious && formattedNext) {
+  if (hasPrevious && hasNext && previous.id === next.id) {
+    return null;
+  }
+
+  const formattedPrevious = wrapCategoryForNote(previous);
+  const formattedNext = wrapCategoryForNote(next);
+
+  // Both categories exist - it's a change from one to another
+  if (hasPrevious && hasNext) {
     return `${userLink} changed the asset category from ${formattedPrevious} to ${formattedNext}.`;
   }
 
-  if (formattedNext) {
+  // Only next exists - setting category for the first time
+  if (hasNext) {
     return `${userLink} set the asset category to ${formattedNext}.`;
   }
 
+  // Only previous exists - removing the category
   return `${userLink} removed the asset category.`;
 }
 
