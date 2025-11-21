@@ -122,10 +122,10 @@ export default function BaseDrawer({
               ? vh - 400
               : vh - TOP_GAP
             : headerContent
-            ? headerHeight // Use dynamic height when custom header content exists
-            : hasItems
-            ? 170 // Original logic: show first item when there are items
-            : 148, // Original logic: minimal height when no items
+              ? headerHeight // Use dynamic height when custom header content exists
+              : hasItems
+                ? 170 // Original logic: show first item when there are items
+                : 148, // Original logic: minimal height when no items
         }}
       >
         <div className={tw("h-full")} style={style}>

@@ -19,8 +19,9 @@
   border-radius: 0.375rem;
   background-color: #f2f4f7;
   padding: 0.125rem 0.25rem;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-    Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   font-size: 0.75rem;
   color: #344054;
 }

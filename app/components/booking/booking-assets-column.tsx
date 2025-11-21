@@ -101,12 +101,12 @@ export function BookingAssetsColumn() {
             reason: isCompleted
               ? "Booking is completed. You cannot change the assets anymore"
               : isArchived
-              ? "Booking is archived. You cannot change the assets anymore"
-              : isCancelled
-              ? "Booking is cancelled. You cannot change the assets anymore"
-              : cantManageAssetsAsBase
-              ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-              : "You need to select a start and end date and save your booking before you can add assets to your booking",
+                ? "Booking is archived. You cannot change the assets anymore"
+                : isCancelled
+                  ? "Booking is cancelled. You cannot change the assets anymore"
+                  : cantManageAssetsAsBase
+                    ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+                    : "You need to select a start and end date and save your booking before you can add assets to your booking",
           }
         : false,
     [isCompleted, isArchived, isCancelled, cantManageAssetsAsBase]

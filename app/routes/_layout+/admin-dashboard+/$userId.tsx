@@ -422,8 +422,8 @@ export default function Area51UserPage() {
         return typeof value === "string"
           ? value
           : typeof value === "boolean"
-          ? String(value)
-          : null;
+            ? String(value)
+            : null;
     }
   };
   const renderBusinessIntelValue = (
