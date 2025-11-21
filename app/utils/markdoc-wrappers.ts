@@ -276,9 +276,9 @@ export function wrapCategoryForNote(
 
   const escape = (value: string) => value.replace(/"/g, "&quot;");
 
-  return `{% category_badge name=\"${escape(name)}\" color=\"${escape(
+  return `{% category_badge name="${escape(name)}" color="${escape(
     color
-  )}\" /%}`;
+  )}" /%}`;
 }
 
 /**

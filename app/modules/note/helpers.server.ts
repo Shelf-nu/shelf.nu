@@ -141,11 +141,11 @@ export function buildCategoryChangeNote({
   }
 
   if (formattedPrevious && formattedNext) {
-    return `${userLink} changed the category from ${formattedPrevious} to ${formattedNext}.`;
+    return `${userLink} changed the asset category from ${formattedPrevious} to ${formattedNext}.`;
   }
 
   if (formattedNext) {
-    return `${userLink} set the category to ${formattedNext}.`;
+    return `${userLink} set the asset category to ${formattedNext}.`;
   }
 
   return `${userLink} removed the asset category.`;
