@@ -141,6 +141,52 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
 
+const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
+  title: true,
+  description: true,
+  category: {
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  },
+  valuation: true,
+  organization: {
+    select: {
+      currency: true,
+    },
+  },
+  tags: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+});
+
+/**
+ * Fetches the snapshot of fields required to build change notes before an update.
+ */
+async function fetchAssetBeforeUpdate({
+  id,
+  organizationId,
+  shouldFetch,
+}: {
+  id: Asset["id"];
+  organizationId: Asset["organizationId"];
+  shouldFetch: boolean;
+}) {
+  if (!shouldFetch) {
+    return null;
+  }
+
+  return db.asset.findUnique({
+    where: { id, organizationId },
+    select: ASSET_BEFORE_UPDATE_SELECT,
+  });
+}
+
 /**
  * Sets kit custody for imported assets after all assets have been created
  */
@@ -1196,37 +1242,24 @@ export async function updateAsset({
 
     const isTagUpdate = Boolean(tags?.set);
 
-    const assetBeforeUpdate = await db.asset.findUnique({
-      where: { id, organizationId },
-      select: {
-        title: true,
-        description: true,
-        category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
-        },
-        valuation: true,
-        organization: {
-          select: {
-            currency: true,
-          },
-        },
-        tags: isTagUpdate
-          ? {
-              select: {
-                id: true,
-                name: true,
-              },
-            }
-          : undefined,
-      },
+    const trackedFieldUpdates = Boolean(
+      typeof title !== "undefined" ||
+        typeof description !== "undefined" ||
+        typeof categoryId !== "undefined" ||
+        typeof valuation !== "undefined"
+    );
+
+    const assetBeforeUpdate = await fetchAssetBeforeUpdate({
+      id,
+      organizationId,
+      shouldFetch: trackedFieldUpdates || isTagUpdate,
     });
 
     const previousTags: TagSummary[] = isTagUpdate
-      ? assetBeforeUpdate?.tags ?? []
+      ? (assetBeforeUpdate?.tags ?? []).map((tag) => ({
+          id: tag.id,
+          name: tag.name ?? "",
+        }))
       : [];
 
     const loadUserForNotes = createLoadUserForNotes(userId);
@@ -1403,7 +1436,7 @@ export async function updateAsset({
       });
     }
 
-    if (assetBeforeUpdate) {
+    if (assetBeforeUpdate && trackedFieldUpdates) {
       await Promise.all([
         createAssetNameChangeNote({
           assetId: asset.id,
@@ -1422,13 +1455,7 @@ export async function updateAsset({
         createAssetCategoryChangeNote({
           assetId: asset.id,
           userId,
-          previousCategory: assetBeforeUpdate.category
-            ? {
-                id: assetBeforeUpdate.category.id,
-                name: assetBeforeUpdate.category.name ?? "Unnamed category",
-                color: assetBeforeUpdate.category.color ?? "#575757",
-              }
-            : null,
+          previousCategory: assetBeforeUpdate.category,
           newCategory: asset.category
             ? {
                 id: asset.category.id,
@@ -1443,9 +1470,7 @@ export async function updateAsset({
           userId,
           previousValuation: assetBeforeUpdate.valuation,
           newValuation: asset.valuation,
-          currency:
-            assetBeforeUpdate.organization?.currency ||
-            asset.organization.currency,
+          currency: assetBeforeUpdate.organization!.currency as any,
           locale: getLocale(request),
           loadUserForNotes,
         }),

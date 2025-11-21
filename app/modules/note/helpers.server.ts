@@ -94,7 +94,7 @@ export function buildNameChangeNote({
   }
 
   const formatName = (value: string) => {
-    const escaped = value.replace(/([*_`~])/g, "$1");
+    const escaped = value.replace(/([*_`~])/g, "\\$1");
     return `**${escaped}**`;
   };
 
@@ -159,7 +159,12 @@ export function toNullableNumber(value: unknown): number | null {
     return null;
   }
 
-  if (typeof value === "object" && value !== null && "toNumber" in value) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toNumber" in value &&
+    typeof (value as Prisma.Decimal).toNumber === "function"
+  ) {
     try {
       return (value as Prisma.Decimal).toNumber();
     } catch {
