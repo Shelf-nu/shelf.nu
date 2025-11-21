@@ -9,7 +9,6 @@ import { data, redirect } from "@remix-run/node";
 import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
-import { ClientOnly } from "remix-utils/client-only";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
@@ -18,7 +17,6 @@ import {
   CommandPaletteButton,
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
-import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
@@ -40,7 +38,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
-  installPwaPromptCookie,
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
@@ -111,10 +108,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
     const userPrefsCookie = await initializePerPageCookieOnLayout(request);
 
-    const cookieHeader = request.headers.get("Cookie");
-    const pwaPromptCookie =
-      (await installPwaPromptCookie.parse(cookieHeader)) || {};
-
     if (!user.onboarded) {
       return redirect("onboarding");
     }
@@ -170,9 +163,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganizationUserRoles,
         subscription,
         enablePremium: config.enablePremiumFeatures,
-        hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
-        hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         unreadUpdatesCount,
@@ -228,13 +219,6 @@ export default function App() {
   } = useLoaderData<typeof loader>();
   const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
-  const renderInstallPwaPromptOnMobile = () =>
-    // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
-    window.matchMedia("(max-width: 640px)").matches &&
-    !window.matchMedia("(display-mode: standalone)").matches ? (
-      <InstallPwaPromptModal />
-    ) : null;
-
   return (
     <CommandPaletteRoot>
       <SidebarProvider defaultOpen={!minimizedSidebar}>
@@ -276,9 +260,6 @@ export default function App() {
             </>
           )}
           <Toaster />
-          <ClientOnly fallback={null}>
-            {renderInstallPwaPromptOnMobile}
-          </ClientOnly>
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (
