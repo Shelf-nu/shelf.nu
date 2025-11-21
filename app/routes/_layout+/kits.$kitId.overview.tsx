@@ -6,11 +6,11 @@ import { z } from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import type { HeaderData } from "~/components/layout/header/types";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
-import { Tag } from "~/components/shared/tag";
 import When from "~/components/when/when";
 import { getKitOverviewFields } from "~/modules/kit/fields";
 import { getKit } from "~/modules/kit/service.server";
@@ -154,9 +154,18 @@ export default function KitOverview() {
             <span className="w-1/4 text-[14px] font-medium text-gray-900">
               Location
             </span>
-            <Tag key={kit?.location?.id} className="mb-0">
-              {kit?.location?.name ?? ""}
-            </Tag>
+            <div className="mt-1 md:mt-0 md:w-3/5">
+              {kit.location ? (
+                <LocationBadge
+                  location={{
+                    id: kit.location.id,
+                    name: kit.location.name,
+                    parentId: kit.location.parentId ?? undefined,
+                    childCount: kit.location._count?.children ?? 0,
+                  }}
+                />
+              ) : null}
+            </div>
           </li>
         </When>
 

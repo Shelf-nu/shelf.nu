@@ -545,10 +545,16 @@ model Location {
   assets Asset[]
   kits   Kit[]
 
+  // Self-relation for nested locations
+  parentId String?
+  parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Location[] @relation("LocationHierarchy")
+
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, parentId])
 }
 
 // Master data for roles
@@ -878,6 +884,7 @@ enum Currency {
   UGX // Ugandan Shilling
   ZAR // South African Rand
   PKR // Pakistani Rupee
+  RON // Romanian Leu
 }
 
 enum InviteStatuses {
@@ -971,10 +978,10 @@ model Booking {
   partialCheckins PartialBookingCheckin[]
 
   // Datetime
-  createdAt DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime  @updatedAt @db.Timestamptz(3)
-  from      DateTime? @db.Timestamptz(3)
-  to        DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  from      DateTime @db.Timestamptz(3)
+  to        DateTime @db.Timestamptz(3)
 
   // When a booking is early check-in or early check-out, we store the original from and to
   // dates here and updated the from and to dates to current date (if users agrees to change) 

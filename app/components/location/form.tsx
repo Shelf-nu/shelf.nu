@@ -11,6 +11,7 @@ import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
+import { LocationSelect } from "./location-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
@@ -22,6 +23,10 @@ export const NewLocationFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   description: z.string(),
   address: z.string(),
+  parentId: z
+    .string()
+    .optional()
+    .transform((value) => (value ? value : null)),
   addAnother: z
     .string()
     .optional()
@@ -34,14 +39,18 @@ interface Props {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
+  parentId?: Location["parentId"];
   referer?: string | null;
+  excludeLocationId?: Location["id"];
 }
 
 export const LocationForm = ({
   name,
   address,
   description,
+  parentId,
   referer,
+  excludeLocationId,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
@@ -83,6 +92,25 @@ export const LocationForm = ({
             defaultValue={name || undefined}
             placeholder="Storage room"
             required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
+          />
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Parent location"}
+          subHeading={
+            <p>
+              Optional. Nest this location under an existing one to build
+              breadcrumbs.
+            </p>
+          }
+        >
+          <LocationSelect
+            isBulk={false}
+            fieldName={zo.fields.parentId()}
+            placeholder="No parent"
+            defaultValue={parentId ?? undefined}
+            hideCurrentLocationInput
+            excludeIds={excludeLocationId ? [excludeLocationId] : undefined}
           />
         </FormRow>
 

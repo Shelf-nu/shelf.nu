@@ -22,10 +22,7 @@ export enum CheckinIntentEnum {
 
 type CheckinDialogProps = {
   disabled?: ButtonProps["disabled"];
-  booking: Pick<Booking, "id" | "name"> & {
-    to: string | Date;
-    from: string | Date;
-  };
+  booking: Pick<Booking, "id" | "name" | "from" | "to">;
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
 

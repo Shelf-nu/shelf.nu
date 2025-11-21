@@ -91,7 +91,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog
-              currentEndDate={dateForDateTimeInputValue(new Date(booking.to!))}
+              currentEndDate={dateForDateTimeInputValue(new Date(booking.to))}
             />
           </When>
           <When truthy={isCompleted && canArchiveBooking}>

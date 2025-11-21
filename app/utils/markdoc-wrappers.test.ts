@@ -18,7 +18,6 @@ import {
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 describe("markdoc-wrappers", () => {
-
   describe("wrapTagForNote", () => {
     it("should wrap tag name and optional id", () => {
       const result = wrapTagForNote({ id: "tag-1", name: "Operations" });
@@ -32,7 +31,9 @@ describe("markdoc-wrappers", () => {
 
     it("should escape quotes in tag name", () => {
       const result = wrapTagForNote({ id: "tag-2", name: 'Quality "Control"' });
-      expect(result).toBe('{% tag name="Quality &quot;Control&quot;" id="tag-2" /%}');
+      expect(result).toBe(
+        '{% tag name="Quality &quot;Control&quot;" id="tag-2" /%}'
+      );
     });
   });
 
