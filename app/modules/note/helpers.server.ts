@@ -104,24 +104,6 @@ export function buildNameChangeNote({
 }
 
 /**
- * Convert a category into a link / bold text for notes.
- */
-export function formatCategoryForNote(
-  category?: Pick<Category, "id" | "name" | "color"> | null
-) {
-  if (!category) {
-    return null;
-  }
-
-  const name = (category.name ?? "Unnamed category").trim();
-  if (!name) {
-    return null;
-  }
-
-  return wrapCategoryForNote(category);
-}
-
-/**
  * Build the category change note content.
  */
 export function buildCategoryChangeNote({

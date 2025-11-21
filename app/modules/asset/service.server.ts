@@ -1470,7 +1470,7 @@ export async function updateAsset({
           userId,
           previousValuation: assetBeforeUpdate.valuation,
           newValuation: asset.valuation,
-          currency: assetBeforeUpdate.organization!.currency as any,
+          currency: assetBeforeUpdate.organization.currency,
           locale: getLocale(request),
           loadUserForNotes,
         }),
