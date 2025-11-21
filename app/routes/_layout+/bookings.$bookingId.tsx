@@ -147,8 +147,8 @@ export default function AssetDetailsPage() {
                   custodianUserId={booking.custodianUserId || undefined}
                 />
                 <TimeRemaining
-                  from={booking.from!}
-                  to={booking.to!}
+                  from={booking.from}
+                  to={booking.to}
                   status={booking.status}
                 />
               </div>

@@ -254,7 +254,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
               <CheckoutDialog
                 portalContainer={zo.form}
-                booking={{ id, name: name!, from: startDate! }}
+                booking={{ id, name: name!, from: new Date(startDate!) }}
                 disabled={
                   disabled ||
                   isLoadingWorkingHours ||
@@ -284,7 +284,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             >
               <CheckinDropdown
                 portalContainer={zo.form}
-                booking={{ id, name: name!, to: endDate!, from: startDate! }}
+                booking={{
+                  id,
+                  name: name!,
+                  to: new Date(endDate),
+                  from: new Date(startDate),
+                }}
                 disabled={disabled || isLoadingWorkingHours}
               />
             </When>

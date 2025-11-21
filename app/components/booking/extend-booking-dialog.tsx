@@ -169,7 +169,7 @@ export default function ExtendBookingDialog({
               <input
                 type="hidden"
                 name={zo.fields.startDate()}
-                value={booking?.from?.toISOString() || ""}
+                value={booking.from.toISOString()}
               />
 
               <div className="flex items-center gap-2">

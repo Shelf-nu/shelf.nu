@@ -474,8 +474,8 @@ export default function AddAssetsToNewBooking() {
     () =>
       `/bookings/${booking.id}/overview/manage-kits?${new URLSearchParams({
         // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from!).toISOString(),
-        bookingTo: new Date(booking.to!).toISOString(),
+        bookingFrom: new Date(booking.from).toISOString(),
+        bookingTo: new Date(booking.to).toISOString(),
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`,

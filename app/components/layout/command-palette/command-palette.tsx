@@ -76,8 +76,8 @@ export type BookingSearchResult = {
   description: string | null;
   status: string;
   custodianName: string | null;
-  from: string | null;
-  to: string | null;
+  from: Date;
+  to: Date;
 };
 
 export type LocationSearchResult = {

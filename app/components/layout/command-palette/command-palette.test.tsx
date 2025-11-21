@@ -90,8 +90,8 @@ describe("getBookingCommandValue", () => {
     description: "Wedding photography session",
     status: "RESERVED",
     custodianName: "John Doe",
-    from: "2024-01-15T10:00:00Z",
-    to: "2024-01-15T18:00:00Z",
+    from: new Date("2024-01-15T10:00:00Z"),
+    to: new Date("2024-01-15T18:00:00Z"),
   };
 
   it("includes the primary searchable fields", () => {

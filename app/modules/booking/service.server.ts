@@ -2358,7 +2358,7 @@ export async function extendBooking({
           assets: { some: { id: { in: activeAssets.map((a) => a.id) } } },
           // Check for bookings that start within the extension period
           from: {
-            gt: booking.to!,
+            gt: booking.to,
             lte: newEndDate,
           },
         },
@@ -2407,7 +2407,7 @@ export async function extendBooking({
       content: `${wrapUserLinkForNote(
         user
       )} extended the booking from **${wrapDateForNote(
-        booking.to!
+        booking.to
       )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
 
@@ -2425,7 +2425,7 @@ export async function extendBooking({
         to: updatedBooking.to!,
         hints,
         bookingId: updatedBooking.id,
-        oldToDate: booking.to!,
+        oldToDate: booking.to,
       });
 
       const { format } = getDateTimeFormatFromHints(hints, {
@@ -2435,7 +2435,7 @@ export async function extendBooking({
 
       const html = await bookingUpdatesTemplateString({
         booking: updatedBooking,
-        heading: `Booking extended from ${format(booking.to!)} to ${format(
+        heading: `Booking extended from ${format(booking.to)} to ${format(
           newEndDate
         )}`,
         assetCount: updatedBooking._count.assets,
