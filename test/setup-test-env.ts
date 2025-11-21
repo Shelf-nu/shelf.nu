@@ -8,7 +8,23 @@ declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+  configurable: true,
+  get: () => true,
+  set: () => {
+    // Keep the flag stable for React act() detection.
+  },
+});
+
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    get: () => true,
+    set: () => {
+      // Keep the flag stable for React act() detection.
+    },
+  });
+}
 
 process.env.DATABASE_URL =
   "postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true";
