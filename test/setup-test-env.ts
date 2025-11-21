@@ -38,7 +38,7 @@ if (typeof window !== "undefined") {
     queueMicrotask(() => cb(performance.now()));
     return id;
   };
-  window.cancelAnimationFrame = () => {
+  window.cancelAnimationFrame = (_frameId: number) => {
     // no-op
   };
 }

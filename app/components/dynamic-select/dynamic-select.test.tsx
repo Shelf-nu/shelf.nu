@@ -450,7 +450,9 @@ describe("DynamicSelect", () => {
       });
 
       // WithoutValueItem should be visible initially
-      expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      });
 
       // Update mock to simulate search query
       mockUseModelFilters.mockReturnValue(
@@ -500,7 +502,9 @@ describe("DynamicSelect", () => {
       });
 
       // WithoutValueItem should be hidden during search
-      expect(screen.queryByText("Without kit")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText("Without kit")).not.toBeInTheDocument();
+      });
 
       // Clear search
       mockUseModelFilters.mockReturnValue(
@@ -548,9 +552,11 @@ describe("DynamicSelect", () => {
       });
 
       // All regular items should be searchable
-      expect(screen.getByText("Item 1")).toBeInTheDocument();
-      expect(screen.getByText("Item 2")).toBeInTheDocument();
-      expect(screen.getByText("Item 3")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+        expect(screen.getByText("Item 2")).toBeInTheDocument();
+        expect(screen.getByText("Item 3")).toBeInTheDocument();
+      });
     });
   });
 
