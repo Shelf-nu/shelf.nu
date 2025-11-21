@@ -160,7 +160,7 @@ export function buildCategoryChangeNote({
   }
 
   // Only previous exists - removing the category
-  return `${userLink} removed the asset category.`;
+  return `${userLink} removed the asset category ${formattedPrevious}.`;
 }
 
 /**

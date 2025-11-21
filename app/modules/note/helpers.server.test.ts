@@ -159,7 +159,9 @@ describe("buildCategoryChangeNote", () => {
       next: null,
     });
 
-    expect(result).toBe(`${userLink} removed the asset category.`);
+    expect(result).toContain("removed the asset category");
+    expect(result).toContain("category_badge");
+    expect(result).toContain("Electronics");
   });
 
   it("builds note for changing category", () => {
