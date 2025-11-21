@@ -29,6 +29,18 @@ process.env.SENTRY_DSN = "sentry-dsn";
 if (typeof window !== "undefined") {
   // @ts-expect-error missing vitest type
   window.happyDOM.settings.enableFileSystemHttpRequests = true;
+
+  // Make requestAnimationFrame run synchronously to prevent act() warnings
+  // from Radix UI components that use RAF for animations
+  let rafId = 0;
+  window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    const id = ++rafId;
+    queueMicrotask(() => cb(performance.now()));
+    return id;
+  };
+  window.cancelAnimationFrame = (_frameId: number) => {
+    // no-op
+  };
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
