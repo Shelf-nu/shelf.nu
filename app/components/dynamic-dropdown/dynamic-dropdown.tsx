@@ -6,7 +6,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,

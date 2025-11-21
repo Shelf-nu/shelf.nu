@@ -1,4 +1,5 @@
-import React from "react";
+import type { JSX } from "react";
+import type React from "react";
 import { tw } from "~/utils/tw";
 import SubHeading from "../shared/sub-heading";
 

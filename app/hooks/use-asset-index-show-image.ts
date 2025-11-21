@@ -1,4 +1,4 @@
-import { useFetchers } from "@remix-run/react";
+import { useFetchers } from "react-router";
 import { useAssetIndexViewState } from "./use-asset-index-view-state";
 
 /** Hook that returns the image flag for the first column.

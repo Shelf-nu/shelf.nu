@@ -1,4 +1,4 @@
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { createAssetsFromBackupImport } from "~/modules/asset/service.server";
@@ -56,7 +56,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return payload({ success: true });
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
     return data(error(reason), { status: reason.status });

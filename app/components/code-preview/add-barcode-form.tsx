@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { BarcodeType } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";

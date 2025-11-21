@@ -1,4 +1,4 @@
-import { useFetchers, useLoaderData } from "@remix-run/react";
+import { useFetchers, useLoaderData } from "react-router";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
 /** Hook that returns the flags for the first column.

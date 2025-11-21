@@ -1,8 +1,8 @@
 import React from "react";
 
-import { RemixBrowser } from "@remix-run/react";
 import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
+import { HydratedRouter } from "react-router/dom";
 
 function hydrate() {
   React.startTransition(() => {
@@ -10,7 +10,7 @@ function hydrate() {
       document,
       <React.StrictMode>
         <JotaiProvider>
-          <RemixBrowser />
+          <HydratedRouter />
         </JotaiProvider>
       </React.StrictMode>
     );

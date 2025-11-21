@@ -2,9 +2,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useActionData } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -74,7 +73,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading });
+  return data(payload({ title, subHeading }));
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {

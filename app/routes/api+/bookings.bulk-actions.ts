@@ -1,4 +1,4 @@
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
@@ -70,7 +70,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "bulk-archive": {
@@ -89,7 +89,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "bulk-cancel": {
@@ -110,12 +110,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return payload({ success: true });
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return payload(null);
+        return data(payload(null));
       }
     }
   } catch (cause) {

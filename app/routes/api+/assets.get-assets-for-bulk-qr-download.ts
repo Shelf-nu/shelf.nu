@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -96,11 +96,13 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return payload({
-      assets: assetsWithQrObj,
-      qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
-      showShelfBranding: currentOrganization.showShelfBranding,
-    });
+    return data(
+      payload({
+        assets: assetsWithQrObj,
+        qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+        showShelfBranding: currentOrganization.showShelfBranding,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

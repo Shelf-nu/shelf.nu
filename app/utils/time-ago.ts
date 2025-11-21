@@ -20,7 +20,7 @@ export function timeAgo(input: Date | string) {
     seconds: 1,
   };
   const secondsElapsed = (date.getTime() - Date.now()) / 1000;
-  for (let key of Object.keys(ranges) as RelativeTimeUnit[]) {
+  for (const key of Object.keys(ranges) as RelativeTimeUnit[]) {
     if (ranges[key] < Math.abs(secondsElapsed)) {
       const delta = secondsElapsed / ranges[key];
       return formatter.format(Math.round(delta), key);

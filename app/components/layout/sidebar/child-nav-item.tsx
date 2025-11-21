@@ -1,4 +1,4 @@
-import { NavLink } from "@remix-run/react";
+import { NavLink } from "react-router";
 import { useIsRouteActive } from "~/hooks/use-is-route-active";
 import type { ChildNavItem } from "~/hooks/use-sidebar-nav-items";
 import { tw } from "~/utils/tw";

@@ -1,6 +1,6 @@
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "react-router";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";

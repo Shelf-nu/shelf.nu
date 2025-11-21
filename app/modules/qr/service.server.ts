@@ -7,7 +7,7 @@ import {
   type User,
   type Kit,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -309,7 +309,7 @@ async function getQrCodes({
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.QrWhereInput = {};
+    const where: Prisma.QrWhereInput = {};
 
     /** If the search string exists, add it to the where object
      */
@@ -468,7 +468,7 @@ export async function getQrCodeMaps({
   try {
     const qrCodePromises = assets.map(async (asset) => {
       try {
-        let qr = asset.qrCodes[0];
+        const qr = asset.qrCodes[0];
         const qrCode = qr
           ? await generateCode({
               version: qr.version as TypeNumber,

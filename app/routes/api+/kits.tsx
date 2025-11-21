@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -27,13 +27,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const idsParam = url.searchParams.get("ids");
 
     if (!idsParam) {
-      return payload({ kits: [] });
+      return data(payload({ kits: [] }));
     }
 
     const kitIds = idsParam.split(",").filter(Boolean);
 
     if (kitIds.length === 0) {
-      return payload({ kits: [] });
+      return data(payload({ kits: [] }));
     }
 
     const kits = await db.kit.findMany({
@@ -73,7 +73,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return payload({ kits });
+    return data(payload({ kits }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

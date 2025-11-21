@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { Button } from "../shared/button";
 

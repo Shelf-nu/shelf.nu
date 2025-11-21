@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 
 export const AddAssetForm = ({
   assetId,

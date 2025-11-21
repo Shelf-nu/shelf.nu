@@ -40,6 +40,16 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const email = booking.custodianUser?.email;
 
   if (email && booking.from && booking.to) {
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
+        new Date(booking.from),
+        new Date()
+      )}.`,
+      assetCount: booking._count.assets,
+      hints: data.hints,
+    });
+
     sendEmail({
       to: email,
       subject: `🔔 Checkout reminder (${booking.name}) - shelf.nu`,
@@ -54,15 +64,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         bookingId: booking.id,
         hints: data.hints,
       }),
-      html: bookingUpdatesTemplateString({
-        booking,
-        heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
-          new Date(booking.from),
-          new Date()
-        )}.`,
-        assetCount: booking._count.assets,
-        hints: data.hints,
-      }),
+      html,
     });
   }
 };
@@ -93,7 +95,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     booking.to &&
     booking.status === BookingStatus.ONGOING
   ) {
-    sendCheckinReminder(booking, booking._count.assets, data.hints);
+    await sendCheckinReminder(booking, booking._count.assets, data.hints);
   }
 
   //schedule the next job
@@ -154,6 +156,13 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const email = booking.custodianUser?.email;
 
   if (email) {
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
+      assetCount: booking._count.assets,
+      hints: data.hints,
+    });
+
     sendEmail({
       to: email,
       subject: `⚠️ Overdue booking (${booking.name}) - shelf.nu`,
@@ -168,12 +177,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         bookingId: booking.id,
         hints: data.hints,
       }),
-      html: bookingUpdatesTemplateString({
-        booking,
-        heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
-        assetCount: booking._count.assets,
-        hints: data.hints,
-      }),
+      html,
     });
   }
 };

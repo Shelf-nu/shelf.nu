@@ -1,9 +1,37 @@
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { vi } from "vitest";
 
 /**
  * Common Remix hook mocks for testing components that use Remix hooks.
  * These are reusable mocks that can be imported across test files.
  */
+
+// why: provides proper type-safe args for testing loaders with all required React Router 7 properties
+export function createLoaderArgs(
+  args: Partial<LoaderFunctionArgs>
+): LoaderFunctionArgs {
+  return {
+    request: args.request || new Request("http://localhost:3000"),
+    params: args.params || {},
+    context: args.context || {},
+    // unstable_pattern must be a string route pattern, not an object
+    unstable_pattern: args.unstable_pattern || "*",
+  };
+}
+
+// why: provides proper type-safe args for testing actions with all required React Router 7 properties
+export function createActionArgs(
+  args: Partial<ActionFunctionArgs>
+): ActionFunctionArgs {
+  return {
+    request:
+      args.request || new Request("http://localhost:3000", { method: "POST" }),
+    params: args.params || {},
+    context: args.context || {},
+    // unstable_pattern must be a string route pattern, not an object
+    unstable_pattern: args.unstable_pattern || "*",
+  };
+}
 
 // why: allows testing components that read loader data without running actual loaders
 export const createUseLoaderDataMock = () => vi.fn();

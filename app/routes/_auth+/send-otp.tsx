@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 
 import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
 import { sendOTP } from "~/modules/auth/service.server";

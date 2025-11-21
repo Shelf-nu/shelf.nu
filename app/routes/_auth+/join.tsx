@@ -2,9 +2,8 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { redirect, data } from "@remix-run/node";
-import { useActionData, useNavigation } from "@remix-run/react";
+} from "react-router";
+import { redirect, data, useActionData, useNavigation } from "react-router";
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -56,7 +55,7 @@ export function loader({ context }: LoaderFunctionArgs) {
       return redirect("/assets");
     }
 
-    return payload({ title, subHeading });
+    return data(payload({ title, subHeading }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

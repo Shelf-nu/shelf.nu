@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useActionData, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
 import {
   selectedBulkItemsAtom,

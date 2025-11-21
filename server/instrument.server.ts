@@ -1,5 +1,6 @@
-import * as Sentry from "@sentry/remix";
-import { type Event, type EventHint } from "@sentry/remix";
+/* eslint-disable no-console */
+import * as Sentry from "@sentry/react-router";
+import { type Event, type EventHint } from "@sentry/react-router";
 
 import { SENTRY_DSN } from "~/utils/env";
 import type { ShelfError } from "~/utils/error";
@@ -37,6 +38,12 @@ if (SENTRY_DSN) {
       return handleBeforeSend(event, hint);
     },
   });
+
+  // Sentry example
+  if (process.env.NODE_ENV === "production") {
+    console.log("Sentry is enabled");
+    console.log("Doing some Sentry stuff before the server starts");
+  }
 }
 
 /**

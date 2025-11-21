@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import type { IndexResponse } from "~/components/list";
 import { useSearchParams } from "~/hooks/search-params";
 

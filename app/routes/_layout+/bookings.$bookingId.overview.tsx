@@ -4,15 +4,14 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
+import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { Outlet, useMatches } from "@remix-run/react";
-import { DateTime } from "luxon";
+} from "react-router";
+import { data, redirect, Outlet, useMatches } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -740,7 +739,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
-      case "checkIn":
+      case "checkIn": {
         // Extract specific asset IDs if provided (for enhanced completion messaging)
         const specificAssetIds = formData.getAll(
           "specificAssetIds[]"
@@ -782,6 +781,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ booking, success: true }), {
           headers,
         });
+      }
       case "partial-checkin": {
         return await checkinAssets({
           formData,

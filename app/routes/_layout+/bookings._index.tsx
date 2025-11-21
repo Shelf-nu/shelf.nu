@@ -1,9 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { Link, Outlet, useMatches } from "@remix-run/react";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ShouldRevalidateFunction,
+} from "react-router";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";
@@ -315,7 +317,6 @@ export default function BookingsIndexPage({
           />
         </Header>
       ) : null}
-
       <ListContentWrapper className={className}>
         <BookingFilters />
 

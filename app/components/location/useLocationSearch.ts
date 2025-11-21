@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
 import type { Location } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { atom, useAtom, useAtomValue } from "jotai";
+import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 
 const searchAtom = atom("");

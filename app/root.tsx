@@ -1,10 +1,12 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
+import nProgressStyles from "nprogress/nprogress.css?url";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
+} from "react-router";
 import {
   Links,
   Meta,
@@ -13,9 +15,7 @@ import {
   ScrollRestoration,
   useLoaderData,
   useRouteLoaderData,
-} from "@remix-run/react";
-import { withSentry } from "@sentry/remix";
-import nProgressStyles from "nprogress/nprogress.css?url";
+} from "react-router";
 import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
@@ -73,7 +73,7 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
 
 export const shouldRevalidate = () => false;
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children }: { children: ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
@@ -147,6 +147,6 @@ function App() {
   );
 }
 
-export default withSentry(App);
+export default App;
 
 export const ErrorBoundary = () => <ErrorContent />;

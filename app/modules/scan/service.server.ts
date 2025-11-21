@@ -99,7 +99,7 @@ export async function updateScan(params: {
 
   try {
     /** Delete the category id from the payload so we can use connect syntax from prisma */
-    let data = {
+    const data = {
       latitude,
       longitude,
     };

@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import Icon from "../icons/icon";

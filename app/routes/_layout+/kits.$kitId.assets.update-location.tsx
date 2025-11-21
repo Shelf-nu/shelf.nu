@@ -1,7 +1,6 @@
-import { redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
 import { MapPinIcon } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { redirect, Form, useLoaderData } from "react-router";
 import { z } from "zod";
 import { LocationSelect } from "~/components/location/location-select";
 import { Button } from "~/components/shared/button";

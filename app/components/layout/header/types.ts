@@ -7,7 +7,7 @@
  * Those will be rendered on on top of the layout
  */
 
-import type { LinkProps } from "@remix-run/react";
+import type { LinkProps } from "react-router";
 import type { IconType } from "~/components/shared/icons-map";
 
 export interface HeaderData {

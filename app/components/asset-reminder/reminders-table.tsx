@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
-import { useParams } from "@remix-run/react";
+import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { List } from "../list";

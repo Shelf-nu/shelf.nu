@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { NRM_ID_PARAM } from "~/components/nrm/export-nrm-button";
 import { exportNRMsToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";

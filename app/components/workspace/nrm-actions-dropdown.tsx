@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,

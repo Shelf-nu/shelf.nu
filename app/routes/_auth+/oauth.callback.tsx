@@ -1,8 +1,7 @@
 import { useEffect, useMemo } from "react";
 
-import { data, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect, useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
@@ -153,7 +152,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading });
+  return data(payload({ title, subHeading }));
 }
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();
@@ -183,7 +182,7 @@ export default function LoginCallback() {
           redirectTo
         );
 
-        fetcher.submit(formData, { method: "post" });
+        void fetcher.submit(formData, { method: "post" });
       }
     });
 

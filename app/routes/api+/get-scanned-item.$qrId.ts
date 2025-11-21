@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { data } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
@@ -115,12 +115,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
-      return payload({
-        qr: {
-          type: "asset" as const,
-          asset,
-        },
-      });
+      return data(
+        payload({
+          qr: {
+            type: "asset" as const,
+            asset,
+          },
+        })
+      );
     }
 
     const include = {
@@ -155,12 +157,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return payload({
-      qr: {
-        ...qr,
-        type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
-      },
-    });
+    return data(
+      payload({
+        qr: {
+          ...qr,
+          type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+        },
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     const sendNotification = reason.additionalData?.shouldSendNotification;

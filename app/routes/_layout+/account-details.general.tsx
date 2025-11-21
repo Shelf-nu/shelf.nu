@@ -3,10 +3,9 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+} from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 
-import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { createChangeEmailSchema } from "~/components/user/change-email";
@@ -287,7 +286,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             otp: linkData.properties.email_otp,
             user,
           }),
-          html: changeEmailAddressHtmlEmail(
+          html: await changeEmailAddressHtmlEmail(
             linkData.properties.email_otp,
             user
           ),

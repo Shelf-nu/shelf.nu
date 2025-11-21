@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
 import {
   processBooking,
@@ -116,7 +116,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return payload({ success: true, bookingId: booking.id });
+    return data(payload({ success: true, bookingId: booking.id }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(error(reason), { status: reason.status });

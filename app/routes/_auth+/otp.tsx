@@ -3,9 +3,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useActionData, useFetcher } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -132,7 +131,7 @@ export default function OtpPage() {
     formData.append("mode", mode);
 
     try {
-      fetcher.submit(formData, {
+      void fetcher.submit(formData, {
         method: "POST",
         action: "/resend-otp",
       });

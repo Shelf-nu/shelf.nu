@@ -2,6 +2,7 @@ node_modules
 
 /build
 /public/build
+.react-router/
 .env
 .env.local
 .env.staging

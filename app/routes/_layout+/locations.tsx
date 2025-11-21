@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, data } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { Link, Outlet, data } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";

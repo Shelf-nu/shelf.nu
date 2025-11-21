@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -9,7 +9,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "react-router";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
 import { LocationBadge } from "~/components/location/location-badge";

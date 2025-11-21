@@ -2,9 +2,14 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -49,7 +54,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading, disableSignup, disableSSO });
+  return data(payload({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({

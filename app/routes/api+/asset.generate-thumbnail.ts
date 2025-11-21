@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -58,10 +58,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         })
       );
 
-      return payload({
-        asset: null,
-        error: "Asset not found",
-      });
+      return data(
+        payload({
+          asset: null,
+          error: "Asset not found",
+        })
+      );
     }
 
     // If thumbnail already exists, refresh its URL
@@ -90,7 +92,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             },
           });
 
-          return payload({ asset: updatedAsset });
+          return data(payload({ asset: updatedAsset }));
         } catch (error) {
           Logger.error(
             new ShelfError({
@@ -102,24 +104,28 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           );
 
           // Return the existing thumbnail rather than failing
-          return payload({
-            asset: {
-              id: asset.id,
-              thumbnailImage: asset.thumbnailImage,
-            },
-          });
+          return data(
+            payload({
+              asset: {
+                id: asset.id,
+                thumbnailImage: asset.thumbnailImage,
+              },
+            })
+          );
         }
       }
     }
 
     // If there's no main image, we can't generate a thumbnail
     if (!asset.mainImage) {
-      return payload({
-        asset: {
-          id: asset.id,
-          thumbnailImage: asset.thumbnailImage, // Will be null
-        },
-      });
+      return data(
+        payload({
+          asset: {
+            id: asset.id,
+            thumbnailImage: asset.thumbnailImage, // Will be null
+          },
+        })
+      );
     }
 
     // Extract the original filename from the mainImage URL using the consistent function
@@ -127,12 +133,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     if (!originalPath) {
       // If we can't extract the path, return existing values
-      return payload({
-        asset: {
-          id: asset.id,
-          thumbnailImage: asset.thumbnailImage,
-        },
-      });
+      return data(
+        payload({
+          asset: {
+            id: asset.id,
+            thumbnailImage: asset.thumbnailImage,
+          },
+        })
+      );
     }
 
     // Download the original image from Supabase
@@ -141,12 +149,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     if (downloadError) {
       // If download fails, return existing values
-      return payload({
-        asset: {
-          id: asset.id,
-          thumbnailImage: asset.thumbnailImage,
-        },
-      });
+      return data(
+        payload({
+          asset: {
+            id: asset.id,
+            thumbnailImage: asset.thumbnailImage,
+          },
+        })
+      );
     }
 
     // Convert to AsyncIterable for the uploadFile function
@@ -210,10 +220,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         })
       );
 
-      return payload({
-        asset: null,
-        error: "Asset was deleted during processing",
-      });
+      return data(
+        payload({
+          asset: null,
+          error: "Asset was deleted during processing",
+        })
+      );
     }
 
     // Update the asset record with both the thumbnail and a fresh expiration
@@ -229,7 +241,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return payload({ asset: updatedAsset });
+    return data(payload({ asset: updatedAsset }));
   } catch (cause) {
     // In case of any error, try to return existing values instead of failing
     try {
@@ -244,7 +256,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         });
 
         if (asset) {
-          return payload({ asset });
+          return data(payload({ asset }));
         }
       }
     } catch {
@@ -266,9 +278,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     Logger.error(reason);
 
     // Return a successful response with error flag
-    return payload({
-      asset: null,
-      error: reason.message,
-    });
+    return data(
+      payload({
+        asset: null,
+        error: reason.message,
+      })
+    );
   }
 }

@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import z from "zod";
 import TransferOwnershipCard from "~/components/settings/transfer-ownership-card";
 import { getOrganizationAdmins } from "~/modules/organization/service.server";

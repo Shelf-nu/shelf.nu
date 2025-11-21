@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import { AssetStatus } from "@prisma/client";
 import type { Booking } from "@prisma/client";
-import { useLoaderData, Form } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
@@ -31,6 +31,7 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { Form } from "~/components/custom-form";
 
 // Export the schema so it can be reused
 export const partialCheckinAssetsSchema = z.object({

@@ -1,14 +1,20 @@
 import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
+import { useAtomValue } from "jotai";
+import { ScanBarcodeIcon } from "lucide-react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
-import { ScanBarcodeIcon } from "lucide-react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  NavLink,
+  Outlet,
+  useLoaderData,
+} from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";

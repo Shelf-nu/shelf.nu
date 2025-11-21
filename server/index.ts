@@ -2,11 +2,11 @@
 // It is important to import it as .js for this to work, even if the file is .ts
 import "./instrument.server.js";
 
-import type { AppLoadContext } from "@remix-run/node";
+import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
-import { initEnv, env } from "~/utils/env";
+import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
 import { logger } from "./logger";
@@ -14,21 +14,14 @@ import { protect, refreshSession, urlShortener } from "./middleware";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
+type ServerEnv = {
+  Variables: Record<symbol, unknown>;
+};
+
 // Server will not start if the env is not valid
 initEnv();
 
-/**
- * installGlobals from remix doesnt work as it conflicts with some other packages that we use and overrides some of their types
- * In our case the only type causing issue is File and it only happens in development mode
- * So we will import it conditionally in development mode
- * */
-if (env.NODE_ENV !== "production") {
-  void import("@remix-run/web-fetch").then((webFetch) => {
-    global.File = webFetch.File;
-  });
-}
-
-export const getLoadContext: HonoServerOptions["getLoadContext"] = (
+export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
   c,
   { build, mode }
 ) => {
@@ -67,31 +60,25 @@ export const getLoadContext: HonoServerOptions["getLoadContext"] = (
   } satisfies AppLoadContext;
 };
 
-export const server = await createHonoServer({
-  honoOptions: {
-    getPath: (req) => {
-      const url = new URL(req.url);
-      const host = req.headers.get("host");
-
-      if (process.env.URL_SHORTENER && host === process.env.URL_SHORTENER) {
-        return "/" + host + url.pathname;
-      }
-
-      return url.pathname;
-    },
-  },
-  assetsDir: "file-assets",
+export default createHonoServer<ServerEnv>({
   /** Disable default logger as we have our own */
   defaultLogger: false,
   getLoadContext,
   configure: (server) => {
-    // Apply the middleware to all routes
-    server.use(
-      `/${process.env.URL_SHORTENER}/:path*`,
-      urlShortener({
-        excludePaths: ["/file-assets", "/healthcheck", "/static"],
-      })
-    );
+    // Apply URL shortener middleware only when host matches
+    // In v2, we check the host inside middleware instead of using getPath
+    server.use("*", async (c, next) => {
+      const host = c.req.header("host");
+
+      // If this is the URL shortener host, handle it
+      if (process.env.URL_SHORTENER && host === process.env.URL_SHORTENER) {
+        return urlShortener({
+          excludePaths: ["/file-assets", "/healthcheck", "/static"],
+        })(c, next);
+      }
+
+      return next();
+    });
 
     /**
      * Add logger middleware
@@ -165,7 +152,7 @@ export const server = await createHonoServer({
 /**
  * Declare our loaders and actions context type
  */
-declare module "@remix-run/node" {
+declare module "react-router" {
   interface AppLoadContext {
     /**
      * The app version from the build assets

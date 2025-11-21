@@ -1,6 +1,31 @@
 import "@testing-library/jest-dom/vitest";
 import { server } from "./mocks";
 
+declare global {
+  // Let React know this environment supports act() (Vitest + happy-dom)
+  // so it does not warn during tests.
+  // eslint-disable-next-line no-var
+  var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+
+Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+  configurable: true,
+  get: () => true,
+  set: () => {
+    // Keep the flag stable for React act() detection.
+  },
+});
+
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    get: () => true,
+    set: () => {
+      // Keep the flag stable for React act() detection.
+    },
+  });
+}
+
 process.env.DATABASE_URL =
   "postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true";
 process.env.DIRECT_URL = "postgres://{USER}:{PASSWORD}@{HOST}:5432/{DB_NAME}";

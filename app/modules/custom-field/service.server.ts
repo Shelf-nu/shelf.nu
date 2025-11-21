@@ -114,7 +114,7 @@ export async function getFilteredAndPaginatedCustomFields(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    let where: Prisma.CustomFieldWhereInput = {
+    const where: Prisma.CustomFieldWhereInput = {
       organizationId,
       deletedAt: null,
     };
@@ -489,8 +489,8 @@ export async function createCustomFieldsIfNotExists({
     //{CF header: definition to create}
     const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
 
-    for (let item of data) {
-      for (let k of Object.keys(item)) {
+    for (const item of data) {
+      for (const k of Object.keys(item)) {
         if (k.startsWith("cf:")) {
           const def = getDefinitionFromCsvHeader(k);
           if (!fieldToDefDraftMap[k]) {

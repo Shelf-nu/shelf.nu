@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import type { Path, UIMatch } from "@remix-run/react";
+import type { Path, UIMatch } from "react-router";
 import {
   parsePath,
   resolvePath,
   useLocation,
   useMatches,
   useResolvedPath,
-} from "@remix-run/react";
+} from "react-router";
 
 /**
  * This function returns the active state of a route.
@@ -24,7 +24,7 @@ export function useIsRouteActive(to: string) {
 export function useIsAnyRouteActive(routes: string[]) {
   const locationPathname = useLocation().pathname;
   const matches = useMatches();
-  let routePathnamesJson = JSON.stringify(getResolveToMatches(matches));
+  const routePathnamesJson = JSON.stringify(getResolveToMatches(matches));
 
   const resolvedPaths = useMemo(
     () =>
@@ -84,8 +84,8 @@ export function resolveTo(
   let to: Partial<Path>;
   to = parsePath(toArg);
 
-  let isEmptyPath = toArg === "" || to.pathname === "";
-  let toPathname = isEmptyPath ? "/" : to.pathname;
+  const isEmptyPath = toArg === "" || to.pathname === "";
+  const toPathname = isEmptyPath ? "/" : to.pathname;
 
   let from: string;
 
@@ -108,7 +108,7 @@ export function resolveTo(
     // difference from how <a href> works and a major reason we call this a
     // "to" value instead of a "href".
     if (!isPathRelative && toPathname.startsWith("..")) {
-      let toSegments = toPathname.split("/");
+      const toSegments = toPathname.split("/");
 
       while (toSegments[0] === "..") {
         toSegments.shift();
@@ -121,13 +121,13 @@ export function resolveTo(
     from = routePathnameIndex >= 0 ? routePathnames[routePathnameIndex] : "/";
   }
 
-  let path = resolvePath(to, from);
+  const path = resolvePath(to, from);
 
   // Ensure the pathname has a trailing slash if the original "to" had one
-  let hasExplicitTrailingSlash =
+  const hasExplicitTrailingSlash =
     toPathname && toPathname !== "/" && toPathname.endsWith("/");
   // Or if this was a link to the current path which has a trailing slash
-  let hasCurrentTrailingSlash =
+  const hasCurrentTrailingSlash =
     (isEmptyPath || toPathname === ".") && locationPathname.endsWith("/");
   if (
     !path.pathname.endsWith("/") &&
@@ -142,7 +142,7 @@ export function resolveTo(
 // Return the array of pathnames for the current route matches - used to
 // generate the routePathnames input for resolveTo()
 export function getResolveToMatches(matches: UIMatch[]) {
-  let pathMatches = getPathContributingMatches(matches);
+  const pathMatches = getPathContributingMatches(matches);
 
   // Use the full pathname for the leaf match so we include splat values for "." links
   // https://github.com/remix-run/react-router/issues/11052#issuecomment-1836589329

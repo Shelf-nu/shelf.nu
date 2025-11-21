@@ -2,6 +2,7 @@ import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 import { loader } from "~/routes/api+/kits";
+import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -20,8 +21,8 @@ const createDataMock = vitest.hoisted(() => {
     });
 });
 
-vitest.mock("@remix-run/node", async () => {
-  const actual = await vitest.importActual("@remix-run/node");
+vitest.mock("react-router", async () => {
+  const actual = await vitest.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),
@@ -122,11 +123,13 @@ describe("/api/kits", () => {
 
       (db.kit.findMany as any).mockResolvedValue(mockKits);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(requirePermission).toHaveBeenCalledWith({
         request: mockRequest,
@@ -172,8 +175,10 @@ describe("/api/kits", () => {
         },
       });
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         kits: mockKits,
       });
@@ -182,14 +187,18 @@ describe("/api/kits", () => {
     it("should return empty array when no ids parameter provided", async () => {
       const mockRequest = new Request("http://localhost:3000/api/kits");
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         kits: [],
       });
@@ -200,14 +209,18 @@ describe("/api/kits", () => {
     it("should return empty array when ids parameter is empty", async () => {
       const mockRequest = new Request("http://localhost:3000/api/kits?ids=");
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         kits: [],
       });
@@ -222,11 +235,13 @@ describe("/api/kits", () => {
 
       (db.kit.findMany as any).mockResolvedValue(mockKits);
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.kit.findMany).toHaveBeenCalledWith({
         where: {
@@ -274,11 +289,13 @@ describe("/api/kits", () => {
       const singleKit = [mockKits[0]];
       (db.kit.findMany as any).mockResolvedValue(singleKit);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.kit.findMany).toHaveBeenCalledWith({
         where: {
@@ -317,8 +334,10 @@ describe("/api/kits", () => {
         },
       });
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         kits: singleKit,
       });
@@ -329,11 +348,13 @@ describe("/api/kits", () => {
         "http://localhost:3000/api/kits?ids=kit-1,kit-2"
       );
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.kit.findMany).toHaveBeenCalledWith({
         where: {
@@ -384,11 +405,13 @@ describe("/api/kits", () => {
       const shelfError = { status: 403, message: "Permission denied" };
       (makeShelfError as any).mockReturnValue(shelfError);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(makeShelfError).toHaveBeenCalledWith(permissionError, {
         userId: "user-1",
@@ -416,11 +439,13 @@ describe("/api/kits", () => {
       const shelfError = { status: 500, message: "Database error" };
       (makeShelfError as any).mockReturnValue(shelfError);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(makeShelfError).toHaveBeenCalledWith(dbError, {
         userId: "user-1",
@@ -444,11 +469,13 @@ describe("/api/kits", () => {
 
       (db.kit.findMany as any).mockResolvedValue(mockKits);
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.kit.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -466,11 +493,13 @@ describe("/api/kits", () => {
 
       (db.kit.findMany as any).mockResolvedValue([mockKits[0]]);
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.kit.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

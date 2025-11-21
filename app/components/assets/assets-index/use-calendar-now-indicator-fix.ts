@@ -4,7 +4,7 @@ import { scrollToNow } from "~/utils/calendar";
 
 interface UseCalendarNowIndicatorFixOptions {
   resources: any[] | undefined;
-  calendarRef: React.RefObject<FullCalendar>;
+  calendarRef: React.RefObject<FullCalendar | null>;
   targetView: string;
   setCalendarView: (view: string) => void;
 }

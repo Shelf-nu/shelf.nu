@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { data } from "@remix-run/node";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, useNavigate } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 import Header from "~/components/layout/header";

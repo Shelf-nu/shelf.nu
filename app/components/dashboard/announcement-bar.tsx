@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { StarsIcon } from "../icons/library";
 import { MarkdownViewer } from "../markdown/markdown-viewer";

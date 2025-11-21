@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect } from "react";
-import { Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
+import { Outlet, useMatches, useNavigate } from "react-router";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -22,7 +22,7 @@ const Dialog = ({
   const handleBackdropClose = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
-      navigate(prevRoute);
+      void navigate(prevRoute);
     },
     [prevRoute, navigate]
   );
@@ -34,7 +34,7 @@ const Dialog = ({
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        navigate(prevRoute);
+        void navigate(prevRoute);
       }
     };
 
