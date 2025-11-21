@@ -6,6 +6,8 @@
  * custom date component.
  */
 
+import type { Category } from "@prisma/client";
+
 /**
  * Wraps a date in Markdoc date tag syntax for proper rendering
  *
@@ -257,6 +259,26 @@ export function wrapCustodianForNote(custodian: {
     // Team member without user account, use bold text with escaped asterisks
     return `**${teamMember.name.replace(/\*\*/g, "\\*\\*")}**`;
   }
+}
+
+/**
+ * Wrap a category in a Markdoc tag so the renderer can show the badge component
+ */
+export function wrapCategoryForNote(
+  category?: Pick<Category, "id" | "name" | "color"> | null
+): string {
+  if (!category) {
+    return '{% category_badge name="Uncategorized" color="#575757" /%}';
+  }
+
+  const name = (category.name ?? "Uncategorized").trim();
+  const color = category.color ?? "#575757";
+
+  const escape = (value: string) => value.replace(/"/g, "&quot;");
+
+  return `{% category_badge name="${escape(name)}" color="${escape(
+    color
+  )}" /%}`;
 }
 
 /**

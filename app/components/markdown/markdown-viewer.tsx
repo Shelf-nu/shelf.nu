@@ -6,6 +6,7 @@ import { parseMarkdownToReact } from "~/utils/md";
 import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
 import { BookingStatusComponent } from "./booking-status-component";
+import { CategoryBadgeComponent } from "./category-badge-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
@@ -43,6 +44,7 @@ const defaultComponents = {
   LinkComponent,
   BookingStatusComponent,
   DescriptionComponent,
+  CategoryBadgeComponent,
   RawBlock: RawBlockComponent,
   TagComponent,
 };

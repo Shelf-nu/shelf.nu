@@ -228,6 +228,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       barcodes,
       valuation,
       organizationId,
+      request,
     });
 
     sendNotification({
