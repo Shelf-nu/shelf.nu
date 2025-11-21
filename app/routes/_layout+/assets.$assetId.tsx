@@ -24,7 +24,7 @@ import {
   deleteAsset,
   deleteOtherImages,
   getAsset,
-  relinkQrCode,
+  relinkAssetQrCode,
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -173,7 +173,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           z.object({ newQrId: z.string() })
         );
 
-        await relinkQrCode({
+        await relinkAssetQrCode({
           qrId: newQrId,
           assetId: id,
           organizationId,

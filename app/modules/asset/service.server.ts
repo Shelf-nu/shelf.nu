@@ -3621,7 +3621,11 @@ export async function bulkMarkAvailability({
   }
 }
 
-export async function relinkQrCode({
+/**
+ * Relinks an asset to a different QR code, unlinking any previous code.
+ * Throws if the QR belongs to another org, asset, or kit.
+ */
+export async function relinkAssetQrCode({
   qrId,
   assetId,
   organizationId,

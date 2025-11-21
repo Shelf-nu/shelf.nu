@@ -1422,6 +1422,10 @@ export async function updateKitQrCode({
   }
 }
 
+/**
+ * Relinks a kit to a different QR code, unlinking any previous code.
+ * Throws when the QR belongs to another org or is already linked to an asset/kit.
+ */
 export async function relinkKitQrCode({
   qrId,
   kitId,

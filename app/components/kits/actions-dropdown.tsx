@@ -268,6 +268,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
       <When truthy={isRelinkQrDialogOpen}>
         <RelinkQrCodeDialog
+          key={kit.qrCodes[0]?.id || kit.id}
           open={isRelinkQrDialogOpen}
           onClose={() => setIsRelinkQrDialogOpen(false)}
         />

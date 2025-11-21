@@ -2,7 +2,7 @@ import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
-import { relinkQrCode } from "./service.server";
+import { relinkAssetQrCode } from "./service.server";
 
 // why: isolating asset service logic from actual database operations
 vitest.mock("~/database/db.server", () => ({
@@ -36,7 +36,7 @@ vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
 }));
 
-describe("relinkQrCode (asset)", () => {
+describe("relinkAssetQrCode (asset)", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
   });
@@ -53,7 +53,7 @@ describe("relinkQrCode (asset)", () => {
     db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
 
     await expect(
-      relinkQrCode({
+      relinkAssetQrCode({
         qrId: "qr-1",
         assetId: "asset-1",
         organizationId: "org-1",
@@ -73,7 +73,7 @@ describe("relinkQrCode (asset)", () => {
     //@ts-expect-error mock setup
     db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
 
-    await relinkQrCode({
+    await relinkAssetQrCode({
       qrId: "qr-1",
       assetId: "asset-1",
       organizationId: "org-1",
