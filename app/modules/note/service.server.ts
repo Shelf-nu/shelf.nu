@@ -416,8 +416,8 @@ export async function createAssetCategoryChangeNote({
 }: {
   assetId: Asset["id"];
   userId: User["id"];
-  previousCategory?: Pick<Category, "id" | "name"> | null;
-  newCategory?: Pick<Category, "id" | "name"> | null;
+  previousCategory?: Pick<Category, "id" | "name" | "color"> | null;
+  newCategory?: Pick<Category, "id" | "name" | "color"> | null;
   loadUserForNotes: LoadUserForNotesFn;
 }) {
   const userLink = await resolveUserLink({ userId, loadUserForNotes });

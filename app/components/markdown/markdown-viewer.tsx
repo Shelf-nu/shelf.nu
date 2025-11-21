@@ -10,6 +10,7 @@ import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkComponent } from "./link-component";
+import { CategoryBadgeComponent } from "./category-badge-component";
 import { TagComponent } from "./tag-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
@@ -43,6 +44,7 @@ const defaultComponents = {
   LinkComponent,
   BookingStatusComponent,
   DescriptionComponent,
+  CategoryBadgeComponent,
   RawBlock: RawBlockComponent,
   TagComponent,
 };

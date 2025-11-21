@@ -3,8 +3,8 @@ import type { LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.serv
 
 import { formatCurrency } from "~/utils/currency";
 import {
+  wrapCategoryForNote,
   wrapDescriptionForNote,
-  wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
@@ -107,7 +107,7 @@ export function buildNameChangeNote({
  * Convert a category into a link / bold text for notes.
  */
 export function formatCategoryForNote(
-  category?: Pick<Category, "id" | "name"> | null
+  category?: Pick<Category, "id" | "name" | "color"> | null
 ) {
   if (!category) {
     return null;
@@ -118,9 +118,7 @@ export function formatCategoryForNote(
     return null;
   }
 
-  return category.id
-    ? wrapLinkForNote(`/categories/${category.id}`, name)
-    : `**${name}**`;
+  return wrapCategoryForNote(category);
 }
 
 /**
@@ -132,11 +130,11 @@ export function buildCategoryChangeNote({
   next,
 }: {
   userLink: string;
-  previous?: Pick<Category, "id" | "name"> | null;
-  next?: Pick<Category, "id" | "name"> | null;
+  previous?: Pick<Category, "id" | "name" | "color"> | null;
+  next?: Pick<Category, "id" | "name" | "color"> | null;
 }) {
-  const formattedPrevious = formatCategoryForNote(previous);
-  const formattedNext = formatCategoryForNote(next);
+  const formattedPrevious = wrapCategoryForNote(previous);
+  const formattedNext = wrapCategoryForNote(next);
 
   if (formattedPrevious === formattedNext) {
     return null;

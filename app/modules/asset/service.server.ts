@@ -1205,6 +1205,7 @@ export async function updateAsset({
           select: {
             id: true,
             name: true,
+            color: true,
           },
         },
         valuation: true,
@@ -1421,8 +1422,20 @@ export async function updateAsset({
         createAssetCategoryChangeNote({
           assetId: asset.id,
           userId,
-          previousCategory: assetBeforeUpdate.category,
-          newCategory: asset.category,
+          previousCategory: assetBeforeUpdate.category
+            ? {
+                id: assetBeforeUpdate.category.id,
+                name: assetBeforeUpdate.category.name ?? "Unnamed category",
+                color: assetBeforeUpdate.category.color ?? "#575757",
+              }
+            : null,
+          newCategory: asset.category
+            ? {
+                id: asset.category.id,
+                name: asset.category.name ?? "Unnamed category",
+                color: asset.category.color ?? "#575757",
+              }
+            : null,
           loadUserForNotes,
         }),
         createAssetValuationChangeNote({
