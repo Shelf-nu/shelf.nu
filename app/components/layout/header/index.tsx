@@ -24,9 +24,9 @@ export default function Header({
    * This is very useful for interactive adjustments of the title
    */
   title?: string | ReactNode | null;
-  children?: React.ReactNode;
-  subHeading?: React.ReactNode;
-  preHeading?: React.ReactNode;
+  children?: ReactNode;
+  subHeading?: ReactNode;
+  preHeading?: ReactNode;
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;

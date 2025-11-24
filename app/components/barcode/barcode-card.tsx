@@ -47,7 +47,7 @@ export function Ean13LookupLink({
   value: string;
   className?: string;
   /** Replaces default icon */
-  content?: React.ReactNode | string;
+  content?: ReactNode | string;
 }) {
   return (
     <a

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import type { Booking } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -48,7 +49,7 @@ export default function PartialCheckinDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

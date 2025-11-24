@@ -21,7 +21,7 @@ export const DeleteCategory = ({
   trigger,
 }: {
   category: Pick<Category, "name" | "id">;
-  trigger?: React.ReactNode;
+  trigger?: ReactNode;
 }) => {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);

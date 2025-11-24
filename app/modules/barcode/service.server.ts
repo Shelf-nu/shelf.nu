@@ -681,17 +681,13 @@ export async function updateBarcodes({
         // Use existing validation function for detailed error messages
         const currentItemId = assetId || kitId;
         const relationshipType = assetId ? "asset" : "kit";
-        try {
-          await validateBarcodeUniqueness(
-            barcodes,
-            organizationId,
-            currentItemId,
-            relationshipType as "asset" | "kit"
-          );
-        } catch (validationError) {
-          // Re-throw the detailed validation error
-          throw validationError;
-        }
+        await validateBarcodeUniqueness(
+          barcodes,
+          organizationId,
+          currentItemId,
+          relationshipType as "asset" | "kit"
+        );
+
         // If validateBarcodeUniqueness completes without throwing,
         // it means no duplicates were found, so continue with the generic error
       }

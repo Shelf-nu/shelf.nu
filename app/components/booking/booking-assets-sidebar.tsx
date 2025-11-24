@@ -57,7 +57,7 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
 
 interface BookingAssetsSidebarProps {
   booking: BookingWithAssets;
-  trigger?: React.ReactNode;
+  trigger?: ReactNode;
 }
 
 // Group assets by kits and individual assets - similar to the original pagination structure

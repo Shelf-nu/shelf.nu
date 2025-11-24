@@ -79,7 +79,7 @@ export const StickyHeader = ({
   stickyHeaderRef,
   coords,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   isSticky: boolean;
   stickyHeaderRef: React.RefObject<HTMLDivElement>;
   coords: {

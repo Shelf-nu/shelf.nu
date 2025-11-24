@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import type { CSSProperties } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
@@ -36,7 +37,7 @@ export interface CodeType {
 
 interface CodePreviewProps {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   hideButton?: boolean;
   item: {
     id: string; // Need the ID to construct the action URL

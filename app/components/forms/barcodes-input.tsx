@@ -5,6 +5,7 @@ import {
   useMemo,
   useEffect,
 } from "react";
+import type { CSSProperties } from "react";
 import { BarcodeType } from "@prisma/client";
 import {
   Popover,
@@ -40,7 +41,7 @@ type BarcodeInput = {
 
 type BarcodesInputProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   disabled?: boolean;
   typeName: (index: number) => string;
   valueName: (index: number) => string;

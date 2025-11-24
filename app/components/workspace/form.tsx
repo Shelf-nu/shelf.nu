@@ -36,7 +36,7 @@ export const NewWorkspaceFormSchema = z.object({
 interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
-  children?: string | React.ReactNode;
+  children?: string | ReactNode;
 }
 
 export const WorkspaceForm = ({ name, currency, children }: Props) => {

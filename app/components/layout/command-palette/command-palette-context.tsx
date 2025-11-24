@@ -27,11 +27,7 @@ export function useCommandPaletteSafe() {
   return context;
 }
 
-export function CommandPaletteProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
 
   const value = useMemo(

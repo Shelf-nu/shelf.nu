@@ -7,9 +7,7 @@ const TooltipProvider = TooltipPrimitive.Provider;
 
 // const Tooltip = TooltipPrimitive.Root;
 
-type TooltipProps = React.ComponentPropsWithoutRef<
-  typeof TooltipPrimitive.Root
->;
+type TooltipProps = ComponentPropsWithoutRef<typeof TooltipPrimitive.Root>;
 
 const Tooltip = ({ delayDuration = 100, ...props }: TooltipProps) => (
   <TooltipPrimitive.Root delayDuration={delayDuration} {...props} />
@@ -20,7 +18,7 @@ const TooltipTrigger = TooltipPrimitive.Trigger;
 type TooltipContentElement = React.ComponentRef<
   typeof TooltipPrimitive.Content
 >;
-type TooltipContentProps = React.ComponentPropsWithoutRef<
+type TooltipContentProps = ComponentPropsWithoutRef<
   typeof TooltipPrimitive.Content
 >;
 

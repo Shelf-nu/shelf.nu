@@ -50,7 +50,7 @@ export function BookingStatusBadge({
   );
 }
 
-function ExtraInfoTooltip({ children }: { children: React.ReactNode }) {
+function ExtraInfoTooltip({ children }: { children: ReactNode }) {
   return (
     <TooltipProvider>
       <Tooltip>

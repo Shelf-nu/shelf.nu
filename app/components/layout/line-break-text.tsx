@@ -1,10 +1,10 @@
-import type { HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
 import { createElement, useMemo } from "react";
 import { tw } from "~/utils/tw";
 
 type LineBreakTextProps = HTMLAttributes<HTMLParagraphElement> & {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 
   /** Element tag which will be rendered */
   as?: "p" | "span" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li";

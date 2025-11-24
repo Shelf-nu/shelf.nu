@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import { CheckIcon, UserIcon } from "lucide-react";
 import { Separator } from "~/components/shared/separator";
@@ -9,7 +10,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 
 type TeamMembersSelectorProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   error?: string;
   defaultValues?: string[];
 };

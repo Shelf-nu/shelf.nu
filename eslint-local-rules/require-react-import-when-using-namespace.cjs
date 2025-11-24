@@ -9,7 +9,7 @@
  * const MyComponent = () => React.createElement("div", null);
  *
  * ❌ Also bad:
- * type Props = { children: React.ReactNode };
+ * type Props = { children: ReactNode };
  *
  * ✅ Good:
  * import React from "react";
@@ -17,7 +17,7 @@
  *
  * ✅ Also good:
  * import type React from "react";
- * type Props = { children: React.ReactNode };
+ * type Props = { children: ReactNode };
  */
 
 const ts = require("typescript");

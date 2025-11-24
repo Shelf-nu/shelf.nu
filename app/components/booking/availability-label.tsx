@@ -211,7 +211,7 @@ export function AvailabilityBadge({
 }: {
   badgeText: string;
   tooltipTitle: string;
-  tooltipContent: string | React.ReactNode;
+  tooltipContent: string | ReactNode;
   className?: string;
 }) {
   return (

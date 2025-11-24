@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { ElementRef } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { tw } from "~/utils/tw";
 import { CheckIcon, ChevronRight } from "../icons/library";
@@ -11,8 +12,8 @@ const SelectGroup = SelectPrimitive.Group;
 const SelectValue = SelectPrimitive.Value;
 
 const SelectTrigger = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
+  ElementRef<typeof SelectPrimitive.Trigger>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
     hideArrow?: boolean;
   }
 >(function SelectTrigger(
@@ -38,8 +39,8 @@ const SelectTrigger = React.forwardRef<
 });
 
 const SelectContent = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
+  ElementRef<typeof SelectPrimitive.Content>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(function SelectContent({ className, children, ...props }, _ref) {
   return (
     <SelectPrimitive.Portal>
@@ -60,8 +61,8 @@ const SelectContent = React.forwardRef<
 });
 
 const SelectLabel = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Label>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
+  ElementRef<typeof SelectPrimitive.Label>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
 >(function SelectLabel({ className, ...props }, ref) {
   return (
     <SelectPrimitive.Label
@@ -76,8 +77,8 @@ const SelectLabel = React.forwardRef<
 });
 
 const SelectItem = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+  ElementRef<typeof SelectPrimitive.Item>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
 >(function SelectItem({ className, children, ...props }, ref) {
   return (
     <SelectPrimitive.Item
@@ -102,8 +103,8 @@ const SelectItem = React.forwardRef<
 });
 
 const SelectSeparator = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Separator>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
+  ElementRef<typeof SelectPrimitive.Separator>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
 >(function SelectSeparator({ className, ...props }, ref) {
   return (
     <SelectPrimitive.Separator

@@ -1,4 +1,5 @@
 import type React from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
@@ -26,15 +27,13 @@ type ConfigurableDrawerProps<T> = {
   // Function to clear all items
   onClearItems: () => void;
   // Title for the drawer
-  title: string | React.ReactNode;
+  title: string | ReactNode;
   // Custom empty state content
-  emptyStateContent?:
-    | React.ReactNode
-    | ((expanded: boolean) => React.ReactNode);
+  emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
   // Loading state
   isLoading?: boolean;
   // Item rendering function
-  renderItem: (qrId: string, item: T) => React.ReactNode;
+  renderItem: (qrId: string, item: T) => ReactNode;
   // Blockers component (from createBlockers)
   Blockers?: React.ComponentType;
   // Whether form submission should be disabled
@@ -52,15 +51,15 @@ type ConfigurableDrawerProps<T> = {
   // Custom class name
   className?: string;
   // Custom style
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   // Form name (for the zorm)
   formName?: string;
 
   // Optional form component to completely replace the default form
-  form?: React.ReactNode;
+  form?: ReactNode;
 
   // Optional header content to render above the item list
-  headerContent?: React.ReactNode;
+  headerContent?: ReactNode;
 };
 
 /**

@@ -16,7 +16,7 @@ export function InnerLabel({
   hideLg?: boolean;
   hideMd?: boolean;
   required?: boolean;
-  children: string | React.ReactNode;
+  children: string | ReactNode;
   className?: string;
 }) {
   return (

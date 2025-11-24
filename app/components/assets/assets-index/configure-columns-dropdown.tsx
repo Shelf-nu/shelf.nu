@@ -257,7 +257,7 @@ function ColumnRow({
   children,
   className,
 }: {
-  children: React.ReactNode | string;
+  children: ReactNode | string;
   className?: string;
 }) {
   return <div className={tw("px-[10px] py-[6px]", className)}>{children}</div>;

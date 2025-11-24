@@ -19,7 +19,7 @@ import { Button } from "../shared/button";
 import { Th } from "../table";
 
 type ListHeaderProps = {
-  children: React.ReactNode;
+  children: ReactNode;
   hideFirstColumn?: boolean;
   bulkActions?: ListProps["bulkActions"];
   title?: string;

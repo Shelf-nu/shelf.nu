@@ -20,7 +20,7 @@ export type DisabledProp =
   | boolean
   | {
       title?: string;
-      reason: React.ReactNode | string;
+      reason: ReactNode | string;
     };
 
 /**
@@ -46,7 +46,7 @@ export interface CommonButtonProps {
   onlyNewTabIconOnHover?: boolean;
   error?: string;
   hideErrorText?: boolean;
-  children?: React.ReactNode;
+  children?: ReactNode;
   disabled?: DisabledProp;
   /**
    * Accessible label for the button. Only required for icon-only buttons.

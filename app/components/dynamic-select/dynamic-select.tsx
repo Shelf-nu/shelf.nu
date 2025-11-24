@@ -1,5 +1,6 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -27,14 +28,14 @@ import When from "../when/when";
 type Props = ModelFilterProps & {
   className?: string;
   triggerWrapperClassName?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   fieldName?: string;
 
   /** This is the html label */
-  label?: React.ReactNode;
+  label?: ReactNode;
 
   /** This is to be shown inside the popover */
-  contentLabel?: React.ReactNode;
+  contentLabel?: ReactNode;
 
   /** Hide the label */
   hideLabel?: boolean;
@@ -44,8 +45,8 @@ type Props = ModelFilterProps & {
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
-  renderItem?: (item: ModelFilterItem) => React.ReactNode;
-  extraContent?: React.ReactNode;
+  renderItem?: (item: ModelFilterItem) => ReactNode;
+  extraContent?: ReactNode;
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;

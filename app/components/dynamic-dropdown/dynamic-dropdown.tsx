@@ -1,4 +1,5 @@
 import { cloneElement, useState } from "react";
+import type { CSSProperties } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -30,7 +31,7 @@ type Props = ModelFilterProps & {
   name?: string;
   className?: string;
   triggerWrapperClassName?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   trigger: React.ReactElement;
   label?: string;
   hideLabel?: boolean;
@@ -39,7 +40,7 @@ type Props = ModelFilterProps & {
   placeholder?: string;
   searchIcon?: IconType;
   showSearch?: boolean;
-  renderItem?: (item: ModelFilterItem) => React.ReactNode;
+  renderItem?: (item: ModelFilterItem) => ReactNode;
   /**
    * A a new item will be added to the list in dropdown, this item can be used to filter items
    * like "uncategorized" or "untagged" etc.

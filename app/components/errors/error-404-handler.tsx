@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { CSSProperties } from "react";
 import { useFetcher } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -15,7 +16,7 @@ import { Button } from "../shared/button";
 
 export type Error404HandlerProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   additionalData: Error404AdditionalData;
 };
 

@@ -8,7 +8,7 @@ export interface CustomEmptyState {
   className?: string;
   customContent?: {
     title: string;
-    text: React.ReactNode;
+    text: ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;

@@ -63,7 +63,7 @@ export const UpdateGpsCoordinatesForm = ({
     try {
       const coords = await requestGeoCoordinates();
 
-      fetcher.submit(
+      void fetcher.submit(
         {
           assetId: assetId as string,
           latitude: String(coords.latitude),

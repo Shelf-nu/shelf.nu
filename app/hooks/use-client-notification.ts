@@ -8,7 +8,7 @@ export function useClientNotification() {
     message = null,
     icon,
   }: Omit<NotificationType, "open" | "senderId">) => {
-    fetcher.submit(
+    void fetcher.submit(
       {
         title,
         message,

@@ -21,7 +21,7 @@ export const DeleteTag = ({
   trigger,
 }: {
   tag: Pick<Tag, "name" | "id">;
-  trigger?: React.ReactNode;
+  trigger?: ReactNode;
 }) => {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);

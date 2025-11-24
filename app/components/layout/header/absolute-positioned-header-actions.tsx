@@ -5,7 +5,7 @@ export const AbsolutePositionedHeaderActions = ({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) => (
   <div

@@ -59,7 +59,7 @@ export type ListProps = {
   className?: string;
   customEmptyStateContent?: {
     title: string;
-    text: React.ReactNode;
+    text: ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;
@@ -73,7 +73,7 @@ export type ListProps = {
   /** Optionally recieve an element for custom pagination */
   customPagination?: React.ReactElement;
   /** Any extra content to the right in Header */
-  headerExtraContent?: React.ReactNode;
+  headerExtraContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
 

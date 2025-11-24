@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { isValidElement, createElement } from "react";
 import * as React from "react";
 
@@ -6,7 +6,7 @@ interface SwitchChild {
   when?: boolean;
 }
 
-export const Switch = ({ children }: { children: React.ReactNode }) => {
+export const Switch = ({ children }: { children: ReactNode }) => {
   const components = React.Children.toArray(children);
 
   // Check if components[] has a non-ReactNode type Element

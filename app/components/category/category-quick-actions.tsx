@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Category } from "@prisma/client";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
@@ -13,7 +14,7 @@ import { DeleteCategory } from "./delete-category";
 
 type CategoryQuickActionsProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   category: Pick<Category, "id" | "name">;
 };
 
