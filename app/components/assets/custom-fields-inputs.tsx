@@ -1,3 +1,4 @@
+import type React from "react";
 import type { ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
@@ -10,15 +11,12 @@ import {
 } from "@radix-ui/react-popover";
 import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
-import type { Zorm } from "react-zorm";
-import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
@@ -27,13 +25,11 @@ import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
 
 export default function AssetCustomFields({
-  zo,
-  schema,
   currency,
+  fieldErrors,
 }: {
-  zo: Zorm<z.ZodObject<any, any, any>>;
-  schema: z.ZodObject<any, any, any>;
   currency: Currency;
+  fieldErrors: Record<string, string | undefined>;
 }) {
   const { customFields, asset } = useLoaderData<typeof loader>();
 
@@ -60,6 +56,16 @@ export default function AssetCustomFields({
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
     return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
+  };
+
+  // Get field errors from the plain object passed from parent
+  // This avoids react-zorm + React 19 incompatibility
+  const getFieldError = (fieldId: string) => fieldErrors[fieldId];
+
+  // Get required status from the custom field definition itself
+  const isFieldRequired = (fieldId: string) => {
+    const field = customFields.find((f) => f.id === fieldId);
+    return field?.required ?? false;
   };
 
   const fieldTypeToCompMap: {
@@ -105,7 +111,7 @@ export default function AssetCustomFields({
 
             setDateObj({ ...dateObj, [field.id]: selectedDate });
           }}
-          error={zo.errors[`cf-${field.id}`]()?.message}
+          error={getFieldError(field.id)}
           disabled={disabled}
         />
         {dateObj[field.id] ? (
@@ -137,7 +143,7 @@ export default function AssetCustomFields({
         (cfv) => cfv.customFieldId === field.id
       )?.value?.raw;
 
-      const error = zo.errors[`cf-${field.id}`]()?.message;
+      const error = getFieldError(field.id);
 
       return (
         <>
@@ -163,14 +169,14 @@ export default function AssetCustomFields({
           label={field.name}
           name={`cf-${field.id}`}
           placeholder={field.helpText || undefined}
-          error={zo.errors[`cf-${field.id}`]()?.message}
+          error={getFieldError(field.id)}
           defaultValue={getCustomFieldVal(field.id)}
           inputClassName="pl-[70px] valuation-input"
           disabled={disabled}
           step="any"
           min={0}
           className="w-full"
-          required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
+          required={isFieldRequired(field.id)}
         />
         <span className="absolute bottom-0 border-r px-3 py-2.5  text-gray-600 ">
           {currency}
@@ -184,12 +190,12 @@ export default function AssetCustomFields({
         label={field.name}
         name={`cf-${field.id}`}
         placeholder={field.helpText || undefined}
-        error={zo.errors[`cf-${field.id}`]()?.message}
+        error={getFieldError(field.id)}
         defaultValue={getCustomFieldVal(field.id)}
         disabled={disabled}
         step="any"
         className="w-full"
-        required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
+        required={isFieldRequired(field.id)}
       />
     ),
   };
@@ -233,13 +239,11 @@ export default function AssetCustomFields({
                       type={field.type.toLowerCase()}
                       label={field.name}
                       name={`cf-${field.id}`}
-                      error={zo.errors[`cf-${field.id}`]()?.message}
+                      error={getFieldError(field.id)}
                       disabled={disabled}
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
-                      required={zodFieldIsRequired(
-                        schema.shape[`cf-${field.id}`]
-                      )}
+                      required={isFieldRequired(field.id)}
                     />
                   )}
                 </FormRow>
@@ -266,13 +270,11 @@ export default function AssetCustomFields({
                       type={field.type.toLowerCase()}
                       label={field.name}
                       name={`cf-${field.id}`}
-                      error={zo.errors[`cf-${field.id}`]()?.message}
+                      error={getFieldError(field.id)}
                       disabled={disabled}
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
-                      required={zodFieldIsRequired(
-                        schema.shape[`cf-${field.id}`]
-                      )}
+                      required={isFieldRequired(field.id)}
                     />
                   )}
                 </FormRow>
