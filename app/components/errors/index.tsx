@@ -1,4 +1,4 @@
-import { useLocation, useRouteError } from "@remix-run/react";
+import { useLocation, useRouteError } from "react-router";
 
 import { isRouteError } from "~/utils/http";
 import { tw } from "~/utils/tw";

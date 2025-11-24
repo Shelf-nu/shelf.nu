@@ -1,5 +1,5 @@
 // learn more: https://fly.io/docs/reference/configuration/#services-http_checks
-import { data } from "@remix-run/node";
+import { data } from "react-router";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -12,7 +12,7 @@ export async function loader() {
     await db.user.findFirst({
       select: { id: true },
     });
-    return payload({ status: "OK" });
+    return data(payload({ status: "OK" }));
   } catch (cause) {
     return data(
       error(

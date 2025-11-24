@@ -4,9 +4,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { Link, Outlet, useMatches } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";

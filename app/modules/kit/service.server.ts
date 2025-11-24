@@ -18,7 +18,7 @@ import {
   KitStatus,
   NoteType,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -631,7 +631,7 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    let where: Prisma.AssetWhereInput = { organizationId, kitId };
+    const where: Prisma.AssetWhereInput = { organizationId, kitId };
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();
@@ -2048,19 +2048,20 @@ export async function updateKitAssets({
      */
     if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+      const assetIds = removedAssets.map((a) => a.id);
       await Promise.all([
         db.custody.deleteMany({
-          where: { assetId: { in: removedAssets.map((a) => a.id) } },
+          where: { assetId: { in: assetIds } },
         }),
         db.asset.updateMany({
-          where: { id: { in: removedAssets.map((a) => a.id) }, organizationId },
+          where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
-        await createNotes({
+        createNotes({
           content: `${actor} released ${custodianDisplay}'s custody.`,
           type: NoteType.UPDATE,
           userId,
-          assetIds: removedAssets.map((asset) => asset.id),
+          assetIds,
         }),
       ]);
     }

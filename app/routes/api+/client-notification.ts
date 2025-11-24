@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { NotificationIcon } from "~/atoms/notifications";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -34,7 +34,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return payload({ success: true });
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { data } from "@remix-run/node";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";

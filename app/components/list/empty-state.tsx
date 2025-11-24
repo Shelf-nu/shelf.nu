@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 
 import type { SearchableIndexResponse } from "~/modules/types";
 import { tw } from "~/utils/tw";

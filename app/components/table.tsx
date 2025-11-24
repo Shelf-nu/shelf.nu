@@ -1,5 +1,5 @@
 import type { TdHTMLAttributes } from "react";
-import React from "react";
+import type React from "react";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
 import { useViewportHeight } from "~/hooks/use-viewport-height";

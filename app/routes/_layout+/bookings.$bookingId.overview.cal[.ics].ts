@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";

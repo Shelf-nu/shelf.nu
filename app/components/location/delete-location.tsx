@@ -1,5 +1,5 @@
 import type { Location } from "@prisma/client";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 
 import {

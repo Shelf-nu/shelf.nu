@@ -1,7 +1,6 @@
 import { OrganizationRoles, type Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";

@@ -1,4 +1,4 @@
-import { redirect, type MetaFunction } from "@remix-run/node";
+import { redirect, type MetaFunction } from "react-router";
 import { ChoosePurpose } from "~/components/welcome/choose-purpose";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";

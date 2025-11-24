@@ -2,7 +2,7 @@
 
 import type { AssetIndexSettings, Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
+import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -336,7 +336,7 @@ export async function advancedModeLoader({
   });
 
   /** Query tierLimit, assets & Asset index settings */
-  let [
+  const [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,

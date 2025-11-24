@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { type ActionFunctionArgs, data } from "@remix-run/node";
+import { type ActionFunctionArgs, data } from "react-router";
 import sharp from "sharp";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -59,7 +59,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       profilePicture: getPublicFileURL({ filename: profilePicture }),
     });
 
-    return payload({ updatedUser });
+    return data(payload({ updatedUser }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

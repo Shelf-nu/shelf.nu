@@ -1,6 +1,6 @@
 import { UpdateStatus, OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";

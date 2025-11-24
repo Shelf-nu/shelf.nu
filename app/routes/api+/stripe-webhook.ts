@@ -1,5 +1,5 @@
 import { TierId } from "@prisma/client";
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";

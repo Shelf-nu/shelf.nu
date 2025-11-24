@@ -1,8 +1,7 @@
 /* eslint-disable no-console */
 import { useState } from "react";
-import { data } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, Form, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";

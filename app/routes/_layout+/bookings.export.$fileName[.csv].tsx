@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { exportBookingsFromIndexToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
