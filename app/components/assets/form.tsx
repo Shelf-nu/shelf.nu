@@ -124,7 +124,6 @@ export const AssetForm = ({
       }
   ) as CustomFieldZodSchema[];
 
-  // Testing: Use merged schema with Zorm but disable custom fields and barcodes
   const FormSchema = useMemo(
     () =>
       mergedSchema({
