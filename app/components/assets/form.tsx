@@ -231,7 +231,9 @@ export const AssetForm = ({
             hideLabel
             name="title"
             disabled={disabled}
-            error={actionData?.errors?.title?.message}
+            error={
+              actionData?.errors?.title?.message || zo.errors.title()?.message
+            }
             autoFocus
             onChange={updateDynamicTitle}
             className="w-full"
@@ -336,7 +338,6 @@ export const AssetForm = ({
               </p>
             }
             className="border-b-0"
-            // required={zodFieldIsRequired(FormSchema.shape.description)}
           >
             <Input
               inputType="textarea"
@@ -370,7 +371,6 @@ export const AssetForm = ({
             </p>
           }
           className="border-b-0 pb-[10px]"
-          // required={zodFieldIsRequired(FormSchema.shape.category)}
         >
           <DynamicSelect
             disabled={disabled}
@@ -441,7 +441,6 @@ export const AssetForm = ({
             </p>
           }
           className="border-b-0 py-[10px]"
-          // required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
         >
           <input
             type="hidden"
@@ -527,7 +526,6 @@ export const AssetForm = ({
             </p>
           }
           className="border-b-0 py-[10px]"
-          // required={zodFieldIsRequired(FormSchema.shape.valuation)}
         >
           <div className="relative w-full">
             <Input
