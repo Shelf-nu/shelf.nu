@@ -1,6 +1,5 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Outlet, useFetcher, useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, Outlet, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
@@ -127,7 +126,7 @@ export default function Announcements() {
                     method="post"
                     onChange={(e) => {
                       e.preventDefault();
-                      fetcher.submit(e.currentTarget);
+                      void fetcher.submit(e.currentTarget);
                     }}
                   >
                     <input type="hidden" name="id" value={a.id} />

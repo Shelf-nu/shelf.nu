@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { sendOTP } from "~/modules/auth/service.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";

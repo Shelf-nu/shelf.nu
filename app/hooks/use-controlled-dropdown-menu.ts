@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "~/hooks/search-params";
 
 type UseControlledDropdownMenuReturn = {
-  ref: React.RefObject<HTMLDivElement>;
+  ref: React.RefObject<HTMLDivElement | null>;
   defaultOpen: boolean;
   defaultApplied: boolean;
   open: boolean;

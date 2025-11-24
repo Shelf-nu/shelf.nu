@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect } from "react";
-import { useLoaderData } from "@remix-run/react";
-
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData } from "react-router";
+
 import {
   bulkDialogAtom,
   closeBulkDialogAtom,

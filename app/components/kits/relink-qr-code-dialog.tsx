@@ -1,9 +1,9 @@
-import { useActionData, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import {
   RelinkQrCodeDialog,
   type RelinkQrCodeActionData,
 } from "../qr/relink-qr-code-dialog";
+import { useActionData, useLoaderData } from "react-router";
 
 type RelinkQrCodeDialogProps = {
   open: boolean;

@@ -1,5 +1,5 @@
 import type { Tag } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import FormRow from "~/components/forms/form-row";
 import MultiSelect from "~/components/multi-select/multi-select";
 import { tw } from "~/utils/tw";

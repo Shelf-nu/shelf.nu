@@ -1,4 +1,4 @@
-import { useActionData, useLoaderData } from "@remix-run/react";
+import { useActionData, useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
   RelinkQrCodeDialog,

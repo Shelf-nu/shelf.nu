@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useRouteLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { ChevronUpIcon } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useRouteLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
@@ -49,7 +49,7 @@ export default function BaseDrawer({
   );
   const { vh } = useViewportHeight();
 
-  let minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
+  const minimizedSidebar = useRouteLoaderData<typeof layoutLoader>(
     "routes/_layout+/_layout"
   )?.minimizedSidebar;
 

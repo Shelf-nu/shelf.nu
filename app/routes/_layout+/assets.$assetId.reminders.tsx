@@ -1,5 +1,5 @@
-import { data } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import RemindersTable from "~/components/asset-reminder/reminders-table";
 import type { HeaderData } from "~/components/layout/header/types";

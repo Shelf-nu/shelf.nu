@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";

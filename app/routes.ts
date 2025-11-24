@@ -1,16 +1,13 @@
-import {
-  defineRoutes,
-  routeManifestToRouteConfig,
-  type RouteConfig,
-} from "@remix-run/dev/dist/config/routes";
+// import type { RouteConfig } from "@react-router/dev/routes";
+// import { flatRoutes } from "@react-router/fs-routes";
+
+// export default flatRoutes() satisfies RouteConfig;
+
+import { remixRoutesOptionAdapter } from "@react-router/remix-routes-option-adapter";
 import { flatRoutes } from "remix-flat-routes";
 
-// Generate a route config that mirrors the flat-routes convention so Remix can
-// lazily discover route metadata when the v3 lazy route discovery flag is
-// enabled. This keeps the manifest consistent with the routes option used in
-// vite.config.ts and prepares the app for the React Router v7 upgrade.
-const manifest = flatRoutes("routes", defineRoutes, {
-  ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"],
-});
-
-export default routeManifestToRouteConfig(manifest) satisfies RouteConfig;
+export default remixRoutesOptionAdapter((defineRoutes) =>
+  flatRoutes("routes", defineRoutes, {
+    ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"], // Ignore dot files and test files
+  })
+);

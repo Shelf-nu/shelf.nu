@@ -10,7 +10,7 @@ import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
 import { isQrId } from "~/utils/id";
 import { Logger } from "~/utils/logger";
-import type { FlashData } from "./session";
+import type { FlashData, SessionData } from "./session";
 import { authSessionKey } from "./session";
 
 /**
@@ -46,7 +46,6 @@ export function protect({
     if (isPublic) {
       return next();
     }
-    //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
@@ -58,7 +57,7 @@ export function protect({
 
       return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
     }
-    let isValidSession = await validateSession(auth.refreshToken);
+    const isValidSession = await validateSession(auth.refreshToken);
 
     if (!isValidSession) {
       session.flash(
@@ -106,7 +105,6 @@ function isExpiringSoon(expiresAt: number | undefined) {
  */
 export function refreshSession() {
   return createMiddleware(async (c, next) => {
-    //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
@@ -116,7 +114,7 @@ export function refreshSession() {
 
     try {
       session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
-    } catch (cause) {
+    } catch (_cause) {
       session.flash(
         "errorMessage",
         "You have been logged out. Please log in again."
@@ -158,12 +156,9 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
     const fullPath = c.req.path;
 
-    // Remove the URL_SHORTENER part from the beginning of the path
-    const pathWithoutShortener = fullPath.replace(
-      `/${process.env.URL_SHORTENER}`,
-      ""
-    );
-    const pathParts = pathWithoutShortener.split("/").filter(Boolean);
+    // In react-router-hono-server v2, we no longer use getPath to prepend the host
+    // The path is just the regular path, so no need to remove URL_SHORTENER prefix
+    const pathParts = fullPath.split("/").filter(Boolean);
     const pathname = "/" + pathParts.join("/");
 
     // console.log(`urlShortener middleware: Processing ${pathname}`);

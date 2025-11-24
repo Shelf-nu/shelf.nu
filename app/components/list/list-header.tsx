@@ -5,7 +5,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";

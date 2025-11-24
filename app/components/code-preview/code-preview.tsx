@@ -221,7 +221,7 @@ export const CodePreview = ({
     }
   }
 
-  const printCode = useReactToPrint({ content: () => captureDivRef.current });
+  const printCode = useReactToPrint({ contentRef: captureDivRef });
 
   // Don't render if no codes available
   if (availableCodes.length === 0) {

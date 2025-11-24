@@ -1,5 +1,4 @@
-/* eslint-disable no-console */
-import type { ReactNodeArray, ReactElement } from "react";
+import type { ReactElement } from "react";
 import { isValidElement, createElement } from "react";
 import * as React from "react";
 
@@ -8,7 +7,7 @@ interface SwitchChild {
 }
 
 export const Switch = ({ children }: { children: React.ReactNode }) => {
-  const components: ReactNodeArray = React.Children.toArray(children);
+  const components = React.Children.toArray(children);
 
   // Check if components[] has a non-ReactNode type Element
   const hasInvalidComponent: boolean =
@@ -19,7 +18,8 @@ export const Switch = ({ children }: { children: React.ReactNode }) => {
 
   // Check if last component is default component - No when props
   const lastComponentIsDefault =
-    isValidElement(lastComponent) && !("when" in lastComponent.props);
+    isValidElement<Record<string, unknown>>(lastComponent) &&
+    !("when" in lastComponent.props);
 
   if (hasInvalidComponent) {
     console.warn(

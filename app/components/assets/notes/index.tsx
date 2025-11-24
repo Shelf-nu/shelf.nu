@@ -1,4 +1,4 @@
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/assets.$assetId.activity";

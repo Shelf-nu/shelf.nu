@@ -1,4 +1,4 @@
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { IMPORT_USERS_CSV_HEADERS } from "~/modules/invite/utils.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
@@ -54,10 +54,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (!response) {
-      return payload({ success: true });
+      return data(payload({ success: true }));
     }
 
-    return payload({ success: true, ...response });
+    return data(payload({ success: true, ...response }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

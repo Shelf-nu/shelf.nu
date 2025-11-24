@@ -1,4 +1,4 @@
-import { useFetchers, useLoaderData } from "@remix-run/react";
+import { useFetchers, useLoaderData } from "react-router";
 import { z } from "zod";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";

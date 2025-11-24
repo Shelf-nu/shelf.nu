@@ -64,7 +64,7 @@ export async function resolveUserAndOrgForSsoCallback({
 }) {
   try {
     // First check if user exists
-    let user = await db.user.findUnique({
+    const user = await db.user.findUnique({
       where: {
         email: authSession.email,
       },

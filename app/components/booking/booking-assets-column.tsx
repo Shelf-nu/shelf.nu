@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";

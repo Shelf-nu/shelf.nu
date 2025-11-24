@@ -1,4 +1,4 @@
-import * as React from "react";
+import type { ComponentProps } from "react";
 import * as ProgressPrimitive from "@radix-ui/react-progress";
 import { tw } from "~/utils/tw";
 
@@ -6,7 +6,7 @@ function Progress({
   className,
   value,
   ...props
-}: React.ComponentProps<typeof ProgressPrimitive.Root>) {
+}: ComponentProps<typeof ProgressPrimitive.Root>) {
   const isComplete = (value || 0) === 100;
 
   return (

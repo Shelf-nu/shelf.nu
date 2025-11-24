@@ -1,12 +1,17 @@
 import { AssetStatus, BarcodeType, type Prisma } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   ActionFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  Outlet,
+  useLoaderData,
+  useMatches,
+} from "react-router";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { CodePreview } from "~/components/code-preview/code-preview";
@@ -92,7 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    let [kit, qrObj] = await Promise.all([
+    const [kit, qrObj] = await Promise.all([
       getKit({
         id: kitId,
         organizationId,

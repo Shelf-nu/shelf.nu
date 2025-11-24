@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Outlet, useMatches, useNavigate } from "@remix-run/react";
+import { Outlet, useMatches, useNavigate } from "react-router";
 import { tw } from "~/utils/tw";
 import Header from "./header";
 import {
@@ -33,7 +33,7 @@ export default function ContextualSidebar() {
       if (open) {
         setOpen(true);
       } else {
-        navigate(prevRoute.pathname);
+        void navigate(prevRoute.pathname);
       }
     },
     [navigate, prevRoute.pathname]

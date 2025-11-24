@@ -2,14 +2,12 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookingNotes } from "~/components/booking/notes";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "react-router";
 
 // why: supplying deterministic Remix hooks for BookingNotes component rendering
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const actual =
-    await vi.importActual<typeof import("@remix-run/react")>(
-      "@remix-run/react"
-    );
+    await vi.importActual<typeof import("react-router")>("react-router");
 
   return {
     ...actual,

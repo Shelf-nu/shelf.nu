@@ -1,6 +1,6 @@
 import React from "react";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
-import { Link, type LinkProps } from "@remix-run/react";
+import { Link, type LinkProps } from "react-router";
 import { tw } from "~/utils/tw";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { IconType } from "./icons-map";
