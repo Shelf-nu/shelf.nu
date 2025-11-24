@@ -2057,7 +2057,7 @@ export async function updateKitAssets({
           where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
-        await createNotes({
+        createNotes({
           content: `${actor} released ${custodianDisplay}'s custody.`,
           type: NoteType.UPDATE,
           userId,
