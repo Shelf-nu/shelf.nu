@@ -144,7 +144,7 @@ export default function UpdatesNavItem() {
           align="end"
           side="right"
           sideOffset={8}
-          className="updates-popover z-50 w-[650px] rounded-md border border-gray-200 bg-white shadow-lg"
+          className="z-50 w-[650px] rounded-md border border-gray-200 bg-white shadow-lg"
         >
           <div className="p-4">
             <div className="mb-4 flex items-center justify-between">
