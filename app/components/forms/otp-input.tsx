@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { ElementRef } from "react";
+import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import { OTPInput, OTPInputContext } from "input-otp";
 import { Minus } from "lucide-react";
 import { tw } from "~/utils/tw";

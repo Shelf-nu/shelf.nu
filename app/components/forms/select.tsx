@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { ElementRef } from "react";
+import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { tw } from "~/utils/tw";
 import { CheckIcon, ChevronRight } from "../icons/library";

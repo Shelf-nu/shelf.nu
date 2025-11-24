@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { ElementRef } from "react";
+import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import * as SwitchPrimitives from "@radix-ui/react-switch";
 
 import { tw } from "~/utils/tw";

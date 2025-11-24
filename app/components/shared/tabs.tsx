@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { ElementRef } from "react";
+import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { tw } from "~/utils/tw";
 

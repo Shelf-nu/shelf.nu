@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { ComponentPropsWithoutRef } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { tw } from "~/utils/tw";
