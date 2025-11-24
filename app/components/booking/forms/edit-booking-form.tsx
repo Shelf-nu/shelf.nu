@@ -205,6 +205,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   type="hidden"
                   name="nameChangeOnly"
                   value={bookingStatus?.isDraft ? "no" : "yes"}
+                  key={id}
                 />
                 <Button
                   type="submit"
@@ -298,7 +299,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       ) : null}
       <div className="mb-4">
         <div className="m-0 flex w-full flex-col gap-3">
-          {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
+          {id ? (
+            <input type="hidden" name="id" defaultValue={id} key={id} />
+          ) : null}
           <h3>Booking details</h3>
           <div
             className={tw(
