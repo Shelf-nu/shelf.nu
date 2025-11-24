@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Popover,
   PopoverContent,
@@ -62,7 +62,7 @@ export default function UpdatesNavItem() {
         );
         if (unreadUpdates.length > 0) {
           viewsTrackedRef.current = true;
-          fetcher.submit(
+          void fetcher.submit(
             {
               intent: "trackViews",
               updateIds: unreadUpdates.map((u) => u.id).join(","),
@@ -92,7 +92,7 @@ export default function UpdatesNavItem() {
     // Set optimistic flag to hide button and dot immediately
     setOptimisticMarkAllRead(true);
 
-    fetcher.submit(
+    void fetcher.submit(
       { intent: "markAllAsRead" },
       { method: "POST", action: "/api/updates" }
     );
@@ -103,7 +103,7 @@ export default function UpdatesNavItem() {
     setReadUpdateIds((prev) => new Set(prev).add(updateId));
 
     // Mark as read AND track click in single API call
-    fetcher.submit(
+    void fetcher.submit(
       { intent: "clickUpdate", updateId },
       { method: "POST", action: "/api/updates" }
     );

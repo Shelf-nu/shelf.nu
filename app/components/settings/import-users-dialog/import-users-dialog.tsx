@@ -1,4 +1,5 @@
-import { cloneElement, ReactElement, useState } from "react";
+import type { ReactElement } from "react";
+import { cloneElement, useState } from "react";
 import { UploadIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { z } from "zod";

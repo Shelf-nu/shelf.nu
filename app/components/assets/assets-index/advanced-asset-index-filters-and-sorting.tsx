@@ -1,3 +1,9 @@
+import type {
+  ChangeEvent,
+  KeyboardEvent,
+  Dispatch,
+  SetStateAction,
+} from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Popover,
@@ -506,7 +512,7 @@ function PickAColumnToSortBy({
   setSorts,
 }: {
   sorts: Sort[];
-  setSorts: React.Dispatch<React.SetStateAction<Sort[]>>;
+  setSorts: Dispatch<SetStateAction<Sort[]>>;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -553,12 +559,12 @@ function PickAColumnToSortBy({
     );
   }, [baseOptions, searchQuery]);
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();

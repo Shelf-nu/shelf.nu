@@ -112,6 +112,7 @@
     // jsx-a11y
     "jsx-a11y/no-autofocus": "off",
     "jsx-a11y/click-events-have-key-events": "off",
+    "jsx-a11y/no-noninteractive-element-interactions": "off",
     // react
     "react/no-unescaped-entities": "off",
     "no-restricted-imports": [
@@ -126,6 +127,7 @@
       }
     ],
     // Custom local rules
+    "local-rules/require-react-import-when-using-namespace": "error",
     "local-rules/require-satisfies-on-nested-prisma-selects": "error",
     "local-rules/require-deleted-at-check-on-custom-field-queries": "error"
     // "local-rules/require-meta-export-in-routes": "warn"
@@ -140,6 +142,20 @@
       ],
       "rules": {
         "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "globals": {
+        "vi": "readonly",
+        "vitest": "readonly",
+        "describe": "readonly",
+        "it": "readonly",
+        "expect": "readonly",
+        "beforeEach": "readonly",
+        "afterEach": "readonly",
+        "beforeAll": "readonly",
+        "afterAll": "readonly"
       }
     }
   ]

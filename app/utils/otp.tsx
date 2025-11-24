@@ -1,3 +1,4 @@
+import type React from "react";
 import SubHeading from "~/components/shared/sub-heading";
 
 export type OtpVerifyMode = "login" | "signup" | "confirm_signup";

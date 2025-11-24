@@ -180,7 +180,7 @@ describe("useKeyboardReorder", () => {
         key: "ArrowUp",
         altKey: true,
         preventDefault: vi.fn(),
-      } as unknown as React.KeyboardEvent;
+      } as unknown as KeyboardEvent;
 
       act(() => {
         result.current.handleKeyDown(mockEvent, 1);
@@ -203,7 +203,7 @@ describe("useKeyboardReorder", () => {
         key: "ArrowDown",
         altKey: true,
         preventDefault: vi.fn(),
-      } as unknown as React.KeyboardEvent;
+      } as unknown as KeyboardEvent;
 
       act(() => {
         result.current.handleKeyDown(mockEvent, 0);
@@ -226,7 +226,7 @@ describe("useKeyboardReorder", () => {
         key: "ArrowUp",
         altKey: false,
         preventDefault: vi.fn(),
-      } as unknown as React.KeyboardEvent;
+      } as unknown as KeyboardEvent;
 
       act(() => {
         result.current.handleKeyDown(mockEvent, 1);
@@ -249,7 +249,7 @@ describe("useKeyboardReorder", () => {
         key: "Enter",
         altKey: true,
         preventDefault: vi.fn(),
-      } as unknown as React.KeyboardEvent;
+      } as unknown as KeyboardEvent;
 
       act(() => {
         result.current.handleKeyDown(mockEvent, 1);

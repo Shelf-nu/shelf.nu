@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
@@ -113,7 +114,7 @@ type CodeScannerProps = {
   paused: boolean;
   setPaused: (paused: boolean) => void;
   /** Custom message to show when scanner is paused after detecting a code */
-  scanMessage?: string | React.ReactNode;
+  scanMessage?: string | ReactNode;
 
   /** Error message to show when scanner encounters an unsupported barcode */
   errorMessage?: string;
@@ -129,7 +130,7 @@ type CodeScannerProps = {
   /** Custom callback for the scanner mode */
   scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
 
-  actionSwitcher?: React.ReactNode;
+  actionSwitcher?: ReactNode;
 
   /** Force a specific mode and hide mode switching tabs */
   forceMode?: Mode;
@@ -387,7 +388,7 @@ function ScannerMode({
     [onCodeDetectionSuccess, allowNonShelfCodes, paused, callback]
   );
 
-  const handleEnterPress = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleEnterPress = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
       const input = e.target as HTMLInputElement;
@@ -662,7 +663,7 @@ function CameraMode({
   );
 }
 
-function InfoOverlay({ children }: { children: React.ReactNode }) {
+function InfoOverlay({ children }: { children: ReactNode }) {
   return (
     <div className="info-overlay absolute inset-0 z-20 flex items-center justify-center bg-slate-800 px-5">
       <RadialBg />

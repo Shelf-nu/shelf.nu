@@ -1,3 +1,4 @@
+import type React from "react";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { InfoBox } from "~/components/shared/info-box";

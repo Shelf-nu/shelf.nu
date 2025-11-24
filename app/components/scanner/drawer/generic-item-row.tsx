@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import type { Prisma } from "@prisma/client";
 import { motion } from "framer-motion";
@@ -53,8 +54,8 @@ type GenericItemRowProps<T> = {
   qrId: string;
   item: ScanListItem | undefined;
   onRemove: (qrId: string) => void;
-  renderItem: (item: T) => React.ReactNode;
-  renderLoading: (qrId: string, error?: string) => React.ReactNode;
+  renderItem: (item: T) => ReactNode;
+  renderLoading: (qrId: string, error?: string) => ReactNode;
   /**
    * Optional array of strings to be sent as search params to the get-scanned-item endpoint
    * This can allow for additional data to be fetched or included in the asset request for better UX
@@ -196,7 +197,7 @@ export function GenericItemRow<T>({
 }
 
 // Animation wrapper for rows
-export function Tr({ children }: { children: React.ReactNode }) {
+export function Tr({ children }: { children: ReactNode }) {
   return (
     <motion.tr
       initial={{ opacity: 0, y: -80 }}

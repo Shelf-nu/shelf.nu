@@ -13,6 +13,7 @@ import {
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckinDialog from "~/components/booking/checkin-dialog";
+import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
@@ -31,7 +32,6 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
-import { Form } from "~/components/custom-form";
 
 // Export the schema so it can be reused
 export const partialCheckinAssetsSchema = z.object({

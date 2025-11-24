@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Form, useNavigation } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
 import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
@@ -7,7 +8,6 @@ import type { OnCodeDetectionSuccessProps } from "../scanner/code-scanner";
 import { CodeScanner } from "../scanner/code-scanner";
 import { Button } from "../shared/button";
 import When from "../when/when";
-import { Form, useNavigation } from "react-router";
 
 export type RelinkQrCodeActionData = {
   success: boolean;
