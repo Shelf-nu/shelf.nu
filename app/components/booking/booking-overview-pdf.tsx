@@ -33,7 +33,7 @@ export const BookingOverviewPDF = ({
 
   useEffect(() => {
     if (isDialogOpen) {
-      fetch(`/api/bookings/${booking.id}/generate-pdf`)
+      void fetch(`/api/bookings/${booking.id}/generate-pdf`)
         .then((response) => response.json())
         .then((data) => {
           setPdfMeta(data.pdfMeta);
@@ -311,7 +311,7 @@ const BookingPDFPreview = ({
                         mainImageExpiration: asset.mainImageExpiration,
                       }}
                       alt={`Image of ${asset.title}`}
-                      className="!size-13 object-cover"
+                      className="!size-14 object-cover"
                     />
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
