@@ -2048,19 +2048,20 @@ export async function updateKitAssets({
      */
     if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+      const assetIds = removedAssets.map((a) => a.id);
       await Promise.all([
         db.custody.deleteMany({
-          where: { assetId: { in: removedAssets.map((a) => a.id) } },
+          where: { assetId: { in: assetIds } },
         }),
         db.asset.updateMany({
-          where: { id: { in: removedAssets.map((a) => a.id) }, organizationId },
+          where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
         await createNotes({
           content: `${actor} released ${custodianDisplay}'s custody.`,
           type: NoteType.UPDATE,
           userId,
-          assetIds: removedAssets.map((asset) => asset.id),
+          assetIds,
         }),
       ]);
     }
