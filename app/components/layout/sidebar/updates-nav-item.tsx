@@ -144,7 +144,7 @@ export default function UpdatesNavItem() {
           align="end"
           side="right"
           sideOffset={8}
-          className="z-50 w-[450px] rounded-md border border-gray-200 bg-white shadow-lg"
+          className="updates-popover z-50 w-[650px] rounded-md border border-gray-200 bg-white shadow-lg"
         >
           <div className="p-4">
             <div className="mb-4 flex items-center justify-between">
@@ -169,7 +169,7 @@ export default function UpdatesNavItem() {
               </div>
             ) : updates && updates?.length > 0 ? (
               <div
-                className="max-h-80 space-y-3 overflow-y-auto"
+                className="max-h-[500px] space-y-3 overflow-y-auto"
                 style={{
                   WebkitOverflowScrolling: "touch",
                   touchAction: "pan-y",
