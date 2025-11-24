@@ -322,7 +322,9 @@ async function normalizeToAsyncIterable(
   if (typeof (file as Blob).stream === "function") {
     const webStream = (file as Blob).stream();
     if (typeof Readable.fromWeb === "function") {
-      return Readable.fromWeb(webStream as any) as unknown as AsyncIterable<Uint8Array>;
+      return Readable.fromWeb(
+        webStream as any
+      ) as unknown as AsyncIterable<Uint8Array>;
     }
   }
 
