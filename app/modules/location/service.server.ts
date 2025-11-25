@@ -10,7 +10,10 @@ import type {
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { PUBLIC_BUCKET } from "~/utils/constants";
+import {
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -817,6 +820,7 @@ export async function updateLocationImage({
       },
       generateThumbnail: true,
       thumbnailSize: 108,
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string | null;
@@ -874,7 +878,7 @@ export async function updateLocationImage({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while updating the location image.",
-      additionalData: { locationId },
+      additionalData: { locationId, field: "image" },
       label,
     });
   }

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Organization, Currency } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useLoaderData, useNavigation } from "react-router";
+import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -40,6 +40,7 @@ interface Props {
 }
 
 export const WorkspaceForm = ({ name, currency, children }: Props) => {
+  const actionData = useActionData<{ error?: any }>();
   const { curriences } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -49,6 +50,11 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
   const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
   const nameFieldRef = useRef<HTMLInputElement>(null);
+
+  const imageError =
+    (actionData?.error?.additionalData?.field === "image"
+      ? actionData?.error?.message
+      : undefined) ?? fileError;
 
   useEffect(() => {
     const team = searchParams.get("team");
@@ -108,7 +114,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
               onChange={validateFile}
               label={"Main image"}
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />

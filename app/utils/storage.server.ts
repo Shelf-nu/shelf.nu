@@ -1,11 +1,18 @@
 import { Readable } from "node:stream";
 
-import { parseFormData } from "@remix-run/form-data-parser";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "./constants";
+import {
+  ASSET_MAX_IMAGE_UPLOAD_SIZE,
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "./constants";
 import { cropImage } from "./crop-image";
 import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
@@ -177,6 +184,7 @@ export async function parseFileFormData({
   resizeOptions,
   generateThumbnail = false,
   thumbnailSize = 108,
+  maxFileSize = DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
 }: {
   request: Request;
   newFileName: string;
@@ -184,6 +192,7 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
   generateThumbnail?: boolean;
   thumbnailSize?: number;
+  maxFileSize?: number;
 }) {
   try {
     const uploadHandler = async (upload: any) => {
@@ -207,20 +216,6 @@ export async function parseFileFormData({
       if (!fileStream) {
         return undefined;
       }
-
-      // const fileSize = await calculateAsyncIterableSize(file);
-      // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
-      //   throw new ShelfError({
-      //     cause: null,
-      //     title: "File too large",
-      //     message: `Image file size exceeds maximum allowed size of ${
-      //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-      //     }MB`,
-      //     additionalData: { filename: name, contentType: type, bucketName },
-      //     label,
-      //     shouldBeCaptured: false,
-      //   });
-      // }
 
       const extension = originalName?.includes(".")
         ? originalName.split(".").pop()
@@ -254,10 +249,29 @@ export async function parseFileFormData({
       return (uploadedFilePaths as { originalPath: string }).originalPath;
     };
 
-    const formData = await parseFormData(request, uploadHandler);
+    const formData = await parseFormData(
+      request,
+      { maxFileSize },
+      uploadHandler
+    );
 
     return formData;
   } catch (cause) {
+    const sizeLimitError = getMaxFileSizeExceededError(cause);
+
+    if (sizeLimitError) {
+      throw new ShelfError({
+        cause,
+        title: "File too large",
+        message: `Image file size exceeds maximum allowed size of ${
+          maxFileSize / (1024 * 1024)
+        }MB`,
+        additionalData: { maxFileSize },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
     throw new ShelfError({
       cause,
       message: isLikeShelfError(cause)
@@ -266,6 +280,29 @@ export async function parseFileFormData({
       label,
     });
   }
+}
+
+/**
+ * Recursively walks the `.cause` chain to find a `MaxFileSizeExceededError`.
+ *
+ * `parseFormData` wraps errors, so this helper normalises the shape and lets
+ * callers respond with the correct user-facing message when the underlying
+ * file exceeds the configured size.
+ */
+function getMaxFileSizeExceededError(
+  error: unknown
+): MaxFileSizeExceededError | null {
+  if (error instanceof MaxFileSizeExceededError) {
+    return error;
+  }
+
+  const cause = (error as { cause?: unknown })?.cause;
+
+  if (!cause) {
+    return null;
+  }
+
+  return getMaxFileSizeExceededError(cause);
 }
 
 /**
@@ -739,15 +776,4 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
       label,
     });
   }
-}
-
-// Utility function to get size from AsyncIterable<Uint8Array>
-export async function calculateAsyncIterableSize(
-  data: AsyncIterable<Uint8Array>
-): Promise<number> {
-  let totalSize = 0;
-  for await (const chunk of data) {
-    totalSize += chunk.byteLength;
-  }
-  return totalSize;
 }

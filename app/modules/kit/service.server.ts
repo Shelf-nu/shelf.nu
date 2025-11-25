@@ -26,6 +26,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -292,6 +293,7 @@ export async function updateKitImage({
         width: 800,
         withoutEnlargement: true,
       },
+      maxFileSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string;
@@ -312,8 +314,10 @@ export async function updateKitImage({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating image for kit.",
-      additionalData: { kitId, userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating image for kit.",
+      additionalData: { kitId, userId, field: "image" },
       label,
     });
   }
