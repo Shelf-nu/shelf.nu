@@ -329,6 +329,10 @@ export function BookingFormSchema({
           // Only basic fields can be updated for active bookings
           return baseSchema;
         }
+
+        default: {
+          return baseSchema;
+        }
       }
     }
 

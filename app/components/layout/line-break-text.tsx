@@ -45,9 +45,12 @@ export default function LineBreakText({
     return lines;
   }, [charactersPerLine, numberOfLines, text]);
 
-  return createElement(as, {
-    className: tw("w-60 whitespace-pre-wrap", className),
-    style,
-    children: lines.map((line, i) => <span key={i}>{line}</span>),
-  });
+  return createElement(
+    as,
+    {
+      className: tw("w-60 whitespace-pre-wrap", className),
+      style,
+    },
+    lines.map((line, i) => <span key={i}>{line}</span>)
+  );
 }

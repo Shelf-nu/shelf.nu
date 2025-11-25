@@ -4,8 +4,9 @@
  */
 export function getRandomColor(): string {
   const minBrightness = 10; // minimum brightness value (out of 255)
+  const maxAttempts = 100; // Prevent infinite loop
 
-  while (true) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Generate random RGB values
     const r = Math.floor(Math.random() * 256);
     const g = Math.floor(Math.random() * 256);
@@ -25,4 +26,7 @@ export function getRandomColor(): string {
 
     return hex;
   }
+
+  // Fallback color if we can't generate a suitable one
+  return "#000000";
 }

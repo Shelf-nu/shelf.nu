@@ -254,7 +254,7 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
 
   // Sort the prices within each group by unit_amount
   for (const interval in groupedPrices) {
-    if (groupedPrices.hasOwnProperty(interval)) {
+    if (Object.prototype.hasOwnProperty.call(groupedPrices, interval)) {
       // @ts-ignore
       groupedPrices[interval].sort((a, b) => a.unit_amount - b.unit_amount);
     }

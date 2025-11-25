@@ -118,6 +118,7 @@
     "jsx-a11y/no-noninteractive-element-interactions": "off",
     // react
     "react/no-unescaped-entities": "off",
+    "react/prop-types": "off", // Disabled for TypeScript projects - use TypeScript types instead
     "no-restricted-imports": [
       "error",
       {
