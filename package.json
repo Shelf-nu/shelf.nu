@@ -81,7 +81,7 @@
     "@react-router/node": "^7.9.5",
     "@react-router/serve": "^7.9.5",
     "@remix-run/form-data-parser": "^0.14.0",
-    "@sentry/react-router": "^10.24.0",
+    "@sentry/react-router": "^10.27.0",
     "@stripe/stripe-js": "^3.0.2",
     "@supabase/supabase-js": "^2.43.4",
     "@tremor/react": "^3.18.7",
