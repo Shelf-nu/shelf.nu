@@ -366,7 +366,7 @@ export async function validateSession(token: string) {
       );
     }
     return result.length > 0;
-  } catch (err) {
+  } catch (_err) {
     Logger.error(
       new ShelfError({
         cause: null,

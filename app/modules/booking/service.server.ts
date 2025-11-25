@@ -656,7 +656,7 @@ export async function updateBasicBooking({
             content: custodianChangeMessage,
           });
         }
-      } catch (error) {
+      } catch (_error) {
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
         await createSystemBookingNote({
           bookingId: booking.id,

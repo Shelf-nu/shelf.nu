@@ -514,7 +514,7 @@ async function generateReturnUrl({
       userId,
       orgType: "TEAM",
     });
-  } catch (cause) {
+  } catch (_cause) {
     userTeamOrg = null;
   }
 
