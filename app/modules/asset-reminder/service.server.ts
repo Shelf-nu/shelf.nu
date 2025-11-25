@@ -73,7 +73,7 @@ export async function createAssetReminder({
           assetReminder.name
         )}.`,
       }),
-      await scheduleAssetReminder({
+      scheduleAssetReminder({
         data: {
           reminderId: assetReminder.id,
           eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,

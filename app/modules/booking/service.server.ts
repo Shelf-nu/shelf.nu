@@ -1798,45 +1798,41 @@ export async function partialCheckinBooking({
       const isCompletingBooking = remainingCount === 0;
 
       if (isCompletingBooking) {
-        try {
-          // Update booking status to COMPLETE
-          const completedBooking = await tx.booking.update({
-            where: { id },
-            data: { status: BookingStatus.COMPLETE },
-            include: {
-              assets: true,
-              custodianUser: true,
-              custodianTeamMember: true,
-              _count: { select: { assets: true } },
-            },
-          });
+        // Update booking status to COMPLETE
+        const completedBooking = await tx.booking.update({
+          where: { id },
+          data: { status: BookingStatus.COMPLETE },
+          include: {
+            assets: true,
+            custodianUser: true,
+            custodianTeamMember: true,
+            _count: { select: { assets: true } },
+          },
+        });
 
-          // Create combined completion message
-          const fromStatusBadge = wrapBookingStatusForNote(
-            updatedBookingForNote.status,
-            completedBooking.custodianUserId || undefined
-          );
-          const toStatusBadge = wrapBookingStatusForNote(
-            BookingStatus.COMPLETE,
-            completedBooking.custodianUserId || undefined
-          );
+        // Create combined completion message
+        const fromStatusBadge = wrapBookingStatusForNote(
+          updatedBookingForNote.status,
+          completedBooking.custodianUserId || undefined
+        );
+        const toStatusBadge = wrapBookingStatusForNote(
+          BookingStatus.COMPLETE,
+          completedBooking.custodianUserId || undefined
+        );
 
-          await createSystemBookingNote({
-            bookingId: id,
-            content: `${wrapUserLinkForNote(
-              user!
-            )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
-          });
+        await createSystemBookingNote({
+          bookingId: id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+        });
 
-          return {
-            booking: completedBooking,
-            checkedInAssetCount: assetIds.length,
-            remainingAssetCount: 0,
-            isComplete: true,
-          };
-        } catch (error) {
-          throw error;
-        }
+        return {
+          booking: completedBooking,
+          checkedInAssetCount: assetIds.length,
+          remainingAssetCount: 0,
+          isComplete: true,
+        };
       } else {
         // Regular partial check-in
         const remainingText = ` (Remaining: ${remainingCount})`;
