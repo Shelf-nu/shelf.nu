@@ -18,11 +18,14 @@ export async function createUserAssetIndexSettings({
   userId,
   organizationId,
   canUseBarcodes = false,
+  role,
   tx,
 }: {
   userId: string;
   organizationId: string;
   canUseBarcodes?: boolean;
+  /** User's role to determine default mode */
+  role?: string;
   /** Optionally receive a transaction when the settingsd need to be created together with other entries */
   tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
@@ -59,11 +62,16 @@ export async function createUserAssetIndexSettings({
       ...customFieldsColumns,
     ];
 
+    // BASE and SELF_SERVICE users should default to SIMPLE mode
+    // All other roles default to ADVANCED mode
+    const defaultMode =
+      role && ["BASE", "SELF_SERVICE"].includes(role) ? "SIMPLE" : "ADVANCED";
+
     const settings = await _db.assetIndexSettings.create({
       data: {
         userId,
         organizationId,
-        mode: "ADVANCED",
+        mode: defaultMode,
         columns,
       },
     });
@@ -85,10 +93,12 @@ export async function getAssetIndexSettings({
   userId,
   organizationId,
   canUseBarcodes = false,
+  role,
 }: {
   userId: string;
   organizationId: string;
   canUseBarcodes?: boolean;
+  role?: string;
 }) {
   try {
     const assetIndexSettings = await db.assetIndexSettings.findFirst({
@@ -101,6 +111,7 @@ export async function getAssetIndexSettings({
         userId,
         organizationId,
         canUseBarcodes,
+        role,
       });
     }
 
