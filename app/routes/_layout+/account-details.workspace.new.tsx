@@ -1,5 +1,8 @@
 import { Currency } from "@prisma/client";
-import { parseFormData } from "@remix-run/form-data-parser";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -78,7 +81,29 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { name, currency } = payload;
     /** This checks if tags are passed and build the  */
 
-    const formDataFile = await parseFormData(request);
+    let formDataFile: FormData;
+    try {
+      formDataFile = await parseFormData(request, {
+        maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      });
+    } catch (parseError) {
+      if (parseError instanceof MaxFileSizeExceededError) {
+        const reason = new ShelfError({
+          cause: parseError,
+          message: `Image size exceeds maximum allowed size of ${
+            DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          }MB`,
+          status: 400,
+          label: "Organization",
+          additionalData: { userId, field: "image" },
+          shouldBeCaptured: false,
+        });
+        return data(error(reason), { status: reason.status });
+      }
+
+      const reason = makeShelfError(parseError, { userId });
+      return data(error(reason), { status: reason.status });
+    }
 
     const file = formDataFile.get("image") as File | null;
 
@@ -93,6 +118,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         }MB`,
         status: 400,
         label: "Organization",
+        additionalData: { userId, field: "image" },
+        shouldBeCaptured: false,
       });
     }
 

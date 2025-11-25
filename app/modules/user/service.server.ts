@@ -23,6 +23,7 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -1046,6 +1047,7 @@ export async function updateProfilePicture({
         fit: sharp.fit.cover,
         withoutEnlargement: true,
       },
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const profilePicture = fileData.get("profile-picture") as string;
@@ -1067,9 +1069,10 @@ export async function updateProfilePicture({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while updating your profile picture. Please try again or contact support.",
-      additionalData: { userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating your profile picture. Please try again or contact support.",
+      additionalData: { userId, field: "profile-picture" },
       label,
     });
   }

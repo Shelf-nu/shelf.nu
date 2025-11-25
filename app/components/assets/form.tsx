@@ -163,6 +163,11 @@ export const AssetForm = ({
     return errors;
   }, [customFields, zo.errors]);
 
+  const actionData = useActionData<{
+    errors?: Record<string, { message: string }>;
+    error?: { message: string; additionalData?: Record<string, unknown> };
+  }>();
+
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(assetImageValidateFileAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
@@ -170,14 +175,12 @@ export const AssetForm = ({
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
   const isKitAsset = Boolean(asset?.kit);
   const locationDisabled = disabled || isKitAsset;
-  const actionData = useActionData<{
-    errors?: {
-      title?: {
-        message: string;
-      };
-    };
-  }>();
-
+  const mainImageError =
+    actionData?.errors?.mainImage?.message ??
+    (actionData?.error?.additionalData?.field === "mainImage"
+      ? actionData?.error?.message
+      : undefined) ??
+    fileError;
   /** Get the tags from the loader */
   const tagsSuggestions = useLoaderData<typeof loader>().tags.map((tag) => ({
     label: tag.name,
@@ -316,7 +319,7 @@ export const AssetForm = ({
                 onChange={validateFile}
                 label={"Main image"}
                 hideLabel
-                error={fileError}
+                error={mainImageError}
                 className="mt-2"
                 inputClassName="border-0 shadow-none p-0 rounded-none"
               />
