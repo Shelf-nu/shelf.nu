@@ -218,7 +218,7 @@
     "vitest": "^2.1.9"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.20.0"
   },
   "config": {
     "commitizen": {
