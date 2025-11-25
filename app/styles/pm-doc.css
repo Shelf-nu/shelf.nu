@@ -1,6 +1,6 @@
 .pm-doc {
   max-width: none;
-  font-size: 1rem;
+  /* font-size: 1rem; */
   line-height: 1.6;
   color: #101828;
 }
@@ -146,4 +146,11 @@
 .pm-doc.pm--editing:focus-visible {
   outline: none;
   outline-offset: 0;
+}
+
+/* Prevent iOS zoom on focus by ensuring minimum 16px font size on mobile */
+@media (max-width: 768px) {
+  .pm-doc.pm--editing {
+    font-size: 1rem;
+  }
 }

@@ -1,12 +1,12 @@
+import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, Link, useLoaderData } from "react-router";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -380,7 +380,7 @@ function ListContent({
       }
     >;
   }>;
-  bulkActions?: React.ReactNode;
+  bulkActions?: ReactNode;
 }) {
   const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
     typeof LOCATION_WITH_HIERARCHY

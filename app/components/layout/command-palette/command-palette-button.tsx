@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useMatches } from "@remix-run/react";
 import { SearchIcon } from "lucide-react";
+import { useMatches } from "react-router";
 
 import { Button } from "~/components/shared/button";
 import type { RouteHandleWithName } from "~/modules/types";

@@ -1,6 +1,5 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link, Outlet, useRouteLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, Link, Outlet, useRouteLoaderData } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -50,7 +49,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const shouldRevalidate = () => false;
 
 export default function AccountDetailsPage() {
-  let items = [
+  const items = [
     { to: "general", content: "General" },
     { to: "workspace", content: "Workspaces" },
   ];

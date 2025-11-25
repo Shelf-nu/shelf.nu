@@ -1,4 +1,4 @@
-import { data, type Params } from "@remix-run/react";
+import { data, type Params } from "react-router";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";
 import { sendNotification } from "./emitter/send-notification.server";

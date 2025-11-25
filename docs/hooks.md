@@ -211,7 +211,7 @@ export default function AssetIndexPage() {
 
 **Dependencies:**
 
-- `useRouteLoaderData`: hook from `@remix-run/react` that returns the loader data for a given route by ID.
+- `useRouteLoaderData`: hook from `react-router` that returns the loader data for a given route by ID.
 
 ## `useUserData`
 
@@ -250,7 +250,7 @@ In this example, the `useUserData` hook is used to retrieve the current user's e
 
 ## Dependencies
 
-- `useRouteLoaderData`: A hook from `@remix-run/react` that returns the loader data for a given route by ID.
+- `useRouteLoaderData`: A hook from `react-router` that returns the loader data for a given route by ID.
 - `loader` type from `~/routes/_layout+/_layout`: Used to type the loader data.
 
 ## useTableIsOverflowing

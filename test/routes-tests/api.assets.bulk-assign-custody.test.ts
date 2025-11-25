@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
@@ -20,8 +20,8 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
-vi.mock("@remix-run/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),
@@ -178,8 +178,10 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const response = (await action(createActionArgs({ request }))) as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
@@ -259,7 +261,9 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const response = (await action(createActionArgs({ request }))) as any;
 
-    // Success case returns plain object, not Response
-    expect(response).toEqual({ error: null, success: true });
+    // Success case returns Response wrapping the payload
+    expect(response instanceof Response).toBe(true);
+    const responseData = await (response as unknown as Response).json();
+    expect(responseData).toEqual({ error: null, success: true });
   });
 });

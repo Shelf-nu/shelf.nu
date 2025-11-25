@@ -4,7 +4,7 @@ import { CrossCircledIcon } from "@radix-ui/react-icons";
 import Input from "./input";
 
 interface Props {
-  options: String[];
+  options: string[];
   onAdd: (input: string) => void;
   onRemove: (idx: number) => void;
   disabled?: boolean;

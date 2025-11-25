@@ -1,7 +1,6 @@
-import {
-  unstable_composeUploadHandlers,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+import { Readable } from "node:stream";
+
+import { parseFormData } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -187,57 +186,75 @@ export async function parseFileFormData({
   thumbnailSize?: number;
 }) {
   try {
-    const uploadHandler = unstable_composeUploadHandlers(
-      async ({ contentType, data, filename }) => {
-        if (!contentType?.includes("image")) {
-          return undefined;
-        }
+    const uploadHandler = async (upload: any) => {
+      const file = upload?.file ?? upload;
+      const mimeType =
+        upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
+      const originalName =
+        upload?.name ?? upload?.filename ?? file?.name ?? undefined;
 
-        // const fileSize = await calculateAsyncIterableSize(data);
-        // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
-        //   throw new ShelfError({
-        //     cause: null,
-        //     title: "File too large",
-        //     message: `Image file size exceeds maximum allowed size of ${
-        //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-        //     }MB`,
-        //     additionalData: { filename, contentType, bucketName },
-        //     label,
-        //     shouldBeCaptured: false,
-        //   });
-        // }
-
-        const fileExtension = filename?.split(".").pop();
-        const uploadedFilePaths = await uploadFile(data, {
-          filename: `${newFileName}.${fileExtension}`,
-          contentType,
-          bucketName,
-          resizeOptions,
-          generateThumbnail,
-          thumbnailSize,
-        });
-
-        // For profile pictures and other cases that don't need thumbnails,
-        // the uploadFile function returns a string path
-        if (typeof uploadedFilePaths === "string") {
-          return uploadedFilePaths;
-        }
-
-        // For cases where thumbnails are generated, we need to store the object
-        // in a way that FormData can handle. We'll store it as a stringified JSON
-        if (generateThumbnail) {
-          return JSON.stringify(uploadedFilePaths);
-        }
-
-        // This shouldn't happen, but if it does, return the originalPath
-        return (uploadedFilePaths as { originalPath: string }).originalPath;
+      // Only process image files
+      if (mimeType && !mimeType.includes("image")) {
+        return undefined;
       }
-    );
 
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      uploadHandler
-    );
+      if (!file) {
+        return undefined;
+      }
+
+      const fileStream = await normalizeToAsyncIterable(file);
+
+      if (!fileStream) {
+        return undefined;
+      }
+
+      // const fileSize = await calculateAsyncIterableSize(file);
+      // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
+      //   throw new ShelfError({
+      //     cause: null,
+      //     title: "File too large",
+      //     message: `Image file size exceeds maximum allowed size of ${
+      //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+      //     }MB`,
+      //     additionalData: { filename: name, contentType: type, bucketName },
+      //     label,
+      //     shouldBeCaptured: false,
+      //   });
+      // }
+
+      const extension = originalName?.includes(".")
+        ? originalName.split(".").pop()
+        : undefined;
+      const targetFilename = extension
+        ? `${newFileName}.${extension}`
+        : newFileName;
+
+      const uploadedFilePaths = await uploadFile(fileStream, {
+        filename: targetFilename,
+        contentType: mimeType ?? "application/octet-stream",
+        bucketName,
+        resizeOptions,
+        generateThumbnail,
+        thumbnailSize,
+      });
+
+      // For profile pictures and other cases that don't need thumbnails,
+      // the uploadFile function returns a string path
+      if (typeof uploadedFilePaths === "string") {
+        return uploadedFilePaths;
+      }
+
+      // For cases where thumbnails are generated, we need to store the object
+      // in a way that FormData can handle. We'll store it as a stringified JSON
+      if (generateThumbnail) {
+        return JSON.stringify(uploadedFilePaths);
+      }
+
+      // This shouldn't happen, but if it does, return the originalPath
+      return (uploadedFilePaths as { originalPath: string }).originalPath;
+    };
+
+    const formData = await parseFormData(request, uploadHandler);
 
     return formData;
   } catch (cause) {
@@ -265,6 +282,61 @@ function logUploadError(cause: unknown, additionalData: AdditionalData) {
       label,
     })
   );
+}
+
+/**
+ * Normalise the various shapes `parseFormData` can hand us for file payloads
+ * (Blob, File, Buffer, Node streams, async iterables) into an AsyncIterable
+ * that Sharp can consume without crashing.
+ */
+async function normalizeToAsyncIterable(
+  file:
+    | AsyncIterable<Uint8Array>
+    | Readable
+    | Buffer
+    | Blob
+    | { stream?: () => any; arrayBuffer?: () => Promise<ArrayBuffer> }
+    | null
+    | undefined
+): Promise<AsyncIterable<Uint8Array> | null> {
+  if (!file) {
+    return null;
+  }
+
+  if (typeof (file as any)[Symbol.asyncIterator] === "function") {
+    return file as AsyncIterable<Uint8Array>;
+  }
+
+  if (file instanceof Readable) {
+    return file as AsyncIterable<Uint8Array>;
+  }
+
+  if (Buffer.isBuffer(file)) {
+    return (async function* bufferToIterable() {
+      await Promise.resolve();
+      yield file;
+    })();
+  }
+
+  // Remix now uses the undici File polyfill which exposes stream()/arrayBuffer()
+  if (typeof (file as Blob).stream === "function") {
+    const webStream = (file as Blob).stream();
+    if (typeof Readable.fromWeb === "function") {
+      return Readable.fromWeb(
+        webStream as any
+      ) as unknown as AsyncIterable<Uint8Array>;
+    }
+  }
+
+  if (typeof (file as Blob).arrayBuffer === "function") {
+    const buffer = Buffer.from(await (file as Blob).arrayBuffer());
+    return (async function* bufferToIterable() {
+      await Promise.resolve();
+      yield buffer;
+    })();
+  }
+
+  return null;
 }
 
 /**
@@ -480,12 +552,13 @@ export async function uploadImageFromUrl(
       });
     }
 
-    async function* toAsyncIterable(): AsyncIterable<Uint8Array> {
-      await Promise.resolve();
-      yield new Uint8Array(buffer);
-    }
-
-    const file = await cropImage(toAsyncIterable(), resizeOptions);
+    const file = await cropImage(
+      (async function* webResponseToIterable() {
+        await Promise.resolve();
+        yield new Uint8Array(buffer);
+      })(),
+      resizeOptions
+    );
 
     // Upload to Supabase
     const { data, error } = await getSupabaseAdmin()

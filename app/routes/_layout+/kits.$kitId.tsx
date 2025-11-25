@@ -1,12 +1,17 @@
 import { AssetStatus, BarcodeType, type Prisma } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   ActionFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  Outlet,
+  useLoaderData,
+  useMatches,
+} from "react-router";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { CodePreview } from "~/components/code-preview/code-preview";
@@ -32,6 +37,7 @@ import {
   deleteKitImage,
   getKit,
   getKitCurrentBooking,
+  relinkKitQrCode,
 } from "~/modules/kit/service.server";
 import { createNote } from "~/modules/note/service.server";
 
@@ -91,7 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    let [kit, qrObj] = await Promise.all([
+    const [kit, qrObj] = await Promise.all([
       getKit({
         id: kitId,
         organizationId,
@@ -209,13 +215,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["removeAsset", "delete", "add-barcode"]) })
+      z.object({
+        intent: z.enum([
+          "removeAsset",
+          "delete",
+          "add-barcode",
+          "relink-qr-code",
+        ]),
+      })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
       removeAsset: PermissionAction.update,
       "add-barcode": PermissionAction.update,
+      "relink-qr-code": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -372,6 +386,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: reason.status,
           });
         }
+      }
+
+      case "relink-qr-code": {
+        const { newQrId } = parseData(
+          formData,
+          z.object({ newQrId: z.string() })
+        );
+
+        await relinkKitQrCode({
+          qrId: newQrId,
+          kitId,
+          organizationId,
+          userId,
+        });
+
+        sendNotification({
+          title: "QR Relinked",
+          message: "A new qr code has been linked to your kit.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
       }
 
       default: {

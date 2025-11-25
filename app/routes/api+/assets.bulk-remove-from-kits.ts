@@ -1,4 +1,4 @@
-import { data, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { BulkRemoveFromKitsSchema } from "~/components/assets/bulk-remove-from-kits";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { bulkRemoveAssetsFromKits } from "~/modules/kit/service.server";
@@ -54,7 +54,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       message: `Successfully removed ${assetIds.length} assets from kits.`,
     });
 
-    return payload({ success: true });
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

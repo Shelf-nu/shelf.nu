@@ -1,5 +1,6 @@
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import * as bookingService from "~/modules/booking/service.server";
@@ -174,11 +175,13 @@ describe("manage-assets route validation", () => {
       vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const response = await action({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Should return error response for checked out assets
       assertIsDataWithResponseInit(response);
@@ -211,11 +214,13 @@ describe("manage-assets route validation", () => {
 
       // Should succeed without validation since no new assets
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
 
       // Should not call validation helper since no newly added assets
@@ -271,11 +276,13 @@ describe("manage-assets route validation", () => {
 
       // Should succeed because asset is partially checked in within booking context
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
 
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
@@ -312,11 +319,13 @@ describe("manage-assets route validation", () => {
       );
 
       // Should return error response because asset is truly checked out
-      const response = await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);
@@ -337,11 +346,13 @@ describe("manage-assets route validation", () => {
 
       // Should succeed because asset status is AVAILABLE
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
 
       // Should not call validation helper since asset is available
@@ -381,11 +392,13 @@ describe("manage-assets route validation", () => {
 
       // Should succeed because DRAFT bookings allow checked out assets
       await expect(
-        actionFunction({
-          context: mockContext,
-          request: mockRequest,
-          params: mockParams,
-        })
+        actionFunction(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        )
       ).resolves.not.toThrow();
     });
 
@@ -419,11 +432,13 @@ describe("manage-assets route validation", () => {
       );
 
       // Should return error response because ONGOING booking validates checked out assets
-      const response = await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);
@@ -459,11 +474,13 @@ describe("manage-assets route validation", () => {
       );
 
       // Should return error response because OVERDUE booking validates checked out assets
-      const response = await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);
@@ -514,11 +531,13 @@ describe("manage-assets route validation", () => {
         "./bookings.$bookingId.overview.manage-assets"
       );
 
-      await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Verify helper is called with correct parameters
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
@@ -542,11 +561,13 @@ describe("manage-assets route validation", () => {
         "./bookings.$bookingId.overview.manage-assets"
       );
 
-      await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Verify updateBookingAssets is called with new assets only
       expect(bookingService.updateBookingAssets).toHaveBeenCalledWith({
@@ -578,11 +599,13 @@ describe("manage-assets route validation", () => {
         "./bookings.$bookingId.overview.manage-assets"
       );
 
-      await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Verify removeAssets is called
       expect(bookingService.removeAssets).toHaveBeenCalledWith({
@@ -607,11 +630,13 @@ describe("manage-assets route validation", () => {
         "./bookings.$bookingId.overview.manage-assets"
       );
 
-      await actionFunction({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      await actionFunction(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       // Should not call updateBookingAssets when no new assets
       expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
@@ -649,11 +674,13 @@ describe("manage-assets route validation", () => {
       vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const response = await action({
-        context: mockContext,
-        request: mockRequest,
-        params: mockParams,
-      });
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
 
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);

@@ -1,6 +1,6 @@
 import type { Organization } from "@prisma/client";
-import { redirect, data } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";

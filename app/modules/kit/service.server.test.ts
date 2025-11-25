@@ -19,8 +19,10 @@ import {
   releaseCustody,
   createKitsIfNotExists,
   updateKitQrCode,
+  relinkKitQrCode,
   getAvailableKitAssetForBooking,
 } from "./service.server";
+import { getQr } from "../qr/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -47,6 +49,9 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    qr: {
+      update: vitest.fn().mockResolvedValue({}),
     },
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -832,6 +837,63 @@ describe("updateKitQrCode", () => {
 
     expect(db.kit.update).toHaveBeenCalledTimes(2); // Once to disconnect, once to connect
     expect(result).toEqual(updatedKit);
+  });
+});
+
+describe("relinkKitQrCode", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should relink qr code to kit", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr-id" }] });
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue({});
+
+    const result = await relinkKitQrCode({
+      qrId: "qr-1",
+      kitId: "kit-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1" },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
+    expect(db.kit.update).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ oldQrCodeId: "old-qr-id", newQrId: "qr-1" });
+  });
+
+  it("should throw when qr code belongs to another asset", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-1",
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(
+      relinkKitQrCode({
+        qrId: "qr-1",
+        kitId: "kit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
   });
 });
 

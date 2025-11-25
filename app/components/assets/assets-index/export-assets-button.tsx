@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useLoaderData } from "react-router";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import { Button } from "~/components/shared/button";

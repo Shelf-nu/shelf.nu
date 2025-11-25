@@ -1,5 +1,5 @@
-import { data } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";

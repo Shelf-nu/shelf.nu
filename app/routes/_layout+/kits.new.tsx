@@ -1,6 +1,6 @@
-import { data, redirect } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useAtomValue } from "jotai";
+import { data, redirect } from "react-router";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
