@@ -1,3 +1,4 @@
+import type { HTMLAttributes } from "react";
 import { tw } from "~/utils/tw";
 
 function Skeleton({ className, ...props }: HTMLAttributes<HTMLDivElement>) {

@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { ShelfSidebarLogo } from "~/components/marketing/logos";
 import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
 import { SidebarNoticeCard } from "./notice-card";
@@ -13,7 +14,7 @@ import {
 import SidebarNav from "./sidebar-nav";
 import SidebarUserMenu from "./sidebar-user-menu";
 
-type AppSidebarProps = React.ComponentProps<typeof Sidebar>;
+type AppSidebarProps = ComponentProps<typeof Sidebar>;
 
 export default function AppSidebar(props: AppSidebarProps) {
   const { state } = useSidebar();
