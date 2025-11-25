@@ -315,7 +315,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                       e.preventDefault();
                       // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
                       if (!disabled) {
-                        fetcher.submit(formRef.current);
+                        void fetcher.submit(formRef.current);
                       }
                     }
                   }}
@@ -466,7 +466,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   type="submit"
                   onClick={() => {
                     // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                    fetcher.submit(formRef.current);
+                    void fetcher.submit(formRef.current);
                   }}
                   disabled={disabled}
                 >
