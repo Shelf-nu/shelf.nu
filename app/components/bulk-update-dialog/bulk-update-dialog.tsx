@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect } from "react";
-import type { ElementRef } from "react";
+import type { ElementRef, ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 

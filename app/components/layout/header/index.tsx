@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import type React from "react";
 import { useLoaderData } from "react-router";
 import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";

@@ -3,6 +3,7 @@
  * This is not an actual <label> element. By default its a span, but can be used as a label as well
  */
 
+import type { ReactNode } from "react";
 import { tw } from "~/utils/tw";
 
 export function InnerLabel({

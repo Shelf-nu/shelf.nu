@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useLoaderData } from "react-router";
 
 import type { SearchableIndexResponse } from "~/modules/types";

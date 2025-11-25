@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";

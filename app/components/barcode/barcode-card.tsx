@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Barcode } from "@prisma/client";
 import { SearchIcon } from "lucide-react";
 import { tw } from "~/utils/tw";

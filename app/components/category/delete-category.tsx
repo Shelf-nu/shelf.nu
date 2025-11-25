@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Category } from "@prisma/client";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";

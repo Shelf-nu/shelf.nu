@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import type { Organization, Currency } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";

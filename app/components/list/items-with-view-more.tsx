@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import _ from "lodash";
 import { tw } from "~/utils/tw";
 import { GrayBadge } from "../shared/gray-badge";
