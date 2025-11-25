@@ -15,6 +15,7 @@ import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
+import type { TypeNumber, ErrorCorrectionLevel } from "qrcode-generator";
 // eslint-disable-next-line import/no-cycle
 import { generateCode } from "./utils.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
