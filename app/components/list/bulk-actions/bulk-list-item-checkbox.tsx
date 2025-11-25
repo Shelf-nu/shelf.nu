@@ -42,7 +42,7 @@ export default function BulkListItemCheckbox({
   const checked = !!selectedBulkItems.find((i) => i.id === item.id);
 
   function handleBulkItemSelection(
-    e: React.MouseEvent<HTMLTableCellElement, MouseEvent>
+    e: MouseEvent<HTMLTableCellElement, MouseEvent>
   ) {
     e.preventDefault();
     e.stopPropagation();

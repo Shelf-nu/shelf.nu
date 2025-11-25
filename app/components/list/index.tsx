@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import React from "react";
 import { useLoaderData } from "react-router";
 
@@ -68,10 +68,10 @@ export type ListProps = {
   /**
    * Allow bulk actions on List by providing Bulk actions dropdown
    */
-  bulkActions?: React.ReactElement;
+  bulkActions?: ReactElement;
 
   /** Optionally recieve an element for custom pagination */
-  customPagination?: React.ReactElement;
+  customPagination?: ReactElement;
   /** Any extra content to the right in Header */
   headerExtraContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */

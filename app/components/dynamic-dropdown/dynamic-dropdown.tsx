@@ -1,5 +1,5 @@
 import { cloneElement, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -32,7 +32,7 @@ type Props = ModelFilterProps & {
   className?: string;
   triggerWrapperClassName?: string;
   style?: CSSProperties;
-  trigger: React.ReactElement;
+  trigger: ReactElement;
   label?: string;
   hideLabel?: boolean;
   hideCounter?: boolean;

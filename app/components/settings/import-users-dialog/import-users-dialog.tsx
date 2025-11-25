@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ChangeEvent, ReactElement } from "react";
 import { cloneElement, useState } from "react";
 import { UploadIcon } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -51,7 +51,7 @@ export default function ImportUsersDialog({
     setIsDialogOpen(false);
   }
 
-  function handleSelectFile(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleSelectFile(event: ChangeEvent<HTMLInputElement>) {
     setError("");
 
     const file = event.target.files?.[0];
