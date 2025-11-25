@@ -201,7 +201,7 @@ export function compareCustomFieldValues(
         // Fallback to string comparison if date parsing fails
         return String(oldValue.raw) !== String(newValue.raw);
       }
-    case "BOOLEAN":
+    case "BOOLEAN": {
       // Handle string boolean values more intelligently
       const normalizeBoolean = (value: any) => {
         if (typeof value === "boolean") return value;
@@ -215,6 +215,7 @@ export function compareCustomFieldValues(
       };
 
       return normalizeBoolean(oldValue.raw) !== normalizeBoolean(newValue.raw);
+    }
     case "NUMBER":
       return Number(oldValue.raw) !== Number(newValue.raw);
     default:
