@@ -220,7 +220,11 @@ export function AdvancedIndexColumn({
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
-      return <TextColumn value={value ?? ""} />;
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {value ? value : <EmptyTableValue />}
+        </Td>
+      );
 
     case "createdAt":
       return <DateColumn value={item.createdAt} includeTime />;
@@ -364,10 +368,13 @@ function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
 }
 
 function DescriptionColumn({ value }: { value: string }) {
+  const isEmpty = !value || value.trim().length === 0;
+
   return (
     <Td className="max-w-62 whitepsace-pre-wrap">
-      {/* Only show tooltip when value is more than 60 - 2 rows of 30 */}
-      {value.length > 60 ? (
+      {isEmpty ? (
+        <EmptyTableValue />
+      ) : value.length > 60 ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger className="text-left">
