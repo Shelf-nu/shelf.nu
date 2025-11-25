@@ -473,10 +473,10 @@ export async function uploadImageFromUrl(
       });
     }
 
-    async function* toAsyncIterable(): AsyncIterable<Uint8Array> {
+    const toAsyncIterable = async function* (): AsyncIterable<Uint8Array> {
       await Promise.resolve();
       yield new Uint8Array(buffer);
-    }
+    };
 
     const file = await cropImage(toAsyncIterable(), resizeOptions);
 
