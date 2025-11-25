@@ -1,3 +1,4 @@
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import {
@@ -120,7 +121,7 @@ export function ValueField({
   }, [customFields, filter.name, filter.type, filter.value, setFilter]);
 
   function handleChange(
-    event: React.ChangeEvent<
+    event: ChangeEvent<
       HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
     >
   ) {
@@ -134,7 +135,7 @@ export function ValueField({
   }
 
   function handleBetweenChange(index: 0 | 1) {
-    return (event: React.ChangeEvent<HTMLInputElement>) => {
+    return (event: ChangeEvent<HTMLInputElement>) => {
       const newValue = [...localValue] as [string, string];
       newValue[index] = event.target.value;
       setLocalValue(newValue);
@@ -165,7 +166,7 @@ export function ValueField({
     disabled,
   };
 
-  const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const submitOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !disabled) {
       applyFilters();
     }
@@ -199,7 +200,7 @@ export function ValueField({
                   setFilter(e.target.value);
                 }}
                 placeholder={placeholder(filter.operator)}
-                onKeyUp={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                onKeyUp={(e: KeyboardEvent<HTMLInputElement>) => {
                   if (e.key === "Enter") {
                     setTimeout(() => {
                       // Assert the target as HTMLInputElement to access value
@@ -207,7 +208,7 @@ export function ValueField({
                       const cleanValue = extractQrIdFromValue(input.value);
                       setFilter(cleanValue);
                       // Create a new keyboard event for submitOnEnter
-                      submitOnEnter(e as React.KeyboardEvent<HTMLInputElement>);
+                      submitOnEnter(e as KeyboardEvent<HTMLInputElement>);
                     }, 10);
                   }
                 }}
@@ -492,7 +493,7 @@ function BooleanField({
     setIsPopoverOpen(false);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -637,7 +638,7 @@ function EnumField({
     }
   }
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -1549,7 +1550,7 @@ export function DateField({
   }, [filter.value, timeZone]);
 
   function handleDateChange(index: 0 | 1) {
-    return (event: React.ChangeEvent<HTMLInputElement>) => {
+    return (event: ChangeEvent<HTMLInputElement>) => {
       const newValue = [...localValue] as [string, string];
       newValue[index] = event.target.value;
       setLocalValue(newValue);
@@ -1580,7 +1581,7 @@ export function DateField({
     }
   }
 
-  const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const submitOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !error) {
       applyFilters();
     }
@@ -1674,7 +1675,7 @@ function MultiDateInput({
     inputClassName: string;
     hideLabel: boolean;
     label: string;
-    onKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+    onKeyUp: (e: KeyboardEvent<HTMLInputElement>) => void;
   };
   name?: string;
   error?: string;
@@ -1687,7 +1688,7 @@ function MultiDateInput({
 
   // Handle date change at specific index
   const handleDateChange =
-    (index: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    (index: number) => (event: ChangeEvent<HTMLInputElement>) => {
       const newDates = [...dates];
       newDates[index] = event.target.value;
       setDates(newDates);

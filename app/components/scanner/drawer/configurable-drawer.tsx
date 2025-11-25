@@ -1,5 +1,4 @@
-import type React from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, ReactNode, ComponentType, FormEvent } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
@@ -35,7 +34,7 @@ type ConfigurableDrawerProps<T> = {
   // Item rendering function
   renderItem: (qrId: string, item: T) => ReactNode;
   // Blockers component (from createBlockers)
-  Blockers?: React.ComponentType;
+  Blockers?: ComponentType;
   // Whether form submission should be disabled
   disableSubmit?: boolean;
 
@@ -47,7 +46,7 @@ type ConfigurableDrawerProps<T> = {
   // Default expanded state
   defaultExpanded?: boolean;
   // Form submission handler (if you need custom handling)
-  onSubmit?: (e: React.FormEvent) => void;
+  onSubmit?: (e: FormEvent) => void;
   // Custom class name
   className?: string;
   // Custom style

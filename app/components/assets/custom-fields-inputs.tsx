@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
@@ -341,7 +341,7 @@ function OptionSelect({
   }
 
   // Keyboard navigation handler
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();

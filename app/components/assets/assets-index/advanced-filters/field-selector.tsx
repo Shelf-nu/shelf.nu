@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ChangeEvent } from "react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Popover,
@@ -54,7 +54,7 @@ export function FieldSelector({
     );
   }, [baseAvailableColumns, searchQuery]);
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0); // Reset selection when search changes
   };

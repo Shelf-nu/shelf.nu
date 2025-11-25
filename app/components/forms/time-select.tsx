@@ -1,3 +1,4 @@
+import type { FC } from "react";
 import { useEffect, useState } from "react";
 import { format, parse } from "date-fns";
 import {
@@ -169,7 +170,7 @@ const TIME_OPTIONS = generateTimeOptions();
  * />
  * ```
  */
-export const TimeSelect: React.FC<TimeSelectProps> = ({
+export const TimeSelect: FC<TimeSelectProps> = ({
   name,
   value,
   defaultValue,

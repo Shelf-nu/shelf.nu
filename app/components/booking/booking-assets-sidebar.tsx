@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";

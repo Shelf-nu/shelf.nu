@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, MouseEvent } from "react";
 import { useCallback, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Outlet, useMatches, useNavigate } from "react-router";
@@ -20,7 +20,7 @@ const Dialog = ({
 
   const navigate = useNavigate();
   const handleBackdropClose = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
       void navigate(prevRoute);
     },

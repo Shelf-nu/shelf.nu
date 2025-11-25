@@ -1,4 +1,4 @@
-import type React from "react";
+import type { KeyboardEvent } from "react";
 import { useEffect, useState } from "react";
 import {
   Popover,
@@ -104,7 +104,7 @@ export function OperatorSelector({
     setIsPopoverOpen(false);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
