@@ -11,7 +11,6 @@ import {
 } from "@radix-ui/react-popover";
 import { Link, useLoaderData } from "react-router";
 import { EventCardContent } from "~/components/calendar/event-card";
-import LineBreakText from "~/components/layout/line-break-text";
 import { LocationBadge } from "~/components/location/location-badge";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
@@ -371,14 +370,14 @@ function DescriptionColumn({ value }: { value: string }) {
   const isEmpty = !value || value.trim().length === 0;
 
   return (
-    <Td className="max-w-62 whitespace-pre-wrap">
+    <Td className="w-full max-w-none whitespace-nowrap">
       {isEmpty ? (
         <EmptyTableValue />
       ) : value.length > 60 ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger className="text-left">
-              <LineBreakText text={value} />
+              {value.slice(0, 60)}...
             </TooltipTrigger>
 
             <TooltipContent side="top" className="max-w-[400px]">
