@@ -1,5 +1,5 @@
 import type { ReactElement, KeyboardEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -33,8 +33,12 @@ export default function AssetCustomFields({
 }) {
   const { customFields, asset } = useLoaderData<typeof loader>();
 
-  const customFieldsValues =
-    (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) || [];
+  const customFieldsValues = useMemo(
+    () =>
+      (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) ||
+      [],
+    [asset?.customFields]
+  );
 
   const [dateObj, setDateObj] = useState(
     customFieldsValues
@@ -52,15 +56,33 @@ export default function AssetCustomFields({
   const disabled = isFormProcessing(navigation.state);
   const hints = useHints();
 
-  const getCustomFieldVal = (id: string) => {
-    const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
-      ?.value;
-    return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
-  };
+  const getCustomFieldVal = useCallback(
+    (id: string) => {
+      const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
+        ?.value;
+      return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
+    },
+    [customFieldsValues, hints]
+  );
 
   // Get field errors from the plain object passed from parent
   // This avoids react-zorm + React 19 incompatibility
-  const getFieldError = (fieldId: string) => fieldErrors[fieldId];
+  const getFieldError = (fieldId: string) => {
+    // First check if there's a validation error from form submission
+    const validationError = fieldErrors[fieldId];
+    if (validationError) return validationError;
+
+    // Then check if this is an empty required field on initial load
+    const field = customFields.find((f) => f.id === fieldId);
+    const value = getCustomFieldVal(fieldId);
+    const isEmpty = !value || value === "" || value === `Choose ${field?.name}`;
+
+    if (field?.required && isEmpty && !disabled) {
+      return "This field is required";
+    }
+
+    return undefined;
+  };
 
   // Get required status from the custom field definition itself
   const isFieldRequired = (fieldId: string) => {
@@ -204,6 +226,17 @@ export default function AssetCustomFields({
 
   const optionalFields = customFields.filter((field) => !field.required);
 
+  // Detect empty required fields on page load
+  const emptyRequiredFields = useMemo(
+    () =>
+      requiredFields.filter((field) => {
+        const value = getCustomFieldVal(field.id);
+        // Check if field is empty based on its value
+        return !value || value === "" || value === `Choose ${field.name}`;
+      }),
+    [requiredFields, getCustomFieldVal]
+  );
+
   return (
     <div className="border-b pb-6">
       <div className=" border-t py-5">
@@ -217,6 +250,32 @@ export default function AssetCustomFields({
           Manage custom fields
         </Button>
       </div>
+      {emptyRequiredFields.length > 0 && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4">
+          <div className="flex">
+            <div className="shrink-0">
+              <svg
+                className="size-5 text-amber-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-amber-700">
+                This asset has {emptyRequiredFields.length} required field
+                {emptyRequiredFields.length > 1 ? "s" : ""} that must be
+                completed before saving.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {customFields.length > 0 ? (
         <>
           {requiredFields.length > 0 && (
@@ -225,7 +284,14 @@ export default function AssetCustomFields({
               {requiredFields.map((field, index) => (
                 <FormRow
                   key={field.id + index}
-                  rowLabel={field.name}
+                  rowLabel={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{field.name}</span>
+                      <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+                        Required by admin
+                      </span>
+                    </div>
+                  }
                   subHeading={
                     field.helpText ? <p>{field.helpText}</p> : undefined
                   }

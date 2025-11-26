@@ -4,7 +4,7 @@ import SubHeading from "../shared/sub-heading";
 
 interface Props {
   /** Label to be rendered on the left side of the row */
-  rowLabel: string;
+  rowLabel: string | ReactNode;
   children: ReactNode;
   className?: string;
   subHeading?: string | JSX.Element;
