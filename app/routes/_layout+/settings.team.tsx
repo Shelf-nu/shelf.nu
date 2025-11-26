@@ -1,7 +1,6 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Outlet, useLoaderData, useParams } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data, Outlet, useLoaderData, useParams } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";

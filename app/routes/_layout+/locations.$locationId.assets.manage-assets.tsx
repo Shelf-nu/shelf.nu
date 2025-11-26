@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import { useAtomValue, useSetAtom } from "jotai";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -169,7 +170,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds, redirectTo } = parseData(
+    const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -255,7 +256,7 @@ export default function AddAssetsToLocation() {
           return;
         }
 
-        navigate(manageKitsUrl);
+        void navigate(manageKitsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -411,10 +412,10 @@ export default function AddAssetsToLocation() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageKitsUrl);
+          void navigate(manageKitsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some assets to the booking but haven't saved it yet. Do

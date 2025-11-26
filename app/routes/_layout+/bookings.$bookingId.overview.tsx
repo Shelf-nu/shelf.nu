@@ -4,15 +4,14 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
+import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { Outlet, useMatches } from "@remix-run/react";
-import { DateTime } from "luxon";
+} from "react-router";
+import { data, redirect, Outlet, useMatches } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -84,6 +83,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { logMissingFormIntent } from "~/utils/logger";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -497,6 +497,8 @@ export const handle = {
   name: "bookings.$bookingId.overview",
 };
 
+
+
 export type BookingPageActionData = typeof action;
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -512,6 +514,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
   try {
     const formData = await request.formData();
+    logMissingFormIntent({ formData, request, bookingId: id, userId });
     const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
       formData,
       z.object({
@@ -740,7 +743,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
-      case "checkIn":
+      case "checkIn": {
         // Extract specific asset IDs if provided (for enhanced completion messaging)
         const specificAssetIds = formData.getAll(
           "specificAssetIds[]"
@@ -782,6 +785,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ booking, success: true }), {
           headers,
         });
+      }
       case "partial-checkin": {
         return await checkinAssets({
           formData,

@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isPersonalOrg } from "~/utils/organization";

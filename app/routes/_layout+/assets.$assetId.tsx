@@ -1,13 +1,12 @@
 import { BarcodeType } from "@prisma/client";
+import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { redirect, data } from "@remix-run/node";
-import { useLoaderData, Outlet } from "@remix-run/react";
-import { DateTime } from "luxon";
+} from "react-router";
+import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -24,7 +23,7 @@ import {
   deleteAsset,
   deleteOtherImages,
   getAsset,
-  relinkQrCode,
+  relinkAssetQrCode,
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -173,7 +172,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           z.object({ newQrId: z.string() })
         );
 
-        await relinkQrCode({
+        await relinkAssetQrCode({
           qrId: newQrId,
           assetId: id,
           organizationId,
@@ -313,7 +312,7 @@ export default function AssetDetailsPage() {
 
   const { roles } = useUserRoleHelper();
 
-  let items = [
+  const items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },

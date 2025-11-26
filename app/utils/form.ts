@@ -1,4 +1,4 @@
-import type { Navigation } from "@remix-run/react";
+import type { Navigation } from "react-router";
 
 export function isFormProcessing(state: "idle" | "submitting" | "loading") {
   return state === "submitting" || state === "loading";

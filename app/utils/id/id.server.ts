@@ -47,7 +47,7 @@ export function id(length?: number) {
       const randomIndex = Math.floor(Math.random() * 9) + 1;
 
       // Convert generatedId to an array of characters
-      let generatedIdArray = generatedId.split("");
+      const generatedIdArray = generatedId.split("");
       // Replace the character at randomIndex with randomNumber
       generatedIdArray[randomIndex] = randomNumber.toString();
 

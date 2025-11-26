@@ -9,8 +9,8 @@ import { vi } from "vitest";
  * Returns a Response object matching the actual runtime behavior
  *
  * @example
- * vi.mock("@remix-run/node", async () => {
- *   const actual = await vi.importActual("@remix-run/node");
+ * vi.mock("react-router", async () => {
+ *   const actual = await vi.importActual("react-router");
  *   return {
  *     ...actual,
  *     data: createDataMock(),
@@ -41,7 +41,7 @@ export function getResponseStatus(response: unknown): number {
     return response.status;
   }
   throw new Error(
-    `Expected Response but got: ${typeof response}. Did you forget to mock @remix-run/node data()?`
+    `Expected Response but got: ${typeof response}. Did you forget to mock react-router data()?`
   );
 }
 
@@ -60,6 +60,6 @@ export async function getResponseData<T = unknown>(
     return response.json();
   }
   throw new Error(
-    `Expected Response but got: ${typeof response}. Did you forget to mock @remix-run/node data()?`
+    `Expected Response but got: ${typeof response}. Did you forget to mock react-router data()?`
   );
 }

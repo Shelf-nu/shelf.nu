@@ -1,4 +1,4 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -32,7 +32,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(isSelfServiceOrBase && { custodianUserId: userId }),
     });
 
-    return payload({ bookings });
+    return data(payload({ bookings }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });

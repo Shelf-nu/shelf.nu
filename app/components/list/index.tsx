@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import React from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
@@ -155,9 +155,10 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           >
             <ListHeader
               bulkActions={bulkActions}
-              children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
-            />
+            >
+              {headerChildren}
+            </ListHeader>
             <tbody>
               {items.map((item, i) => (
                 <ListItem

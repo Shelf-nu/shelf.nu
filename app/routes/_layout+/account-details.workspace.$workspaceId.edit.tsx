@@ -1,17 +1,15 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
-  data,
-  MaxPartSizeExceededError,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
@@ -255,12 +253,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           nextShowShelfBranding = true;
         }
 
-        const formDataFile = await unstable_parseMultipartFormData(
-          request,
-          unstable_createMemoryUploadHandler({
-            maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-          })
-        );
+        let formDataFile: FormData;
+        try {
+          formDataFile = await parseFormData(request, {
+            maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+          });
+        } catch (parseError) {
+          if (parseError instanceof MaxFileSizeExceededError) {
+            const reason = new ShelfError({
+              cause: parseError,
+              message: `Image size exceeds maximum allowed size of ${
+                DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+              }MB`,
+              status: 400,
+              label: "Organization",
+              additionalData: { userId, id, field: "image" },
+              shouldBeCaptured: false,
+            });
+            return data(error(reason), { status: reason.status });
+          }
+
+          const reason = makeShelfError(parseError, {
+            userId,
+            organizationId: id,
+          });
+          return data(error(reason), { status: reason.status });
+        }
 
         const file = formDataFile.get("image") as File | null;
 
@@ -374,18 +392,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
   } catch (cause) {
-    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return data(
-      error({
-        ...reason,
-        ...(isMaxPartSizeExceeded && {
-          title: "File too large",
-          message: "Max file size is 4MB.",
-        }),
-      }),
-      { status: reason.status }
-    );
+    // File size errors are now handled in the validation above
+    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -1,14 +1,12 @@
 import { Currency } from "@prisma/client";
 import {
-  data,
-  MaxPartSizeExceededError,
-  redirect,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -26,7 +24,7 @@ import { createOrganization } from "~/modules/organization/service.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { assertUserCanCreateMoreOrganizations } from "~/utils/subscription.server";
 
@@ -83,16 +81,47 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { name, currency } = payload;
     /** This checks if tags are passed and build the  */
 
-    const formDataFile = await unstable_parseMultipartFormData(
-      request,
-      unstable_createMemoryUploadHandler({
-        maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-      })
-    );
+    let formDataFile: FormData;
+    try {
+      formDataFile = await parseFormData(request, {
+        maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      });
+    } catch (parseError) {
+      if (parseError instanceof MaxFileSizeExceededError) {
+        const reason = new ShelfError({
+          cause: parseError,
+          message: `Image size exceeds maximum allowed size of ${
+            DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          }MB`,
+          status: 400,
+          label: "Organization",
+          additionalData: { userId, field: "image" },
+          shouldBeCaptured: false,
+        });
+        return data(error(reason), { status: reason.status });
+      }
+
+      const reason = makeShelfError(parseError, { userId });
+      return data(error(reason), { status: reason.status });
+    }
 
     const file = formDataFile.get("image") as File | null;
 
     invariant(file instanceof File, "file not the right type");
+
+    // Validate file size
+    if (file && file.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
+      throw new ShelfError({
+        cause: null,
+        message: `Image size exceeds maximum allowed size of ${
+          DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+        }MB`,
+        status: 400,
+        label: "Organization",
+        additionalData: { userId, field: "image" },
+        shouldBeCaptured: false,
+      });
+    }
 
     const newOrg = await createOrganization({
       name,
@@ -112,18 +141,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
     });
   } catch (cause) {
-    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return data(
-      error({
-        ...reason,
-        ...(isMaxPartSizeExceeded && {
-          title: "File too large",
-          message: "Max file size is 4MB.",
-        }),
-      }),
-      { status: reason.status }
-    );
+    // File size errors are now handled in the validation above
+    return data(error(reason), { status: reason.status });
   }
 }
 

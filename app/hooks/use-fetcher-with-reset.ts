@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 
 export default function useFetcherWithReset<TData = unknown>() {
   const fetcher = useFetcher<TData>();

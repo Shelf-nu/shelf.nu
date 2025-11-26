@@ -1,6 +1,6 @@
 import type { Location } from "@prisma/client";
-import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -56,12 +56,20 @@ export const LocationForm = ({
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
-  const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
-  const [, updateName] = useAtom(updateDynamicTitleAtom);
   const actionData = useActionData<
     typeof newLocationAction | typeof editLocationAction
   >();
+
+  const fileError = useAtomValue(fileErrorAtom);
+  const [, validateFile] = useAtom(defaultValidateFileAtom);
+  const [, updateName] = useAtom(updateDynamicTitleAtom);
+
+  const imageError =
+    (actionData as any)?.errors?.image?.message ??
+    ((actionData as any)?.error?.additionalData?.field === "image"
+      ? (actionData as any)?.error?.message
+      : undefined) ??
+    fileError;
 
   return (
     <Card className="w-full md:w-min">
@@ -127,7 +135,7 @@ export const LocationForm = ({
               onChange={validateFile}
               label={"Main image"}
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />

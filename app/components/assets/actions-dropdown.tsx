@@ -5,8 +5,8 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
 import { AlarmClockIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
@@ -326,6 +326,7 @@ const ConditionalActionsDropdown = () => {
 
       <When truthy={isRelinkQrDialogOpen}>
         <RelinkQrCodeDialog
+          key={asset.qrCodes[0]?.id || asset.id}
           open={isRelinkQrDialogOpen}
           onClose={() => {
             setIsRelinkQrDialogOpen(false);

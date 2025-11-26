@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useLocation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
+import { useLocation } from "react-router";
 import { fileErrorAtom } from "./file";
 import { clearSelectedBulkItemsAtom, setDisabledBulkItemsAtom } from "./list";
 import { clearScannedItemsAtom } from "./qr-scanner";
