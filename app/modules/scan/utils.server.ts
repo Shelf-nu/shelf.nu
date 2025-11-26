@@ -2,6 +2,16 @@ import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
 import parser from "ua-parser-js";
 import { ShelfError } from "~/utils/error";
 
+function isValidUser(
+  userOrganizations: UserOrganization[] | null | undefined,
+  organizationId: string | null | undefined
+) {
+  if (!userOrganizations || !organizationId) {
+    return false;
+  }
+  return userOrganizations.find((uo) => uo?.organizationId === organizationId);
+}
+
 export function parseScanData({
   scan,
   userId,
@@ -19,17 +29,6 @@ export function parseScanData({
      * 1. Coordinates - if they are null, we don't render the map, print unknown location
      * 2. User - Scanned by: You || Unknown
      */
-    function isValidUser(
-      userOrganizations: UserOrganization[] | null | undefined,
-      organizationId: string | null | undefined
-    ) {
-      if (!userOrganizations || !organizationId) {
-        return false;
-      }
-      return userOrganizations.find(
-        (uo) => uo?.organizationId === organizationId
-      );
-    }
     if (scan) {
       let scannedBy = scan.userId === userId ? "You" : "Unknown";
       const user = scan?.user;

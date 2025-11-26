@@ -1,3 +1,7 @@
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MutableRefObject,
+} from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UseKeyboardReorderOptions<T> {
@@ -31,7 +35,10 @@ interface UseKeyboardReorderReturn {
   /**
    * Handle keyboard events for reordering
    */
-  handleKeyDown: (event: React.KeyboardEvent, index: number) => void;
+  handleKeyDown: (
+    event: ReactKeyboardEvent<HTMLElement>,
+    index: number
+  ) => void;
   /**
    * Current announcement for screen readers
    */
@@ -39,7 +46,7 @@ interface UseKeyboardReorderReturn {
   /**
    * Array of refs for managing focus on items
    */
-  itemRefs: React.MutableRefObject<(HTMLElement | null)[]>;
+  itemRefs: MutableRefObject<(HTMLElement | null)[]>;
   /**
    * Set focus to a specific item by index
    */
@@ -68,7 +75,9 @@ export function useKeyboardReorder<T>({
 }: UseKeyboardReorderOptions<T>): UseKeyboardReorderReturn {
   const [announcement, setAnnouncement] = useState("");
   const itemRefs = useRef<(HTMLElement | null)[]>([]);
-  const announcementTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const announcementTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   // Clean up timeout on unmount
   useEffect(
@@ -160,7 +169,7 @@ export function useKeyboardReorder<T>({
   );
 
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent, index: number) => {
+    (event: ReactKeyboardEvent<HTMLElement>, index: number) => {
       // Alt+ArrowUp: Move item up
       if (event.key === "ArrowUp" && event.altKey) {
         event.preventDefault();

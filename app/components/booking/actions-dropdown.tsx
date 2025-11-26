@@ -114,7 +114,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 onClick={() => {
                   const formData = new FormData();
                   formData.append("intent", "archive");
-                  submit(formData, { method: "post" });
+                  void submit(formData, { method: "post" });
                 }}
               >
                 Archive

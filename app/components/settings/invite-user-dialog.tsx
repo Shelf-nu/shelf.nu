@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { cloneElement, useCallback, useEffect, useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { UserIcon } from "lucide-react";
@@ -26,7 +27,7 @@ import When from "../when/when";
 type InviteUserDialogProps = {
   className?: string;
   teamMemberId?: string;
-  trigger?: React.ReactElement<{ onClick: () => void }>;
+  trigger?: ReactElement<{ onClick: () => void }>;
   open?: boolean;
   onClose?: () => void;
 };

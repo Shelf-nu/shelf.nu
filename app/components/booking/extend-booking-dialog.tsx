@@ -61,11 +61,8 @@ export default function ExtendBookingDialog({
 
   useEffect(
     function closeOnSuccess() {
-      if (
-        fetcher?.data &&
-        "success" in fetcher?.data &&
-        fetcher?.data?.success
-      ) {
+      const data = fetcher?.data;
+      if (data && "success" in data && data.success) {
         handleClose();
       }
     },

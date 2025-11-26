@@ -1,3 +1,4 @@
+import type { HTMLProps } from "react";
 import { useState } from "react";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
@@ -11,7 +12,7 @@ type ImageWithPreviewProps = {
   withPreview?: boolean;
   alt: string;
   editImageUrl?: string;
-} & React.HTMLProps<HTMLImageElement>;
+} & HTMLProps<HTMLImageElement>;
 
 export default function ImageWithPreview({
   className,

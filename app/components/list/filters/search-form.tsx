@@ -1,3 +1,4 @@
+import type { ChangeEvent } from "react";
 import { useRef } from "react";
 import { useLoaderData, useNavigation } from "react-router";
 
@@ -42,7 +43,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
    * Resets page to 1 whenever search query changes
    */
   const debouncedHandleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const searchQuery = e.target.value;
     if (!searchQuery) {

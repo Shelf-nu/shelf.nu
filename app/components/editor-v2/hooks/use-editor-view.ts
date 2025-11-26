@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FocusEvent } from "react";
+import type { FocusEvent, MutableRefObject, RefObject } from "react";
 import type { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
@@ -36,8 +36,8 @@ interface UseEditorViewOptions {
 }
 
 export function useEditorView(
-  editorContainerRef: React.RefObject<HTMLDivElement | null>,
-  viewRef: React.MutableRefObject<EditorView | null>,
+  editorContainerRef: RefObject<HTMLDivElement | null>,
+  viewRef: MutableRefObject<EditorView | null>,
   options: UseEditorViewOptions
 ) {
   const {
@@ -241,7 +241,7 @@ export function useEditorView(
     } else {
       dom.removeAttribute("aria-disabled");
     }
-  }, [disabled]);
+  }, [disabled, viewRef]);
 
   // Update content when defaultValue changes
   useEffect(() => {
@@ -254,7 +254,7 @@ export function useEditorView(
       doc.content
     );
     view.dispatch(tr);
-  }, [defaultValue, schema]);
+  }, [defaultValue, schema, viewRef]);
 
   return {
     markdocValue,

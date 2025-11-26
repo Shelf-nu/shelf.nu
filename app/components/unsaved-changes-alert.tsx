@@ -1,3 +1,4 @@
+import type { CSSProperties, ReactNode } from "react";
 import { AlertDialog } from "@radix-ui/react-alert-dialog";
 import { useDisabled } from "~/hooks/use-disabled";
 import { Button } from "./shared/button";
@@ -12,12 +13,12 @@ import {
 
 type UnsavedChangesAlertProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCancel: () => void;
   onYes?: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 export default function UnsavedChangesAlert({

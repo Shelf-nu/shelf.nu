@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { useCallback } from "react";
 import { setBlockType, wrapIn } from "prosemirror-commands";
 import type { Schema } from "prosemirror-model";
@@ -8,7 +9,7 @@ import type { ToolbarBlock } from "../types";
 
 export function useEditorCommands(
   schema: Schema,
-  viewRef: React.RefObject<EditorView | null>
+  viewRef: RefObject<EditorView | null>
 ) {
   const runCommand = useCallback(
     (command: any) => {

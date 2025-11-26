@@ -1,3 +1,4 @@
+import type { MutableRefObject } from "react";
 import { BarcodeType } from "@prisma/client";
 import { readBarcodes, type ReadResult } from "zxing-wasm/reader";
 import {
@@ -204,7 +205,7 @@ export const processFrame = async ({
 }: {
   video: HTMLVideoElement;
   canvas: HTMLCanvasElement;
-  animationFrame: React.MutableRefObject<number>;
+  animationFrame: MutableRefObject<number>;
   paused: boolean;
   setPaused: (paused: boolean) => void;
   onCodeDetectionSuccess: OnCodeDetectionSuccess;

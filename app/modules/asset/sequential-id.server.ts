@@ -80,7 +80,7 @@ export async function estimateNextSequentialId(
 
     const nextValue = Number(result[0].currval) + 1;
     return formatSequentialId(nextValue, prefix);
-  } catch (error) {
+  } catch (_error) {
     // If currval fails, sequence might not have been used yet
     // Find the highest existing sequential ID using proper numeric extraction
     // This avoids string sorting issues when IDs go beyond 9999

@@ -30,7 +30,7 @@ export default function SidebarUserMenu() {
   }
 
   function logOut() {
-    fetcher.submit(null, { action: "/logout", method: "POST" });
+    void fetcher.submit(null, { action: "/logout", method: "POST" });
   }
 
   return (

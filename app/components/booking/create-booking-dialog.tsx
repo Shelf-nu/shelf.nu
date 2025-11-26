@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { cloneElement, useState } from "react";
 import type { TeamMember } from "@prisma/client";
 import { CalendarRangeIcon } from "lucide-react";
@@ -10,7 +11,7 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 
 type CreateBookingDialogProps = {
   className?: string;
-  trigger: React.ReactElement<{ onClick: () => void }>;
+  trigger: ReactElement<{ onClick: () => void }>;
 };
 
 export default function CreateBookingDialog({

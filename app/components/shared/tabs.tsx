@@ -1,12 +1,13 @@
 import * as React from "react";
+import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { tw } from "~/utils/tw";
 
 const Tabs = TabsPrimitive.Root;
 
 const TabsList = React.forwardRef<
-  React.ElementRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
+  ElementRef<typeof TabsPrimitive.List>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(function TabsList({ className, ...props }, ref) {
   return (
     <TabsPrimitive.List
@@ -21,8 +22,8 @@ const TabsList = React.forwardRef<
 });
 
 const TabsTrigger = React.forwardRef<
-  React.ElementRef<typeof TabsPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
+  ElementRef<typeof TabsPrimitive.Trigger>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
 >(function TabsTrigger({ className, ...props }, ref) {
   return (
     <TabsPrimitive.Trigger
@@ -37,8 +38,8 @@ const TabsTrigger = React.forwardRef<
 });
 
 const TabsContent = React.forwardRef<
-  React.ElementRef<typeof TabsPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
+  ElementRef<typeof TabsPrimitive.Content>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
 >(function TabsContent({ className, ...props }, ref) {
   return (
     <TabsPrimitive.Content

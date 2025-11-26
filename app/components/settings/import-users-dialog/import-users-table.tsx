@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { z } from "zod";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils/tw";
@@ -5,7 +6,7 @@ import type { InviteUserFormSchema } from "../invite-user-dialog";
 
 type ImportUsersTableProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   title: string;
   users: z.infer<typeof InviteUserFormSchema>[];
 };

@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { useMemo, useRef, useState } from "react";
 import {
   Popover,
@@ -13,6 +13,7 @@ import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -80,7 +81,7 @@ export function ActionSwitcher() {
     );
   }, [searchQuery, availableActions]);
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0); // Reset selection when search changes
   };
@@ -191,7 +192,11 @@ export function ActionSwitcher() {
                       "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                   ]
                 )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
                 onClick={() => changeAction(action)}
+                onKeyDown={handleActivationKeyPress(() => changeAction(action))}
               >
                 <span className="font-medium">{action}</span>
                 <span className="ml-2 font-normal text-gray-500">
