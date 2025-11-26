@@ -83,7 +83,6 @@ export class RequestTimeLogger {
   }
 }
 
-
 /**
  * Log the full context when a form submission reaches the server without the expected `intent` field.
  *

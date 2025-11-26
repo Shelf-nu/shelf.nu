@@ -497,8 +497,6 @@ export const handle = {
   name: "bookings.$bookingId.overview",
 };
 
-
-
 export type BookingPageActionData = typeof action;
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
