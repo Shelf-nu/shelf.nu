@@ -223,10 +223,11 @@ export default function TransferOwnershipCard({
                     !selectedOwner
                       ? { reason: "Please select a new owner." }
                       : confirmationInput !== currentOrganization?.name
-                      ? {
-                          reason: "Please type the workspace name to confirm.",
-                        }
-                      : disabled
+                        ? {
+                            reason:
+                              "Please type the workspace name to confirm.",
+                          }
+                        : disabled
                   }
                 >
                   Transfer ownership
