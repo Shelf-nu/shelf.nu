@@ -58,6 +58,8 @@ export function BookingPageContent() {
             allCategories={allCategories}
             tags={booking.tags}
             creator={booking.creator}
+            autoArchivedAt={booking.autoArchivedAt}
+            status={booking.status}
           />
         </Card>
       </div>

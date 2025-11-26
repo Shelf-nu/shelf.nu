@@ -19,6 +19,8 @@ export async function getBookingSettingsForOrganization(
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
         tagsRequired: false,
+        autoArchiveBookings: false,
+        autoArchiveDays: 2,
         organizationId,
       },
       select: {
@@ -27,6 +29,8 @@ export async function getBookingSettingsForOrganization(
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
         tagsRequired: true,
+        autoArchiveBookings: true,
+        autoArchiveDays: true,
       },
     });
 
@@ -47,12 +51,16 @@ export async function updateBookingSettings({
   tagsRequired,
   maxBookingLength,
   maxBookingLengthSkipClosedDays,
+  autoArchiveBookings,
+  autoArchiveDays,
 }: {
   organizationId: string;
   bufferStartTime?: number;
   tagsRequired?: boolean;
   maxBookingLength?: number | null;
   maxBookingLengthSkipClosedDays?: boolean;
+  autoArchiveBookings?: boolean;
+  autoArchiveDays?: number;
 }) {
   try {
     const updateData: Prisma.BookingSettingsUpdateInput = {};
@@ -64,6 +72,10 @@ export async function updateBookingSettings({
     if (maxBookingLengthSkipClosedDays !== undefined)
       updateData.maxBookingLengthSkipClosedDays =
         maxBookingLengthSkipClosedDays;
+    if (autoArchiveBookings !== undefined)
+      updateData.autoArchiveBookings = autoArchiveBookings;
+    if (autoArchiveDays !== undefined)
+      updateData.autoArchiveDays = autoArchiveDays;
 
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
@@ -74,6 +86,8 @@ export async function updateBookingSettings({
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        autoArchiveBookings: true,
+        autoArchiveDays: true,
       },
     });
 
@@ -88,6 +102,8 @@ export async function updateBookingSettings({
         tagsRequired,
         maxBookingLength,
         maxBookingLengthSkipClosedDays,
+        autoArchiveBookings,
+        autoArchiveDays,
       },
       label,
     });

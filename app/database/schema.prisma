@@ -984,9 +984,12 @@ model Booking {
   to        DateTime @db.Timestamptz(3)
 
   // When a booking is early check-in or early check-out, we store the original from and to
-  // dates here and updated the from and to dates to current date (if users agrees to change) 
+  // dates here and updated the from and to dates to current date (if users agrees to change)
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
+
+  // When a booking is auto-archived, we store the timestamp here
+  autoArchivedAt DateTime? @db.Timestamptz(3)
 
   // Indexes for foreign keys
   @@index([creatorId])
@@ -1003,6 +1006,9 @@ model BookingSettings {
 
   maxBookingLength               Int? // Maximum booking length in hours. NULL means no limit
   maxBookingLengthSkipClosedDays Boolean @default(false) // If true, the max booking length will skip closed days
+
+  autoArchiveBookings Boolean @default(false) // Whether to automatically archive completed bookings
+  autoArchiveDays     Int     @default(2) // Number of days after completion before auto-archiving
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
