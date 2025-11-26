@@ -371,7 +371,7 @@ function DescriptionColumn({ value }: { value: string }) {
   const isEmpty = !value || value.trim().length === 0;
 
   return (
-    <Td className="max-w-62 whitepsace-pre-wrap">
+    <Td className="max-w-62 whitespace-pre-wrap">
       {isEmpty ? (
         <EmptyTableValue />
       ) : value.length > 60 ? (
