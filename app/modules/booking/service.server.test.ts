@@ -66,6 +66,7 @@ vitest.mock("~/database/db.server", () => ({
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
       findFirstOrThrow: vitest.fn().mockResolvedValue({}),
+      findUnique: vitest.fn().mockResolvedValue(null),
       findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
@@ -1633,7 +1634,7 @@ describe("deleteBooking", () => {
     expect.assertions(1);
 
     //@ts-expect-error missing vitest type
-    db.booking.findFirst.mockResolvedValue(mockBookingData);
+    db.booking.findUnique.mockResolvedValue(mockBookingData);
     //@ts-expect-error missing vitest type
     db.booking.delete.mockResolvedValue(mockBookingData);
 
@@ -1642,7 +1643,7 @@ describe("deleteBooking", () => {
       mockClientHints
     );
 
-    expect(db.booking.findFirst).toHaveBeenCalled();
+    expect(db.booking.findUnique).toHaveBeenCalled();
   });
 });
 
