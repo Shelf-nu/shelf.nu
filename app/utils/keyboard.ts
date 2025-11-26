@@ -34,6 +34,10 @@ export function handleActivationKeyPress(
   callback: () => void
 ): (event: KeyboardEvent) => void {
   return (event: KeyboardEvent) => {
+    // Only handle the key press when the element itself is focused.
+    // This prevents bubbling key presses (like space in text inputs) from triggering the callback.
+    if (event.target !== event.currentTarget) return;
+
     if (isActivationKey(event)) {
       event.preventDefault();
       callback();

@@ -19,6 +19,7 @@ import {
   updateInviteStatus,
 } from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -90,6 +91,8 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     );
   }
 }
+
+export const meta = () => [{ title: appendToMetaTitle("Accept team invite") }];
 
 export async function action({ context, request }: LoaderFunctionArgs) {
   try {

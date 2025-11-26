@@ -28,6 +28,8 @@ import {
   toggleBarcodeEnabled,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -36,6 +38,9 @@ import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
 
+export const meta = () => [
+  { title: appendToMetaTitle("Organization details") },
+];
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;

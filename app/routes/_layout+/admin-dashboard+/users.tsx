@@ -1,6 +1,6 @@
 import type { User } from "@prisma/client";
 import { TierId } from "@prisma/client";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useNavigate, useLoaderData } from "react-router";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
@@ -11,6 +11,7 @@ import { Pagination } from "~/components/list/pagination";
 import { DateS } from "~/components/shared/date";
 import { Td, Th } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -60,6 +61,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
+];
 
 export default function Area51() {
   const navigate = useNavigate();
