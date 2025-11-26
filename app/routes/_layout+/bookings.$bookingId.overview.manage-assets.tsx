@@ -67,6 +67,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -92,6 +93,8 @@ export type AssetWithBooking = Asset & {
   kitId?: string | null;
   qrScanned: string;
 };
+
+export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 

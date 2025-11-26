@@ -7,6 +7,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -16,6 +17,8 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
+
+export const meta = () => [{ title: appendToMetaTitle("QR code") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated
