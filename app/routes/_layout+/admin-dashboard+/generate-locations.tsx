@@ -10,6 +10,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { generateLocationWithImages } from "~/modules/location/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -24,6 +25,7 @@ const GenerateLocationSchema = z.object({
   numberOfLocations: z.coerce.number().min(1).max(500).default(100),
   image: z.instanceof(File, { message: "Image is required" }),
 });
+export const meta = () => [{ title: appendToMetaTitle("Generate locations") }];
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = context.getSession();

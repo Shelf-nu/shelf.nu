@@ -5,7 +5,10 @@ import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { payload, getParams } from "~/utils/http.server";
+
+export const meta = () => [{ title: appendToMetaTitle("QR not logged in") }];
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));

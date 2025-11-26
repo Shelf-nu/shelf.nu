@@ -29,6 +29,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -46,6 +47,8 @@ import {
   getStripeCustomer,
   getStripePricesAndProducts,
 } from "~/utils/stripe.server";
+
+export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
 export type QrCodeWithAsset = Qr & {
   asset: {

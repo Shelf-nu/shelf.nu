@@ -127,8 +127,8 @@
     ],
     // Custom local rules
     "local-rules/require-satisfies-on-nested-prisma-selects": "error",
-    "local-rules/require-deleted-at-check-on-custom-field-queries": "error"
-    // "local-rules/require-meta-export-in-routes": "warn"
+    "local-rules/require-deleted-at-check-on-custom-field-queries": "error",
+    "local-rules/require-meta-export-in-routes": "warn"
   },
   "overrides": [
     {

@@ -1,6 +1,10 @@
 import { useEffect, useMemo } from "react";
 
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect, useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
@@ -10,6 +14,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -154,6 +159,11 @@ export function loader({ context }: LoaderFunctionArgs) {
 
   return data(payload({ title, subHeading }));
 }
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.title) : "" },
+];
+
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();
   const { data } = fetcher;
