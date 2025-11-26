@@ -17,7 +17,7 @@ export function OverridePreview({ override }: OverridePreviewProps) {
 
   const handleDelete = () => {
     if (window.confirm("Are you sure you want to delete this override?")) {
-      deleteFetcher.submit(
+      void deleteFetcher.submit(
         {
           intent: "deleteOverride",
           overrideId: override.id,

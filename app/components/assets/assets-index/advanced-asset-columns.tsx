@@ -1,4 +1,4 @@
-import type React from "react";
+import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -213,7 +213,7 @@ export function AdvancedIndexColumn({
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
 
-    case "valuation":
+    case "valuation": {
       const value = item?.valuation?.toLocaleString(locale, {
         currency: currentOrganization.currency,
         style: "currency",
@@ -225,7 +225,7 @@ export function AdvancedIndexColumn({
           {value ? value : <EmptyTableValue />}
         </Td>
       );
-
+    }
     case "createdAt":
       return <DateColumn value={item.createdAt} includeTime />;
 
@@ -328,7 +328,7 @@ function TextColumn({
   className,
   ...rest
 }: {
-  value: string | React.ReactNode;
+  value: string | ReactNode;
   className?: string;
 }) {
   return (
@@ -454,7 +454,7 @@ function CustodyColumn({
   );
 }
 
-function Td({ className, ...rest }: React.ComponentProps<typeof BaseTd>) {
+function Td({ className, ...rest }: ComponentProps<typeof BaseTd>) {
   return <BaseTd className={tw("p-[2px]", className)} {...rest} />;
 }
 

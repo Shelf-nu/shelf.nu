@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Popover,
   PopoverContent,
@@ -14,6 +14,7 @@ import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import type { UpdateForUser } from "~/modules/update/service.server";
 import type { loader } from "~/routes/_layout+/_layout";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { SidebarMenuButton, SidebarMenuItem } from "./sidebar";
 
@@ -62,7 +63,7 @@ export default function UpdatesNavItem() {
         );
         if (unreadUpdates.length > 0) {
           viewsTrackedRef.current = true;
-          fetcher.submit(
+          void fetcher.submit(
             {
               intent: "trackViews",
               updateIds: unreadUpdates.map((u) => u.id).join(","),
@@ -92,7 +93,7 @@ export default function UpdatesNavItem() {
     // Set optimistic flag to hide button and dot immediately
     setOptimisticMarkAllRead(true);
 
-    fetcher.submit(
+    void fetcher.submit(
       { intent: "markAllAsRead" },
       { method: "POST", action: "/api/updates" }
     );
@@ -103,7 +104,7 @@ export default function UpdatesNavItem() {
     setReadUpdateIds((prev) => new Set(prev).add(updateId));
 
     // Mark as read AND track click in single API call
-    fetcher.submit(
+    void fetcher.submit(
       { intent: "clickUpdate", updateId },
       { method: "POST", action: "/api/updates" }
     );
@@ -191,7 +192,16 @@ export default function UpdatesNavItem() {
                         update.url &&
                           (isUnread ? "hover:bg-blue-100" : "hover:bg-gray-100")
                       )}
+                      role={update.url ? "button" : undefined}
+                      tabIndex={update.url ? 0 : undefined}
                       onClick={() => handleUpdateClick(update.id, update.url)}
+                      onKeyDown={
+                        update.url
+                          ? handleActivationKeyPress(() =>
+                              handleUpdateClick(update.id, update.url)
+                            )
+                          : undefined
+                      }
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">

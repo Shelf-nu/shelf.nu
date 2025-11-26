@@ -1,7 +1,8 @@
+import type { ReactNode } from "react";
 import { tw } from "~/utils/tw";
 
 interface Props {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }
 

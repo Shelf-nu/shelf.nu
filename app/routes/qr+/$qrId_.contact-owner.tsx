@@ -111,7 +111,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
      * 2. To the person who reported the asset as found
      */
     if (ownerEmail) {
-      await sendReportEmails({
+      sendReportEmails({
         ownerEmail,
         qr,
         message: report.content,

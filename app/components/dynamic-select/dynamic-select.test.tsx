@@ -1,3 +1,4 @@
+import type { ChangeEvent } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,7 +42,7 @@ function createMockUseModelFiltersReturn(
   return {
     searchQuery: "",
     setSearchQuery: vi.fn(),
-    handleSearchQueryChange: vi.fn((e: React.ChangeEvent<HTMLInputElement>) => {
+    handleSearchQueryChange: vi.fn((e: ChangeEvent<HTMLInputElement>) => {
       // Update searchQuery in subsequent calls
       mockUseModelFilters.mockReturnValue({
         ...createMockUseModelFiltersReturn(items, {

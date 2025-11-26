@@ -1,4 +1,4 @@
-import type React from "react";
+import type { ComponentType, SVGProps } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 import {
@@ -103,7 +103,7 @@ type QuickCommand = {
   description?: string;
   href: string;
   keywords?: string[];
-  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
   isVisible?: (context: CommandContext) => boolean;
 };
 

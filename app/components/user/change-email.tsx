@@ -291,7 +291,7 @@ function ResendCodeForm({
           formData.append("intent", "initiateEmailChange");
           formData.append("email", formState.newEmail || "");
           formData.append("confirmEmail", formState.newEmail || "");
-          fetcher.submit(formData, {
+          void fetcher.submit(formData, {
             method: "POST",
           });
         }}

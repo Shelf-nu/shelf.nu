@@ -14,7 +14,7 @@ import {
 } from "~/hooks/use-is-route-active";
 import type {
   ChildNavItem,
-  ParentNavItem,
+  ParentNavItem as ParentNavItemType,
 } from "~/hooks/use-sidebar-nav-items";
 import { tw } from "~/utils/tw";
 import {
@@ -27,7 +27,7 @@ import {
 } from "./sidebar";
 
 type ParentNavItemProps = {
-  route: ParentNavItem;
+  route: ParentNavItemType;
   tooltip: ComponentProps<typeof SidebarMenuButton>["tooltip"];
   closeIfMobile?: () => void;
 };

@@ -1,3 +1,8 @@
+import type {
+  ComponentPropsWithoutRef,
+  ElementRef,
+  HTMLAttributes,
+} from "react";
 import { forwardRef } from "react";
 import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -14,8 +19,8 @@ const SheetPortal = SheetPrimitive.Portal;
 const SheetClose = SheetPrimitive.Close;
 
 const SheetOverlay = forwardRef<
-  React.ElementRef<typeof SheetPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
+  ElementRef<typeof SheetPrimitive.Overlay>,
+  ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Overlay
     className={tw(
@@ -48,11 +53,11 @@ const sheetVariants = cva(
 );
 
 interface SheetContentProps
-  extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
+  extends ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {}
 
 const SheetContent = forwardRef<
-  React.ElementRef<typeof SheetPrimitive.Content>,
+  ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps & { hideCloseButton?: boolean }
 >(
   (
@@ -83,7 +88,7 @@ SheetContent.displayName = SheetPrimitive.Content.displayName;
 const SheetHeader = ({
   className,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
+}: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={tw(
       "flex flex-col space-y-2 text-center sm:text-left",
@@ -97,7 +102,7 @@ SheetHeader.displayName = "SheetHeader";
 const SheetFooter = ({
   className,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
+}: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={tw(
       "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
@@ -109,8 +114,8 @@ const SheetFooter = ({
 SheetFooter.displayName = "SheetFooter";
 
 const SheetTitle = forwardRef<
-  React.ElementRef<typeof SheetPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Title>
+  ElementRef<typeof SheetPrimitive.Title>,
+  ComponentPropsWithoutRef<typeof SheetPrimitive.Title>
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Title
     ref={ref}
@@ -121,8 +126,8 @@ const SheetTitle = forwardRef<
 SheetTitle.displayName = SheetPrimitive.Title.displayName;
 
 const SheetDescription = forwardRef<
-  React.ElementRef<typeof SheetPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Description>
+  ElementRef<typeof SheetPrimitive.Description>,
+  ComponentPropsWithoutRef<typeof SheetPrimitive.Description>
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Description
     ref={ref}

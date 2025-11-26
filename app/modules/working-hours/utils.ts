@@ -84,7 +84,7 @@ export function normalizeWorkingHoursForValidation(
     }
 
     return undefined;
-  } catch (error) {
+  } catch (_error) {
     return undefined;
   }
 }

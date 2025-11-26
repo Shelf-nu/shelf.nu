@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
+
 type Props = {
   truthy: boolean | null | undefined;
-  children: React.ReactNode;
-  fallback?: React.ReactNode;
+  children: ReactNode;
+  fallback?: ReactNode;
 };
 
 export default function When({ truthy, children, fallback }: Props) {

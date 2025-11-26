@@ -211,7 +211,7 @@ export function useModelFilters({
 
       // Only fetch from server if we don't have all data
       if (!hasAllData) {
-        fetcher.submit(
+        void fetcher.submit(
           {
             ...model,
             queryValue: e.currentTarget.value,

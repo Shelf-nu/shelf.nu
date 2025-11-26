@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { Crisp } from "crisp-sdk-web";
 import {
@@ -30,7 +31,7 @@ type BaseNavItem = {
   title: string;
   hidden?: boolean;
   Icon: LucideIcon;
-  disabled?: boolean | { reason: React.ReactNode };
+  disabled?: boolean | { reason: ReactNode };
   badge?: {
     show: boolean;
     variant?: "unread";

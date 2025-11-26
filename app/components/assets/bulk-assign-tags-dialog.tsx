@@ -44,7 +44,7 @@ export default function BulkAssignTagsDialog() {
   }, [fetcher.data]);
 
   useEffect(() => {
-    fetcher.submit(
+    void fetcher.submit(
       {
         name: "tag",
         queryKey: "name",

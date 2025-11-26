@@ -43,7 +43,7 @@ export default function KitImage({
       const now = new Date();
       const expiration = new Date(imageExpiration);
       if (now > expiration) {
-        fetcher.submit(
+        void fetcher.submit(
           { kitId, image },
           {
             method: "post",
