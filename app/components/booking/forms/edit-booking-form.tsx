@@ -205,6 +205,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   type="hidden"
                   name="nameChangeOnly"
                   value={bookingStatus?.isDraft ? "no" : "yes"}
+                  key={id}
                 />
                 <Button
                   type="submit"
@@ -298,7 +299,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       ) : null}
       <div className="mb-4">
         <div className="m-0 flex w-full flex-col gap-3">
-          {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
+          {id ? (
+            <input type="hidden" name="id" defaultValue={id} key={id} />
+          ) : null}
           <h3>Booking details</h3>
           <div
             className={tw(
@@ -309,6 +312,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <div className="w-full lg:w-2/5">
               <div>
                 <NameField
+                  key={id}
                   name={name || undefined}
                   fieldName={zo.fields.name()}
                   disabled={
@@ -327,6 +331,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </div>
               <div className="mt-[10px]">
                 <DatesFields
+                  key={`${id}-dates`}
                   startDate={startDate}
                   startDateName={zo.fields.startDate()}
                   startDateError={
@@ -347,6 +352,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </div>
               <div className="mt-[10px]">
                 <CustodianField
+                  key={`${id}-custodian`}
                   defaultTeamMember={defaultTeamMember}
                   disabled={
                     disabled ||
@@ -370,6 +376,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 )}
               >
                 <TagField
+                  key={`${id}-tags`}
                   disabled={
                     disabled ||
                     isLoadingWorkingHours ||
@@ -387,6 +394,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 />
 
                 <DescriptionField
+                  key={`${id}-description`}
                   description={description || undefined}
                   fieldName={zo.fields.description()}
                   disabled={

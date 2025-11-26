@@ -4102,18 +4102,47 @@ export async function addScannedAssetsToBooking({
   userId: string;
 }) {
   try {
-    /** Step 1: Add assets to booking */
-    const updatedBooking = await db.booking.update({
-      where: { id: bookingId, organizationId },
-      data: {
-        assets: {
-          connect: assetIds.map((id) => ({ id })),
+    /**
+     * Step 1: Add assets to booking inside a transaction so we can mirror the
+     * status-sync behaviour used in manage-assets.
+     */
+    const updatedBooking = await db.$transaction(async (tx) => {
+      const booking = await tx.booking.update({
+        where: { id: bookingId, organizationId },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
         },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      });
+
+      /** When booking is active, newly added items must be flagged checked out */
+      const isActiveBooking =
+        booking.status === BookingStatus.ONGOING ||
+        booking.status === BookingStatus.OVERDUE;
+
+      if (isActiveBooking) {
+        if (assetIds.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: assetIds }, organizationId },
+            data: { status: AssetStatus.CHECKED_OUT },
+          });
+        }
+
+        if (kitIds.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
+      }
+
+      return booking;
     });
 
     /** Step 2: Create activity notes */
