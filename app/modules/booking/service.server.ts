@@ -98,19 +98,28 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
 
-async function cancelScheduler(
-  b?: Pick<Booking, "activeSchedulerReference"> | null
-) {
+/** Booking shape required for scheduler cancellation. */
+type BookingWithSchedulerReference = Pick<Booking, "id"> & {
+  activeSchedulerReference: NonNullable<Booking["activeSchedulerReference"]>;
+};
+
+/** Detects whether a booking has an active scheduler job we can cancel. */
+function hasActiveSchedulerReference(
+  booking: Pick<Booking, "id" | "activeSchedulerReference">
+): booking is BookingWithSchedulerReference {
+  return Boolean(booking.activeSchedulerReference);
+}
+
+/** Cancels the queued PgBoss job for the provided booking. */
+async function cancelScheduler(booking: BookingWithSchedulerReference) {
   try {
-    if (b?.activeSchedulerReference) {
-      await scheduler.cancel(b.activeSchedulerReference);
-    }
+    await scheduler.cancel(booking.activeSchedulerReference);
   } catch (cause) {
     Logger.error(
       new ShelfError({
         cause,
         message: "Failed to cancel the scheduler for booking",
-        additionalData: { booking: b },
+        additionalData: { bookingId: booking.id },
         label,
       })
     );
@@ -374,7 +383,10 @@ export async function createBooking({
 
     return await db.booking.create({
       data: dataToCreate,
-      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+      include: {
+        ...BOOKING_COMMON_INCLUDE,
+        organization: true,
+      },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -1130,7 +1142,9 @@ export async function checkoutBooking({
     const lessThanOneHourToCheckin = hours < 1;
 
     /** We cancel just in case there is something pending */
-    await cancelScheduler(updatedBooking);
+    if (hasActiveSchedulerReference(updatedBooking)) {
+      await cancelScheduler(updatedBooking);
+    }
 
     /**
      * If its expired that means its status will directly go to OVERDUE,
@@ -1517,7 +1531,9 @@ export async function checkinBooking({
      * Because, if the only possible case is OVERDUE, and if it was OVERDUE
      * during the checkin it must have been handled by overdueHandler.
      */
-    await cancelScheduler(updatedBooking);
+    if (hasActiveSchedulerReference(updatedBooking)) {
+      await cancelScheduler(updatedBooking);
+    }
 
     if (updatedBooking.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
@@ -1587,7 +1603,9 @@ export async function partialCheckinBooking({
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        include: { assets: { select: { id: true, kitId: true } } },
+        include: {
+          assets: { select: { id: true, kitId: true } },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -2139,7 +2157,9 @@ export async function cancelBooking({
     });
 
     /** Cancel any active schedulers */
-    await cancelScheduler(booking);
+    if (hasActiveSchedulerReference(booking)) {
+      await cancelScheduler(booking);
+    }
 
     if (booking.custodianUser?.email) {
       const subject = `Booking canceled (${booking.name}) - shelf.nu`;
@@ -2247,7 +2267,9 @@ export async function revertBookingToDraft({
     }
 
     /** Cancels all scheduled events */
-    await cancelScheduler(cancelledBooking);
+    if (hasActiveSchedulerReference(cancelledBooking)) {
+      await cancelScheduler(cancelledBooking);
+    }
 
     return cancelledBooking;
   } catch (cause) {
@@ -2454,7 +2476,9 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    await cancelScheduler(booking);
+    if (hasActiveSchedulerReference(booking)) {
+      await cancelScheduler(booking);
+    }
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
@@ -3035,29 +3059,46 @@ export async function deleteBooking(
 ) {
   try {
     const { id, organizationId } = booking;
-    const activeBooking = await db.booking.findFirst({
-      where: {
-        id,
-        status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
-        organizationId,
-      },
-      include: {
-        assets: {
-          select: {
-            id: true,
-            kitId: true,
+
+    const bookingToDelete = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: {
+          assets: {
+            select: { id: true, kitId: true },
           },
         },
-      },
-    });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in current workspace?",
+        });
+      });
 
-    const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
-    const uniqueKitIds = new Set(
-      assetWithKits.map((a) => a.kitId) as unknown as string
-    );
-    const hasKits = uniqueKitIds.size > 0;
+    const isActiveBooking =
+      bookingToDelete.status === BookingStatus.OVERDUE ||
+      bookingToDelete.status === BookingStatus.ONGOING;
 
-    const b = await db.booking.delete({
+    const kitIdsFromAssets = bookingToDelete.assets
+      .map((asset) => asset.kitId)
+      .filter((kitId): kitId is string => Boolean(kitId));
+    const uniqueKitIds = new Set(kitIdsFromAssets);
+
+    if (isActiveBooking) {
+      await updateBookingAssetStates(bookingToDelete, AssetStatus.AVAILABLE);
+
+      if (uniqueKitIds.size > 0) {
+        await updateBookingKitStates({
+          kitIds: [...uniqueKitIds],
+          status: KitStatus.AVAILABLE,
+        });
+      }
+    }
+
+    const deletedBooking = await db.booking.delete({
       where: { id, organizationId },
       include: {
         ...BOOKING_COMMON_INCLUDE,
@@ -3070,24 +3111,24 @@ export async function deleteBooking(
       },
     });
 
-    const email = b.custodianUser?.email;
+    const email = deletedBooking.custodianUser?.email;
     if (email) {
-      const subject = `🗑️ Booking deleted (${b.name}) - shelf.nu`;
+      const subject = `🗑️ Booking deleted (${deletedBooking.name}) - shelf.nu`;
       const text = deletedBookingEmailContent({
-        bookingName: b.name,
-        assetsCount: b._count.assets,
+        bookingName: deletedBooking.name,
+        assetsCount: deletedBooking._count.assets,
         custodian:
-          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-          (b.custodianTeamMember?.name as string),
-        from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
-        to: b.to as Date,
-        bookingId: b.id,
+          `${deletedBooking.custodianUser?.firstName} ${deletedBooking.custodianUser?.lastName}` ||
+          (deletedBooking.custodianTeamMember?.name as string),
+        from: deletedBooking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+        to: deletedBooking.to as Date,
+        bookingId: deletedBooking.id,
         hints: hints,
       });
       const html = await bookingUpdatesTemplateString({
-        booking: b,
-        heading: `Your booking has been deleted: "${b.name}".`,
-        assetCount: b._count.assets,
+        booking: deletedBooking,
+        heading: `Your booking has been deleted: "${deletedBooking.name}".`,
+        assetCount: deletedBooking._count.assets,
         hints,
         hideViewButton: true,
       });
@@ -3100,21 +3141,11 @@ export async function deleteBooking(
       });
     }
 
-    /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
-    if (activeBooking) {
-      await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
-
-      // If booking has some kits, then make them available too
-      if (hasKits) {
-        await updateBookingKitStates({
-          kitIds: [...uniqueKitIds],
-          status: KitStatus.AVAILABLE,
-        });
-      }
+    if (hasActiveSchedulerReference(bookingToDelete)) {
+      await cancelScheduler(bookingToDelete);
     }
-    await cancelScheduler(b);
 
-    return b;
+    return deletedBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -3607,7 +3638,11 @@ export async function bulkDeleteBookings({
 
     /** Cancelling scheduler */
     await Promise.all(
-      bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
+      bookingsWithSchedulerReference.map((booking) => {
+        if (hasActiveSchedulerReference(booking)) {
+          cancelScheduler(booking);
+        }
+      })
     );
 
     const emailConfigs = await Promise.all(
@@ -3716,7 +3751,13 @@ export async function bulkArchiveBookings({
     });
 
     /** Cancel any active schedulers */
-    await Promise.all(bookings.map((b) => cancelScheduler(b)));
+    await Promise.all(
+      bookings.map((b) => {
+        if (hasActiveSchedulerReference(b)) {
+          cancelScheduler(b);
+        }
+      })
+    );
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 
@@ -3880,7 +3921,11 @@ export async function bulkCancelBookings({
 
     /** Cancelling scheduler */
     await Promise.all(
-      bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
+      bookingsWithSchedulerReference.map((booking) => {
+        if (hasActiveSchedulerReference(booking)) {
+          cancelScheduler(booking);
+        }
+      })
     );
 
     /** Sending cancellation emails */
