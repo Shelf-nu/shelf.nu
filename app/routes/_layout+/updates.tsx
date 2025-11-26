@@ -52,7 +52,7 @@ export default function UpdatesPage() {
   const fetcher = useFetcher();
   const viewsTrackedRef = useRef(false);
 
-  // Track views for all unread updates when the page loads
+  // Mark all updates as read when the page loads (visiting the page = reading)
   useEffect(() => {
     if (updates && updates.length > 0 && !viewsTrackedRef.current) {
       const unreadUpdates = updates.filter((u) => u.userReads.length === 0);
@@ -60,8 +60,7 @@ export default function UpdatesPage() {
         viewsTrackedRef.current = true;
         fetcher.submit(
           {
-            intent: "trackViews",
-            updateIds: unreadUpdates.map((u) => u.id).join(","),
+            intent: "markAllAsRead",
           },
           { method: "POST", action: "/api/updates" }
         );
