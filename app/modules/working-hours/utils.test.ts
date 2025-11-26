@@ -3,6 +3,7 @@ import {
   calculateBusinessHoursDuration,
   calculateEffectiveEndDate,
   getBookingDefaultStartEndTimes,
+  getDateStringUTC,
   normalizeWorkingHoursForValidation,
 } from "./utils";
 
@@ -15,6 +16,52 @@ vitest.mock("~/utils/date-fns", () => ({
     (date: Date) => date.toISOString().slice(0, 16) // YYYY-MM-DDTHH:mm format
   ),
 }));
+
+describe("getDateStringUTC", () => {
+  it("should extract UTC date from Date object", () => {
+    expect.assertions(1);
+
+    // This date is Nov 27 midnight UTC
+    const date = new Date("2024-11-27T00:00:00.000Z");
+    expect(getDateStringUTC(date)).toBe("2024-11-27");
+  });
+
+  it("should handle ISO string input", () => {
+    expect.assertions(1);
+
+    expect(getDateStringUTC("2024-11-27T00:00:00.000Z")).toBe("2024-11-27");
+  });
+
+  it("should handle date-only string input", () => {
+    expect.assertions(1);
+
+    expect(getDateStringUTC("2024-11-27")).toBe("2024-11-27");
+  });
+
+  it("should consistently return UTC date regardless of time component", () => {
+    expect.assertions(3);
+
+    // All of these represent the same UTC date
+    expect(getDateStringUTC(new Date("2024-11-27T00:00:00.000Z"))).toBe(
+      "2024-11-27"
+    );
+    expect(getDateStringUTC(new Date("2024-11-27T23:59:59.999Z"))).toBe(
+      "2024-11-27"
+    );
+    expect(getDateStringUTC(new Date("2024-11-27T12:00:00.000Z"))).toBe(
+      "2024-11-27"
+    );
+  });
+
+  it("should handle override dates stored as midnight UTC", () => {
+    expect.assertions(1);
+
+    // When user selects Nov 27, DB stores it as midnight UTC
+    // This should always return "2024-11-27" regardless of server timezone
+    const overrideDateFromDB = new Date("2024-11-27T00:00:00.000Z");
+    expect(getDateStringUTC(overrideDateFromDB)).toBe("2024-11-27");
+  });
+});
 
 describe("normalizeWorkingHoursForValidation", () => {
   it("should normalize valid working hours data", () => {

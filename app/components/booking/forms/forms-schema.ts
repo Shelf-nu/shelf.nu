@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import {
   calculateBusinessHoursDuration,
+  getDateStringUTC,
   normalizeWorkingHoursForValidation,
 } from "~/modules/working-hours/utils";
 import type { getHints } from "~/utils/client-hints";
@@ -23,15 +24,18 @@ function validateWorkingHours(
     return { isValid: true };
   }
 
-  // Extract day and time directly - no timezone conversion needed
-  // dateTime is already correctly parsed from user input
-  const dayOfWeek = dateTime.getDay().toString(); // 0 = Sunday, 1 = Monday, etc.
+  // Use UTC methods for date comparison to ensure override dates work as absolute dates
+  // This ensures that when a user sets an override for "Nov 27", it blocks "Nov 27"
+  // regardless of the server's timezone
+  const dayOfWeek = dateTime.getUTCDay().toString(); // 0 = Sunday, 1 = Monday, etc.
   const timeString = format(dateTime, "HH:mm");
-  const dateString = format(dateTime, "yyyy-MM-dd");
+  // Use UTC date string for comparing against override dates (which are stored as absolute dates)
+  const dateString = getDateStringUTC(dateTime);
 
   // Check for date-specific overrides first
   const override = workingHours.overrides.find((override) => {
-    const overrideDate = format(override.date, "yyyy-MM-dd");
+    // Override dates are stored as midnight UTC and should be compared as absolute dates
+    const overrideDate = getDateStringUTC(override.date);
     return overrideDate === dateString;
   });
 

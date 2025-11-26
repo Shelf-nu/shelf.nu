@@ -1,10 +1,34 @@
-import { addHours, addDays, format, differenceInHours } from "date-fns";
+import { addHours, addDays, differenceInHours } from "date-fns";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type {
   DaySchedule,
   WeeklyScheduleJson,
   WorkingHoursData,
 } from "./types";
+
+/**
+ * Extracts the date portion (YYYY-MM-DD) from a Date object in UTC.
+ * This ensures consistent date comparison regardless of local timezone.
+ *
+ * Override dates should be treated as absolute dates (timezone-agnostic),
+ * so we always extract the date portion in UTC to avoid timezone-related shifts.
+ *
+ * @param date - The Date object to extract the date portion from
+ * @returns A date string in YYYY-MM-DD format (UTC)
+ */
+export function getDateStringUTC(date: Date | string): string {
+  if (typeof date === "string") {
+    // If it's already a string, try to parse and extract date
+    const parsed = new Date(date);
+    if (isNaN(parsed.getTime())) {
+      // If parsing fails, try to extract date from string format
+      const match = date.match(/^\d{4}-\d{2}-\d{2}/);
+      return match ? match[0] : "";
+    }
+    return parsed.toISOString().split("T")[0];
+  }
+  return date.toISOString().split("T")[0];
+}
 
 /**
  * Parses form data into WeeklyScheduleJson format
@@ -418,12 +442,13 @@ export function calculateEffectiveEndDate(
 
   // Count closed days between start and original end date
   while (currentDate < originalEndDate) {
-    const dateString = format(currentDate, "yyyy-MM-dd");
-    const dayOfWeek = currentDate.getDay().toString();
+    // Use UTC date strings for consistent comparison regardless of timezone
+    const dateString = getDateStringUTC(currentDate);
+    const dayOfWeek = currentDate.getUTCDay().toString();
 
     // Check for date-specific override first
     const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(override.date, "yyyy-MM-dd");
+      const overrideDate = getDateStringUTC(override.date);
       return overrideDate === dateString;
     });
 
@@ -483,12 +508,13 @@ export function calculateBusinessHoursDuration(
     const windowEnd = nextDay > endDate ? endDate : nextDay;
 
     // Check if this day is closed
-    const dateString = format(windowStart, "yyyy-MM-dd");
-    const dayOfWeek = windowStart.getDay().toString();
+    // Use UTC date strings for consistent comparison regardless of timezone
+    const dateString = getDateStringUTC(windowStart);
+    const dayOfWeek = windowStart.getUTCDay().toString();
 
     // Check for date-specific override first
     const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(override.date, "yyyy-MM-dd");
+      const overrideDate = getDateStringUTC(override.date);
       return overrideDate === dateString;
     });
 
