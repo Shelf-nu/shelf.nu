@@ -1,4 +1,9 @@
-import type { AssetIndexMode, CustomField, Prisma } from "@prisma/client";
+import {
+  OrganizationRoles,
+  type AssetIndexMode,
+  type CustomField,
+  type Prisma,
+} from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
@@ -25,7 +30,7 @@ export async function createUserAssetIndexSettings({
   organizationId: string;
   canUseBarcodes?: boolean;
   /** User's role to determine default mode */
-  role?: string;
+  role?: OrganizationRoles;
   /** Optionally receive a transaction when the settingsd need to be created together with other entries */
   tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
@@ -63,9 +68,13 @@ export async function createUserAssetIndexSettings({
     ];
 
     // BASE and SELF_SERVICE users should default to SIMPLE mode
-    // All other roles default to ADVANCED mode
-    const defaultMode =
-      role && ["BASE", "SELF_SERVICE"].includes(role) ? "SIMPLE" : "ADVANCED";
+    // All other roles default to ADVANCED mode when a role is provided
+    const defaultMode: AssetIndexMode =
+      !role ||
+      role === OrganizationRoles.BASE ||
+      role === OrganizationRoles.SELF_SERVICE
+        ? "SIMPLE"
+        : "ADVANCED";
 
     const settings = await _db.assetIndexSettings.create({
       data: {
@@ -98,7 +107,7 @@ export async function getAssetIndexSettings({
   userId: string;
   organizationId: string;
   canUseBarcodes?: boolean;
-  role?: string;
+  role?: OrganizationRoles;
 }) {
   try {
     const assetIndexSettings = await db.assetIndexSettings.findFirst({
