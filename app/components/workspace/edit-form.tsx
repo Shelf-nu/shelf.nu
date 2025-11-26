@@ -89,6 +89,22 @@ const WorkspaceGeneralEditForms = ({
   const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
+  const fetcherError = (
+    fetcher.data as
+      | {
+          error?: {
+            message: string;
+            additionalData?: { field?: string };
+          };
+        }
+      | undefined
+  )?.error;
+
+  const imageError =
+    (fetcherError?.additionalData?.field === "image"
+      ? fetcherError.message
+      : undefined) ?? fileError;
+
   return (
     <fetcher.Form
       ref={zo.ref}
@@ -138,7 +154,7 @@ const WorkspaceGeneralEditForms = ({
               onChange={validateFile}
               label={"Main image"}
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />

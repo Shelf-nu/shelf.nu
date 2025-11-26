@@ -83,6 +83,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { logMissingFormIntent } from "~/utils/logger";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -496,6 +497,8 @@ export const handle = {
   name: "bookings.$bookingId.overview",
 };
 
+
+
 export type BookingPageActionData = typeof action;
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -511,6 +514,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
   try {
     const formData = await request.formData();
+    logMissingFormIntent({ formData, request, bookingId: id, userId });
     const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
       formData,
       z.object({
