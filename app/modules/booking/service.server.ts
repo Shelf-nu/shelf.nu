@@ -99,18 +99,23 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Booking";
 
 async function cancelScheduler(
-  b?: Pick<Booking, "activeSchedulerReference"> | null
+  booking: Pick<Booking, "id" | "activeSchedulerReference">
 ) {
   try {
-    if (b?.activeSchedulerReference) {
-      await scheduler.cancel(b.activeSchedulerReference);
+    if (!booking.activeSchedulerReference) {
+      Logger.error(
+        `Skipping scheduler cancellation for booking ${booking.id} because no activeSchedulerReference was found.`
+      );
+      return;
     }
+
+    await scheduler.cancel(booking.activeSchedulerReference);
   } catch (cause) {
     Logger.error(
       new ShelfError({
         cause,
         message: "Failed to cancel the scheduler for booking",
-        additionalData: { booking: b },
+        additionalData: { booking },
         label,
       })
     );
@@ -3031,12 +3036,8 @@ export async function deleteBooking(
 ) {
   try {
     const { id, organizationId } = booking;
-    const activeBooking = await db.booking.findFirst({
-      where: {
-        id,
-        status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
-        organizationId,
-      },
+    const currentBooking = await db.booking.findUnique({
+      where: { id, organizationId },
       include: {
         assets: {
           select: {
@@ -3046,6 +3047,13 @@ export async function deleteBooking(
         },
       },
     });
+
+    const activeBooking =
+      currentBooking &&
+      (currentBooking.status === BookingStatus.OVERDUE ||
+        currentBooking.status === BookingStatus.ONGOING)
+        ? currentBooking
+        : null;
 
     const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
     const uniqueKitIds = new Set(
@@ -3108,7 +3116,12 @@ export async function deleteBooking(
         });
       }
     }
-    await cancelScheduler(b);
+    await cancelScheduler(
+      currentBooking ?? {
+        id: b.id,
+        activeSchedulerReference: b.activeSchedulerReference,
+      }
+    );
 
     return b;
   } catch (cause) {
@@ -3551,7 +3564,7 @@ export async function bulkDeleteBookings({
     );
 
     /** We have to cancel scheduler for the bookings */
-    const bookingsWithSchedulerReference = overdueOrOngoingBookings.filter(
+    const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
     );
 
@@ -3810,7 +3823,7 @@ export async function bulkCancelBookings({
     );
 
     /** We have to cancel scheduler for the bookings */
-    const bookingsWithSchedulerReference = ongoingOrOverdueBookings.filter(
+    const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
     );
 
