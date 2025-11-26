@@ -1,6 +1,6 @@
 import {
+  AssetIndexMode,
   OrganizationRoles,
-  type AssetIndexMode,
   type CustomField,
   type Prisma,
 } from "@prisma/client";
@@ -73,8 +73,8 @@ export async function createUserAssetIndexSettings({
       !role ||
       role === OrganizationRoles.BASE ||
       role === OrganizationRoles.SELF_SERVICE
-        ? "SIMPLE"
-        : "ADVANCED";
+        ? AssetIndexMode.SIMPLE
+        : AssetIndexMode.ADVANCED;
 
     const settings = await _db.assetIndexSettings.create({
       data: {
