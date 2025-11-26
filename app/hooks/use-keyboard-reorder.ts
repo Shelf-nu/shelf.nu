@@ -1,4 +1,7 @@
-import type { MutableRefObject } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MutableRefObject,
+} from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UseKeyboardReorderOptions<T> {
@@ -32,7 +35,10 @@ interface UseKeyboardReorderReturn {
   /**
    * Handle keyboard events for reordering
    */
-  handleKeyDown: (event: KeyboardEvent, index: number) => void;
+  handleKeyDown: (
+    event: ReactKeyboardEvent<HTMLElement>,
+    index: number
+  ) => void;
   /**
    * Current announcement for screen readers
    */
@@ -163,7 +169,7 @@ export function useKeyboardReorder<T>({
   );
 
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent, index: number) => {
+    (event: ReactKeyboardEvent<HTMLElement>, index: number) => {
       // Alt+ArrowUp: Move item up
       if (event.key === "ArrowUp" && event.altKey) {
         event.preventDefault();

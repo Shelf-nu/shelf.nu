@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   disabledBulkItemsAtom,
@@ -41,9 +42,7 @@ export default function BulkListItemCheckbox({
   const disabled = disabledBulkItems.some((i) => i.id === item.id);
   const checked = !!selectedBulkItems.find((i) => i.id === item.id);
 
-  function handleBulkItemSelection(
-    e: MouseEvent<HTMLTableCellElement, MouseEvent>
-  ) {
+  function handleBulkItemSelection(e: MouseEvent<HTMLTableCellElement>) {
     e.preventDefault();
     e.stopPropagation();
     if (disabled) return;

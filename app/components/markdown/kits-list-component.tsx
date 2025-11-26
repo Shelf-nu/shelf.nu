@@ -153,9 +153,11 @@ export function KitsListComponent({
                           className="size-5"
                           asset={{
                             id: asset.id,
-                            thumbnailImage: asset.mainImage,
-                            mainImage: asset.mainImage,
-                            mainImageExpiration: asset.mainImageExpiration,
+                            thumbnailImage: asset.mainImage ?? null,
+                            mainImage: asset.mainImage ?? null,
+                            mainImageExpiration: asset.mainImageExpiration
+                              ? new Date(asset.mainImageExpiration)
+                              : null,
                           }}
                           alt={`${asset.title} main image`}
                         />
