@@ -17,6 +17,7 @@ import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
@@ -427,7 +428,13 @@ function OptionSelect({
                           "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                       ]
                     )}
+                    role="option"
+                    aria-selected={isSelected}
+                    tabIndex={0}
                     onClick={() => handleOptionClick(option)}
+                    onKeyDown={handleActivationKeyPress(() =>
+                      handleOptionClick(option)
+                    )}
                     style={{
                       width: triggerRef.current?.clientWidth || "auto",
                     }}

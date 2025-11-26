@@ -24,6 +24,7 @@ import {
   type Column,
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { FieldSelector } from "./advanced-filters/field-selector";
 import {
@@ -658,7 +659,11 @@ function PickAColumnToSortBy({
                       "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                   ]
                 )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
                 onClick={() => addSort(option)}
+                onKeyDown={handleActivationKeyPress(() => addSort(option))}
               >
                 {parseColumnName(option.name)}
               </div>

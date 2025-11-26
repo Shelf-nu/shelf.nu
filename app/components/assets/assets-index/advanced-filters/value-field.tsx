@@ -33,6 +33,7 @@ import {
   adjustDateToUTC,
   isDateString,
 } from "~/utils/date-fns";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { extractQrIdFromValue } from "./helpers";
@@ -547,7 +548,10 @@ function BooleanField({
                 "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                 selectedIndex === 0 && "bg-gray-50"
               )}
+              role="button"
+              tabIndex={0}
               onClick={() => handleSelect("true")}
+              onKeyDown={handleActivationKeyPress(() => handleSelect("true"))}
             >
               <span>Yes</span>
             </div>
@@ -556,7 +560,10 @@ function BooleanField({
                 "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                 selectedIndex === 1 && "bg-gray-50"
               )}
+              role="button"
+              tabIndex={0}
               onClick={() => handleSelect("false")}
+              onKeyDown={handleActivationKeyPress(() => handleSelect("false"))}
             >
               <span>No</span>
             </div>
@@ -721,7 +728,12 @@ function EnumField({
                       "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                       selectedIndex === index && "bg-gray-50"
                     )}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleOptionClick(option.id)}
+                    onKeyDown={handleActivationKeyPress(() =>
+                      handleOptionClick(option.id)
+                    )}
                   >
                     <span>{option.label}</span>
                     {multiSelect && isSelected && (

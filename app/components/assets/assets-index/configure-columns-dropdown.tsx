@@ -186,6 +186,8 @@ export function ConfigureColumnsDropdown() {
 
                           <label
                             htmlFor={column.name}
+                            role="checkbox"
+                            aria-checked={column.visible}
                             tabIndex={0}
                             onKeyDown={(e) => {
                               if (e.key === " " || e.key === "Enter") {

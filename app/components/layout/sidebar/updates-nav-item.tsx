@@ -14,6 +14,7 @@ import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import type { UpdateForUser } from "~/modules/update/service.server";
 import type { loader } from "~/routes/_layout+/_layout";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { SidebarMenuButton, SidebarMenuItem } from "./sidebar";
 
@@ -191,7 +192,16 @@ export default function UpdatesNavItem() {
                         update.url &&
                           (isUnread ? "hover:bg-blue-100" : "hover:bg-gray-100")
                       )}
+                      role={update.url ? "button" : undefined}
+                      tabIndex={update.url ? 0 : undefined}
                       onClick={() => handleUpdateClick(update.id, update.url)}
+                      onKeyDown={
+                        update.url
+                          ? handleActivationKeyPress(() =>
+                              handleUpdateClick(update.id, update.url)
+                            )
+                          : undefined
+                      }
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">

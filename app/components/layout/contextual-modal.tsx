@@ -2,6 +2,7 @@ import type { ReactNode, MouseEvent } from "react";
 import { useCallback, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Outlet, useMatches, useNavigate } from "react-router";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -43,7 +44,13 @@ const Dialog = ({
   }, [open, navigate, prevRoute]);
 
   return open ? (
-    <div className="dialog-backdrop" onClick={handleBackdropClose}>
+    <div
+      className="dialog-backdrop"
+      role="button"
+      tabIndex={0}
+      onClick={handleBackdropClose}
+      onKeyDown={handleActivationKeyPress(() => navigate(prevRoute))}
+    >
       <dialog className="dialog" open={true}>
         <div
           className={tw(

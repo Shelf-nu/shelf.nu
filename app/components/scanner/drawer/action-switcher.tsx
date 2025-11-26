@@ -13,6 +13,7 @@ import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -191,7 +192,11 @@ export function ActionSwitcher() {
                       "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                   ]
                 )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
                 onClick={() => changeAction(action)}
+                onKeyDown={handleActivationKeyPress(() => changeAction(action))}
               >
                 <span className="font-medium">{action}</span>
                 <span className="ml-2 font-normal text-gray-500">

@@ -8,6 +8,7 @@ import {
 } from "@radix-ui/react-popover";
 import type { DisabledProp } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import type { Filter, FilterDefinition, FilterOperator } from "./schema";
 
@@ -171,7 +172,13 @@ export function OperatorSelector({
                   "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                   selectedIndex === index && "bg-gray-50"
                 )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
                 onClick={() => handleSelect(k as FilterOperator)}
+                onKeyDown={handleActivationKeyPress(() =>
+                  handleSelect(k as FilterOperator)
+                )}
               >
                 <FilterOperatorDisplay symbol={v[0]} text={v[1]} />
               </div>

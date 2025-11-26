@@ -1,10 +1,11 @@
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { CheckIcon, UserIcon } from "lucide-react";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import useApiQuery from "~/hooks/use-api-query";
 import type { ReminderTeamMember } from "~/routes/api+/reminders.team-members";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -50,6 +51,18 @@ export default function TeamMembersSelector({
         tm.user?.email?.includes(normalizedQuery)
     );
   }, [data, searchQuery]);
+
+  const handleSelectedTeamMembersChange = useCallback(
+    (teamMember: ReminderTeamMember) => {
+      setSelectedTeamMembers((prev) => {
+        if (prev.includes(teamMember.id)) {
+          return prev.filter((tm) => tm !== teamMember.id);
+        }
+        return [...prev, teamMember.id];
+      });
+    },
+    []
+  );
 
   return (
     <div
@@ -102,14 +115,12 @@ export default function TeamMembersSelector({
                 "flex cursor-pointer items-center justify-between gap-4 border-b px-6 py-4 hover:bg-gray-100",
                 isTeamMemberSelected && "bg-gray-100"
               )}
-              onClick={() => {
-                setSelectedTeamMembers((prev) => {
-                  if (prev.includes(teamMember.id)) {
-                    return prev.filter((tm) => tm !== teamMember.id);
-                  }
-                  return [...prev, teamMember.id];
-                });
-              }}
+              role="button"
+              tabIndex={0}
+              onClick={() => handleSelectedTeamMembersChange(teamMember)}
+              onKeyDown={handleActivationKeyPress(() =>
+                handleSelectedTeamMembersChange(teamMember)
+              )}
             >
               <div className="flex items-center gap-2">
                 <img

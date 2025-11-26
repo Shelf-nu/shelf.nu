@@ -14,6 +14,7 @@ import type {
   ModelFilterProps,
 } from "~/hooks/use-model-filters";
 import { isFormProcessing } from "~/utils/form";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { EmptyState } from "../dynamic-dropdown/empty-state";
 import { InnerLabel } from "../forms/inner-label";
@@ -307,9 +308,15 @@ export default function DynamicSelect({
                         "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                         withoutValueItem.id === selectedValue && "bg-gray-100"
                       )}
+                      role="option"
+                      aria-selected={withoutValueItem.id === selectedValue}
+                      tabIndex={0}
                       onClick={() => {
                         handleItemChange(withoutValueItem.id);
                       }}
+                      onKeyDown={handleActivationKeyPress(() =>
+                        handleItemChange(withoutValueItem.id)
+                      )}
                     >
                       <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                         {withoutValueItem.name}
@@ -343,9 +350,15 @@ export default function DynamicSelect({
                         "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                         item.id === selectedValue && "bg-gray-100"
                       )}
+                      role="option"
+                      aria-selected={item.id === selectedValue}
+                      tabIndex={0}
                       onClick={() => {
                         handleItemChange(item.id);
                       }}
+                      onKeyDown={handleActivationKeyPress(() =>
+                        handleItemChange(item.id)
+                      )}
                     >
                       <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                         {value}

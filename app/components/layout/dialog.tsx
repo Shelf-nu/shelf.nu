@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -63,11 +64,14 @@ export const Dialog = ({
   return open ? (
     <div
       className="dialog-backdrop"
+      role="button"
+      tabIndex={0}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
+      onKeyDown={handleActivationKeyPress(() => onClose())}
     >
       <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
         <div className="flex h-full flex-col bg-white">
