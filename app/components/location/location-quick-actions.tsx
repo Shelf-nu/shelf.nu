@@ -37,15 +37,9 @@ export default function LocationQuickActions({
     action: PermissionAction.delete,
   });
 
-  const canReadBooking = userHasPermission({
-    roles,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.read,
-  });
-
   const canManageAssets = userHasPermission({
     roles,
-    entity: PermissionEntity.asset,
+    entity: PermissionEntity.location,
     action: PermissionAction.update,
   });
 
@@ -77,7 +71,7 @@ export default function LocationQuickActions({
         </Button>
       </When>
 
-      <When truthy={canReadBooking}>
+      <When truthy={canManageAssets}>
         <Button
           size="sm"
           variant="secondary"
