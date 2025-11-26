@@ -184,11 +184,11 @@ export function ConfigureColumnsDropdown() {
                             onChange={() => handleCheckboxChange(index)}
                           />
 
-                          <label
-                            htmlFor={column.name}
+                          <div
                             role="checkbox"
                             aria-checked={column.visible}
                             tabIndex={0}
+                            onClick={() => handleCheckboxChange(index)}
                             onKeyDown={(e) => {
                               if (e.key === " " || e.key === "Enter") {
                                 e.preventDefault();
@@ -213,7 +213,7 @@ export function ConfigureColumnsDropdown() {
                                 (cf)
                               </span>
                             )}
-                          </label>
+                          </div>
                           <button
                             type="button"
                             ref={(el) => {

@@ -184,13 +184,15 @@ export default function DynamicDropdown({
               </When>
 
               <When truthy={!!allowSelectAll}>
-                <label
+                <div
                   key="select-all"
+                  role="button"
+                  tabIndex={0}
                   className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
                   onClick={handleSelectAll}
                 >
                   <span className="pr-2">Select all</span>
-                </label>
+                </div>
               </When>
 
               <When truthy={Boolean(withoutValueItem)}>

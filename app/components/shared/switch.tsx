@@ -22,6 +22,7 @@ export const Switch = ({ children }: { children: ReactNode }) => {
     !("when" in lastComponent.props);
 
   if (hasInvalidComponent) {
+    // eslint-disable-next-line no-console
     console.warn(
       "Children of <Switch /> component should be a type of ReactNode"
     );
