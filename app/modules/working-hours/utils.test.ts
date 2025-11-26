@@ -61,6 +61,22 @@ describe("getDateStringUTC", () => {
     const overrideDateFromDB = new Date("2024-11-27T00:00:00.000Z");
     expect(getDateStringUTC(overrideDateFromDB)).toBe("2024-11-27");
   });
+
+  it("should throw error for invalid date string", () => {
+    expect.assertions(1);
+
+    expect(() => getDateStringUTC("not-a-date")).toThrow(
+      "Invalid date string: not-a-date"
+    );
+  });
+
+  it("should throw error for invalid Date object", () => {
+    expect.assertions(1);
+
+    expect(() => getDateStringUTC(new Date("invalid"))).toThrow(
+      "Invalid Date object"
+    );
+  });
 });
 
 describe("normalizeWorkingHoursForValidation", () => {

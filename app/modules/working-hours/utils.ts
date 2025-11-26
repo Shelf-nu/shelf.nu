@@ -13,19 +13,26 @@ import type {
  * Override dates should be treated as absolute dates (timezone-agnostic),
  * so we always extract the date portion in UTC to avoid timezone-related shifts.
  *
- * @param date - The Date object to extract the date portion from
+ * @param date - The Date object or ISO date string to extract the date portion from
  * @returns A date string in YYYY-MM-DD format (UTC)
+ * @throws Error if the input is not a valid date
  */
 export function getDateStringUTC(date: Date | string): string {
   if (typeof date === "string") {
     // If it's already a string, try to parse and extract date
     const parsed = new Date(date);
     if (isNaN(parsed.getTime())) {
-      // If parsing fails, try to extract date from string format
+      // If parsing fails, try to extract date from string format directly
       const match = date.match(/^\d{4}-\d{2}-\d{2}/);
-      return match ? match[0] : "";
+      if (match) {
+        return match[0];
+      }
+      throw new Error(`Invalid date string: ${date}`);
     }
     return parsed.toISOString().split("T")[0];
+  }
+  if (isNaN(date.getTime())) {
+    throw new Error("Invalid Date object");
   }
   return date.toISOString().split("T")[0];
 }
