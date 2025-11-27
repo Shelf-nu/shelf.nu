@@ -14,6 +14,7 @@ import {
   PUBLIC_BUCKET,
 } from "./constants";
 import { cropImage } from "./crop-image";
+import { delay } from "./delay";
 import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
@@ -94,7 +95,7 @@ export async function createSignedUrl({
             shouldBeCaptured: false,
           })
         );
-        await wait(250);
+        await delay(1000);
         continue;
       }
 
@@ -560,7 +561,7 @@ export async function uploadImageFromUrl(
             return null;
           }
           // Wait a moment before retrying
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await delay(1000);
         }
       } catch (cause) {
         fetchError = cause as Error;
@@ -581,7 +582,7 @@ export async function uploadImageFromUrl(
           return null;
         }
         // Wait a moment before retrying
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await delay(1000);
       }
     }
 
@@ -842,9 +843,10 @@ function isSupabaseHtmlError(error: unknown) {
   const name =
     "name" in error && typeof error.name === "string" ? error.name : "";
 
+  // Tighten detection: look for the common JSON parse failure caused by HTML payloads
   const isUnexpectedHtml =
-    message.includes("Unexpected token <") ||
-    message.includes("not valid JSON");
+    message.includes("Unexpected token <") &&
+    message.includes("is not valid JSON");
   const isStorageUnknown =
     name === "StorageUnknownError" ||
     ("__isStorageError" in error &&
@@ -853,6 +855,3 @@ function isSupabaseHtmlError(error: unknown) {
 
   return isUnexpectedHtml && isStorageUnknown;
 }
-
-// Small helper for spaced retries when recovering from transient Supabase edge errors.
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
