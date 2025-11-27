@@ -10,16 +10,18 @@ function formatAbsoluteDate(
   options?: Intl.DateTimeFormatOptions
 ): string {
   // Extract just the date part and create a local date
-  let dateToFormat: Date;
+  let dateOnly: string;
   if (typeof date === "string") {
-    // Extract date-only part if it's a datetime string
-    const dateOnly = date.includes("T") ? date.split("T")[0] : date;
-    // Parse as local date components to completely avoid timezone interpretation
-    const [year, month, day] = dateOnly.split("-").map(Number);
-    dateToFormat = new Date(year, month - 1, day);
+    dateOnly = date.includes("T") ? date.split("T")[0] : date;
   } else {
-    dateToFormat = date;
+    if (isNaN(date.getTime())) {
+      throw new Error("Invalid Date object");
+    }
+    dateOnly = date.toISOString().split("T")[0];
   }
+
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  const dateToFormat = new Date(year, month - 1, day);
 
   // Convert Intl.DateTimeFormatOptions to date-fns format string
   let formatString: string;
