@@ -57,25 +57,30 @@ export async function createSignedUrl({
 }: {
   filename: string;
   bucketName?: string;
-}) {
+}): Promise<string> {
   const normalizedFilename = filename.startsWith("/")
     ? filename.substring(1)
     : filename;
   const maxAttempts = 2;
 
   try {
-    let lastError: unknown;
-
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { data, error } = await getSupabaseAdmin()
         .storage.from(bucketName)
         .createSignedUrl(normalizedFilename, 24 * 60 * 60); //24h
 
       if (!error) {
-        return data.signedUrl;
+        const signedUrl = data?.signedUrl;
+        if (!signedUrl) {
+          throw new ShelfError({
+            cause: null,
+            message: "Supabase did not return a signed URL",
+            additionalData: { filename: normalizedFilename, bucketName },
+            label,
+          });
+        }
+        return signedUrl;
       }
-
-      lastError = error;
 
       // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
       // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
@@ -102,7 +107,13 @@ export async function createSignedUrl({
       throw error;
     }
 
-    throw lastError;
+    // The loop should always return or throw, but ensure we never fall through.
+    throw new ShelfError({
+      cause: null,
+      message: "Unable to create signed URL after retries.",
+      additionalData: { filename: normalizedFilename, bucketName },
+      label,
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -843,10 +854,10 @@ function isSupabaseHtmlError(error: unknown) {
   const name =
     "name" in error && typeof error.name === "string" ? error.name : "";
 
-  // Tighten detection: look for the common JSON parse failure caused by HTML payloads
+  // Detect JSON parse failures that typically show up when HTML is returned instead of JSON
+  const lowerMessage = message.toLowerCase();
   const isUnexpectedHtml =
-    message.includes("Unexpected token <") &&
-    message.includes("is not valid JSON");
+    message.includes("Unexpected token <") && lowerMessage.includes("json");
   const isStorageUnknown =
     name === "StorageUnknownError" ||
     ("__isStorageError" in error &&
