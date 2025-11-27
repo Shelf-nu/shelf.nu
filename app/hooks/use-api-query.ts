@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
  * A simple hook which calls any of our API
  *
  */
-type UseApiQueryParams = {
+type UseApiQueryParams<TData> = {
   /** Any API endpoint */
   api: string;
 
@@ -13,13 +13,21 @@ type UseApiQueryParams = {
 
   /** Query will not execute until this is true */
   enabled?: boolean;
+
+  /** Callback function called when query succeeds */
+  onSuccess?: (data: TData) => void;
+
+  /** Callback function called when query fails */
+  onError?: (error: string) => void;
 };
 
 export default function useApiQuery<TData>({
   api,
   searchParams,
   enabled = true,
-}: UseApiQueryParams) {
+  onSuccess,
+  onError,
+}: UseApiQueryParams<TData>) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [data, setData] = useState<TData | undefined>();
@@ -42,16 +50,19 @@ export default function useApiQuery<TData>({
           .then((response) => response.json())
           .then((data: TData) => {
             setData(data);
+            onSuccess?.(data);
           })
           .catch((error: Error) => {
-            setError(error?.message ?? "Something went wrong.");
+            const errorMessage = error?.message ?? "Something went wrong.";
+            setError(errorMessage);
+            onError?.(errorMessage);
           })
           .finally(() => {
             setIsLoading(false);
           });
       }
     },
-    [apiUrl, enabled, refetchTrigger]
+    [apiUrl, enabled, refetchTrigger, onSuccess, onError]
   );
 
   return {

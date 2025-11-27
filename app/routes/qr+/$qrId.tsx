@@ -1,21 +1,24 @@
 import type { Organization } from "@prisma/client";
-import { redirect, json } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, data } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
 } from "~/utils/http.server";
+
+export const meta = () => [{ title: appendToMetaTitle("QR code") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated
@@ -133,7 +136,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -159,10 +162,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ ok: true }));
+    return data(payload({ ok: true }));
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

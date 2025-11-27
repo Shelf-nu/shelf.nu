@@ -1,12 +1,9 @@
-import { vitePlugin as remix } from "@remix-run/dev";
+import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { devServer } from "react-router-hono-server/dev";
-import esbuild from "esbuild";
-import { flatRoutes } from "remix-flat-routes";
+import { reactRouterHonoServer } from "react-router-hono-server/dev";
 import { cjsInterop } from "vite-plugin-cjs-interop";
 import { init } from "@paralleldrive/cuid2";
-import fs from "node:fs";
 
 const createHash = init({
   length: 8,
@@ -66,47 +63,10 @@ export default defineConfig({
         "react-to-print",
       ],
     }),
-    devServer(),
-
-    remix({
-      ignoredRouteFiles: ["**/.*", "**/*.test.server.ts"],
-      future: {},
-      routes: async (defineRoutes) => {
-        return flatRoutes("routes", defineRoutes);
-      },
-
-      buildEnd: async ({ remixConfig }) => {
-        const sentryInstrument = `instrument.server`;
-        await esbuild
-          .build({
-            alias: {
-              "~": `./app`,
-            },
-            outdir: `${remixConfig.buildDirectory}/server`,
-            entryPoints: [`./server/${sentryInstrument}.ts`],
-            platform: "node",
-            format: "esm",
-            // Don't include node_modules in the bundle
-            packages: "external",
-            bundle: true,
-            logLevel: "info",
-          })
-          .then(() => {
-            const serverBuildPath = `${remixConfig.buildDirectory}/server/${remixConfig.serverBuildFile}`;
-            fs.writeFileSync(
-              serverBuildPath,
-              Buffer.concat([
-                Buffer.from(`import "./${sentryInstrument}.js"\n`),
-                Buffer.from(fs.readFileSync(serverBuildPath)),
-              ])
-            );
-          })
-          .catch((error: unknown) => {
-            console.error(error);
-            process.exit(1);
-          });
-      },
+    reactRouterHonoServer({
+      serverEntryPoint: "./server/index.ts",
     }),
+    reactRouter(),
     tsconfigPaths(),
   ],
 });

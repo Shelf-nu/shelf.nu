@@ -6,7 +6,7 @@ import type {
   ResourceLabelContentArg,
 } from "@fullcalendar/resource/index.js";
 import resourceTimelinePlugin from "@fullcalendar/resource-timeline";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
@@ -25,6 +25,7 @@ import {
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { FULL_CALENDAR_LICENSE_KEY } from "~/utils/env";
+import { tw } from "~/utils/tw";
 import { useCalendarNowIndicatorFix } from "../assets/assets-index/use-calendar-now-indicator-fix";
 
 const DEFAULT_CALENDAR_VIEW = "resourceTimelineDay";
@@ -146,7 +147,13 @@ export default function AvailabilityCalendar({
               events={events}
               resourceAreaHeaderContent={
                 <div className="px-2 py-1">
-                  <h5 className="text-left capitalize">{plural}</h5>
+                  <div
+                    className={tw(
+                      "text-left text-text-sm font-semibold capitalize text-gray-900"
+                    )}
+                  >
+                    {plural}
+                  </div>
                   <div>
                     {perPage < totalItems ? (
                       <p>

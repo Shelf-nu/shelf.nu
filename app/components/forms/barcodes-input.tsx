@@ -5,6 +5,7 @@ import {
   useMemo,
   useEffect,
 } from "react";
+import type { CSSProperties } from "react";
 import { BarcodeType } from "@prisma/client";
 import {
   Popover,
@@ -12,7 +13,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { useActionData } from "@remix-run/react";
+import { useActionData } from "react-router";
 import { ChevronRight, HelpIcon } from "~/components/icons/library";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
@@ -21,6 +22,7 @@ import {
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import Input from "./input";
 import { Button } from "../shared/button";
@@ -40,7 +42,7 @@ type BarcodeInput = {
 
 type BarcodesInputProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   disabled?: boolean;
   typeName: (index: number) => string;
   valueName: (index: number) => string;
@@ -261,10 +263,17 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                               barcode.type === option.value &&
                                 "bg-gray-50 font-medium"
                             )}
+                            role="option"
+                            aria-selected={barcode.type === option.value}
+                            tabIndex={0}
                             onClick={() => {
                               barcodes[i].type = option.value as BarcodeType;
                               setBarcodes([...barcodes]);
                             }}
+                            onKeyDown={handleActivationKeyPress(() => {
+                              barcodes[i].type = option.value as BarcodeType;
+                              setBarcodes([...barcodes]);
+                            })}
                           >
                             <div className="font-medium text-gray-900">
                               {option.label}

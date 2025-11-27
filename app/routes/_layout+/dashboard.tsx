@@ -2,9 +2,8 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
@@ -18,6 +17,7 @@ import MostScannedCategories from "~/components/dashboard/most-scanned-categorie
 import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { getBookings } from "~/modules/booking/service.server";
 
@@ -35,7 +35,7 @@ import {
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
@@ -138,38 +138,41 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookieHeader = request.headers.get("Cookie");
     const cookie = (await userPrefs.parse(cookieHeader)) || {};
 
-    return json(
-      data({
+    const header: HeaderData = {
+      title: "Dashboard",
+    };
+
+    return payload({
+      header,
+      assets,
+      locale: getLocale(request),
+      currency: currentOrganization?.currency,
+      totalValuation,
+      newAssets: assets.slice(0, 5),
+      totalAssets: assets.length,
+      skipOnboardingChecklist: cookie.skipOnboardingChecklist,
+      custodiansData: getCustodiansOrderedByTotalCustodies({
         assets,
-        locale: getLocale(request),
-        currency: currentOrganization?.currency,
-        totalValuation,
-        newAssets: assets.slice(0, 5),
-        totalAssets: assets.length,
-        skipOnboardingChecklist: cookie.skipOnboardingChecklist,
-        custodiansData: getCustodiansOrderedByTotalCustodies({
-          assets,
-          bookings,
-        }),
-        mostScannedAssets: getMostScannedAssets({ assets }),
-        mostScannedCategories: getMostScannedAssetsCategories({ assets }),
-        totalAssetsAtEndOfEachMonth: totalAssetsAtEndOfEachMonth({
-          assets,
-        }),
-        assetsByStatus: groupAssetsByStatus({ assets }),
-        assetsByCategory: groupAssetsByCategory({ assets }),
-        announcement: announcement
-          ? {
-              ...announcement,
-              content: parseMarkdownToReact(announcement.content),
-            }
-          : null,
-        checklistOptions: await checklistOptions({ assets, organizationId }),
-      })
-    );
+        bookings,
+      }),
+      mostScannedAssets: getMostScannedAssets({ assets }),
+      mostScannedCategories: getMostScannedAssetsCategories({ assets }),
+      totalAssetsAtEndOfEachMonth: totalAssetsAtEndOfEachMonth({
+        assets,
+      }),
+      assetsByStatus: groupAssetsByStatus({ assets }),
+      assetsByCategory: groupAssetsByCategory({ assets }),
+      announcement: announcement
+        ? {
+            ...announcement,
+            content: parseMarkdownToReact(announcement.content),
+          }
+        : null,
+      checklistOptions: await checklistOptions({ assets, organizationId }),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -190,7 +193,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <Header />
+      <Header> </Header>
       {completedAllChecks || skipOnboardingChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />

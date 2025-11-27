@@ -1,18 +1,15 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import {
-  json,
-  MaxPartSizeExceededError,
-  redirect,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+} from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 
-import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { ExportBackupButton } from "~/components/assets/export-backup-button";
 import { ErrorContent } from "~/components/errors";
@@ -38,16 +35,20 @@ import {
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canExportAssets } from "~/utils/subscription.server";
+import {
+  canExportAssets,
+  canHideShelfBranding,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -71,6 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
           select: {
             firstName: true,
+            tierId: true,
             userOrganizations: {
               include: {
                 organization: {
@@ -117,21 +119,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: "General",
     };
 
-    return json(
-      data({
-        header,
-        organization: currentOrganization,
-        canExportAssets: canExportAssets(tierLimit),
-        user,
-        curriences: Object.keys(Currency),
-        isPersonalWorkspace:
-          currentOrganization.type === OrganizationType.PERSONAL,
-        admins,
-      })
-    );
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (currentOrganization.type === OrganizationType.TEAM ||
+        user.tierId === "tier_1");
+
+    return payload({
+      header,
+      organization: currentOrganization,
+      canExportAssets: canExportAssets(tierLimit),
+      canHideShelfBranding: canHideBrandingForThisWorkspace,
+      user,
+      curriences: Object.keys(Currency),
+      isPersonalWorkspace:
+        currentOrganization.type === OrganizationType.PERSONAL,
+      admins,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -150,13 +160,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, role } =
+    const { organizationId, currentOrganization, role, organizations } =
       await requirePermission({
         userId: authSession.userId,
         request,
         entity: PermissionEntity.generalSettings,
         action: PermissionAction.update,
       });
+
+    const [tierLimit, user] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (currentOrganization.type === OrganizationType.TEAM ||
+        user.tierId === "tier_1");
+
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -182,7 +213,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id } = payload;
+        const { name, currency, id, qrIdDisplayPreference, showShelfBranding } =
+          payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -193,12 +225,38 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        const formDataFile = await unstable_parseMultipartFormData(
-          request,
-          unstable_createMemoryUploadHandler({
-            maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-          })
+        let nextShowShelfBranding = resolveShowShelfBranding(
+          showShelfBranding,
+          currentOrganization.showShelfBranding
         );
+
+        if (!canHideBrandingForThisWorkspace) {
+          nextShowShelfBranding = true;
+        }
+
+        let formDataFile: FormData;
+        try {
+          formDataFile = await parseFormData(request, {
+            maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+          });
+        } catch (parseError) {
+          if (parseError instanceof MaxFileSizeExceededError) {
+            const reason = new ShelfError({
+              cause: parseError,
+              message: `Image size exceeds maximum allowed size of ${
+                DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+              }MB`,
+              status: 400,
+              label: "Organization",
+              additionalData: { organizationId, field: "image" },
+              shouldBeCaptured: false,
+            });
+            return data(error(reason), { status: reason.status });
+          }
+
+          const reason = makeShelfError(parseError, { userId, organizationId });
+          return data(error(reason), { status: reason.status });
+        }
 
         const file = formDataFile.get("image") as File | null;
 
@@ -208,6 +266,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           image: file || null,
           userId: authSession.userId,
           currency,
+          qrIdDisplayPreference,
+          showShelfBranding: nextShowShelfBranding,
         });
 
         sendNotification({
@@ -319,13 +379,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "transfer-ownership": {
-        const payload = parseData(formData, TransferOwnershipSchema, {
+        const parsedData = parseData(formData, TransferOwnershipSchema, {
           additionalData: { userId, organizationId },
         });
 
         const { newOwner } = await transferOwnership({
           currentOrganization,
-          newOwnerId: payload.newOwner,
+          newOwnerId: parsedData.newOwner,
           userId: authSession.userId,
         });
 
@@ -348,18 +408,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
   } catch (cause) {
-    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
-      error({
-        ...reason,
-        ...(isMaxPartSizeExceeded && {
-          title: "File too large",
-          message: "Max file size is 4MB.",
-        }),
-      }),
-      { status: reason.status }
-    );
+    // File size errors are now handled in the validation above
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -370,6 +421,7 @@ export default function GeneralPage() {
       <WorkspaceEditForms
         name={organization.name}
         currency={organization.currency}
+        qrIdDisplayPreference={organization.qrIdDisplayPreference}
       />
 
       <Card className={tw("mb-0")}>

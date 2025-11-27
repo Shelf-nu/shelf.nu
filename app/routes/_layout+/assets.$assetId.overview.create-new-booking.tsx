@@ -1,15 +1,17 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
+import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { getTeamMemberForForm } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
 } from "~/routes/_layout+/bookings.new";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -20,6 +22,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Create new booking") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
@@ -51,13 +55,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /* We need to fetch the team members to be able to display them in the custodian dropdown. */
     const [teamMembersData, tagsData] = await Promise.all([
-      getTeamMemberForCustodianFilter({
+      getTeamMemberForForm({
         organizationId,
+        userId,
+        isSelfServiceOrBase,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: isSelfServiceOrBase, // Self service or Base users can only create bookings for themselves so we always filter by userId
-        userId,
       }),
       getTagsForBookingTagsFilter({
         organizationId,
@@ -79,21 +83,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
-        currentOrganization,
-        userId,
-        showModal: true,
-        isSelfServiceOrBase,
-        selfServiceOrBaseUser,
-        ...teamMembersData,
-        assetIds: [assetId],
-        ...tagsData,
-      })
-    );
+    return payload({
+      header: newBookingHeader,
+      currentOrganization,
+      userId,
+      showModal: true,
+      isSelfServiceOrBase,
+      selfServiceOrBaseUser,
+      ...teamMembersData,
+      // For consistency, also provide teamMembersForForm
+      teamMembersForForm: teamMembersData.teamMembers,
+      assetIds: [assetId],
+      ...tagsData,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

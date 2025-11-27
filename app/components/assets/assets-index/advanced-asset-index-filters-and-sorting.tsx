@@ -1,15 +1,19 @@
+import type {
+  ChangeEvent,
+  KeyboardEvent,
+  Dispatch,
+  SetStateAction,
+} from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CustomField } from "@prisma/client";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import type { SerializeFrom } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
 import { Search } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -20,6 +24,7 @@ import {
   type Column,
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { FieldSelector } from "./advanced-filters/field-selector";
 import {
@@ -120,10 +125,7 @@ function AdvancedFilter() {
       newCols.push({
         name: firstColumn.name, // Keep the name for proper UI rendering
         operator: operatorsPerType[fieldType][0],
-        value: getDefaultValueForFieldType(
-          firstColumn,
-          customFields as SerializeFrom<CustomField>[] | null
-        ),
+        value: getDefaultValueForFieldType(firstColumn, customFields),
         type: fieldType,
         isNew: true, // Mark as new/unselected
       });
@@ -169,10 +171,15 @@ function AdvancedFilter() {
                   ref={zo.ref}
                   onKeyDown={(e) => {
                     /**
-                     * Prevent default behavior of the Enter key.
+                     * Prevent default behavior of the Enter key on input fields.
                      * The form element is only needed for validations, so we don't want it to submit on Enter.
+                     * However, we allow Enter on buttons to support proper keyboard navigation for popovers.
                      */
-                    if (e.key === "Enter") {
+                    if (
+                      e.key === "Enter" &&
+                      e.target instanceof HTMLElement &&
+                      e.target.tagName !== "BUTTON"
+                    ) {
                       e.preventDefault();
                     }
                   }}
@@ -207,9 +214,7 @@ function AdvancedFilter() {
                                   operator: operatorsPerType[fieldType][0],
                                   value: getDefaultValueForFieldType(
                                     column,
-                                    customFields as
-                                      | SerializeFrom<CustomField>[]
-                                      | null
+                                    customFields
                                   ),
                                   isNew: false,
                                 };
@@ -508,7 +513,7 @@ function PickAColumnToSortBy({
   setSorts,
 }: {
   sorts: Sort[];
-  setSorts: React.Dispatch<React.SetStateAction<Sort[]>>;
+  setSorts: Dispatch<SetStateAction<Sort[]>>;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -555,12 +560,12 @@ function PickAColumnToSortBy({
     );
   }, [baseOptions, searchQuery]);
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -654,7 +659,11 @@ function PickAColumnToSortBy({
                       "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                   ]
                 )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
                 onClick={() => addSort(option)}
+                onKeyDown={handleActivationKeyPress(() => addSort(option))}
               >
                 {parseColumnName(option.name)}
               </div>

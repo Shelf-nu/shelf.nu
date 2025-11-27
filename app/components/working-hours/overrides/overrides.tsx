@@ -1,5 +1,4 @@
-import type { SerializedWorkingHoursOverride } from "~/modules/working-hours/types";
-
+import type { WorkingHoursOverride } from "@prisma/client";
 import { tw } from "~/utils/tw";
 import { NewOverrideDialog } from "./override-dialog";
 import { OverridePreview } from "./override-preview";
@@ -8,7 +7,7 @@ import { Card } from "../../shared/card";
 export function Overrides({
   overrides,
 }: {
-  overrides: SerializedWorkingHoursOverride[];
+  overrides: WorkingHoursOverride[];
 }) {
   return (
     <Card className={tw("my-0")}>

@@ -1,46 +1,441 @@
-import type { Asset, AssetStatus, Location, Prisma } from "@prisma/client";
+import type {
+  Asset,
+  AssetStatus,
+  Location,
+  Prisma,
+  CustomFieldType,
+} from "@prisma/client";
 import _ from "lodash";
 import { z } from "zod";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
-import { parseFilters } from "./query.server";
-import type { AdvancedIndexAsset } from "./types";
+import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import { parseFiltersWithHierarchy } from "./query.server";
+import type { ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 export function getLocationUpdateNoteContent({
   currentLocation,
   newLocation,
+  userId,
   firstName,
   lastName,
-  assetName,
+
   isRemoving,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
-  newLocation?: Location | null;
+  newLocation?: Pick<Location, "id" | "name"> | null;
+  userId: string;
   firstName: string;
   lastName: string;
-  assetName: string;
   isRemoving?: boolean;
 }) {
+  const userLink = wrapUserLinkForNote({
+    id: userId,
+    firstName,
+    lastName,
+  });
+
   let message = "";
   if (currentLocation && newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
-      currentLocation.id
-    })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
+    const currentLocationLink = wrapLinkForNote(
+      `/locations/${currentLocation.id}`,
+      currentLocation.name.trim()
+    );
+    const newLocationLink = wrapLinkForNote(
+      `/locations/${newLocation.id}`,
+      newLocation.name.trim()
+    );
+    message = `${userLink} updated the location from ${currentLocationLink} to ${newLocationLink}.`; // updating location
   }
 
   if (newLocation && !currentLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
-      newLocation.id
-    })**`; // setting to first location
+    const newLocationLink = wrapLinkForNote(
+      `/locations/${newLocation.id}`,
+      newLocation.name.trim()
+    );
+    message = `${userLink} set the location to ${newLocationLink}.`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
+    const currentLocationLink = wrapLinkForNote(
+      `/locations/${currentLocation?.id}`,
+      currentLocation?.name.trim() || ""
+    );
+    message = `${userLink} removed the asset from location ${currentLocationLink}.`; // removing location
   }
 
   return message;
+}
+
+/**
+ * Generates a markdown-formatted note content for custom field changes.
+ *
+ * @param params - The parameters for generating the note content
+ * @param params.customFieldName - Name of the custom field that was changed
+ * @param params.previousValue - Previous value of the field (null if first time set)
+ * @param params.newValue - New value of the field (null if value was removed)
+ * @param params.firstName - First name of the user making the change
+ * @param params.lastName - Last name of the user making the change
+ * @param params.assetName - Name of the asset being updated
+ * @param params.isFirstTimeSet - Whether this is the first time a value is being set
+ * @returns Markdown-formatted note content string, or empty string if invalid scenario
+ *
+ * @example
+ * // First time setting a value
+ * getCustomFieldUpdateNoteContent({
+ *   customFieldName: "Serial Number",
+ *   previousValue: null,
+ *   newValue: "SN123456",
+ *   firstName: "John",
+ *   lastName: "Doe",
+ *   isFirstTimeSet: true
+ * })
+ * // Returns: "**John Doe** set **Serial Number** of **Laptop** to **SN123456**"
+ *
+ * // Updating existing value
+ * getCustomFieldUpdateNoteContent({
+ *   customFieldName: "Status",
+ *   previousValue: "Active",
+ *   newValue: "Inactive",
+ *   firstName: "Jane",
+ *   lastName: "Smith",
+ *   isFirstTimeSet: false
+ * })
+ * // Returns: "**Jane Smith** updated **Status** of **Camera** from **Active** to **Inactive**"
+ */
+export function getCustomFieldUpdateNoteContent({
+  customFieldName,
+  previousValue,
+  newValue,
+  userId,
+  firstName,
+  lastName,
+  isFirstTimeSet,
+}: {
+  customFieldName: string;
+  previousValue?: string | null;
+  newValue?: string | null;
+  userId: string;
+  firstName: string;
+  lastName: string;
+  isFirstTimeSet: boolean;
+}) {
+  const userLink = wrapUserLinkForNote({
+    id: userId,
+    firstName,
+    lastName,
+  });
+  let message = "";
+
+  if (isFirstTimeSet && newValue) {
+    // First time setting a value
+    message = `${userLink} set **${customFieldName}** to **${newValue}**.`;
+  } else if (previousValue && newValue) {
+    // Changing from one value to another
+    message = `${userLink} updated **${customFieldName}** from **${previousValue}** to **${newValue}**.`;
+  } else if (previousValue && !newValue) {
+    // Removing a value
+    message = `${userLink} removed **${customFieldName}** value **${previousValue}**.`;
+  }
+
+  return message;
+}
+
+/**
+ * Compares two custom field values to determine if they represent a meaningful change.
+ * Uses type-specific comparison logic to handle different custom field types appropriately.
+ *
+ * @param oldValue - The previous custom field value
+ * @param newValue - The new custom field value
+ * @param fieldType - The type of the custom field (TEXT, DATE, BOOLEAN, etc.)
+ * @returns true if the values represent a change, false if they are equivalent
+ *
+ * @example
+ * // Date comparison
+ * compareCustomFieldValues(
+ *   { raw: "2024-01-15" },
+ *   { raw: "2024-01-16" },
+ *   "DATE"
+ * ) // Returns: true
+ *
+ * // Boolean comparison with string normalization
+ * compareCustomFieldValues(
+ *   { raw: "true" },
+ *   { raw: "false" },
+ *   "BOOLEAN"
+ * ) // Returns: true
+ *
+ * // Text comparison
+ * compareCustomFieldValues(
+ *   { raw: "old text" },
+ *   { raw: "old text" },
+ *   "TEXT"
+ * ) // Returns: false
+ */
+export function compareCustomFieldValues(
+  oldValue: ICustomFieldValueJson | null | undefined,
+  newValue: ICustomFieldValueJson | null | undefined,
+  fieldType: CustomFieldType
+): boolean {
+  // Handle null/undefined cases
+  if (!oldValue && !newValue) return false; // No change
+  if (!oldValue || !newValue) return true; // One is empty = change
+
+  // Type-specific comparison
+  switch (fieldType) {
+    case "DATE":
+      try {
+        const oldTime = new Date(String(oldValue.raw)).getTime();
+        const newTime = new Date(String(newValue.raw)).getTime();
+
+        // Handle invalid dates (NaN values)
+        if (isNaN(oldTime) || isNaN(newTime)) {
+          // Fallback to string comparison if either date is invalid
+          return String(oldValue.raw) !== String(newValue.raw);
+        }
+
+        return oldTime !== newTime;
+      } catch {
+        // Fallback to string comparison if date parsing fails
+        return String(oldValue.raw) !== String(newValue.raw);
+      }
+    case "BOOLEAN": {
+      // Handle string boolean values more intelligently
+      const normalizeBoolean = (value: any) => {
+        if (typeof value === "boolean") return value;
+        if (typeof value === "string") {
+          const lowerValue = value.toLowerCase().trim();
+          if (lowerValue === "true" || lowerValue === "1") return true;
+          if (lowerValue === "false" || lowerValue === "0" || lowerValue === "")
+            return false;
+        }
+        return Boolean(value);
+      };
+
+      return normalizeBoolean(oldValue.raw) !== normalizeBoolean(newValue.raw);
+    }
+    case "NUMBER":
+      return Number(oldValue.raw) !== Number(newValue.raw);
+    default:
+      // For text and other types, do deep comparison
+      return JSON.stringify(oldValue) !== JSON.stringify(newValue);
+  }
+}
+
+/**
+ * Performs a quick scan to detect potential changes in custom field values.
+ * This is an optimization function that uses basic comparison to avoid expensive
+ * operations when no changes are detected.
+ *
+ * @param existingValues - Array of current custom field values with metadata
+ * @param formValues - Array of new custom field values from form submission
+ * @returns Array of field IDs that potentially have changes
+ *
+ * @example
+ * const potentialChanges = detectPotentialChanges(
+ *   [{ id: "1", customFieldId: "field1", value: { raw: "old" } }],
+ *   [{ id: "field1", value: { raw: "new" } }]
+ * )
+ * // Returns: [{ fieldId: "field1", hasChange: true }]
+ */
+export function detectPotentialChanges(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: ICustomFieldValueJson | null;
+  }>,
+  formValues: Array<{
+    id: string;
+    value: ICustomFieldValueJson | null;
+  }>
+): Array<{ fieldId: string; hasChange: boolean }> {
+  const changes: Array<{ fieldId: string; hasChange: boolean }> = [];
+
+  for (const formField of formValues) {
+    const existingValue = existingValues.find(
+      (cf) => cf.customFieldId === formField.id
+    );
+
+    // Quick check for potential changes
+    let hasChange = false;
+
+    if (!existingValue && formField.value) {
+      // First time setting a value
+      hasChange = true;
+    } else if (existingValue && !formField.value) {
+      // Removing a value
+      hasChange = true;
+    } else if (existingValue && formField.value) {
+      // Basic comparison - if this suggests change, we'll do detailed comparison later
+      const oldRaw = existingValue.value?.raw;
+      const newRaw = formField.value?.raw;
+      hasChange = oldRaw !== newRaw;
+    }
+
+    if (hasChange) {
+      changes.push({ fieldId: formField.id, hasChange });
+    }
+  }
+
+  return changes;
+}
+
+export interface CustomFieldChangeInfo {
+  customFieldName: string;
+  previousValue: string | null;
+  newValue: string | null;
+  isFirstTimeSet: boolean;
+}
+
+/**
+ * Detects and analyzes changes in custom field values, returning detailed change information.
+ * This function performs robust comparison using type-specific logic and formats values
+ * for display using the same logic as the UI.
+ *
+ * @param existingValues - Current custom field values with field metadata
+ * @param formValues - New custom field values from form submission
+ * @param customFields - Custom field definitions for type information
+ * @returns Array of change information objects with formatted display values
+ *
+ * @example
+ * const changes = detectCustomFieldChanges(
+ *   [{
+ *     id: "1",
+ *     customFieldId: "field1",
+ *     value: { raw: "old" },
+ *     customField: { id: "field1", name: "Status", type: "TEXT" }
+ *   }],
+ *   [{ id: "field1", value: { raw: "new" } }],
+ *   [{ id: "field1", name: "Status", type: "TEXT" }]
+ * )
+ * // Returns: [{
+ * //   customFieldName: "Status",
+ * //   previousValue: "old",
+ * //   newValue: "new",
+ * //   isFirstTimeSet: false
+ * // }]
+ */
+export function detectCustomFieldChanges(
+  existingValues: Array<{
+    id: string;
+    customFieldId: string;
+    value: ICustomFieldValueJson | null;
+    customField: { id: string; name: string; type: CustomFieldType };
+  }>,
+  formValues: Array<{
+    id: string;
+    value: ICustomFieldValueJson | null;
+  }>,
+  customFields: Array<{
+    id: string;
+    name: string;
+    type: CustomFieldType;
+  }>
+): CustomFieldChangeInfo[] {
+  const changes: CustomFieldChangeInfo[] = [];
+
+  // Create lookup map for performance
+  const customFieldLookup = new Map(customFields.map((cf) => [cf.id, cf]));
+
+  for (const formField of formValues) {
+    const customField = customFieldLookup.get(formField.id);
+    if (!customField) continue;
+
+    const existingValue = existingValues.find(
+      (cf) => cf.customFieldId === formField.id
+    );
+
+    // Format values for display using the same function as the UI
+    const formatValue = (value: any) => {
+      if (!value) return null;
+      try {
+        const displayValue = getCustomFieldDisplayValue(value);
+
+        // Handle different return types from getCustomFieldDisplayValue
+        if (typeof displayValue === "string") {
+          return displayValue;
+        } else if (displayValue && typeof displayValue === "object") {
+          // For React nodes (multi-line text), use raw value
+          return String(value.raw || "");
+        }
+
+        return String(displayValue);
+      } catch {
+        return String(value.raw || value);
+      }
+    };
+
+    const newValueDisplay = formField.value
+      ? formatValue(formField.value)
+      : null;
+    const oldValueDisplay = existingValue?.value
+      ? formatValue(existingValue.value)
+      : null;
+
+    // Determine if this is a change worth noting using robust comparison
+    let shouldCreateNote = false;
+    let isFirstTimeSet = false;
+
+    if (!existingValue && newValueDisplay) {
+      // First time setting a value
+      shouldCreateNote = true;
+      isFirstTimeSet = true;
+    } else if (existingValue && !newValueDisplay) {
+      // Removing a value
+      shouldCreateNote = true;
+    } else if (existingValue && newValueDisplay) {
+      // Use robust comparison
+      shouldCreateNote = compareCustomFieldValues(
+        existingValue.value,
+        formField.value,
+        customField.type
+      );
+    }
+
+    if (shouldCreateNote) {
+      changes.push({
+        customFieldName: customField.name,
+        previousValue: oldValueDisplay ? String(oldValueDisplay) : null,
+        newValue: newValueDisplay ? String(newValueDisplay) : null,
+        isFirstTimeSet,
+      });
+    }
+  }
+
+  return changes;
+}
+
+export function getKitLocationUpdateNoteContent({
+  currentLocation,
+  newLocation,
+  userId,
+  firstName,
+  lastName,
+  isRemoving,
+}: {
+  currentLocation?: Pick<Location, "id" | "name"> | null;
+  newLocation?: Pick<Location, "id" | "name"> | null;
+  userId: string;
+  firstName: string;
+  lastName: string;
+  isRemoving?: boolean;
+}) {
+  const baseMessage = getLocationUpdateNoteContent({
+    currentLocation,
+    newLocation,
+    userId,
+    firstName,
+    lastName,
+    isRemoving,
+  });
+
+  if (isRemoving) {
+    return `${baseMessage.replace(/\.$/, "")} via parent kit removal.`;
+  } else {
+    return `${baseMessage.replace(/\.$/, "")} via parent kit assignment.`;
+  }
 }
 
 export const CurrentSearchParamsSchema = z.object({
@@ -210,35 +605,6 @@ export function validateAdvancedFilterParams(
   return validatedParams;
 }
 
-export function formatAssetsRemindersDates({
-  assets,
-  request,
-}: {
-  assets: AdvancedIndexAsset[];
-  request: Request;
-}) {
-  if (!assets.length) {
-    return assets;
-  }
-
-  return assets.map((asset) => {
-    if (!asset.upcomingReminder) {
-      return asset;
-    }
-
-    return {
-      ...asset,
-      upcomingReminder: {
-        ...asset.upcomingReminder,
-        displayDate: getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(new Date(asset.upcomingReminder.alertDateTime)),
-      },
-    };
-  });
-}
-
 export const ASSET_CSV_HEADERS = [
   "title",
   "description",
@@ -269,11 +635,16 @@ type AllSelectedValues = {
  *
  * @returns {AllSelectedValues}
  */
-export function getAllSelectedValuesFromFilters(
+export async function getAllSelectedValuesFromFilters(
   filters: string = "",
-  columns: Column[]
+  columns: Column[],
+  organizationId?: string
 ) {
-  const parsedFilters = parseFilters(filters, columns);
+  const parsedFilters = await parseFiltersWithHierarchy(
+    filters,
+    columns,
+    organizationId
+  );
   return parsedFilters.reduce((acc, curr) => {
     /*
      * We only have to take care of string values because most dropdown has string values only.

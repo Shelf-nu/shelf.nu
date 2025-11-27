@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -32,8 +33,9 @@ export function BookingStatusBadge({
     custodianUserId &&
     custodianUserId === user?.id;
 
+  const colors = bookingStatusColorMap[status];
   return (
-    <Badge color={bookingStatusColorMap[status]}>
+    <Badge color={colors.bg} textColor={colors.text} withDot={false}>
       {shouldShowExtraInfo ? (
         <ExtraInfoTooltip>
           <span className="block whitespace-nowrap lowercase first-letter:uppercase">
@@ -49,7 +51,7 @@ export function BookingStatusBadge({
   );
 }
 
-function ExtraInfoTooltip({ children }: { children: React.ReactNode }) {
+function ExtraInfoTooltip({ children }: { children: ReactNode }) {
   return (
     <TooltipProvider>
       <Tooltip>

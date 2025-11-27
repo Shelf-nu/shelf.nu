@@ -7,6 +7,11 @@ export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
         valuation: true,
       },
     },
+    qrCodes: {
+      select: {
+        id: true,
+      },
+    },
     category: {
       select: {
         id: true,
@@ -14,6 +19,7 @@ export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
         color: true,
       },
     },
+    location: true,
   };
 
   if (canUseBarcodes) {

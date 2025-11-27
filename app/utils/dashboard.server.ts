@@ -95,7 +95,7 @@ export function totalAssetsAtEndOfEachMonth({ assets }: { assets: Asset[] }) {
 
   // Get the total of assets created in each month
   let totalAssets = 0;
-  for (let asset of assets) {
+  for (const asset of assets) {
     const assetCreatedDate = new Date(asset.createdAt);
     const assetCreatedMonth = assetCreatedDate.getMonth();
     const assetCreatedYear = assetCreatedDate.getFullYear();
@@ -193,13 +193,13 @@ export function getCustodiansOrderedByTotalCustodies({
   ).filter(Boolean);
 
   const allCustodians = [...allDirectCustodians, ...allBookerCustodians];
-  let custodianCounts: { [key: string]: number } = {};
+  const custodianCounts: { [key: string]: number } = {};
 
   /** Count normal custodies */
-  for (let asset of assetsWithCustody) {
+  for (const asset of assetsWithCustody) {
     if (asset.custody) {
       // will use userId to map and show consolidated hold of assets (through bookings or direct custodies) of a team member, in case of NRM will use custodian id
-      let userId = asset.custody.custodian.userId
+      const userId = asset.custody.custodian.userId
         ? asset.custody.custodian.userId
         : asset.custody.custodian.id;
       custodianCounts[userId] = (custodianCounts[userId] || 0) + 1;
@@ -207,7 +207,7 @@ export function getCustodiansOrderedByTotalCustodies({
   }
 
   /** Count custodies via bookings */
-  for (let booking of bookings) {
+  for (const booking of bookings) {
     if (booking.custodianUserId) {
       custodianCounts[booking.custodianUserId] =
         (custodianCounts[booking.custodianUserId] || 0) + booking.assets.length;
@@ -290,8 +290,8 @@ export function getMostScannedAssetsCategories({
     };
   } = {};
 
-  for (let asset of assetsWithScanCount) {
-    let category = asset.category?.name || "Uncategorized";
+  for (const asset of assetsWithScanCount) {
+    const category = asset.category?.name || "Uncategorized";
     if (!assetsByCategory[category]) {
       assetsByCategory[category] = {
         category,
@@ -327,13 +327,14 @@ export function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
     { status: string; assets: Asset[]; color: string }
   > = {};
 
-  for (let asset of assets) {
-    let status = asset.status;
+  for (const asset of assets) {
+    const status = asset.status;
     if (!assetsByStatus[status]) {
+      const colors = assetStatusColorMap(status);
       assetsByStatus[status] = {
         status: userFriendlyAssetStatus(status),
         assets: [],
-        color: assetStatusColorMap(status),
+        color: colors.text, // Use text color for charts (more saturated/visible)
       };
     }
     assetsByStatus[status].assets.push(asset);
@@ -361,9 +362,9 @@ export function groupAssetsByCategory({ assets }: { assets: Asset[] }) {
     { category: string; assets: Asset[]; id: string }
   > = {};
 
-  for (let asset of assets) {
-    let category = asset.category?.name || "Uncategorized";
-    let id = asset?.category?.id || "Uncategorized";
+  for (const asset of assets) {
+    const category = asset.category?.name || "Uncategorized";
+    const id = asset?.category?.id || "Uncategorized";
     if (!assetsByCategory[category]) {
       assetsByCategory[category] = {
         category,
@@ -439,6 +440,7 @@ export async function checklistOptions({
       db.customField.count({
         where: {
           organizationId,
+          deletedAt: null,
         },
       }),
     ]);

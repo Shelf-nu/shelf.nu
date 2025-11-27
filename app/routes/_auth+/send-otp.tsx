@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 
 import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
 import { sendOTP } from "~/modules/auth/service.server";
@@ -32,6 +32,6 @@ export async function action({ request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

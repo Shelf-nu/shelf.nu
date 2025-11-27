@@ -1,15 +1,18 @@
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Team member assets") }];
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -37,10 +40,10 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return json(data(loaderData), { headers });
+    return data(payload(loaderData), { headers });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

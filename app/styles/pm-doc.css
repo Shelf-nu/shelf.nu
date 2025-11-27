@@ -1,0 +1,156 @@
+.pm-doc {
+  max-width: none;
+  /* font-size: 1rem; */
+  line-height: 1.6;
+  color: #101828;
+}
+
+.pm-doc strong {
+  font-weight: 600;
+  color: #101828;
+}
+
+.pm-doc em {
+  font-style: italic;
+}
+
+.pm-doc code {
+  display: inline-block;
+  border-radius: 0.375rem;
+  background-color: #f2f4f7;
+  padding: 0.125rem 0.25rem;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.75rem;
+  color: #344054;
+}
+
+.pm-doc a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.pm-doc a:hover {
+  color: #ef6820;
+}
+
+.pm-doc hr {
+  margin: 1.5rem 0;
+  border: 0;
+  border-top: 1px solid #eaecf0;
+}
+
+.pm-doc blockquote {
+  margin: 0;
+  border-left: 2px solid #eaecf0;
+  padding-left: 1rem;
+  color: #475467;
+}
+
+.pm-doc blockquote p {
+  margin: 0;
+}
+
+.pm-doc > *,
+.pm-doc article > * {
+  margin: 0;
+}
+
+.pm-doc > * + *,
+.pm-doc article > * + * {
+  margin-top: 1.25rem;
+}
+
+.pm-doc.pm--editing > * + * {
+  margin-top: 1rem;
+}
+
+.pm-doc :is(h1, h2, h3, h4, h5, h6) + p {
+  margin-top: 0.75rem;
+}
+
+.pm-doc article :is(h1, h2, h3, h4, h5, h6) + p {
+  margin-top: 0.75rem;
+}
+
+.pm-doc.pm--editing :is(h1, h2, h3, h4, h5, h6) + p {
+  margin-top: 0.75rem;
+}
+
+.pm-doc :is(ul, ol) {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.pm-doc ul {
+  list-style: disc;
+}
+
+.pm-doc ol {
+  list-style: decimal;
+}
+
+.pm-doc :is(ul, ol) + :is(p, h1, h2, h3, h4, h5, h6, blockquote) {
+  margin-top: 1.25rem;
+}
+
+.pm-doc.pm--editing :is(ul, ol) + :is(p, h1, h2, h3, h4, h5, h6, blockquote) {
+  margin-top: 1.25rem;
+}
+
+.pm-doc li + li {
+  margin-top: 0.5rem;
+}
+
+.pm-doc li p {
+  margin: 0;
+}
+
+.pm-doc li > :not(ul):not(ol) + :is(ul, ol) {
+  margin-top: 0.5rem;
+}
+
+.pm-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+}
+
+.pm-doc table td,
+.pm-doc table th {
+  border: 1px solid #eaecf0;
+  padding: 0.75rem 1.5rem;
+  color: #475467;
+}
+
+.pm-doc table th {
+  background-color: #f9fafb;
+  font-weight: 500;
+}
+
+.pm-doc .raw-block {
+  margin: 0;
+}
+
+.pm-doc.pm--editing .raw-block {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.pm-doc .raw-block pre {
+  margin: 0;
+}
+
+.pm-doc.pm--editing:focus,
+.pm-doc.pm--editing:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
+/* Prevent iOS zoom on focus by ensuring minimum 16px font size on mobile */
+@media (max-width: 768px) {
+  .pm-doc.pm--editing {
+    font-size: 1rem;
+  }
+}

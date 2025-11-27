@@ -1,11 +1,11 @@
 import { TierId } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
@@ -39,9 +39,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const user = await db.user
       .findFirstOrThrow({
         where: { customerId },
-        include: {
-          tier: true,
-          customTierLimit: true,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          tierId: true,
         },
       })
       .catch((cause) => {
@@ -109,6 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
             data: {
               tierId: tierId as TierId,
             },
+            select: { id: true },
           })
           .catch((cause) => {
             throw new ShelfError({
@@ -150,6 +154,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 tierId: tierId as TierId,
                 usedFreeTrial: true,
               },
+              select: { email: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -202,6 +207,7 @@ export async function action({ request }: ActionFunctionArgs) {
               data: {
                 tierId: "free",
               },
+              select: { id: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -212,6 +218,11 @@ export async function action({ request }: ActionFunctionArgs) {
                 status: 500,
               });
             });
+
+          // Only reset branding when downgrading from Plus (tier_1) to Free
+          if (user.tierId === TierId.tier_1) {
+            await resetPersonalWorkspaceBranding(user.id);
+          }
         }
 
         return new Response(null, { status: 200 });
@@ -250,6 +261,7 @@ export async function action({ request }: ActionFunctionArgs) {
               data: {
                 tierId: tierId as TierId,
               },
+              select: { id: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -281,6 +293,7 @@ export async function action({ request }: ActionFunctionArgs) {
               data: {
                 tierId: TierId.free,
               },
+              select: { id: true },
             })
             .catch((cause) => {
               throw new ShelfError({
@@ -291,6 +304,11 @@ export async function action({ request }: ActionFunctionArgs) {
                 status: 500,
               });
             });
+
+          // Only reset branding when downgrading from Plus (tier_1) to Free
+          if (user.tierId === TierId.tier_1) {
+            await resetPersonalWorkspaceBranding(user.id);
+          }
         }
 
         return new Response(null, { status: 200 });
@@ -345,6 +363,6 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

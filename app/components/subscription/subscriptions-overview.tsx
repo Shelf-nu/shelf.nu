@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { InfoIcon } from "lucide-react";
 import type Stripe from "stripe";
@@ -117,8 +118,8 @@ function Item({
     subscription?.trial_end &&
     subscription?.trial_end * 1000 > Date.now();
 
-  const detailsArray = useMemo<(string | React.ReactNode)[]>(() => {
-    const arr: (string | React.ReactNode)[] = [
+  const detailsArray = useMemo<(string | ReactNode)[]>(() => {
+    const arr: (string | ReactNode)[] = [
       planTier === "tier_2"
         ? "Team plan"
         : planTier === "tier_1"

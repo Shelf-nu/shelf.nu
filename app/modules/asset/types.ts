@@ -51,6 +51,7 @@ export interface UpdateAssetPayload {
   barcodes?: { id?: string; type: BarcodeType; value: string }[];
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
+  request: Request;
 }
 
 export interface CreateAssetFromContentImportPayload
@@ -149,7 +150,12 @@ export type AdvancedIndexAsset = Pick<
   kit: Pick<Kit, "id" | "name"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name">[];
-  location: Pick<Location, "name"> | null;
+  location:
+    | (Pick<Location, "id" | "name"> & {
+        parentId?: Location["parentId"];
+        childCount?: number;
+      })
+    | null;
   custody: {
     custodian: {
       name: string;
@@ -173,9 +179,7 @@ export type AdvancedIndexAsset = Pick<
   upcomingReminder?: Pick<
     AssetReminder,
     "id" | "alertDateTime" | "name" | "message"
-  > & {
-    displayDate: string;
-  };
+  >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
 };

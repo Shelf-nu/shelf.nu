@@ -7,8 +7,8 @@ export function TimeRemaining({
   from,
   status,
 }: {
-  to: string;
-  from: string;
+  to: Date;
+  from: Date;
   status: BookingStatus;
 }) {
   const currentDate = new Date();
@@ -27,7 +27,7 @@ export function TimeRemaining({
     status === BookingStatus.DRAFT || status === BookingStatus.RESERVED;
 
   // Determine which date to use for calculation
-  const targetDate = new Date(isUpcoming ? from : to);
+  const targetDate = isUpcoming ? from : to;
   const remainingMs = targetDate.getTime() - currentDate.getTime();
 
   // Handle case where time has already passed

@@ -1,13 +1,17 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { data, parseData } from "~/utils/http.server";
+import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
@@ -24,9 +28,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       })
     );
 
-    // Use findUnique instead of findUniqueOrThrow to handle missing assets gracefully
+    // Validate user has permission to access assets in their organization
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    // Use findUnique with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUnique({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       select: {
         id: true,
         mainImage: true,
@@ -46,8 +58,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         })
       );
 
-      return json(
-        data({
+      return data(
+        payload({
           asset: null,
           error: "Asset not found",
         })
@@ -80,7 +92,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             },
           });
 
-          return json(data({ asset: updatedAsset }));
+          return data(payload({ asset: updatedAsset }));
         } catch (error) {
           Logger.error(
             new ShelfError({
@@ -92,8 +104,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           );
 
           // Return the existing thumbnail rather than failing
-          return json(
-            data({
+          return data(
+            payload({
               asset: {
                 id: asset.id,
                 thumbnailImage: asset.thumbnailImage,
@@ -106,8 +118,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // If there's no main image, we can't generate a thumbnail
     if (!asset.mainImage) {
-      return json(
-        data({
+      return data(
+        payload({
           asset: {
             id: asset.id,
             thumbnailImage: asset.thumbnailImage, // Will be null
@@ -121,8 +133,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     if (!originalPath) {
       // If we can't extract the path, return existing values
-      return json(
-        data({
+      return data(
+        payload({
           asset: {
             id: asset.id,
             thumbnailImage: asset.thumbnailImage,
@@ -137,8 +149,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     if (downloadError) {
       // If download fails, return existing values
-      return json(
-        data({
+      return data(
+        payload({
           asset: {
             id: asset.id,
             thumbnailImage: asset.thumbnailImage,
@@ -152,10 +164,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const buffer = Buffer.from(arrayBuffer);
 
     // Create an async iterable from the buffer - use a proper async generator
-    async function* createAsyncIterable() {
+    const createAsyncIterable = async function* () {
       await Promise.resolve(); // Add await to satisfy eslint
       yield new Uint8Array(buffer);
-    }
+    };
 
     // Generate thumbnail filename
     let thumbnailPath: string;
@@ -180,6 +192,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         fit: "cover",
         withoutEnlargement: true,
       },
+      upsert: true,
     });
 
     // Create signed URL for the thumbnail
@@ -207,8 +220,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         })
       );
 
-      return json(
-        data({
+      return data(
+        payload({
           asset: null,
           error: "Asset was deleted during processing",
         })
@@ -228,7 +241,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ asset: updatedAsset }));
+    return data(payload({ asset: updatedAsset }));
   } catch (cause) {
     // In case of any error, try to return existing values instead of failing
     try {
@@ -243,7 +256,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         });
 
         if (asset) {
-          return json(data({ asset }));
+          return data(payload({ asset }));
         }
       }
     } catch {
@@ -265,8 +278,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     Logger.error(reason);
 
     // Return a successful response with error flag
-    return json(
-      data({
+    return data(
+      payload({
         asset: null,
         error: reason.message,
       })

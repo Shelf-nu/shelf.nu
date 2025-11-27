@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Roles } from "@prisma/client";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -66,7 +66,7 @@ export default function TransferOwnershipCard({
 
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
 
-  const isShelfAdmin = user?.roles.some((role) => role.name === Roles.ADMIN);
+  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
 
   if (!isOwner && !isShelfAdmin) {
     return null;
@@ -223,7 +223,9 @@ export default function TransferOwnershipCard({
                     !selectedOwner
                       ? { reason: "Please select a new owner." }
                       : confirmationInput !== currentOrganization?.name
-                      ? { reason: "Please type the workspace name to confirm." }
+                      ? {
+                          reason: "Please type the workspace name to confirm.",
+                        }
                       : disabled
                   }
                 >

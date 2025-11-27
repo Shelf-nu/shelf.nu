@@ -1,13 +1,30 @@
 import type { Prisma } from "@prisma/client";
 
-export const INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION = {
+export const USER_WITH_SSO_DETAILS_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  sso: true,
   userOrganizations: {
-    include: {
+    select: {
+      roles: true,
       organization: {
-        include: {
-          ssoDetails: true,
+        select: {
+          id: true,
+          name: true,
+          enabledSso: true,
+          ssoDetails: {
+            select: {
+              id: true,
+              domain: true,
+              baseUserGroupId: true,
+              selfServiceGroupId: true,
+              adminGroupId: true,
+            },
+          },
         },
       },
     },
   },
-} satisfies Prisma.UserInclude;
+} satisfies Prisma.UserSelect;

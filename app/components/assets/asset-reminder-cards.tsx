@@ -1,12 +1,14 @@
-import { useLoaderData } from "@remix-run/react";
+import type { CSSProperties } from "react";
+import { useLoaderData } from "react-router";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
 import ReminderTeamMembers from "../asset-reminder/reminder-team-members";
 import { Button } from "../shared/button";
+import { DateS } from "../shared/date";
 
 type AssetReminderCardsProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 };
 
 export function AssetReminderCards({
@@ -48,7 +50,9 @@ export function AssetReminderCards({
             >
               {reminder.name}
             </Button>
-            <p className="mb-2">{reminder.displayDate}</p>
+            <p className="mb-2">
+              <DateS date={reminder.alertDateTime} includeTime />
+            </p>
 
             <p className="mb-2 text-sm text-gray-600">
               {reminder.message.substring(0, 1000)}

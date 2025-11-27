@@ -20,6 +20,7 @@ export const filterOperatorSchema = z.enum([
   "matchesAny",
   "inDates",
   "excludeAny",
+  "withinHierarchy",
 ]);
 
 export const filterFieldTypeSchema = z.enum([

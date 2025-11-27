@@ -1,7 +1,6 @@
-import type { Asset, Image as ImageDataType, Location } from "@prisma/client";
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import type { Prisma } from "@prisma/client";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 import Header from "~/components/layout/header";
@@ -10,10 +9,13 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
+import { LocationBadge } from "~/components/location/location-badge";
 import { LocationDescriptionColumn } from "~/components/location/location-description-column";
+import LocationQuickActions from "~/components/location/location-quick-actions";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -22,7 +24,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -62,8 +64,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "locations",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: locations,
         search,
@@ -80,7 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -89,7 +91,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const navigate = useNavigate();
   const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
@@ -99,7 +100,6 @@ export default function LocationsIndexPage() {
           to="new"
           role="link"
           aria-label={`new location`}
-          icon="plus"
           data-test-id="createNewLocation"
         >
           New location
@@ -112,11 +112,14 @@ export default function LocationsIndexPage() {
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
           }
           ItemComponent={ListItemContent}
-          navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
               <Th>Description</Th>
+              <Th>Parent location</Th>
+              <Th className="whitespace-nowrap">Child locations</Th>
               <Th>Assets</Th>
+              <Th>Kits</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -125,12 +128,11 @@ export default function LocationsIndexPage() {
   );
 }
 
-interface LocationWithAssets extends Location {
-  assets: Asset[];
-  image?: ImageDataType;
-}
-
-const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
+const ListItemContent = ({
+  item,
+}: {
+  item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
+}) => (
   <>
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
@@ -138,12 +140,18 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
           <div className="flex size-12 items-center justify-center">
             <ImageWithPreview
               thumbnailUrl={item.thumbnailUrl}
-              alt={item.name}
+              alt={`${item.name} main image`}
               className="size-full"
             />
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-            <div className="font-medium">{item.name}</div>
+            <Button
+              to={`${item.id}/assets`}
+              variant="link"
+              className="text-left font-medium text-gray-900 hover:text-gray-700"
+            >
+              {item.name}
+            </Button>
             <div className="hidden text-gray-600 md:block">{item.address}</div>
           </div>
         </div>
@@ -154,6 +162,32 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
     ) : (
       <Td>-</Td>
     )}
-    <Td>{item.assets.length}</Td>
+    <Td>
+      {item.parent ? (
+        <LocationBadge
+          location={{
+            id: item.parent.id,
+            name: item.parent.name,
+            parentId: item.parent.parentId ?? undefined,
+            childCount: item.parent._count?.children ?? 0,
+          }}
+          className="m-0"
+        />
+      ) : (
+        "-"
+      )}
+    </Td>
+    <Td>{item._count.children}</Td>
+    <Td>{item._count.assets}</Td>
+    <Td>{item._count.kits}</Td>
+    <Td>
+      <LocationQuickActions
+        location={{
+          id: item.id,
+          name: item.name,
+          childCount: item._count.children,
+        }}
+      />
+    </Td>
   </>
 );

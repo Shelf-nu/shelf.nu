@@ -1,4 +1,4 @@
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import FormRow from "~/components/forms/form-row";
@@ -35,7 +35,7 @@ export function TagsRequiredSettings({
         <fetcher.Form
           ref={zo.ref}
           method="post"
-          onChange={(e) => fetcher.submit(e.currentTarget)}
+          onChange={(e) => void fetcher.submit(e.currentTarget)}
         >
           <FormRow
             rowLabel="Require tags for bookings"

@@ -1,14 +1,26 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import NewCategoryForm, {
-  NewCategoryFormSchema,
-} from "~/components/category/new-category-form";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
+import { Form } from "~/components/custom-form";
+import { ColorInput } from "~/components/forms/color-input";
+import Input from "~/components/forms/input";
+
+import { Button } from "~/components/shared/button";
 
 import { createCategory } from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { isFormProcessing } from "~/utils/form";
+import { getRandomColor } from "~/utils/get-random-color";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -33,10 +45,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ header }));
+    return payload({ header, colorFromServer });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -80,7 +92,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect("/categories");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

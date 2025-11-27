@@ -5,15 +5,17 @@ import {
   isGet,
   getCurrentPath,
   getRedirectTo,
+  getRefererPath,
   makeRedirectToFromHere,
   isPost,
   safeRedirect,
-  data,
+  payload,
   error,
   getParams,
   parseData,
 } from "./http.server";
 import { Logger } from "./logger";
+import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -55,6 +57,64 @@ describe(getRedirectTo.name, () => {
     expect(getRedirectTo(new Request(`${BASE_URL}?redirectTo=//profile`))).toBe(
       "/"
     );
+  });
+});
+
+describe(getRefererPath.name, () => {
+  it("should return null if no referer header", () => {
+    const request = new Request(BASE_URL);
+    expect(getRefererPath(request)).toBe(null);
+  });
+
+  it("should return pathname from referer header", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets` },
+    });
+    expect(getRefererPath(request)).toBe("/assets");
+  });
+
+  it("should return pathname with query params from referer", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets?search=test&status=AVAILABLE` },
+    });
+    expect(getRefererPath(request)).toBe(
+      "/assets?search=test&status=AVAILABLE"
+    );
+  });
+
+  it("should return pathname with hash from referer", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets#section` },
+    });
+    expect(getRefererPath(request)).toBe("/assets");
+  });
+
+  it("should return null for invalid referer URL", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: "not-a-valid-url" },
+    });
+    expect(getRefererPath(request)).toBe(null);
+  });
+
+  it("should handle referer from different domain", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: "https://other-domain.com/some-page" },
+    });
+    expect(getRefererPath(request)).toBe("/some-page");
+  });
+
+  it("should return root path for root referer", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: BASE_URL },
+    });
+    expect(getRefererPath(request)).toBe("/");
+  });
+
+  it("should handle nested paths", () => {
+    const request = new Request(BASE_URL, {
+      headers: { referer: `${BASE_URL}/assets/123/edit` },
+    });
+    expect(getRefererPath(request)).toBe("/assets/123/edit");
   });
 });
 
@@ -101,10 +161,10 @@ describe(safeRedirect.name, () => {
   });
 });
 
-describe(data.name, () => {
+describe(payload.name, () => {
   it("should return data with error set to null", () => {
     const responseData = { name: "John" };
-    const result = data(responseData);
+    const result = payload(responseData);
 
     expect(result).toEqual({
       ...responseData,
@@ -193,16 +253,15 @@ describe(getParams.name, () => {
     expect(result).toEqual(params);
   });
 
-  it("should throw a `json` response if params are invalid", async () => {
+  it("should throw a `json` response if params are invalid", () => {
     const params = {};
 
     try {
       getParams(params, z.object({ id: z.string() }));
     } catch (e) {
-      const response = e as Response;
-      const body = await response.json();
-      expect(response.status).toEqual(400);
-      expect(body).toEqual({
+      assertIsDataWithResponseInit(e);
+      expect(e.init?.status).toEqual(400);
+      expect(e.data).toEqual({
         error: {
           additionalData: {
             data: {},
@@ -221,7 +280,7 @@ describe(getParams.name, () => {
     }
   });
 
-  it("should return additionalData if validation fails", async () => {
+  it("should return additionalData if validation fails", () => {
     const params = { id: "123" };
 
     try {
@@ -229,10 +288,9 @@ describe(getParams.name, () => {
         additionalData: { userId: "user-id" },
       });
     } catch (e) {
-      const response = e as Response;
-      const body = await response.json();
-      expect(response.status).toEqual(400);
-      expect(body).toEqual({
+      assertIsDataWithResponseInit(e);
+      expect(e.init?.status).toEqual(400);
+      expect(e.data).toEqual({
         error: {
           additionalData: {
             data: params,

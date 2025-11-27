@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
-import { useFetcher } from "@remix-run/react";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
@@ -233,11 +233,12 @@ export const ImportContent = () => {
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const [agreed, setAgreed] = useState<"I AGREE" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
-  const fetcher = useFetcher<typeof action>();
+  const fetcher = useFetcherWithReset<typeof action>();
 
   const { data, state } = fetcher;
   const disabled = isFormProcessing(state) || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
+  //
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected
@@ -268,7 +269,15 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
       />
       <input type="hidden" name="intent" value={intent} />
 
-      <AlertDialog>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            // Reset form state when dialog is closed
+            setAgreed("");
+            fetcher.reset();
+          }
+        }}
+      >
         <AlertDialogTrigger asChild>
           <Button
             title={"Confirm asset import"}
@@ -306,7 +315,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                       e.preventDefault();
                       // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
                       if (!disabled) {
-                        fetcher.submit(formRef.current);
+                        void fetcher.submit(formRef.current);
                       }
                     }
                   }}
@@ -457,7 +466,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   type="submit"
                   onClick={() => {
                     // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                    fetcher.submit(formRef.current);
+                    void fetcher.submit(formRef.current);
                   }}
                   disabled={disabled}
                 >

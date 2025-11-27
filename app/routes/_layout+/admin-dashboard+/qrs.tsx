@@ -1,7 +1,16 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { Link, useLoaderData, useNavigation } from "@remix-run/react";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import { z } from "zod";
 import { GenerateBatchQr } from "~/components/admin/generate-batch-qr";
 import { MarkBatchAsPrinted } from "~/components/admin/mark-batch-as-printed";
@@ -23,9 +32,10 @@ import {
   getPaginatedAndFilterableQrCodes,
   markBatchAsPrinted,
 } from "~/modules/qr/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -56,24 +66,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "qrs",
     };
 
-    return json(
-      data({
-        header,
-        items: qrCodes,
-        search,
-        page,
-        totalItems: totalQrCodes,
-        perPage,
-        totalPages,
-        modelName,
-        batches,
-      })
-    );
+    return payload({
+      header,
+      items: qrCodes,
+      search,
+      page,
+      totalItems: totalQrCodes,
+      perPage,
+      totalPages,
+      modelName,
+      batches,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: appendToMetaTitle(loaderData?.header.title) },
+];
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -91,14 +103,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
     /** Update the QR codes from the batch as printed */
     await markBatchAsPrinted({ batch });
 
-    return json(
-      data({
-        success: true,
-      })
-    );
+    return payload({
+      success: true,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

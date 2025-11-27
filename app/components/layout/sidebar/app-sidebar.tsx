@@ -1,6 +1,6 @@
+import type { ComponentProps } from "react";
 import { ShelfSidebarLogo } from "~/components/marketing/logos";
 import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
-import { SidebarNoticeCard } from "./notice-card";
 import OrganizationSelector from "./organization-selector";
 import {
   Sidebar,
@@ -13,7 +13,7 @@ import {
 import SidebarNav from "./sidebar-nav";
 import SidebarUserMenu from "./sidebar-user-menu";
 
-type AppSidebarProps = React.ComponentProps<typeof Sidebar>;
+type AppSidebarProps = ComponentProps<typeof Sidebar>;
 
 export default function AppSidebar(props: AppSidebarProps) {
   const { state } = useSidebar();
@@ -34,7 +34,6 @@ export default function AppSidebar(props: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter>
-        {state !== "collapsed" && <SidebarNoticeCard />}
         <SidebarNav className="p-0" items={bottomMenuItems} />
         <SidebarUserMenu />
       </SidebarFooter>

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Booking, TeamMember, User } from "@prisma/client";
-import type { SerializeFrom } from "@remix-run/node";
+import type { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { KitIndexLoaderData } from "~/routes/_layout+/kits._index";
@@ -10,8 +10,9 @@ import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
-type LoaderData = SerializeFrom<KitIndexLoaderData>;
-type Items = NonNullable<LoaderData["items"]>;
+type Items = NonNullable<
+  ReturnType<typeof useLoaderData<KitIndexLoaderData>>["items"]
+>;
 
 export function useKitAvailabilityData(items: Items) {
   const { roles } = useUserRoleHelper();

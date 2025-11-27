@@ -19,6 +19,7 @@ import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
 import {
+  removeCustomFieldFromAssetIndexSettings,
   updateAssetIndexSettingsAfterCfUpdate,
   updateAssetIndexSettingsWithNewCustomFields,
 } from "../asset-index-settings/service.server";
@@ -113,7 +114,10 @@ export async function getFilteredAndPaginatedCustomFields(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    let where: Prisma.CustomFieldWhereInput = { organizationId };
+    const where: Prisma.CustomFieldWhereInput = {
+      organizationId,
+      deletedAt: null,
+    };
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -174,6 +178,7 @@ export async function getCustomField<
 
     const customField = await db.customField.findFirstOrThrow({
       where: {
+        deletedAt: null,
         OR: [
           { id, organizationId },
           ...(userOrganizations?.length
@@ -244,7 +249,16 @@ export async function updateCustomField(payload: {
   categories?: string[];
   organizationId: CustomField["organizationId"];
 }) {
-  const { id, name, helpText, required, active, options, categories } = payload;
+  const {
+    id,
+    name,
+    helpText,
+    required,
+    active,
+    options,
+    categories,
+    organizationId,
+  } = payload;
 
   try {
     //dont ever update type
@@ -269,7 +283,7 @@ export async function updateCustomField(payload: {
 
     /** Get the custom field. We need it in order to be able to update the asset index settings */
     const customField = (await db.customField.findFirst({
-      where: { id },
+      where: { id, organizationId, deletedAt: null },
     })) as CustomField;
 
     const updatedField = await db.customField.update({
@@ -293,6 +307,88 @@ export async function updateCustomField(payload: {
   }
 }
 
+/**
+ * Soft deletes a custom field by setting its deletedAt timestamp and appending a Unix timestamp to the name.
+ *
+ * This operation:
+ * 1. Appends Unix timestamp to the field name (e.g., "Serial Number" → "Serial Number_1234567890")
+ * 2. Sets deletedAt to current timestamp (soft delete)
+ * 3. Immediately removes the column from all users' AssetIndexSettings
+ * 4. Preserves all AssetCustomFieldValue records (no CASCADE deletion)
+ * 5. Deleted fields don't count toward premium tier limits
+ * 6. Name is freed up for creating a new field with the same name
+ *
+ * Note: This is a soft delete - data is preserved but not restorable via name reuse.
+ * The `active` flag remains separate and controls feature toggle functionality.
+ *
+ * @throws ShelfError if custom field doesn't exist or deletion fails
+ */
+export async function softDeleteCustomField({
+  id,
+  organizationId,
+}: Pick<CustomField, "id"> & { organizationId: Organization["id"] }) {
+  try {
+    const customField = await db.$transaction(
+      async (tx) => {
+        // 1. Verify the custom field exists, belongs to the organization, and is not already deleted
+        const existingCustomField = await tx.customField.findFirst({
+          where: { id, organizationId, deletedAt: null },
+        });
+
+        if (!existingCustomField) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "The custom field you are trying to delete does not exist.",
+            additionalData: { id, organizationId },
+            label,
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
+        // 2. Soft delete the custom field by appending timestamp to name and setting deletedAt
+        // This frees up the original name for creating a new field
+        const timestamp = Math.floor(Date.now() / 1000);
+        const deletedField = await tx.customField.update({
+          where: { id },
+          data: {
+            name: `${existingCustomField.name}_${timestamp}`,
+            deletedAt: new Date(),
+          },
+        });
+
+        // 3. Remove column from all users' AssetIndexSettings immediately
+        // This ensures consistency with deactivation behavior
+        await removeCustomFieldFromAssetIndexSettings({
+          customFieldName: existingCustomField.name,
+          organizationId,
+          prisma: tx,
+        });
+
+        return deletedField;
+      },
+      {
+        timeout: 30000, // 30 second timeout for consistency
+      }
+    );
+
+    return customField;
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while deleting the custom field. Please try again or contact support.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
 export async function upsertCustomField(
   definitions: CustomFieldDraftPayload[]
 ): Promise<{
@@ -311,6 +407,7 @@ export async function upsertCustomField(
             mode: "insensitive",
           },
           organizationId: def.organizationId,
+          deletedAt: null,
         },
       });
 
@@ -392,8 +489,8 @@ export async function createCustomFieldsIfNotExists({
     //{CF header: definition to create}
     const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
 
-    for (let item of data) {
-      for (let k of Object.keys(item)) {
+    for (const item of data) {
+      for (const k of Object.keys(item)) {
         if (k.startsWith("cf:")) {
           const def = getDefinitionFromCsvHeader(k);
           if (!fieldToDefDraftMap[k]) {
@@ -475,6 +572,7 @@ export async function getActiveCustomFields({
       where: {
         organizationId,
         active: { equals: true },
+        deletedAt: null,
         /**
          * Category filtering logic:
          * - If includeAllCategories: no category filtering
@@ -511,7 +609,7 @@ export async function countActiveCustomFields({
 }) {
   try {
     return await db.customField.count({
-      where: { organizationId, active: true },
+      where: { organizationId, active: true, deletedAt: null },
     });
   } catch (cause) {
     throw new ShelfError({

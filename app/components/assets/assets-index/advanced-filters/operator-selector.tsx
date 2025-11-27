@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import type { KeyboardEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -7,6 +8,7 @@ import {
 } from "@radix-ui/react-popover";
 import type { DisabledProp } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import type { Filter, FilterDefinition, FilterOperator } from "./schema";
 
@@ -43,6 +45,7 @@ export const operatorsMap: Record<FilterOperator, string[]> = {
   matchesAny: ["≈", "Matches any"],
   inDates: ["∈", "In dates"],
   excludeAny: ["⊄", "Exclude any of"], // New operator with clear meaning for tag exclusion
+  withinHierarchy: ["↳", "Is in (incl. sub-locations)"],
 };
 
 // Define the allowed operators for each field type
@@ -53,7 +56,7 @@ export const operatorsPerType: FilterDefinition = {
   date: ["is", "isNot", "before", "after", "between", "inDates"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
   amount: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
-  enum: ["is", "isNot", "containsAny"],
+  enum: ["is", "isNot", "containsAny", "withinHierarchy"],
   array: ["contains", "containsAll", "containsAny", "excludeAny"],
   customField: [], // empty array as customField operators are determined by the actual field type
 };
@@ -68,6 +71,7 @@ export function OperatorSelector({
   disabled?: DisabledProp;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const [operator, setOperator] = useState<FilterOperator>();
   useEffect(() => {
@@ -75,7 +79,67 @@ export function OperatorSelector({
   }, [filter.operator]);
 
   /** Get the correct operators, based on the field type */
-  const operators = operatorsPerType[filter.type];
+  const baseOperators = operatorsPerType[filter.type];
+  const locationOperatorOrder: FilterOperator[] = [
+    "is",
+    "withinHierarchy",
+    "containsAny",
+    "isNot",
+  ];
+  const operators =
+    filter.name === "location"
+      ? locationOperatorOrder.filter((op) => baseOperators.includes(op))
+      : baseOperators.filter((op) => op !== "withinHierarchy");
+
+  // Reset selected index when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      // Set initial selection to the current operator
+      const currentIndex = operators.findIndex((op) => op === operator);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [isPopoverOpen, operator, operators]);
+
+  const handleSelect = (operatorToSelect: FilterOperator) => {
+    setFilter(operatorToSelect);
+    setIsPopoverOpen(false);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < operators.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ": // Space key
+        event.preventDefault();
+        handleSelect(operators[selectedIndex] as FilterOperator);
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (isPopoverOpen) {
+      const selectedElement = document.getElementById(
+        `operator-option-${selectedIndex}`
+      );
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [selectedIndex, isPopoverOpen]);
 
   return operator ? (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -95,18 +159,26 @@ export function OperatorSelector({
           className={tw(
             "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
           )}
+          onKeyDown={handleKeyDown}
         >
           {operators.map((operator, index) => {
             const k = operator as FilterOperator;
             const v = operatorsMap[k];
             return (
               <div
+                id={`operator-option-${index}`}
                 key={k + index}
-                className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-                onClick={() => {
-                  setFilter(k as FilterOperator);
-                  setIsPopoverOpen(false);
-                }}
+                className={tw(
+                  "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  selectedIndex === index && "bg-gray-50"
+                )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
+                onClick={() => handleSelect(k as FilterOperator)}
+                onKeyDown={handleActivationKeyPress(() =>
+                  handleSelect(k as FilterOperator)
+                )}
               >
                 <FilterOperatorDisplay symbol={v[0]} text={v[1]} />
               </div>

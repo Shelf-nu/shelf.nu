@@ -4,11 +4,16 @@ import type {
   Location,
   Organization,
   UserOrganization,
+  Asset,
+  Kit,
 } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { PUBLIC_BUCKET } from "~/utils/constants";
+import {
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -18,6 +23,7 @@ import {
 } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
@@ -26,8 +32,17 @@ import {
   removePublicFile,
 } from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import {
+  getAssetsWhereInput,
+  getLocationUpdateNoteContent,
+  getKitLocationUpdateNoteContent,
+} from "../asset/utils.server";
+import { getKitsWhereInput } from "../kit/utils.server";
+import { createNote } from "../note/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
+const MAX_LOCATION_DEPTH = 12;
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
@@ -66,7 +81,7 @@ export async function getLocation(
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Build where object for querying related assets */
-    let assetsWhere: Prisma.AssetWhereInput = {};
+    const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
       assetsWhere.title = {
@@ -74,6 +89,42 @@ export async function getLocation(
         mode: "insensitive",
       };
     }
+
+    const parentInclude = {
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        _count: { select: { children: true } },
+      },
+    } satisfies Prisma.LocationInclude["parent"];
+
+    const locationInclude: Prisma.LocationInclude = include
+      ? { ...include, parent: parentInclude }
+      : {
+          assets: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
+                },
+              },
+              tags: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+            skip,
+            take,
+            where: assetsWhere,
+            orderBy: { [orderBy]: orderDirection },
+          },
+          parent: parentInclude,
+        };
 
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
@@ -86,31 +137,7 @@ export async function getLocation(
               : []),
           ],
         },
-        include: include
-          ? include
-          : {
-              assets: {
-                include: {
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  tags: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
-                },
-                skip,
-                take,
-                where: assetsWhere,
-                orderBy: { [orderBy]: orderDirection },
-              },
-            },
+        include: locationInclude,
       }),
 
       /** Count them */
@@ -121,7 +148,7 @@ export async function getLocation(
       }),
     ]);
 
-    /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
+    /* User is accessing the location in the wrong organization. In that case we need special 404 handling. */
     if (
       userOrganizations?.length &&
       location.organizationId !== organizationId &&
@@ -171,6 +198,165 @@ export async function getLocation(
   }
 }
 
+export type LocationHierarchyEntry = Pick<
+  Location,
+  "id" | "name" | "parentId"
+> & {
+  depth: number;
+};
+
+/**
+ * Returns the ancestor chain for a given location ordered from the root down to the provided node.
+ */
+export async function getLocationHierarchy(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}) {
+  const { organizationId, locationId } = params;
+
+  return db.$queryRaw<LocationHierarchyEntry[]>`
+    WITH RECURSIVE location_hierarchy AS (
+      SELECT
+        id,
+        name,
+        "parentId",
+        "organizationId",
+        0 AS depth
+      FROM "Location"
+      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l.name,
+        l."parentId",
+        l."organizationId",
+        lh.depth + 1 AS depth
+      FROM "Location" l
+      INNER JOIN location_hierarchy lh ON lh."parentId" = l.id
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT id, name, "parentId", depth
+    FROM location_hierarchy
+    ORDER BY depth DESC
+  `;
+}
+
+/** Represents a node in the descendant tree rendered on location detail pages. */
+export type LocationTreeNode = Pick<Location, "id" | "name"> & {
+  children: LocationTreeNode[];
+};
+
+/** Raw row returned when querying descendants via recursive CTE. */
+type LocationDescendantRow = Pick<Location, "id" | "name" | "parentId">;
+/** Aggregate row holding the maximum depth returned from subtree depth query. */
+type SubtreeDepthRow = { maxDepth: number | null };
+
+/**
+ * Fetches a nested tree of all descendants for the provided location.
+ * Used to render the hierarchical child list on the location page sidebar.
+ */
+export async function getLocationDescendantsTree(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}): Promise<LocationTreeNode[]> {
+  const { organizationId, locationId } = params;
+
+  const descendants = await db.$queryRaw<LocationDescendantRow[]>`
+    WITH RECURSIVE location_descendants AS (
+      SELECT
+        id,
+        name,
+        "parentId",
+        "organizationId"
+      FROM "Location"
+      WHERE "parentId" = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l.name,
+        l."parentId",
+        l."organizationId"
+      FROM "Location" l
+      INNER JOIN location_descendants ld ON ld.id = l."parentId"
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT id, name, "parentId"
+    FROM location_descendants
+  `;
+
+  const nodes = new Map<string, LocationTreeNode>();
+  const rootNodes: LocationTreeNode[] = [];
+
+  for (const row of descendants) {
+    nodes.set(row.id, { id: row.id, name: row.name, children: [] });
+  }
+
+  for (const row of descendants) {
+    const node = nodes.get(row.id);
+    if (!node) continue;
+
+    if (row.parentId === locationId) {
+      rootNodes.push(node);
+    }
+
+    const parentNode = row.parentId ? nodes.get(row.parentId) : null;
+    if (parentNode) {
+      parentNode.children.push(node);
+    }
+  }
+
+  return rootNodes;
+}
+
+/**
+ * Returns the maximum depth (root node counted as 0) for a location's subtree.
+ * Used by validation to ensure re-parent operations do not exceed the configured max depth.
+ */
+export async function getLocationSubtreeDepth(params: {
+  organizationId: Organization["id"];
+  locationId: Location["id"];
+}): Promise<number> {
+  const { organizationId, locationId } = params;
+
+  const [result] = await db.$queryRaw<SubtreeDepthRow[]>`
+    WITH RECURSIVE location_subtree AS (
+      SELECT
+        id,
+        "parentId",
+        "organizationId",
+        0 AS depth
+      FROM "Location"
+      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
+      UNION ALL
+      SELECT
+        l.id,
+        l."parentId",
+        l."organizationId",
+        ls.depth + 1 AS depth
+      FROM "Location" l
+      INNER JOIN location_subtree ls ON l."parentId" = ls.id
+      WHERE l."organizationId" = ${organizationId}
+    )
+    SELECT MAX(depth) AS "maxDepth"
+    FROM location_subtree
+  `;
+
+  return result?.maxDepth ?? 0;
+}
+
+export const LOCATION_LIST_INCLUDE = {
+  _count: { select: { kits: true, assets: true, children: true } },
+  parent: {
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      _count: { select: { children: true } },
+    },
+  },
+  image: { select: { updatedAt: true } },
+} satisfies Prisma.LocationInclude;
+
 export async function getLocations(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -186,7 +372,7 @@ export async function getLocations(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    let where: Prisma.LocationWhereInput = { organizationId };
+    const where: Prisma.LocationWhereInput = { organizationId };
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -203,14 +389,7 @@ export async function getLocations(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        include: {
-          assets: true,
-          image: {
-            select: {
-              updatedAt: true,
-            },
-          },
-        },
+        include: LOCATION_LIST_INCLUDE,
       }),
 
       /** Count them */
@@ -228,15 +407,123 @@ export async function getLocations(params: {
   }
 }
 
+export async function getLocationTotalValuation({
+  locationId,
+}: {
+  locationId: Location["id"];
+}) {
+  const result = await db.asset.aggregate({
+    _sum: { valuation: true },
+    where: { locationId },
+  });
+
+  return result._sum.valuation ?? 0;
+}
+
+/**
+ * Validates that a parent location belongs to the same organization, does not create cycles,
+ * and keeps the tree depth under {@link MAX_LOCATION_DEPTH}.
+ */
+async function validateParentLocation({
+  organizationId,
+  parentId,
+  currentLocationId,
+}: {
+  organizationId: Organization["id"];
+  parentId?: Location["parentId"];
+  currentLocationId?: Location["id"];
+}) {
+  if (!parentId) {
+    return null;
+  }
+
+  if (currentLocationId && parentId === currentLocationId) {
+    throw new ShelfError({
+      cause: null,
+      message: "A location cannot be its own parent.",
+      additionalData: { currentLocationId, parentId, organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const parentLocation = await db.location.findFirst({
+    where: { id: parentId, organizationId },
+    select: { id: true },
+  });
+
+  if (!parentLocation) {
+    throw new ShelfError({
+      cause: null,
+      message: "Parent location not found.",
+      additionalData: { parentId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const hierarchy = await getLocationHierarchy({
+    organizationId,
+    locationId: parentId,
+  });
+
+  const parentDepth = hierarchy.reduce(
+    (maxDepth, location) => Math.max(maxDepth, location.depth),
+    0
+  );
+
+  const subtreeDepth =
+    currentLocationId === undefined
+      ? 0
+      : await getLocationSubtreeDepth({
+          organizationId,
+          locationId: currentLocationId,
+        });
+
+  if (parentDepth + 1 + subtreeDepth > MAX_LOCATION_DEPTH) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message: `Locations cannot be nested deeper than ${MAX_LOCATION_DEPTH} levels.`,
+      additionalData: {
+        parentId,
+        organizationId,
+        parentDepth,
+        subtreeDepth,
+      },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (currentLocationId && hierarchy.some((l) => l.id === currentLocationId)) {
+    throw new ShelfError({
+      cause: null,
+      message: "A location cannot be assigned to one of its descendants.",
+      additionalData: { parentId, currentLocationId, organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  return parentLocation.id;
+}
+
 export async function createLocation({
   name,
   description,
   address,
   userId,
   organizationId,
+  parentId,
 }: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
   organizationId: Organization["id"];
+  parentId?: Location["parentId"];
 }) {
   try {
     // Geocode the address if provided
@@ -244,6 +531,11 @@ export async function createLocation({
     if (address) {
       coordinates = await geolocate(address);
     }
+
+    const validatedParentId = await validateParentLocation({
+      organizationId,
+      parentId,
+    });
 
     return await db.location.create({
       data: {
@@ -262,9 +554,19 @@ export async function createLocation({
             id: organizationId,
           },
         },
+        ...(validatedParentId && {
+          parent: {
+            connect: {
+              id: validatedParentId,
+            },
+          },
+        }),
       },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
     });
@@ -304,8 +606,10 @@ export async function updateLocation(payload: {
   description?: Location["description"];
   userId: User["id"];
   organizationId: Organization["id"];
+  parentId?: Location["parentId"];
 }) {
-  const { id, name, address, description, userId, organizationId } = payload;
+  const { id, name, address, description, userId, organizationId, parentId } =
+    payload;
 
   try {
     // Get the current location to check if address changed
@@ -328,6 +632,15 @@ export async function updateLocation(payload: {
       }
     }
 
+    const validatedParentId =
+      parentId === undefined
+        ? undefined
+        : await validateParentLocation({
+            organizationId,
+            parentId,
+            currentLocationId: id,
+          });
+
     return await db.location.update({
       where: { id, organizationId },
       data: {
@@ -338,9 +651,21 @@ export async function updateLocation(payload: {
           latitude: coordinates?.lat || null,
           longitude: coordinates?.lon || null,
         }),
+        ...(validatedParentId !== undefined && {
+          parent: validatedParentId
+            ? {
+                connect: {
+                  id: validatedParentId,
+                },
+              }
+            : { disconnect: true },
+        }),
       },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: {
         id,
@@ -495,6 +820,7 @@ export async function updateLocationImage({
       },
       generateThumbnail: true,
       thumbnailSize: 108,
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string | null;
@@ -513,7 +839,7 @@ export async function updateLocationImage({
       } else {
         imagePath = image;
       }
-    } catch (error) {
+    } catch (_error) {
       imagePath = image;
     }
 
@@ -552,7 +878,7 @@ export async function updateLocationImage({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while updating the location image.",
-      additionalData: { locationId },
+      additionalData: { locationId, field: "image" },
       label,
     });
   }
@@ -613,6 +939,608 @@ export async function generateLocationWithImages({
         ? cause.message
         : "Something went wrong while generating locations.",
       additionalData: { organizationId, numberOfLocations },
+      label,
+    });
+  }
+}
+
+export async function getLocationKits(
+  params: Pick<Location, "id"> & {
+    organizationId: Organization["id"];
+    /** Page number. Starts at 1 */
+    page?: number;
+    /** Assets to be loaded per page with the location */
+    perPage?: number;
+    search?: string | null;
+    orderBy?: string;
+    orderDirection?: "asc" | "desc";
+  }
+) {
+  const {
+    organizationId,
+    id,
+    page = 1,
+    perPage = 8,
+    search,
+    orderBy = "createdAt",
+    orderDirection,
+  } = params;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+
+    const kitWhere: Prisma.KitWhereInput = {
+      organizationId,
+      locationId: id,
+    };
+
+    if (search) {
+      kitWhere.name = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [kits, totalKits] = await Promise.all([
+      db.kit.findMany({
+        where: kitWhere,
+        include: { category: true },
+        skip,
+        take,
+        orderBy: { [orderBy]: orderDirection },
+      }),
+      db.kit.count({ where: kitWhere }),
+    ]);
+
+    return { kits, totalKits };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Something went wrong while fetching the location kits",
+      message:
+        "Something went wrong while fetching the location kits. Please try again or contact support.",
+      label,
+    });
+  }
+}
+
+export async function createLocationChangeNote({
+  currentLocation,
+  newLocation,
+  firstName,
+  lastName,
+  assetId,
+  userId,
+  isRemoving,
+}: {
+  currentLocation: Pick<Location, "id" | "name"> | null;
+  newLocation: Location | null;
+  firstName: string;
+  lastName: string;
+  assetId: Asset["id"];
+  userId: User["id"];
+  isRemoving: boolean;
+}) {
+  try {
+    const message = getLocationUpdateNoteContent({
+      currentLocation,
+      newLocation,
+      userId,
+      firstName,
+      lastName,
+      isRemoving,
+    });
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a location change note. Please try again or contact support",
+      additionalData: { userId, assetId },
+      label,
+    });
+  }
+}
+
+async function createBulkLocationChangeNotes({
+  modifiedAssets,
+  assetIds,
+  removedAssetIds,
+  userId,
+  location,
+}: {
+  modifiedAssets: Prisma.AssetGetPayload<{
+    select: {
+      title: true;
+      id: true;
+      location: {
+        select: {
+          name: true;
+          id: true;
+        };
+      };
+      user: {
+        select: {
+          firstName: true;
+          lastName: true;
+          id: true;
+        };
+      };
+    };
+  }>[];
+  assetIds: Asset["id"][];
+  removedAssetIds: Asset["id"][];
+  userId: User["id"];
+  location: Location;
+}) {
+  try {
+    const user = await db.user
+      .findFirstOrThrow({
+        where: {
+          id: userId,
+        },
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "User not found",
+          additionalData: { userId },
+          label,
+        });
+      });
+
+    // Iterate over the modified assets
+    for (const asset of modifiedAssets) {
+      const isRemoving = removedAssetIds.includes(asset.id);
+      const isNew = assetIds.includes(asset.id);
+      const newLocation = isRemoving ? null : location;
+      const currentLocation = asset.location
+        ? { name: asset.location.name, id: asset.location.id }
+        : null;
+
+      if (isNew || isRemoving) {
+        await createLocationChangeNote({
+          currentLocation,
+          newLocation,
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          assetId: asset.id,
+          userId,
+          isRemoving,
+        });
+      }
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating bulk location change notes",
+      additionalData: { userId, assetIds, removedAssetIds },
+      label,
+    });
+  }
+}
+
+export async function updateLocationAssets({
+  assetIds,
+  organizationId,
+  locationId,
+  userId,
+  request,
+  removedAssetIds,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Location["organizationId"];
+  locationId: Location["id"];
+  userId: User["id"];
+  request: Request;
+  removedAssetIds: Asset["id"][];
+}) {
+  try {
+    const location = await db.location
+      .findUniqueOrThrow({
+        where: {
+          id: locationId,
+          organizationId,
+        },
+        include: {
+          assets: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Location not found",
+          additionalData: { locationId, userId, organizationId },
+          status: 404,
+          label: "Location",
+        });
+      });
+
+    /**
+     * If user has selected all assets, then we have to get ids of all those assets
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const assetsWhere = getAssetsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allAssets = await db.asset.findMany({
+        where: assetsWhere,
+        select: { id: true },
+      });
+
+      const locationAssets = location.assets.map((asset) => asset.id);
+      /**
+       * New assets that needs to be added are
+       * - Previously added assets
+       * - All assets with applied filters
+       */
+      assetIds = [
+        ...new Set([
+          ...allAssets.map((asset) => asset.id),
+          ...locationAssets.filter((asset) => !removedAssetIds.includes(asset)),
+        ]),
+      ];
+    }
+
+    /**
+     * We need to query all the modified assets so we know their location before the change
+     * That way we can later create notes for all the location changes
+     */
+    const modifiedAssets = await db.asset
+      .findMany({
+        where: {
+          id: {
+            in: [...assetIds, ...removedAssetIds],
+          },
+          organizationId,
+        },
+        select: {
+          title: true,
+          id: true,
+          location: {
+            select: {
+              name: true,
+              id: true,
+            },
+          },
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              id: true,
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching the assets. Please try again or contact support.",
+          additionalData: { assetIds, removedAssetIds, userId, locationId },
+          label: "Assets",
+        });
+      });
+
+    if (assetIds.length > 0) {
+      /** We update the location with the new assets */
+      await db.location
+        .update({
+          where: {
+            id: locationId,
+            organizationId,
+          },
+          data: {
+            assets: {
+              connect: assetIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while adding the assets to the location. Please try again or contact support.",
+            additionalData: { assetIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+
+    /** If some assets were removed, we also need to handle those */
+    if (removedAssetIds.length > 0) {
+      await db.location
+        .update({
+          where: {
+            organizationId,
+            id: locationId,
+          },
+          data: {
+            assets: {
+              disconnect: removedAssetIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while removing the assets from the location. Please try again or contact support.",
+            additionalData: { removedAssetIds, userId, locationId },
+            label: "Location",
+          });
+        });
+    }
+
+    /** Creates the relevant notes for all the changed assets */
+    await createBulkLocationChangeNotes({
+      modifiedAssets,
+      assetIds,
+      removedAssetIds,
+      userId,
+      location,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the location assets.",
+      additionalData: { assetIds, organizationId, locationId },
+      label,
+    });
+  }
+}
+
+export async function updateLocationKits({
+  locationId,
+  kitIds,
+  removedKitIds,
+  organizationId,
+  userId,
+  request,
+}: {
+  locationId: Location["id"];
+  kitIds: Kit["id"][];
+  removedKitIds: Kit["id"][];
+  organizationId: Location["organizationId"];
+  userId: User["id"];
+  request: Request;
+}) {
+  try {
+    const location = await db.location
+      .findUniqueOrThrow({
+        where: { id: locationId, organizationId },
+        include: {
+          kits: {
+            select: {
+              id: true,
+              assets: { select: { id: true } },
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Location not found",
+          additionalData: { locationId, userId, organizationId },
+          status: 404,
+          label: "Location",
+        });
+      });
+
+    /**
+     * If user has selected all kits, then we have to get ids of all those kits
+     * with respect to the filters applied.
+     * */
+    const hasSelectedAll = kitIds.includes(ALL_SELECTED_KEY);
+    if (hasSelectedAll) {
+      const searchParams = getCurrentSearchParams(request);
+      const kitWhere = getKitsWhereInput({
+        organizationId,
+        currentSearchParams: searchParams.toString(),
+      });
+
+      const allKits = await db.kit.findMany({
+        where: kitWhere,
+        select: {
+          id: true,
+          assets: { select: { id: true } },
+        },
+      });
+
+      const locationKits = location.kits.map((kit) => kit.id);
+      /**
+       * New kits that needs to be added are
+       * - Previously added kits
+       * - All kits with applied filters
+       */
+      kitIds = [
+        ...new Set([
+          ...allKits.map((kit) => kit.id),
+          ...locationKits.filter((kit) => !removedKitIds.includes(kit)),
+        ]),
+      ];
+    }
+
+    if (kitIds.length > 0) {
+      // Get all asset IDs from the kits that are being added to this location
+      const kitsToAdd = await db.kit.findMany({
+        where: { id: { in: kitIds }, organizationId },
+        select: {
+          id: true,
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              location: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+
+      const assetIds = kitsToAdd.flatMap((kit) =>
+        kit.assets.map((asset) => asset.id)
+      );
+
+      /** We update the location with the new kits and their assets */
+      await db.location
+        .update({
+          where: {
+            id: locationId,
+            organizationId,
+          },
+          data: {
+            kits: {
+              connect: kitIds.map((id) => ({
+                id,
+              })),
+            },
+            assets: {
+              connect: assetIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while adding the kits to the location. Please try again or contact support.",
+            additionalData: { kitIds, userId, locationId },
+            label: "Location",
+          });
+        });
+
+      // Add notes to the assets that their location was updated via their parent kit
+      if (assetIds.length > 0) {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location, // Use the asset's current location
+                newLocation: location,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    }
+
+    /** If some kits were removed, we also need to handle those */
+    if (removedKitIds.length > 0) {
+      // Get asset IDs from the kits being removed
+      const kitsBeingRemoved = await db.kit.findMany({
+        where: { id: { in: removedKitIds }, organizationId },
+        select: { id: true, assets: { select: { id: true, title: true } } },
+      });
+
+      const removedAssetIds = kitsBeingRemoved.flatMap((kit) =>
+        kit.assets.map((asset) => asset.id)
+      );
+
+      await db.location
+        .update({
+          where: {
+            organizationId,
+            id: locationId,
+          },
+          data: {
+            kits: {
+              disconnect: removedKitIds.map((id) => ({
+                id,
+              })),
+            },
+            assets: {
+              disconnect: removedAssetIds.map((id) => ({
+                id,
+              })),
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while removing the kits from the location. Please try again or contact support.",
+            additionalData: { removedKitIds, userId, locationId },
+            label: "Location",
+          });
+        });
+
+      // Add notes to the assets that their location was removed via their parent kit
+      if (removedAssetIds.length > 0) {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allRemovedAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: location,
+                newLocation: null,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: true,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the location kits.",
+      additionalData: { locationId, kitIds },
       label,
     });
   }

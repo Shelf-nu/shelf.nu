@@ -22,10 +22,7 @@ export enum CheckinIntentEnum {
 
 type CheckinDialogProps = {
   disabled?: ButtonProps["disabled"];
-  booking: Pick<Booking, "id" | "name"> & {
-    to: string | Date;
-    from: string | Date;
-  };
+  booking: Pick<Booking, "id" | "name" | "from" | "to">;
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
 
@@ -35,6 +32,8 @@ type CheckinDialogProps = {
   label?: string;
   /** Variant for different contexts */
   variant?: "default" | "dropdown" | "primary";
+  /** Specific asset IDs for enhanced completion messaging */
+  specificAssetIds?: string[];
 };
 
 export default function CheckinDialog({
@@ -43,6 +42,7 @@ export default function CheckinDialog({
   portalContainer,
   label = "Check-in",
   variant = "default",
+  specificAssetIds,
 }: CheckinDialogProps) {
   const isEarlyCheckin = isBookingEarlyCheckin(booking.to);
   if (!isEarlyCheckin) {
@@ -147,6 +147,16 @@ export default function CheckinDialog({
           </AlertDialogCancel>
 
           <input type="hidden" name="intent" value="checkIn" />
+
+          {/* Pass specific asset IDs for enhanced completion messaging */}
+          {specificAssetIds?.map((assetId) => (
+            <input
+              key={assetId}
+              type="hidden"
+              name="specificAssetIds[]"
+              value={assetId}
+            />
+          ))}
 
           <Button
             disabled={disabled}

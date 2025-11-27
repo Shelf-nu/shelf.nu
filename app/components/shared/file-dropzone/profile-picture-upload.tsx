@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import { useFetcher } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { useFetcher } from "react-router";
 import { updateFileInfoFromFileAtom } from "./atoms";
 import { FileDropzone } from "./file-dropzone";
 
@@ -14,7 +14,7 @@ export function ProfilePictureUpload() {
       if (acceptedFiles) {
         const file = acceptedFiles[0];
         setFileInfo(file);
-        fetcher.submit(
+        void fetcher.submit(
           /**
            * For some reason even tho its multipart/form-data submit() is not
            *  happy with me passing a file as part of the POST body

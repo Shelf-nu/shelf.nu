@@ -1,7 +1,7 @@
 import type { AssetIndexSettings } from "@prisma/client";
-import { createCookie } from "@remix-run/node"; // or cloudflare/deno
+import { createCookie } from "react-router"; // or cloudflare/deno
 
-import type { Cookie } from "@remix-run/node";
+import type { Cookie } from "react-router";
 import type {
   ALLOWED_FILTER_PATHNAMES,
   AllowedPathname,
@@ -76,7 +76,7 @@ export async function updateCookieWithPerPage(
   /* Get the cookie header */
   const cookieHeader = request.headers.get("Cookie");
 
-  let cookie = (await userPrefs.parse(cookieHeader)) || {};
+  const cookie = (await userPrefs.parse(cookieHeader)) || {};
   /** If the cookie doesn't have perPage, adding perPage attribute and setting it to its default value 20*/
   if (!cookie.perPage) {
     cookie.perPage = 20;

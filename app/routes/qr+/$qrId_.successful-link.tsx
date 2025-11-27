@@ -1,6 +1,5 @@
-import { json } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import { ErrorContent } from "~/components/errors";
@@ -11,7 +10,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import { normalizeQrData } from "~/utils/qr";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -23,7 +22,11 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     const qr = await db.qr
       .findUniqueOrThrow({
         where: { id: qrId },
-        include: {
+        select: {
+          id: true,
+          assetId: true,
+          kitId: true,
+
           asset: {
             select: {
               id: true,
@@ -48,17 +51,15 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    return json(
-      data({
-        header: {
-          title: "Successfully linked asset to QR code",
-        },
-        qr,
-      })
-    );
+    return payload({
+      header: {
+        title: "Successfully linked asset to QR code",
+      },
+      qr,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 };
 

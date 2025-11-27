@@ -1,9 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { Link, Outlet, useMatches } from "@remix-run/react";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ShouldRevalidateFunction,
+} from "react-router";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";
@@ -21,6 +23,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
@@ -31,14 +34,16 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -115,50 +120,66 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/bookings?${cookieParams.toString()}`);
     }
 
-    const [{ bookings, bookingCount }, teamMembersData, tags] =
-      await Promise.all([
-        getBookings({
-          organizationId,
-          page,
-          perPage,
-          search,
-          userId: userId,
-          ...(status && {
-            // If status is in the params, we filter based on it
-            statuses: [status],
-          }),
-          custodianTeamMemberIds: teamMemberIds,
-          ...selfServiceData,
-          orderBy,
-          orderDirection,
-          tags: filterTags,
-          extraInclude: {
-            tags: { select: { id: true, name: true } },
-          },
+    const [
+      { bookings, bookingCount },
+      teamMembersData,
+      teamMembersForFormData,
+      tags,
+    ] = await Promise.all([
+      getBookings({
+        organizationId,
+        page,
+        perPage,
+        search,
+        userId: userId,
+        ...(status && {
+          // If status is in the params, we filter based on it
+          statuses: [status],
         }),
+        custodianTeamMemberIds: teamMemberIds,
+        ...selfServiceData,
+        orderBy,
+        orderDirection,
+        tags: filterTags,
+        extraInclude: {
+          tags: { select: { id: true, name: true } },
+        },
+      }),
 
-        // team members/custodian
-        getTeamMemberForCustodianFilter({
-          organizationId,
-          selectedTeamMembers: teamMemberIds,
-          getAll:
-            searchParams.has("getAll") &&
-            hasGetAllValue(searchParams, "teamMember"),
-          filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
-          userId,
-        }),
+      // team members for filter dropdown
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
+        userId,
+      }),
 
-        db.tag.findMany({
-          where: {
+      // team members for booking form - BASE/SELF_SERVICE users need their team member guaranteed
+      isSelfServiceOrBase
+        ? getTeamMemberForForm({
             organizationId,
-            OR: [
-              { useFor: { isEmpty: true } },
-              { useFor: { has: TagUseFor.BOOKING } },
-            ],
-          },
-          orderBy: { name: "asc" },
-        }),
-      ]);
+            userId,
+            isSelfServiceOrBase,
+            getAll:
+              searchParams.has("getAll") &&
+              hasGetAllValue(searchParams, "teamMember"),
+          })
+        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+
+      db.tag.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { useFor: { isEmpty: true } },
+            { useFor: { has: TagUseFor.BOOKING } },
+          ],
+        },
+        orderBy: { name: "asc" },
+      }),
+    ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -170,14 +191,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    /** We format the dates on the server based on the users timezone and locale  */
-    const items = formatBookingsDates(bookings, request);
-
-    return json(
-      data({
+    return data(
+      payload({
         header,
         currentOrganization,
-        items,
+        items: bookings,
         search,
         page,
         totalItems: bookingCount,
@@ -185,6 +203,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         ...teamMembersData,
+        // For BASE/SELF_SERVICE users, provide dedicated form team members
+        // For ADMIN users, reuse the filter team members
+        teamMembersForForm:
+          teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
         isSelfServiceOrBase,
         tags,
         totalTags: tags.length,
@@ -203,7 +225,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -295,7 +317,6 @@ export default function BookingsIndexPage({
           />
         </Header>
       ) : null}
-
       <ListContentWrapper className={className}>
         <BookingFilters />
 
@@ -378,10 +399,7 @@ const ListBookingsContent = ({
       custodianTeamMember: true;
       tags: { select: { id: true; name: true } };
     };
-  }> & {
-    displayFrom?: string[];
-    displayTo?: string[];
-  };
+  }>;
 }) => {
   const hasUnavaiableAssets =
     item.assets.some(
@@ -444,24 +462,28 @@ const ListBookingsContent = ({
 
       {/* From */}
       <Td>
-        {item.displayFrom ? (
+        {item.from ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
-              {item.displayFrom[0]}
+              <DateS date={item.from} />
             </span>
-            <span className="block text-gray-600">{item.displayFrom[1]}</span>
+            <span className="block text-gray-600">
+              <DateS date={item.from} onlyTime />
+            </span>
           </div>
         ) : null}
       </Td>
 
       {/* To */}
       <Td>
-        {item.displayTo ? (
+        {item.to ? (
           <div className="min-w-[130px]">
             <span className="word-break mb-1 block font-medium">
-              {item.displayTo[0]}
+              <DateS date={item.to} />
             </span>
-            <span className="block text-gray-600">{item.displayTo[1]}</span>
+            <span className="block text-gray-600">
+              <DateS date={item.to} onlyTime />
+            </span>
           </div>
         ) : null}
       </Td>

@@ -1,6 +1,11 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -13,17 +18,20 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Duplicate asset") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -47,19 +55,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    return json(
-      data({
-        header: {
-          title: `Duplicate asset`,
-          subHeading: "Choose the amount of duplicates you want to create.",
-        },
-        showModal: true,
-        asset,
-      })
-    );
+    return payload({
+      header: {
+        title: `Duplicate asset`,
+        subHeading: "Choose the amount of duplicates you want to create.",
+      },
+      showModal: true,
+      asset,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -122,7 +128,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -155,7 +161,7 @@ export default function DuplicateAsset() {
                   thumbnailImage: asset.thumbnailImage,
                   mainImageExpiration: asset.mainImageExpiration,
                 }}
-                alt={asset.title}
+                alt={`Image of ${asset.title}`}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>

@@ -1,13 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
+  data,
+  redirect,
   Link,
   useActionData,
   useLoaderData,
   useNavigation,
-} from "@remix-run/react";
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -17,27 +18,35 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { createNote } from "~/modules/note/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
   parseData,
 } from "~/utils/http.server";
 import {
+  wrapCustodianForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
-import type { AssetWithBooking } from "./bookings.$bookingId.manage-assets";
+
+export const meta = () => [{ title: appendToMetaTitle("Assign custody") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -47,43 +56,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      }
+    );
 
-    const asset = await db.asset
-      .findUnique({
-        where: { id: assetId },
-        select: {
-          custody: {
-            select: {
-              id: true,
-            },
-          },
-          bookings: {
-            where: {
-              status: {
-                in: [BookingStatus.RESERVED],
-              },
-            },
-            select: {
-              id: true,
-            },
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+      request,
+      include: {
+        custody: {
+          select: {
+            id: true,
           },
         },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching asset. Please try again or contact support.",
-          additionalData: { userId, assetId, organizationId },
-          label: "Assets",
-        });
-      });
+        bookings: {
+          where: {
+            status: {
+              in: [BookingStatus.RESERVED],
+            },
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
 
     /** If the asset already has a custody, this page should not be visible */
     if (asset && asset.custody) {
@@ -120,17 +124,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const totalTeamMembers = await db.teamMember.count({ where });
 
-    return json(
-      data({
-        showModal: true,
-        teamMembers,
-        asset,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      showModal: true,
+      teamMembers,
+      asset,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -142,7 +144,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { role } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -161,7 +163,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     /** We send the data from the form as a json string, so we can easily have both the name and id
      * ID is used to connect the asset to the custodian
@@ -169,21 +177,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const { id: custodianId, name: custodianName } = custodian;
 
-    if (isSelfService) {
-      const custodian = await db.teamMember.findUnique({
-        where: { id: custodianId },
-        select: { id: true, userId: true },
+    // Validate that the custodian belongs to the same organization
+    const custodianTeamMember = await getTeamMember({
+      id: custodianId,
+      organizationId,
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    }).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, assetId, custodianId },
+        label: "Assets",
+        status: 404,
       });
+    });
 
-      if (custodian?.userId !== user.id) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, assetId, custodianId },
-          label: "Assets",
-        });
-      }
+    const custodianDisplayName =
+      custodianTeamMember.name?.trim() || custodianName.trim();
+
+    if (isSelfService && custodianTeamMember.userId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetId, custodianId },
+        label: "Assets",
+      });
     }
 
     /** In order to do it with a single query
@@ -193,7 +224,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const asset = await db.asset
       .update({
-        where: { id: assetId },
+        where: { id: assetId, organizationId } as Prisma.AssetWhereUniqueInput,
         data: {
           status: AssetStatus.IN_CUSTODY,
           custody: {
@@ -202,13 +233,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
+        select: {
+          id: true,
+          title: true,
         },
       })
       .catch((cause) => {
@@ -222,17 +249,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
     /** Once the asset is updated, we create the note */
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    const custodianDisplay = wrapCustodianForNote({
+      teamMember: {
+        name: custodianDisplayName,
+        user: custodianTeamMember.user
+          ? {
+              id: custodianTeamMember.user.id,
+              firstName: custodianTeamMember.user.firstName,
+              lastName: custodianTeamMember.user.lastName,
+            }
+          : null,
+      },
+    });
+
+    const content = isSelfService
+      ? `${actor} took custody.`
+      : `${actor} assigned custody to ${custodianDisplay}.`;
+
     await createNote({
-      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has ${
-        isSelfService ? "taken" : `given **${custodianName.trim()}**`
-      } custody over **${asset.title.trim()}**`,
+      content,
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
     });
 
     sendNotification({
-      title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+      title: `‘${asset.title}’ is now in custody of ${custodianDisplayName}`,
       message:
         "Remember, this asset will be unavailable until custody is manually released.",
       icon: { name: "success", variant: "success" },
@@ -242,7 +290,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/assets/${assetId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -252,7 +300,7 @@ export function links() {
 
 export default function Custody() {
   const { asset, teamMembers } = useLoaderData<typeof loader>();
-  const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+  const firstReservedBookingId = asset?.bookings?.[0]?.id;
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -314,12 +362,12 @@ export default function Custody() {
             <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
           ) : null}
 
-          {hasBookings ? (
+          {firstReservedBookingId ? (
             <WarningBox className="-mt-4 mb-8">
               <>
                 Asset is part of an{" "}
                 <Link
-                  to={`/bookings/${(asset as AssetWithBooking).bookings[0].id}`}
+                  to={`/bookings/${firstReservedBookingId}`}
                   className="underline"
                   target="_blank"
                 >

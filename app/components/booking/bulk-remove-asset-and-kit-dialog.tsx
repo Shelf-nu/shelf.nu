@@ -1,5 +1,5 @@
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
@@ -24,7 +24,7 @@ export default function BulkRemoveAssetAndKitDialog() {
       title={`Remove selected items (${totalSelectedItems})`}
       arrayFieldId="assetOrKitIds"
       description={`Are you sure you want to remove ${totalSelectedItems} selected item(s)? This action cannot be undone.`}
-      actionUrl={`/bookings/${booking.id}`}
+      actionUrl={`/bookings/${booking.id}/overview`}
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <>

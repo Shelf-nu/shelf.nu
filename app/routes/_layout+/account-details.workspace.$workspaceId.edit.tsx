@@ -1,17 +1,15 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import {
-  json,
-  MaxPartSizeExceededError,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
@@ -31,13 +29,15 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
   parseData,
@@ -48,6 +48,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -61,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    await requirePermission({
+    const { organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -96,26 +97,43 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    const admins = await getOrganizationAdmins({
-      organizationId: organization.id,
-    });
+    const [admins, tierLimit, user] = await Promise.all([
+      getOrganizationAdmins({
+        organizationId: organization.id,
+      }),
+      getOrganizationTierLimit({
+        organizationId: organization.id,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
 
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
     };
 
-    return json(
-      data({
-        organization,
-        header,
-        curriences: Object.keys(Currency),
-        isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
-        admins,
-      })
-    );
+    return payload({
+      organization,
+      header,
+      curriences: Object.keys(Currency),
+      isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
+      admins,
+      canHideShelfBranding: canHideBrandingForThisWorkspace,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -142,7 +160,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -179,6 +197,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
+    const [tierLimit, user] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId: organization.id,
+        organizations,
+      }),
+      db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { tierId: true },
+      }),
+    ]);
+
+    const canHideBranding = canHideShelfBranding(tierLimit);
+
+    // Team tier users can only hide branding on team workspaces
+    // Plus tier users can only hide branding on personal workspaces
+    const canHideBrandingForThisWorkspace =
+      canHideBranding &&
+      (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
+
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -200,18 +237,48 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organization.type === "PERSONAL"
         );
 
-        const payload = parseData(formData, schema, {
+        const parsedData = parseData(formData, schema, {
           additionalData: { userId, organizationId: id },
         });
 
-        const { name, currency } = payload;
+        const { name, currency, qrIdDisplayPreference, showShelfBranding } =
+          parsedData;
 
-        const formDataFile = await unstable_parseMultipartFormData(
-          request,
-          unstable_createMemoryUploadHandler({
-            maxPartSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-          })
+        let nextShowShelfBranding = resolveShowShelfBranding(
+          showShelfBranding,
+          organization.showShelfBranding
         );
+
+        if (!canHideBrandingForThisWorkspace) {
+          nextShowShelfBranding = true;
+        }
+
+        let formDataFile: FormData;
+        try {
+          formDataFile = await parseFormData(request, {
+            maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+          });
+        } catch (parseError) {
+          if (parseError instanceof MaxFileSizeExceededError) {
+            const reason = new ShelfError({
+              cause: parseError,
+              message: `Image size exceeds maximum allowed size of ${
+                DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+              }MB`,
+              status: 400,
+              label: "Organization",
+              additionalData: { userId, id, field: "image" },
+              shouldBeCaptured: false,
+            });
+            return data(error(reason), { status: reason.status });
+          }
+
+          const reason = makeShelfError(parseError, {
+            userId,
+            organizationId: id,
+          });
+          return data(error(reason), { status: reason.status });
+        }
 
         const file = formDataFile.get("image") as File | null;
 
@@ -221,6 +288,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           image: file || null,
           userId: authSession.userId,
           currency,
+          qrIdDisplayPreference,
+          showShelfBranding: nextShowShelfBranding,
         });
 
         sendNotification({
@@ -230,12 +299,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json({ success: true });
+        return payload({ success: true });
       }
       case "permissions": {
         const schema = EditWorkspacePermissionsSettingsFormSchema();
 
-        const payload = parseData(formData, schema, {
+        const parsedData = parseData(formData, schema, {
           additionalData: { userId, organization },
         });
 
@@ -244,7 +313,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           selfServiceCanSeeBookings,
           baseUserCanSeeCustody,
           baseUserCanSeeBookings,
-        } = payload;
+        } = parsedData;
 
         await updateOrganizationPermissions({
           id,
@@ -263,7 +332,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json({ success: true });
+        return payload({ success: true });
       }
       case "sso": {
         if (role !== OrganizationRoles.OWNER) {
@@ -287,11 +356,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const schema = EditWorkspaceSSOSettingsFormSchema(enabledSso);
 
-        const payload = parseData(formData, schema, {
+        const parsedData = parseData(formData, schema, {
           additionalData: { userId, organizationId: id },
         });
 
-        const { selfServiceGroupId, adminGroupId, baseUserGroupId } = payload;
+        const { selfServiceGroupId, adminGroupId, baseUserGroupId } =
+          parsedData;
 
         await updateOrganization({
           id,
@@ -310,7 +380,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json({ success: true });
+        return payload({ success: true });
       }
       default: {
         throw new ShelfError({
@@ -322,18 +392,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
   } catch (cause) {
-    const isMaxPartSizeExceeded = cause instanceof MaxPartSizeExceededError;
     const reason = makeShelfError(cause, { userId });
-    return json(
-      error({
-        ...reason,
-        ...(isMaxPartSizeExceeded && {
-          title: "File too large",
-          message: "Max file size is 4MB.",
-        }),
-      }),
-      { status: reason.status }
-    );
+    // File size errors are now handled in the validation above
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -352,6 +413,7 @@ export default function WorkspaceEditPage() {
         <WorkspaceEditForms
           name={organization.name || name}
           currency={organization.currency}
+          qrIdDisplayPreference={organization.qrIdDisplayPreference}
           className="mt-4"
         />
       </div>

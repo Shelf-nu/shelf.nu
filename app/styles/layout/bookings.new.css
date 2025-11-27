@@ -1,0 +1,15 @@
+.booking-route-form-wrapper {
+  @apply bg-white my-4 overflow-hidden rounded border px-4 py-3 w-full lg:w-min;
+}
+
+.booking-route-form-wrapper .actions-wrapper {
+  @apply mt-4 flex flex-row;
+}
+
+.booking-route-form-wrapper .actions-wrapper .cancellation-button {
+  @apply hidden;
+}
+
+.field-card {
+  @apply p-0 m-0 bg-none border-none shadow-none;
+}

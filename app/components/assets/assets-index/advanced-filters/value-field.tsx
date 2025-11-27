@@ -1,3 +1,4 @@
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import {
@@ -6,8 +7,8 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
 import { parseISO } from "date-fns";
+import { useLoaderData } from "react-router";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
@@ -32,6 +33,7 @@ import {
   adjustDateToUTC,
   isDateString,
 } from "~/utils/date-fns";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { extractQrIdFromValue } from "./helpers";
@@ -120,7 +122,7 @@ export function ValueField({
   }, [customFields, filter.name, filter.type, filter.value, setFilter]);
 
   function handleChange(
-    event: React.ChangeEvent<
+    event: ChangeEvent<
       HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
     >
   ) {
@@ -134,7 +136,7 @@ export function ValueField({
   }
 
   function handleBetweenChange(index: 0 | 1) {
-    return (event: React.ChangeEvent<HTMLInputElement>) => {
+    return (event: ChangeEvent<HTMLInputElement>) => {
       const newValue = [...localValue] as [string, string];
       newValue[index] = event.target.value;
       setLocalValue(newValue);
@@ -165,7 +167,7 @@ export function ValueField({
     disabled,
   };
 
-  const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const submitOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !disabled) {
       applyFilters();
     }
@@ -199,7 +201,7 @@ export function ValueField({
                   setFilter(e.target.value);
                 }}
                 placeholder={placeholder(filter.operator)}
-                onKeyUp={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                onKeyUp={(e: KeyboardEvent<HTMLInputElement>) => {
                   if (e.key === "Enter") {
                     setTimeout(() => {
                       // Assert the target as HTMLInputElement to access value
@@ -207,7 +209,7 @@ export function ValueField({
                       const cleanValue = extractQrIdFromValue(input.value);
                       setFilter(cleanValue);
                       // Create a new keyboard event for submitOnEnter
-                      submitOnEnter(e as React.KeyboardEvent<HTMLInputElement>);
+                      submitOnEnter(e as KeyboardEvent<HTMLInputElement>);
                     }, 10);
                   }
                 }}
@@ -220,7 +222,7 @@ export function ValueField({
                 <TooltipProvider delayDuration={100}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-400 hover:text-gray-700">
+                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-600 hover:text-gray-700">
                         <HelpIcon />
                       </i>
                     </TooltipTrigger>
@@ -475,8 +477,44 @@ function BooleanField({
   disabled?: boolean;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const boolValue = value === "" ? true : value === "true" || value === true;
+
+  // Reset selected index when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      // Set to "Yes" (0) if true, "No" (1) if false
+      setSelectedIndex(boolValue ? 0 : 1);
+    }
+  }, [isPopoverOpen, boolValue]);
+
+  const handleSelect = (value: "true" | "false") => {
+    handleBooleanChange(value);
+    setIsPopoverOpen(false);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev < 1 ? prev + 1 : prev));
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ": // Space key
+        event.preventDefault();
+        handleSelect(selectedIndex === 0 ? "true" : "false");
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
 
   return (
     <>
@@ -503,22 +541,29 @@ function BooleanField({
             className={tw(
               "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
+            onKeyDown={handleKeyDown}
           >
             <div
-              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-              onClick={() => {
-                handleBooleanChange("true");
-                setIsPopoverOpen(false);
-              }}
+              className={tw(
+                "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                selectedIndex === 0 && "bg-gray-50"
+              )}
+              role="button"
+              tabIndex={0}
+              onClick={() => handleSelect("true")}
+              onKeyDown={handleActivationKeyPress(() => handleSelect("true"))}
             >
               <span>Yes</span>
             </div>
             <div
-              className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50"
-              onClick={() => {
-                handleBooleanChange("false");
-                setIsPopoverOpen(false);
-              }}
+              className={tw(
+                "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                selectedIndex === 1 && "bg-gray-50"
+              )}
+              role="button"
+              tabIndex={0}
+              onClick={() => handleSelect("false")}
+              onKeyDown={handleActivationKeyPress(() => handleSelect("false"))}
             >
               <span>No</span>
             </div>
@@ -555,9 +600,23 @@ function EnumField({
   disabled = false,
 }: EnumFieldProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
+
+  // Reset selected index when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      // For single-select, find the currently selected option
+      if (!multiSelect) {
+        const currentIndex = options.findIndex((opt) => opt.id === value);
+        setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+      } else {
+        setSelectedIndex(0);
+      }
+    }
+  }, [isPopoverOpen, value, options, multiSelect]);
 
   const displayValue = disabled
     ? "Select a column first"
@@ -586,6 +645,44 @@ function EnumField({
     }
   }
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < options.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ": // Space key
+        event.preventDefault();
+        if (options[selectedIndex]) {
+          handleOptionClick(options[selectedIndex].id);
+        }
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (isPopoverOpen) {
+      const selectedElement = document.getElementById(
+        `enum-option-${selectedIndex}`
+      );
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [selectedIndex, isPopoverOpen]);
+
   return (
     <>
       <input
@@ -613,6 +710,7 @@ function EnumField({
             className={tw(
               "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
+            onKeyDown={handleKeyDown}
           >
             {options.length === 0 ? (
               <div className="max-w-[400px] p-4">
@@ -620,13 +718,22 @@ function EnumField({
                 is an error.
               </div>
             ) : (
-              options.map((option) => {
+              options.map((option, index) => {
                 const isSelected = selectedValues.includes(option.id);
                 return (
                   <div
+                    id={`enum-option-${index}`}
                     key={option.id}
-                    className="flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50"
+                    className={tw(
+                      "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                      selectedIndex === index && "bg-gray-50"
+                    )}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleOptionClick(option.id)}
+                    onKeyDown={handleActivationKeyPress(() =>
+                      handleOptionClick(option.id)
+                    )}
                   >
                     <span>{option.label}</span>
                     {multiSelect && isSelected && (
@@ -771,11 +878,12 @@ function CustodyEnumField({
                   selectedIds.length <= 0 && "text-gray-500"
                 )}
               >
-                {value === "without-custody"
-                  ? "Without custody"
-                  : selectedIds.length > 0
+                {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "without-custody") {
+                          return "Without custody";
+                        }
                         const teamMember = data.teamMembers.find(
                           (tm) => tm.id === id
                         );
@@ -895,12 +1003,13 @@ function CategoryEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "uncategorized") {
+                          return "Uncategorized";
+                        }
                         const category = data.categories?.find(
                           (cat) => cat.id === id
                         );
-                        return id === "uncategorized"
-                          ? "Uncategorized"
-                          : category?.name || "";
+                        return category?.name || "";
                       })
                       .join(", ")
                   : "Select category"}
@@ -1007,12 +1116,13 @@ function LocationEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "without-location") {
+                          return "Without location";
+                        }
                         const location = data.locations?.find(
                           (loc) => loc.id === id
                         );
-                        return id === "without-location"
-                          ? "Without location"
-                          : location?.name || "";
+                        return location?.name || "";
                       })
                       .join(", ")
                   : "Select location"}
@@ -1119,10 +1229,11 @@ function KitEnumField({
                   : selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "without-kit") {
+                          return "Without kit";
+                        }
                         const kit = data.kits?.find((kit) => kit.id === id);
-                        return id === "without-kit"
-                          ? "Without kit"
-                          : kit?.name || "";
+                        return kit?.name || "";
                       })
                       .join(", ")
                   : "Select kit"}
@@ -1225,8 +1336,11 @@ function TagsField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "untagged") {
+                          return "Untagged";
+                        }
                         const tag = data.tags?.find((t) => t.id === id);
-                        return id === "untagged" ? "Untagged" : tag?.name || "";
+                        return tag?.name || "";
                       })
                       .join(", ")
                   : "Select Tag"}
@@ -1448,7 +1562,7 @@ export function DateField({
   }, [filter.value, timeZone]);
 
   function handleDateChange(index: 0 | 1) {
-    return (event: React.ChangeEvent<HTMLInputElement>) => {
+    return (event: ChangeEvent<HTMLInputElement>) => {
       const newValue = [...localValue] as [string, string];
       newValue[index] = event.target.value;
       setLocalValue(newValue);
@@ -1479,7 +1593,7 @@ export function DateField({
     }
   }
 
-  const submitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const submitOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !error) {
       applyFilters();
     }
@@ -1573,7 +1687,7 @@ function MultiDateInput({
     inputClassName: string;
     hideLabel: boolean;
     label: string;
-    onKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+    onKeyUp: (e: KeyboardEvent<HTMLInputElement>) => void;
   };
   name?: string;
   error?: string;
@@ -1586,7 +1700,7 @@ function MultiDateInput({
 
   // Handle date change at specific index
   const handleDateChange =
-    (index: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    (index: number) => (event: ChangeEvent<HTMLInputElement>) => {
       const newDates = [...dates];
       newDates[index] = event.target.value;
       setDates(newDates);

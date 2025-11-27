@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
-import { useNavigate } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useNavigate } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 
 export const addAssetsToExistingBookingSchema = z.object({
@@ -24,11 +25,6 @@ export const addAssetsToExistingBookingSchema = z.object({
   assetsIds: z.string().array().min(1, "Please select at least one asset."),
   addOnlyRestAssets: z.coerce.boolean().optional().nullable(),
 });
-
-type BookingWithDates = Booking & {
-  displayFrom: string;
-  displayTo: string;
-};
 
 export default function AddAssetsToExistingBookingDialog() {
   const navigate = useNavigate();
@@ -42,7 +38,7 @@ export default function AddAssetsToExistingBookingDialog() {
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
 
   const [isFetchingBookings, setIsFetchingBookings] = useState(false);
-  const [bookings, setBookings] = useState<BookingWithDates[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
 
   const isDialogOpen = bulkDialogOpenState["booking-exist"] === true;
 
@@ -50,9 +46,9 @@ export default function AddAssetsToExistingBookingDialog() {
     if (isDialogOpen) {
       setIsFetchingBookings(true);
 
-      fetch("/api/bookings/get-all")
+      void fetch("/api/bookings/get-all")
         .then((response) => response.json())
-        .then((data: { bookings: BookingWithDates[] }) => {
+        .then((data: { bookings: Booking[] }) => {
           setBookings(data.bookings);
         })
         .finally(() => {
@@ -101,7 +97,8 @@ export default function AddAssetsToExistingBookingDialog() {
                           {booking.name}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {booking.displayFrom} - {booking.displayTo}
+                          <DateS date={booking.from} includeTime /> -{" "}
+                          <DateS date={booking.to} includeTime />
                         </div>
                       </div>
                     </SelectItem>
@@ -201,7 +198,7 @@ export default function AddAssetsToExistingBookingDialog() {
                   width="full"
                   disabled={disabled}
                   onClick={() => {
-                    navigate(`/bookings/${fetcherData?.bookingId}`);
+                    void navigate(`/bookings/${fetcherData?.bookingId}`);
                   }}
                 >
                   View booking

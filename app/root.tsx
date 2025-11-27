@@ -1,11 +1,12 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type { User } from "@prisma/client";
+import nProgressStyles from "nprogress/nprogress.css?url";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
+} from "react-router";
 import {
   Links,
   Meta,
@@ -14,9 +15,7 @@ import {
   ScrollRestoration,
   useLoaderData,
   useRouteLoaderData,
-} from "@remix-run/react";
-import { withSentry } from "@sentry/remix";
-import nProgressStyles from "nprogress/nprogress.css?url";
+} from "react-router";
 import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
@@ -26,10 +25,11 @@ import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
+import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getClientHint } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
-import { data } from "./utils/http.server";
+import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
@@ -47,6 +47,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
+  { rel: "stylesheet", href: pmDocStylesheetUrl },
   { rel: "manifest", href: "/static/manifest.json" },
   { rel: "apple-touch-icon", href: config.faviconPath },
   { rel: "icon", href: config.faviconPath },
@@ -62,19 +63,17 @@ export const meta: MetaFunction = () => [
 ];
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
-  json(
-    data({
-      env: getBrowserEnv(),
-      maintenanceMode: false,
-      requestInfo: {
-        hints: getClientHint(request),
-      },
-    })
-  );
+  payload({
+    env: getBrowserEnv(),
+    maintenanceMode: false,
+    requestInfo: {
+      hints: getClientHint(request),
+    },
+  });
 
 export const shouldRevalidate = () => false;
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children }: { children: ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
   const [hasCookies, setHasCookies] = useState(true);
@@ -148,6 +147,6 @@ function App() {
   );
 }
 
-export default withSentry(App);
+export default App;
 
 export const ErrorBoundary = () => <ErrorContent />;

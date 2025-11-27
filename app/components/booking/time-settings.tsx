@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useActionData } from "@remix-run/react";
+import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { Form } from "~/components/custom-form";
@@ -11,6 +11,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
 import { getValidationErrors } from "~/utils/http";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 
 export const TimeSettingsSchema = z.object({
   bufferStartTime: z.coerce
@@ -141,11 +142,18 @@ export function TimeSettings({
                   ref={maxBookingLengthSkipClosedDaysRef}
                 />
                 <span
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     if (maxBookingLengthSkipClosedDaysRef.current) {
                       maxBookingLengthSkipClosedDaysRef.current.click();
                     }
                   }}
+                  onKeyDown={handleActivationKeyPress(() => {
+                    if (maxBookingLengthSkipClosedDaysRef.current) {
+                      maxBookingLengthSkipClosedDaysRef.current.click();
+                    }
+                  })}
                   className="cursor-default"
                 >
                   Skip closed days

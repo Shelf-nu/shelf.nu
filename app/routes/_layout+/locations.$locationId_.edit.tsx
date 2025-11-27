@@ -1,11 +1,10 @@
-import { json } from "@remix-run/node";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
-} from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
@@ -16,6 +15,7 @@ import {
 } from "~/components/location/form";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getLocation,
   updateLocation,
@@ -24,7 +24,14 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getParams,
+  getRefererPath,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -58,20 +65,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy: "createdAt",
     });
 
+    const { locations, totalLocations } = await getLocationsForCreateAndEdit({
+      organizationId,
+      request,
+      defaultLocation: location.parentId,
+    });
+
     const header: HeaderData = {
       title: `Edit | ${location.name}`,
       subHeading: location.id,
     };
 
-    return json(
-      data({
-        location,
-        header,
-      })
-    );
+    return payload({
+      location,
+      locations,
+      totalLocations,
+      header,
+      referer: getRefererPath(request),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -103,7 +117,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
     const clonedRequest = request.clone();
 
-    const payload = parseData(
+    const parsedData = parseData(
       await clonedRequest.formData(),
       NewLocationFormSchema,
       {
@@ -111,7 +125,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address } = payload;
+    const { name, description, address, parentId } = parsedData;
 
     const location = await updateLocation({
       id,
@@ -120,6 +134,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       description,
       address,
       organizationId,
+      parentId,
     });
 
     await updateLocationImage({
@@ -137,16 +152,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    // If redirectTo is provided, redirect back to previous page
+    // Otherwise stay on current page (e.g., when opened in new tab)
+    if (parsedData.redirectTo) {
+      return redirect(safeRedirect(parsedData.redirectTo, `/locations/${id}`));
+    }
+
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
 export default function LocationEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
-  const { location } = useLoaderData<typeof loader>();
+  const { location, referer } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">
@@ -162,6 +183,9 @@ export default function LocationEditPage() {
           name={location.name}
           description={location.description}
           address={location.address}
+          parentId={location.parentId}
+          referer={referer}
+          excludeLocationId={location.id}
         />
       </Card>
     </div>

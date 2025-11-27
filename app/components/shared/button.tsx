@@ -1,6 +1,12 @@
 import React from "react";
+import type {
+  ReactNode,
+  ButtonHTMLAttributes,
+  ComponentType,
+  MouseEvent,
+} from "react";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
-import { Link, type LinkProps } from "@remix-run/react";
+import { Link, type LinkProps } from "react-router";
 import { tw } from "~/utils/tw";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { IconType } from "./icons-map";
@@ -20,7 +26,7 @@ export type DisabledProp =
   | boolean
   | {
       title?: string;
-      reason: React.ReactNode | string;
+      reason: ReactNode | string;
     };
 
 /**
@@ -46,11 +52,19 @@ export interface CommonButtonProps {
   onlyNewTabIconOnHover?: boolean;
   error?: string;
   hideErrorText?: boolean;
-  children?: React.ReactNode;
+  children?: ReactNode;
   disabled?: DisabledProp;
-  label?: string; // Add label here since it's used in BookLink
+  /**
+   * Accessible label for the button. Only required for icon-only buttons.
+   * Buttons with text children automatically use the text as the accessible name.
+   * If both label and text children are present, the text children take precedence.
+   */
+  label?: string;
   id?: string; // Add id as an optional prop since some buttons might need it
-  tooltip?: string; // Tooltip text for the button
+  /**
+   * Tooltip text for the button. Also serves as an accessible name for icon-only buttons.
+   */
+  tooltip?: string;
 }
 
 /**
@@ -59,7 +73,7 @@ export interface CommonButtonProps {
 export interface HTMLButtonProps
   extends Omit<CommonButtonProps, "disabled" | "title">,
     Omit<
-      React.ButtonHTMLAttributes<HTMLButtonElement>,
+      ButtonHTMLAttributes<HTMLButtonElement>,
       keyof CommonButtonProps | "disabled"
     > {
   as?: "button";
@@ -83,7 +97,7 @@ export interface LinkButtonProps
  * Props for custom component buttons
  */
 export interface CustomComponentButtonProps extends CommonButtonProps {
-  as: React.ComponentType<any>;
+  as: ComponentType<any>;
   [key: string]: any;
 }
 
@@ -143,6 +157,13 @@ const variants: Record<ButtonVariant, string> = {
   ),
 };
 
+const textualVariants = new Set<ButtonVariant>([
+  "link",
+  "link-gray",
+  "block-link",
+  "block-link-gray",
+]);
+
 /**
  * Style mappings for button sizes
  */
@@ -180,6 +201,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       error,
       hideErrorText = false,
       tooltip,
+      label,
       ...props
     },
     ref
@@ -188,6 +210,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     const baseButtonClasses =
       variant === "inherit"
         ? "inline-flex items-center"
+        : textualVariants.has(variant as ButtonVariant)
+        ? "inline-flex items-start justify-start gap-2 text-left max-w-xl"
         : "inline-flex items-center justify-center rounded font-semibold text-center gap-2 max-w-xl border text-sm box-shadow-xs";
 
     const isDisabled =
@@ -196,6 +220,33 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       typeof disabled === "object" ? disabled.reason : undefined;
     const disabledTitle =
       typeof disabled === "object" ? disabled.title : undefined;
+
+    // Check if this is an icon-only button (has icon but no text children)
+    // Also handles empty strings and whitespace-only children
+    const isIconOnly =
+      icon && (!children || (typeof children === "string" && !children.trim()));
+
+    // Only set aria-label for icon-only buttons or when explicitly provided
+    // Buttons with text children don't need aria-label (text is the accessible name)
+    const explicitAriaLabel =
+      "aria-label" in props
+        ? (props["aria-label" as keyof typeof props] as string)
+        : undefined;
+    const ariaLabel = explicitAriaLabel || (isIconOnly ? label : undefined);
+
+    // Development warning for icon-only buttons without accessible names
+    if (
+      process.env.NODE_ENV === "development" &&
+      isIconOnly &&
+      !ariaLabel &&
+      !tooltip
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "Button: Icon-only button detected without accessible name. " +
+          "Please provide either an aria-label, label prop, or tooltip for accessibility."
+      );
+    }
 
     // Type guard for checking if props has target property
     const hasTarget = (props: ButtonProps): props is LinkButtonProps =>
@@ -252,8 +303,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
             <Component
               {...props}
               className={finalStyles}
-              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-              onClick={(e: React.MouseEvent) => e.preventDefault()}
+              aria-label={ariaLabel}
+              onMouseDown={(e: MouseEvent) => e.preventDefault()}
+              onClick={(e: MouseEvent) => e.preventDefault()}
             >
               {buttonContent}
             </Component>
@@ -276,6 +328,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               <Component
                 {...props}
                 className={finalStyles}
+                aria-label={ariaLabel}
                 prefetch={
                   isLinkProps(props) ? props.prefetch ?? "none" : undefined
                 }
@@ -283,8 +336,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
                 disabled={isDisabled}
                 /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */
                 {...(isDisabled && {
-                  onClick: (e: React.MouseEvent) => e.preventDefault(),
-                  onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+                  onClick: (e: MouseEvent) => e.preventDefault(),
+                  onMouseDown: (e: MouseEvent) => e.preventDefault(),
                 })}
               >
                 {buttonContent}
@@ -304,13 +357,14 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         <Component
           {...props}
           className={finalStyles}
+          aria-label={ariaLabel}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
           ref={ref}
           disabled={isDisabled}
           /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */
           {...(isDisabled && {
-            onClick: (e: React.MouseEvent) => e.preventDefault(),
-            onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+            onClick: (e: MouseEvent) => e.preventDefault(),
+            onMouseDown: (e: MouseEvent) => e.preventDefault(),
           })}
         >
           {buttonContent}

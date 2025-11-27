@@ -14,6 +14,8 @@ import { Button } from "../shared/button";
 interface Props {
   location: {
     name: Location["name"];
+    id: Location["id"];
+    childCount?: number;
   };
   fullWidth?: boolean;
 }
@@ -21,9 +23,11 @@ interface Props {
 export const ActionsDropdown = ({ location, fullWidth }: Props) => (
   <DropdownMenu modal={false}>
     <DropdownMenuTrigger
+      type="button"
       className={tw("asset-actions", fullWidth ? "w-full" : "")}
     >
       <Button
+        type="button"
         variant="secondary"
         to="#"
         width={fullWidth ? "full" : "auto"}

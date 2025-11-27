@@ -98,7 +98,6 @@ export default {
         text: "🗄️ Database",
         collapsed: true,
         items: [
-          { text: "Asset Search", link: "/asset-search" },
           { text: "Database Triggers", link: "/database-triggers" },
           { text: "Protected Indexes", link: "/protected-indexes" },
         ],
@@ -107,7 +106,9 @@ export default {
         text: "🛠️ Development",
         collapsed: true,
         items: [
+          { text: "Accessibility Guidelines", link: "/accessibility" },
           { text: "Error Handling", link: "/handling-errors" },
+          { text: "Select All Pattern", link: "/select-all-pattern" },
           { text: "Utility Hooks", link: "/hooks" },
           {
             text: "Scanner Drawer Development",

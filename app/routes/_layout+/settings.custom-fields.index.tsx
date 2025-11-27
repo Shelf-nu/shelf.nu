@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";
@@ -27,7 +26,7 @@ import {
 } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -80,8 +79,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "custom Fields",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: customFields,
         search,
@@ -101,7 +100,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

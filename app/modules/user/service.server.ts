@@ -7,9 +7,9 @@ import type {
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import sharp from "sharp";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
@@ -23,6 +23,7 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -39,7 +40,7 @@ import {
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
-import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
+import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
@@ -53,28 +54,55 @@ import {
 
 const label: ErrorLabel = "User";
 
-type UserWithInclude<T extends Prisma.UserInclude | undefined> =
-  T extends Prisma.UserInclude ? Prisma.UserGetPayload<{ include: T }> : User;
-
-export async function getUserByID<T extends Prisma.UserInclude | undefined>(
+export function getUserByID<TSelect extends Prisma.UserSelect>(
   id: User["id"],
-  include?: T
-): Promise<UserWithInclude<T>> {
+  options: { select: TSelect; include?: never }
+): Promise<Prisma.UserGetPayload<{ select: TSelect }>>;
+
+// Overload 2: With include
+export function getUserByID<TInclude extends Prisma.UserInclude>(
+  id: User["id"],
+  options: { include: TInclude; select?: never }
+): Promise<Prisma.UserGetPayload<{ include: TInclude }>>;
+
+// Overload 3: Without options (default)
+export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
+
+// Implementation
+export async function getUserByID(
+  id: User["id"],
+  options?: { select?: Prisma.UserSelect; include?: Prisma.UserInclude }
+): Promise<any> {
   try {
+    const select = options?.select;
+    const include = options?.include;
+
+    if (select && include) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot use both select and include in getUserByID. Please choose one.",
+        additionalData: { id, select, include },
+        label,
+      });
+    }
+
     const user = await db.user.findUniqueOrThrow({
       where: { id },
-      include: {
-        ...include,
-      },
+      ...(select
+        ? { select }
+        : include
+        ? { include }
+        : { select: { id: true } }),
     });
 
-    return user as UserWithInclude<T>;
+    return user;
   } catch (cause) {
     throw new ShelfError({
       cause,
       title: "User not found",
       message: "The user you are trying to access does not exist.",
-      additionalData: { id, include },
+      additionalData: { id, ...options },
       label,
     });
   }
@@ -198,7 +226,10 @@ export async function createUserOrAttachOrg({
   createdWithInvite: boolean;
 }) {
   try {
-    const shelfUser = await db.user.findFirst({ where: { email } });
+    const shelfUser = await db.user.findFirst({
+      where: { email },
+      select: USER_WITH_SSO_DETAILS_SELECT,
+    });
 
     /**
      * If user does not exist, create a new user and attach the org to it
@@ -466,7 +497,7 @@ async function handleSCIMTransition(
 export async function updateUserFromSSO(
   authSession: AuthSession,
   existingUser: Prisma.UserGetPayload<{
-    include: typeof INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION;
+    select: typeof USER_WITH_SSO_DETAILS_SELECT;
   }>,
   userData: {
     firstName: string;
@@ -482,7 +513,7 @@ export async function updateUserFromSSO(
     };
   }
 ): Promise<{
-  user: User;
+  user: Prisma.UserGetPayload<{ select: typeof USER_WITH_SSO_DETAILS_SELECT }>;
   org: Organization | null;
   transitions: UserOrgTransition[];
 }> {
@@ -498,7 +529,7 @@ export async function updateUserFromSSO(
       user = await db.user.update({
         where: { id: userId },
         data: { firstName, lastName },
-        include: INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+        select: USER_WITH_SSO_DETAILS_SELECT,
       });
     }
 
@@ -700,9 +731,13 @@ export async function createUser(
               sso: true,
             }),
           },
-          include: {
-            ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
-            organizations: true,
+          select: {
+            ...USER_WITH_SSO_DETAILS_SELECT,
+            organizations: {
+              select: {
+                id: true,
+              },
+            },
           },
         });
 
@@ -938,7 +973,7 @@ async function getUsers({
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = {};
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -998,7 +1033,9 @@ export async function updateProfilePicture({
   userId: User["id"];
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: { id: true, profilePicture: true } satisfies Prisma.UserSelect,
+    });
     const previousProfilePictureUrl = user.profilePicture || undefined;
 
     const fileData = await parseFileFormData({
@@ -1010,6 +1047,7 @@ export async function updateProfilePicture({
         fit: sharp.fit.cover,
         withoutEnlargement: true,
       },
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const profilePicture = fileData.get("profile-picture") as string;
@@ -1031,9 +1069,10 @@ export async function updateProfilePicture({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while updating your profile picture. Please try again or contact support.",
-      additionalData: { userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating your profile picture. Please try again or contact support.",
+      additionalData: { userId, field: "profile-picture" },
       label,
     });
   }
@@ -1055,18 +1094,23 @@ export async function updateProfilePicture({
 export async function softDeleteUser(id: User["id"]) {
   try {
     const user = await getUserByID(id, {
-      contact: {
-        select: {
-          id: true,
-        },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
-            select: { id: true, userId: true },
+      select: {
+        id: true,
+        email: true,
+        profilePicture: true,
+        userOrganizations: {
+          include: {
+            organization: {
+              select: { id: true, userId: true },
+            },
           },
         },
-      },
+        contact: {
+          select: {
+            id: true,
+          },
+        },
+      } satisfies Prisma.UserSelect,
     });
 
     const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(

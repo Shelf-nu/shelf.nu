@@ -1,5 +1,6 @@
 import type {
   Asset,
+  AssetIndexSettings,
   Barcode,
   Booking,
   Kit,
@@ -15,8 +16,9 @@ import {
   BookingStatus,
   ErrorCorrection,
   KitStatus,
+  NoteType,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -24,7 +26,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -41,9 +43,13 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import {
+  wrapCustodianForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import { resolveTeamMemberName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
 import {
@@ -52,11 +58,18 @@ import {
   KITS_INCLUDE_FIELDS,
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
+import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
-import { getAssetsWhereInput } from "../asset/utils.server";
-import { createBulkKitChangeNotes, createNote } from "../note/service.server";
+import {
+  getAssetsWhereInput,
+  getKitLocationUpdateNoteContent,
+} from "../asset/utils.server";
+import {
+  createBulkKitChangeNotes,
+  createNote,
+  createNotes,
+} from "../note/service.server";
 import { getQr } from "../qr/service.server";
-
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -68,10 +81,16 @@ export async function createKit({
   organizationId,
   qrId,
   categoryId,
+  locationId,
   barcodes,
 }: Pick<
   Kit,
-  "name" | "description" | "createdById" | "organizationId" | "categoryId"
+  | "name"
+  | "description"
+  | "createdById"
+  | "organizationId"
+  | "categoryId"
+  | "locationId"
 > & {
   qrId?: Qr["id"];
   barcodes?: Pick<Barcode, "type" | "value">[];
@@ -143,9 +162,11 @@ export async function createKit({
       });
     }
 
-    return await db.kit.create({
-      data,
-    });
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
+    }
+
+    return await db.kit.create({ data });
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -186,9 +207,10 @@ export async function updateKit({
   organizationId,
   categoryId,
   barcodes,
+  locationId,
 }: UpdateKitPayload) {
   try {
-    const data = {
+    const data: Prisma.KitUpdateInput = {
       name,
       description,
       image,
@@ -214,6 +236,10 @@ export async function updateKit({
           },
         },
       });
+    }
+
+    if (locationId) {
+      data.location = { connect: { id: locationId } };
     }
 
     const kit = await db.kit.update({
@@ -267,6 +293,7 @@ export async function updateKitImage({
         width: 800,
         withoutEnlargement: true,
       },
+      maxFileSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string;
@@ -287,8 +314,10 @@ export async function updateKitImage({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating image for kit.",
-      additionalData: { kitId, userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating image for kit.",
+      additionalData: { kitId, userId, field: "image" },
       label,
     });
   }
@@ -606,7 +635,7 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    let where: Prisma.AssetWhereInput = { organizationId, kitId };
+    const where: Prisma.AssetWhereInput = { organizationId, kitId };
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();
@@ -722,16 +751,36 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const kit = await db.kit.findUniqueOrThrow({
-      where: { id: kitId, organizationId },
-      select: {
-        id: true,
-        name: true,
-        assets: true,
-        createdBy: { select: { firstName: true, lastName: true } },
-        custody: { select: { custodian: true } },
-      },
+    const [kit, actor] = await Promise.all([
+      db.kit.findUniqueOrThrow({
+        where: { id: kitId, organizationId },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true, title: true } },
+          createdBy: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+          custody: { select: { custodian: { include: { user: true } } } },
+        },
+      }),
+      getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+    ]);
+
+    const actorLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: actor?.firstName,
+      lastName: actor?.lastName,
     });
+    const custodianDisplay = kit.custody?.custodian
+      ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
+      : "**Unknown Custodian**";
+    const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
     await Promise.all([
       db.kit.update({
@@ -750,18 +799,12 @@ export async function releaseCustody({
           },
         })
       ),
-      ...kit.assets.map((asset) =>
-        createNote({
-          content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
-            .custody?.custodian
-            .name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })
-      ),
+      createNotes({
+        content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
+        type: "UPDATE",
+        userId,
+        assetIds: kit.assets.map((asset) => asset.id),
+      }),
     ]);
 
     return kit;
@@ -874,29 +917,21 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
 type CurrentBookingType = {
   id: string;
   name: string;
-  custodianUser: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
-  custodianTeamMember: Omit<
-    TeamMember,
-    "createdAt" | "updatedAt" | "deletedAt"
+  custodianUser: Pick<
+    User,
+    "firstName" | "lastName" | "profilePicture" | "email"
   > | null;
+  custodianTeamMember: TeamMember | null;
   status: BookingStatus;
-  from: string | Date | null;
+  from: Booking["from"];
 };
 
-export function getKitCurrentBooking(
-  request: Request,
-  kit: {
-    id: string;
-    assets: {
-      bookings: CurrentBookingType[];
-    }[];
-  }
-) {
+export function getKitCurrentBooking(kit: {
+  id: string;
+  assets: {
+    bookings: CurrentBookingType[];
+  }[];
+}) {
   const ongoingBookingAsset = kit.assets
     .map((a) => ({
       ...a,
@@ -911,18 +946,7 @@ export function getKitCurrentBooking(
     ? ongoingBookingAsset.bookings[0]
     : undefined;
 
-  let currentBooking: CurrentBookingType | null | undefined = null;
-
-  if (ongoingBooking && ongoingBooking.from) {
-    const bookingFrom = new Date(ongoingBooking.from);
-    const bookingDateDisplay = getDateTimeFormat(request, {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(bookingFrom);
-
-    currentBooking = { ...ongoingBooking, from: bookingDateDisplay };
-  }
-  return currentBooking;
+  return ongoingBooking;
 }
 
 export async function bulkDeleteKits({
@@ -999,7 +1023,7 @@ export async function bulkAssignKitCustody({
     /**
      * We have to make notes and assign custody to all assets of a kit so we have to make this query
      */
-    const [kits, user] = await Promise.all([
+    const [kits, user, custodianTeamMember] = await Promise.all([
       db.kit.findMany({
         where,
         select: {
@@ -1016,7 +1040,21 @@ export async function bulkAssignKitCustody({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+      db.teamMember.findUnique({
+        where: { id: custodianId },
+        select: {
+          id: true,
+          name: true,
+          user: { select: { id: true, firstName: true, lastName: true } },
+        },
+      }),
     ]);
 
     const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
@@ -1081,14 +1119,26 @@ export async function bulkAssignKitCustody({
       });
 
       /** Creating notes for all the assets of the kit */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const custodianDisplay = custodianTeamMember
+        ? wrapCustodianForNote({ teamMember: custodianTeamMember })
+        : `**${custodianName.trim()}**`;
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${asset
-            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: allAssetsOfAllKits.map((asset) => {
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} granted ${custodianDisplay} custody via kit assignment ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
   } catch (cause) {
@@ -1138,7 +1188,9 @@ export async function bulkReleaseKitCustody({
         select: {
           id: true,
           status: true,
-          custody: { select: { id: true, custodian: true } },
+          custody: {
+            select: { id: true, custodian: { include: { user: true } } },
+          },
           assets: {
             select: {
               id: true,
@@ -1150,7 +1202,13 @@ export async function bulkReleaseKitCustody({
           },
         },
       }),
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
     ]);
 
     const custodian = kits[0].custody?.custodian;
@@ -1207,14 +1265,26 @@ export async function bulkReleaseKitCustody({
       });
 
       /** Creating notes for all the assets */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const custodianDisplay = custodian
+        ? wrapCustodianForNote({ teamMember: custodian })
+        : "**Unknown Custodian**";
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${asset
-            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: allAssetsOfAllKits.map((asset) => {
+          const kitLink = asset.kit
+            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            : "**Unknown Kit**";
+          return {
+            content: `${actor} released ${custodianDisplay}'s custody via kit assignment ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
   } catch (cause) {
@@ -1308,7 +1378,6 @@ export async function updateKitQrCode({
   kitId: string;
   newQrId: string;
 }) {
-  // Disconnect all existing QR codes
   try {
     // Disconnect all existing QR codes
     await db.kit
@@ -1350,11 +1419,94 @@ export async function updateKitQrCode({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating asset QR code",
+      message: "Something went wrong while updating kit QR code",
       label,
       additionalData: { kitId, organizationId, newQrId },
     });
   }
+}
+
+/**
+ * Relinks a kit to a different QR code, unlinking any previous code.
+ * Throws when the QR belongs to another org or is already linked to an asset/kit.
+ */
+export async function relinkKitQrCode({
+  qrId,
+  kitId,
+  organizationId,
+  userId,
+}: {
+  qrId: Qr["id"];
+  kitId: Kit["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}) {
+  const [qr, kit] = await Promise.all([
+    getQr({ id: qrId }),
+    db.kit.findFirst({
+      where: { id: kitId, organizationId },
+      select: { qrCodes: { select: { id: true } } },
+    }),
+  ]);
+
+  if (!kit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Kit not found.",
+      label,
+      additionalData: { kitId, organizationId, qrId },
+    });
+  }
+
+  if (qr.organizationId && qr.organizationId !== organizationId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR not valid.",
+      message: "This QR code does not belong to your organization",
+      label,
+    });
+  }
+
+  if (qr.assetId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (qr.kitId && qr.kitId !== kitId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const oldQrCode = kit.qrCodes[0];
+
+  await Promise.all([
+    db.qr.update({
+      where: { id: qr.id },
+      data: { organizationId, userId },
+    }),
+    updateKitQrCode({
+      kitId,
+      newQrId: qr.id,
+      organizationId,
+    }),
+  ]);
+
+  return {
+    oldQrCodeId: oldQrCode?.id,
+    newQrId: qr.id,
+  };
 }
 
 export async function getAvailableKitAssetForBooking(
@@ -1380,26 +1532,336 @@ export async function getAvailableKitAssetForBooking(
   }
 }
 
+export async function updateKitLocation({
+  id,
+  organizationId,
+  currentLocationId,
+  newLocationId,
+  userId,
+}: {
+  id: Kit["id"];
+  organizationId: Kit["organizationId"];
+  currentLocationId: Kit["locationId"];
+  newLocationId: Kit["locationId"];
+  userId?: User["id"];
+}) {
+  try {
+    // Get kit with its assets first
+    const kit = await db.kit.findUnique({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        name: true,
+        assets: {
+          select: {
+            id: true,
+            title: true,
+            location: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!kit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Kit not found",
+        label,
+      });
+    }
+
+    const assetIds = kit.assets.map((asset) => asset.id);
+
+    if (newLocationId) {
+      // Connect both kit and its assets to the new location in one update
+      await db.location.update({
+        where: { id: newLocationId },
+        data: {
+          kits: {
+            connect: { id },
+          },
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+
+      // Add notes to assets about location update via parent kit
+      if (userId && assetIds.length > 0) {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const location = await db.location.findUnique({
+          where: { id: newLocationId },
+          select: { name: true, id: true },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          kit.assets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location, // Use the asset's current location
+                newLocation: location,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    } else if (!newLocationId && currentLocationId) {
+      // Disconnect both kit and its assets from the current location
+      await db.location.update({
+        where: { id: currentLocationId },
+        data: {
+          kits: {
+            disconnect: { id },
+          },
+          assets: {
+            disconnect: assetIds.map((id) => ({ id })),
+          },
+        },
+      });
+
+      // Add notes to assets about location removal via parent kit
+      if (userId && assetIds.length > 0) {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const currentLocation = await db.location.findUnique({
+          where: { id: currentLocationId },
+          select: { name: true, id: true },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          kit.assets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: currentLocation,
+                newLocation: null,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: true,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    }
+
+    // Return the updated kit
+    return await db.kit.findUnique({
+      where: { id, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateKitLocation({
+  kitIds,
+  organizationId,
+  newLocationId,
+  currentSearchParams,
+  userId,
+}: {
+  kitIds: Array<Kit["id"]>;
+  organizationId: Kit["organizationId"];
+  newLocationId: Kit["locationId"];
+  currentSearchParams?: string | null;
+  userId: User["id"];
+}) {
+  try {
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    // Get kits with their assets before updating
+    const kitsWithAssets = await db.kit.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        assets: {
+          select: {
+            id: true,
+            title: true,
+            location: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    const actualKitIds = kitsWithAssets.map((kit) => kit.id);
+    const allAssets = kitsWithAssets.flatMap((kit) => kit.assets);
+
+    if (
+      newLocationId &&
+      newLocationId.trim() !== "" &&
+      actualKitIds.length > 0
+    ) {
+      // Update location to connect both kits and their assets
+      await db.location.update({
+        where: { id: newLocationId },
+        data: {
+          kits: {
+            connect: actualKitIds.map((id) => ({ id })),
+          },
+          assets: {
+            connect: allAssets.map((asset) => ({ id: asset.id })),
+          },
+        },
+      });
+
+      // Create notes for affected assets
+      if (allAssets.length > 0) {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const location = await db.location.findUnique({
+          where: { id: newLocationId },
+          select: { name: true, id: true },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: location,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    } else {
+      // Removing location - set to null and handle cascade
+      await db.kit.updateMany({
+        where,
+        data: {
+          locationId: null,
+        },
+      });
+
+      // Also remove location from assets and create notes
+      if (allAssets.length > 0) {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+
+        await db.asset.updateMany({
+          where: {
+            id: { in: allAssets.map((asset) => asset.id) },
+          },
+          data: {
+            locationId: null,
+          },
+        });
+
+        // Create individual notes for each asset
+        await Promise.all(
+          allAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: null,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: true,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      }
+    }
+
+    return { count: actualKitIds.length };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating kit location",
+      label,
+    });
+  }
+}
+
 export async function updateKitAssets({
   kitId,
   organizationId,
   userId,
   assetIds,
   request,
+  addOnly = false,
 }: {
   kitId: Kit["id"];
   organizationId: Organization["id"];
   userId: User["id"];
   assetIds: Asset["id"][];
   request: Request;
+  addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
 
     const kit = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
+          location: { select: { id: true, name: true } },
           assets: {
             select: {
               id: true,
@@ -1416,6 +1878,7 @@ export async function updateKitAssets({
                   name: true,
                   user: {
                     select: {
+                      id: true,
                       email: true,
                       firstName: true,
                       lastName: true,
@@ -1437,6 +1900,10 @@ export async function updateKitAssets({
           label: "Kit",
         });
       });
+
+    const kitCustodianDisplay = kit.custody?.custodian
+      ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
+      : undefined;
 
     const removedAssets = kit.assets.filter(
       (asset) => !assetIds.includes(asset.id)
@@ -1474,10 +1941,17 @@ export async function updateKitAssets({
       ];
     }
 
-    const newlyAddedAssets = await db.asset
+    // Get all assets that should be in the kit (based on assetIds) with organization scoping
+    const allAssetsForKit = await db.asset
       .findMany({
-        where: { id: { in: assetIds } },
-        select: { id: true, title: true, kit: true, custody: true },
+        where: { id: { in: assetIds }, organizationId },
+        select: {
+          id: true,
+          title: true,
+          kit: true,
+          custody: true,
+          location: { select: { id: true, name: true } },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -1489,6 +1963,12 @@ export async function updateKitAssets({
         });
       });
 
+    // Identify which assets are actually new (not already in this kit)
+    const newlyAddedAssets = allAssetsForKit.filter(
+      (asset) =>
+        !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
+    );
+
     /** An asset already in custody cannot be added to a kit */
     const isSomeAssetInCustody = newlyAddedAssets.some(
       (asset) => asset.custody && asset.kit?.id !== kit.id
@@ -1496,7 +1976,8 @@ export async function updateKitAssets({
     if (isSomeAssetInCustody) {
       throw new ShelfError({
         cause: null,
-        message: "Cannot add unavailable asset in a kit.",
+        message:
+          "Cannot add assets that are already in custody to a kit. Please release custody of assets to allow them to be added to a kit.",
         additionalData: { userId, kitId },
         label: "Kit",
         shouldBeCaptured: false,
@@ -1511,12 +1992,14 @@ export async function updateKitAssets({
       data: {
         assets: {
           /**
-           * set: [] will make sure that if any previously selected asset is removed,
-           * then it is also disconnected from the kit
+           * Only disconnect assets if not in addOnly mode and there are assets to remove
+           * In addOnly mode (bulk-add), we preserve all existing assets
            */
-          set: [],
+          ...(addOnly || removedAssets.length === 0
+            ? {}
+            : { disconnect: removedAssets.map(({ id }) => ({ id })) }),
           /**
-           * Then this will update the assets to be whatever user has selected now
+           * Connect assets that should be added (only the new ones)
            */
           connect: newlyAddedAssets.map(({ id }) => ({ id })),
         },
@@ -1526,9 +2009,84 @@ export async function updateKitAssets({
     await createBulkKitChangeNotes({
       kit,
       newlyAddedAssets,
-      removedAssets,
+      removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
       userId,
     });
+
+    // Handle location cascade for newly added assets (after kit assignment notes)
+    if (newlyAddedAssets.length > 0) {
+      if (kit.location) {
+        // Kit has a location, update all newly added assets to that location
+        await db.asset.updateMany({
+          where: { id: { in: newlyAddedAssets.map((asset) => asset.id) } },
+          data: { locationId: kit.location.id },
+        });
+
+        // Create notes for assets that had their location changed
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        await Promise.all(
+          newlyAddedAssets.map((asset) =>
+            createNote({
+              content: getKitLocationUpdateNoteContent({
+                currentLocation: asset.location,
+                newLocation: kit.location,
+                userId,
+                firstName: user?.firstName ?? "",
+                lastName: user?.lastName ?? "",
+                isRemoving: false,
+              }),
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            })
+          )
+        );
+      } else {
+        // Kit has no location, remove location from newly added assets
+        const assetsWithLocation = newlyAddedAssets.filter(
+          (asset) => asset.location
+        );
+
+        if (assetsWithLocation.length > 0) {
+          await db.asset.updateMany({
+            where: { id: { in: assetsWithLocation.map((asset) => asset.id) } },
+            data: { locationId: null },
+          });
+
+          // Create notes for assets that had their location removed
+          const user = await getUserByID(userId, {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            } satisfies Prisma.UserSelect,
+          });
+          await Promise.all(
+            assetsWithLocation.map((asset) =>
+              createNote({
+                content: getKitLocationUpdateNoteContent({
+                  currentLocation: asset.location,
+                  newLocation: null,
+                  userId,
+                  firstName: user?.firstName ?? "",
+                  lastName: user?.lastName ?? "",
+                  isRemoving: true,
+                }),
+                type: "UPDATE",
+                userId,
+                assetId: asset.id,
+              })
+            )
+          );
+        }
+      }
+    }
 
     /**
      * If a kit is in custody then the assets added to kit will also inherit the status
@@ -1542,10 +2100,11 @@ export async function updateKitAssets({
       kit.custody.custodian.id &&
       assetsToInheritStatus.length > 0
     ) {
-      await Promise.all([
-        ...assetsToInheritStatus.map((asset) =>
+      // Update custody for all assets to inherit kit's custody
+      await Promise.all(
+        assetsToInheritStatus.map((asset) =>
           db.asset.update({
-            where: { id: asset.id },
+            where: { id: asset.id, organizationId },
             data: {
               status: AssetStatus.IN_CUSTODY,
               custody: {
@@ -1555,42 +2114,40 @@ export async function updateKitAssets({
               },
             },
           })
-        ),
-        db.note.createMany({
-          data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
-        }),
-      ]);
+        )
+      );
+
+      // Create notes for all assets that inherited custody
+      const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+      await createNotes({
+        content: `${actor} granted ${custodianDisplay} custody.`,
+        type: NoteType.UPDATE,
+        userId,
+        assetIds: assetsToInheritStatus.map((asset) => asset.id),
+      });
     }
 
     /**
      * If a kit is in custody and some assets are removed,
      * then we have to make the removed assets Available
+     * Only apply this when not in addOnly mode
      */
-    if (removedAssets.length && kit.custody?.custodian.id) {
+    if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
+      const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+      const assetIds = removedAssets.map((a) => a.id);
       await Promise.all([
         db.custody.deleteMany({
-          where: { assetId: { in: removedAssets.map((a) => a.id) } },
+          where: { assetId: { in: assetIds } },
         }),
         db.asset.updateMany({
-          where: { id: { in: removedAssets.map((a) => a.id) } },
+          where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
-        db.note.createMany({
-          data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-              (kit.custody as NonNullable<typeof kit.custody>).custodian
-            )}'s** custody over **${asset.title.trim()}**`,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          })),
+        createNotes({
+          content: `${actor} released ${custodianDisplay}'s custody.`,
+          type: NoteType.UPDATE,
+          userId,
+          assetIds,
         }),
       ]);
     }
@@ -1636,9 +2193,13 @@ export async function updateKitAssets({
 
     return kit;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating kit assets.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while updating kit assets.",
       label,
       additionalData: { kitId, assetIds },
     });
@@ -1650,37 +2211,39 @@ export async function bulkRemoveAssetsFromKits({
   organizationId,
   userId,
   request,
+  settings,
 }: {
   assetIds: Asset["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
+  settings: AssetIndexSettings;
 }) {
   try {
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
 
-    /**
-     * If user has selected all assets, then we have to get ids of all those assets
-     * with respect to the filters applied.
-     * */
-    const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
-    if (hasSelectedAll) {
-      const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
-        organizationId,
-        currentSearchParams: searchParams.toString(),
-      });
-
-      const allAssets = await db.asset.findMany({
-        where: assetsWhere,
-        select: { id: true },
-      });
-
-      assetIds = allAssets.map((asset) => asset.id);
-    }
+    // Resolve IDs (works for both simple and advanced mode)
+    const searchParams = getCurrentSearchParams(request);
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams: searchParams.toString(),
+      settings,
+    });
 
     const assets = await db.asset.findMany({
-      where: { id: { in: assetIds }, organizationId },
+      where: { id: { in: resolvedIds }, organizationId },
       select: {
         id: true,
         title: true,
@@ -1693,7 +2256,9 @@ export async function bulkRemoveAssetsFromKits({
             custodian: {
               select: {
                 name: true,
-                user: { select: { firstName: true, lastName: true } },
+                user: {
+                  select: { id: true, firstName: true, lastName: true },
+                },
               },
             },
           },
@@ -1720,32 +2285,49 @@ export async function bulkRemoveAssetsFromKits({
         return a.custody.id;
       });
 
-      await tx.custody.deleteMany({
-        where: { id: { in: custodyIdsToDelete } },
-      });
+      if (custodyIdsToDelete.length > 0) {
+        await tx.custody.deleteMany({
+          where: { id: { in: custodyIdsToDelete } },
+        });
+      }
 
       /** Create notes for assets released from custody */
-      await tx.note.createMany({
-        data: assetsWhoseKitsInCustody.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
-            (asset.custody as NonNullable<typeof asset.custody>).custodian
-          )}'s** custody over **${asset.title.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+      if (assetsWhoseKitsInCustody.length > 0) {
+        await tx.note.createMany({
+          data: assetsWhoseKitsInCustody.map((asset) => {
+            const custodianDisplay = asset.custody?.custodian
+              ? wrapCustodianForNote({
+                  teamMember: asset.custody.custodian,
+                })
+              : "**Unknown Custodian**";
+            return {
+              content: `${actor} released ${custodianDisplay}'s custody.`,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
 
       /** Create notes for assets removed from kit */
-      await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has removed **${asset.title.trim()}** from **[${asset.kit?.name.trim()}](/kits/${asset
-            .kit?.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+      const assetsRemovedFromKit = assets.filter((asset) => asset.kit);
+      if (assetsRemovedFromKit.length > 0) {
+        await tx.note.createMany({
+          data: assetsRemovedFromKit.map((asset) => {
+            const kitLink = wrapLinkForNote(
+              `/kits/${asset.kit!.id}`,
+              asset.kit!.name.trim()
+            );
+            return {
+              content: `${actor} removed asset from ${kitLink}.`,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
     });
 
     return true;

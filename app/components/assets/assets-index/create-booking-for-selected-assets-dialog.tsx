@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { CustodianField } from "~/components/booking/forms/fields/custodian";
@@ -23,7 +23,7 @@ import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 export default function CreateBookingForSelectedAssetsDialog() {
-  const { currentOrganization, teamMembers, tagsData } =
+  const { currentOrganization, teamMembers, teamMembersForForm, tagsData } =
     useLoaderData<AssetIndexLoaderData>();
   const tagsSuggestions = tagsData.tags.map((tag) => ({
     label: tag.name,
@@ -52,8 +52,10 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
 
   const user = useUserData();
+  // Use teamMembersForForm for BASE/SELF_SERVICE users to ensure their team member is always available
+  const teamMembersToUse = teamMembersForForm || teamMembers;
   const defaultTeamMember = isBaseOrSelfService
-    ? teamMembers.find((tm) => tm.userId === user!.id)
+    ? teamMembersToUse.find((tm) => tm.userId === user!.id)
     : undefined;
 
   const userCanSeeCustodian = userCanViewSpecificCustody({

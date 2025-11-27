@@ -1,11 +1,10 @@
-import { json } from "@remix-run/node";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
-} from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
@@ -23,7 +22,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -75,17 +74,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: FIELD_TYPE_NAME[customField.type],
     };
 
-    return json(
-      data({
-        customField,
-        header,
-        categories,
-        totalCategories,
-      })
-    );
+    return payload({
+      customField,
+      header,
+      categories,
+      totalCategories,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -104,12 +101,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const payload = parseData(
+    const parsedData = parseData(
       await request.formData(),
       NewCustomFieldFormSchema
     );
 
-    const { name, helpText, active, required, options, categories } = payload;
+    const { name, helpText, active, required, options, categories } =
+      parsedData;
 
     const field = await getCustomField({ organizationId, id });
 
@@ -141,10 +139,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

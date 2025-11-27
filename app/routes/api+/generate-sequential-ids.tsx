@@ -1,10 +1,12 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { Prisma } from "@prisma/client";
+import type { ActionFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { generateBulkSequentialIdsEfficient } from "~/modules/asset/sequential-id.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { updateOrganization } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError } from "~/utils/error";
+import { payload } from "~/utils/http.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -19,10 +21,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // Verify user has permission (owner or admin in org)
     const user = await getUserByID(userId, {
-      userOrganizations: {
-        where: { organizationId },
-        select: { roles: true },
-      },
+      select: {
+        id: true,
+        userOrganizations: {
+          where: { organizationId },
+          select: { roles: true },
+        },
+      } satisfies Prisma.UserSelect,
     });
 
     const userRoles = user.userOrganizations[0]?.roles || [];
@@ -30,11 +35,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userRoles.includes("OWNER") || userRoles.includes("ADMIN");
 
     if (!canRunMigration) {
-      return json(
-        {
+      return data(
+        payload({
           success: false,
           message: "You don't have permission to run this migration.",
-        },
+        }),
         { status: 403 }
       );
     }
@@ -56,18 +61,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ? "Sequential IDs are now enabled! New assets will automatically get sequential IDs (SAM-0001, SAM-0002, etc.)"
         : `Successfully generated sequential IDs for ${updatedCount} assets`;
 
-    return json({
-      success: true,
-      updatedCount,
-      message,
-    });
+    return data(
+      payload({
+        success: true,
+        updatedCount,
+        message,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(
-      {
+    return data(
+      payload({
         success: false,
         message: reason.message,
-      },
+      }),
       { status: reason.status }
     );
   }

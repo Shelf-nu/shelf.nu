@@ -1,13 +1,14 @@
-import { NavLink } from "@remix-run/react";
+import type { ComponentProps } from "react";
+import { NavLink } from "react-router";
 import { useIsRouteActive } from "~/hooks/use-is-route-active";
-import type { ChildNavItem } from "~/hooks/use-sidebar-nav-items";
+import type { ChildNavItem as ChildNavItemType } from "~/hooks/use-sidebar-nav-items";
 import { tw } from "~/utils/tw";
 import { SidebarMenuButton, SidebarMenuItem } from "./sidebar";
 
 type ChildNavItemProps = {
-  route: ChildNavItem;
+  route: ChildNavItemType;
   closeIfMobile?: () => void;
-  tooltip: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
+  tooltip: ComponentProps<typeof SidebarMenuButton>["tooltip"];
 };
 
 export default function ChildNavItem({

@@ -71,7 +71,7 @@ export function BarcodeDisplay({
           barcolor: "000000",
           textyoffset: 2, // Adjust text position for better visibility
         });
-      } catch (error) {
+      } catch (_error) {
         // Clear canvas and show error
         const ctx = canvas.getContext("2d");
         if (ctx) {

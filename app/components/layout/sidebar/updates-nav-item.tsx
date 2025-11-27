@@ -1,12 +1,12 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Popover,
   PopoverContent,
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { BellIcon, ExternalLinkIcon } from "lucide-react";
+import { useFetcher, useLoaderData } from "react-router";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -14,6 +14,7 @@ import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import type { UpdateForUser } from "~/modules/update/service.server";
 import type { loader } from "~/routes/_layout+/_layout";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { SidebarMenuButton, SidebarMenuItem } from "./sidebar";
 
@@ -26,11 +27,11 @@ export default function UpdatesNavItem() {
   const { unreadUpdatesCount } = useLoaderData<typeof loader>();
 
   // Fetch updates when popover opens
-  const { data: updates = [], isLoading } = useApiQuery<UpdateForUser[]>({
+  const { data, isLoading } = useApiQuery<{ updates: UpdateForUser[] }>({
     api: "/api/updates",
     enabled: open,
   }); // Only show Updates on desktop - handled with CSS instead of conditional return
-
+  const updates = data?.updates ?? [];
   // Calculate unread count including optimistic updates
   const unreadCount =
     updates?.length > 0
@@ -62,7 +63,7 @@ export default function UpdatesNavItem() {
         );
         if (unreadUpdates.length > 0) {
           viewsTrackedRef.current = true;
-          fetcher.submit(
+          void fetcher.submit(
             {
               intent: "trackViews",
               updateIds: unreadUpdates.map((u) => u.id).join(","),
@@ -92,7 +93,7 @@ export default function UpdatesNavItem() {
     // Set optimistic flag to hide button and dot immediately
     setOptimisticMarkAllRead(true);
 
-    fetcher.submit(
+    void fetcher.submit(
       { intent: "markAllAsRead" },
       { method: "POST", action: "/api/updates" }
     );
@@ -103,7 +104,7 @@ export default function UpdatesNavItem() {
     setReadUpdateIds((prev) => new Set(prev).add(updateId));
 
     // Mark as read AND track click in single API call
-    fetcher.submit(
+    void fetcher.submit(
       { intent: "clickUpdate", updateId },
       { method: "POST", action: "/api/updates" }
     );
@@ -144,7 +145,7 @@ export default function UpdatesNavItem() {
           align="end"
           side="right"
           sideOffset={8}
-          className="z-50 w-[450px] rounded-md border border-gray-200 bg-white shadow-lg"
+          className="z-50 w-[650px] rounded-md border border-gray-200 bg-white shadow-lg"
         >
           <div className="p-4">
             <div className="mb-4 flex items-center justify-between">
@@ -169,7 +170,7 @@ export default function UpdatesNavItem() {
               </div>
             ) : updates && updates?.length > 0 ? (
               <div
-                className="max-h-80 space-y-3 overflow-y-auto"
+                className="max-h-[500px] space-y-3 overflow-y-auto"
                 style={{
                   WebkitOverflowScrolling: "touch",
                   touchAction: "pan-y",
@@ -191,7 +192,16 @@ export default function UpdatesNavItem() {
                         update.url &&
                           (isUnread ? "hover:bg-blue-100" : "hover:bg-gray-100")
                       )}
+                      role={update.url ? "button" : undefined}
+                      tabIndex={update.url ? 0 : undefined}
                       onClick={() => handleUpdateClick(update.id, update.url)}
+                      onKeyDown={
+                        update.url
+                          ? handleActivationKeyPress(() =>
+                              handleUpdateClick(update.id, update.url)
+                            )
+                          : undefined
+                      }
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">

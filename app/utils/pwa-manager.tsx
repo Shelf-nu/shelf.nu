@@ -61,7 +61,7 @@ export const usePwaManager = () => {
 };
 
 let promptInstallStore: PwaManager["promptInstall"] = null;
-let subscribers = new Set<() => void>();
+const subscribers = new Set<() => void>();
 
 // Initialize the event listener immediately
 if (typeof window !== "undefined") {

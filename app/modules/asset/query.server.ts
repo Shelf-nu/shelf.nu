@@ -4,8 +4,18 @@ import type {
   Filter,
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/schema";
+import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
+
+export const CUSTOM_FIELD_SEARCH_PATHS = [
+  "valueText",
+  "valueMultiLineText",
+  "valueOption",
+  "valueDate",
+  "valueBoolean",
+  "raw",
+] as const;
 
 /**
  * Generates the SQL WHERE clause for asset filtering
@@ -19,9 +29,14 @@ export function generateWhereClause(
   organizationId: string,
   search: string | null,
   filters: Filter[],
-  assetIds?: string[]
+  assetIds?: string[],
+  availableToBookOnly = false
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
+
+  if (availableToBookOnly) {
+    whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  }
 
   // Add asset IDs filter if provided
   if (assetIds && assetIds.length > 0) {
@@ -58,7 +73,17 @@ export function generateWhereClause(
           ) OR
           EXISTS (
             SELECT 1 FROM public."AssetCustomFieldValue" acfv 
-            WHERE acfv."assetId" = a.id AND acfv.value#>>'{valueText}' ILIKE ${`%${term}%`}
+            WHERE acfv."assetId" = a.id AND (
+              ${Prisma.join(
+                CUSTOM_FIELD_SEARCH_PATHS.map(
+                  (jsonPath) =>
+                    Prisma.sql`acfv.value#>>${Prisma.raw(
+                      `'{${jsonPath}}'`
+                    )} ILIKE ${`%${term}%`}`
+                ),
+                " OR "
+              )}
+            )
           )
         )`
       );
@@ -158,8 +183,11 @@ function addCustomFieldStringFilter(
       return Prisma.sql`${whereClause} AND ${subquery} ILIKE ${`%${filter.value}%`}`;
     case "matchesAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
-      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
-      return Prisma.sql`${whereClause} AND ${subquery} = ANY(${valuesArray}::text[])`;
+      const valuesArray = Prisma.join(
+        values.map((v) => Prisma.sql`${v}`),
+        ", "
+      );
+      return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[${valuesArray}])`;
     }
     case "containsAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -190,13 +218,17 @@ function addCustomFieldDateFilter(
       return Prisma.sql`${whereClause} AND (${subquery})::date < ${filter.value}::date`;
     case "after":
       return Prisma.sql`${whereClause} AND (${subquery})::date > ${filter.value}::date`;
-    case "between":
+    case "between": {
       const [start, end] = filter.value as [string, string];
       return Prisma.sql`${whereClause} AND (${subquery})::date BETWEEN ${start}::date AND ${end}::date`;
+    }
     case "inDates": {
       const dates = (filter.value as string).split(",").map((d) => d.trim());
-      const datesArray = `{${dates.map((d) => `"${d}"`).join(",")}}`;
-      return Prisma.sql`${whereClause} AND (${subquery})::date = ANY(${datesArray}::date[])`;
+      const datesArray = Prisma.join(
+        dates.map((d) => Prisma.sql`${d}`),
+        ", "
+      );
+      return Prisma.sql`${whereClause} AND (${subquery})::date = ANY(ARRAY[${datesArray}]::date[])`;
     }
     default:
       return whereClause;
@@ -274,12 +306,13 @@ function addCustomFieldNumberFilter(
       return Prisma.sql`${whereClause} AND (${subquery})::float >= ${numericValue}`;
     case "lte":
       return Prisma.sql`${whereClause} AND (${subquery})::float <= ${numericValue}`;
-    case "between":
+    case "between": {
       const [min, max] = filter.value as [number, number];
       // Ensure min and max are numbers
       const minValue = typeof min === "string" ? parseFloat(min) : min;
       const maxValue = typeof max === "string" ? parseFloat(max) : max;
       return Prisma.sql`${whereClause} AND (${subquery})::float BETWEEN ${minValue} AND ${maxValue}`;
+    }
     default:
       return whereClause;
   }
@@ -303,10 +336,13 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // Split comma-separated values and remove whitespace
       const values = (filter.value as string).split(",").map((v) => v.trim());
       // Create array literal for Postgres
-      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      const valuesArray = Prisma.join(
+        values.map((v) => Prisma.sql`${v}`),
+        ", "
+      );
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
-      )}" = ANY(${valuesArray}::text[])`;
+      )}" = ANY(ARRAY[${valuesArray}]::text[])`;
     }
     case "containsAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -351,11 +387,12 @@ function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" <= ${
         filter.value
       }`;
-    case "between":
+    case "between": {
       const [min, max] = filter.value as [number, number];
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
       )}" BETWEEN ${min} AND ${max}`;
+    }
     default:
       return whereClause;
   }
@@ -385,19 +422,23 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
         filter.value
       }::date`;
-    case "between":
+    case "between": {
       const [start, end] = filter.value as [string, string];
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
       )}" BETWEEN ${start}::date AND ${end}::date`;
+    }
     case "inDates": {
       // Split comma-separated dates and remove whitespace
       const dates = (filter.value as string).split(",").map((d) => d.trim());
       // Create array literal for Postgres
-      const datesArray = `{${dates.map((d) => `"${d}"`).join(",")}}`;
+      const datesArray = Prisma.join(
+        dates.map((d) => Prisma.sql`${d}`),
+        ", "
+      );
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
-      )}"::date = ANY(${datesArray}::date[])`;
+      )}"::date = ANY(ARRAY[${datesArray}]::date[])`;
     }
     default:
       return whereClause;
@@ -406,31 +447,25 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "status") {
-    // For containsAny, convert comma-separated string to array
-    let trimmedValue;
-    if (filter.operator === "containsAny") {
-      const values = (filter.value as string).split(",").map((v) => v.trim());
-      trimmedValue = `{${values.join(",")}}`;
-    } else {
-      // For other operators, use existing trimming logic
-      if (Array.isArray(filter.value)) {
-        trimmedValue = filter.value.map((val) =>
-          typeof val === "string" ? val.trim() : val
-        );
-      } else if (typeof filter.value === "string") {
-        trimmedValue = filter.value.trim();
-      } else {
-        trimmedValue = filter.value;
-      }
-    }
-
     switch (filter.operator) {
-      case "is":
+      case "is": {
+        const trimmedValue =
+          typeof filter.value === "string" ? filter.value.trim() : filter.value;
         return Prisma.sql`${whereClause} AND a.status = ${trimmedValue}::public."AssetStatus"`;
-      case "isNot":
+      }
+      case "isNot": {
+        const trimmedValue =
+          typeof filter.value === "string" ? filter.value.trim() : filter.value;
         return Prisma.sql`${whereClause} AND a.status != ${trimmedValue}::public."AssetStatus"`;
-      case "containsAny":
-        return Prisma.sql`${whereClause} AND a.status = ANY(${trimmedValue}::public."AssetStatus"[])`;
+      }
+      case "containsAny": {
+        const values = (filter.value as string).split(",").map((v) => v.trim());
+        const valuesArray = Prisma.join(
+          values.map((v) => Prisma.sql`${v}`),
+          ", "
+        );
+        return Prisma.sql`${whereClause} AND a.status = ANY(ARRAY[${valuesArray}]::public."AssetStatus"[])`;
+      }
       default:
         return whereClause;
     }
@@ -482,20 +517,26 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             return Prisma.sql`${whereClause} AND a."categoryId" IS NULL`;
           }
 
-          const categoryIdsArray = `{${categoryIds.join(",")}}`;
+          const categoryIdsArray = Prisma.join(
+            categoryIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
           return Prisma.sql`${whereClause} AND (
-            a."categoryId" IS NULL 
+            a."categoryId" IS NULL
             OR EXISTS (
               SELECT 1 FROM public."Category"
-              WHERE id = a."categoryId" AND id = ANY(${categoryIdsArray}::text[])
+              WHERE id = a."categoryId" AND id = ANY(ARRAY[${categoryIdsArray}]::text[])
             )
           )`;
         }
 
-        const categoryIdsArray = `{${values.join(",")}}`;
+        const categoryIdsArray = Prisma.join(
+          values.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
         return Prisma.sql`${whereClause} AND EXISTS (
           SELECT 1 FROM public."Category"
-          WHERE id = a."categoryId" AND id = ANY(${categoryIdsArray}::text[])
+          WHERE id = a."categoryId" AND id = ANY(ARRAY[${categoryIdsArray}]::text[])
         )`;
       }
 
@@ -545,20 +586,26 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
           }
 
-          const locationIdsArray = `{${locationIds.join(",")}}`;
+          const locationIdsArray = Prisma.join(
+            locationIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
           return Prisma.sql`${whereClause} AND (
-            a."locationId" IS NULL 
+            a."locationId" IS NULL
             OR EXISTS (
               SELECT 1 FROM public."Location"
-              WHERE id = a."locationId" AND id = ANY(${locationIdsArray}::text[])
+              WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
             )
           )`;
         }
 
-        const locationIdsArray = `{${values.join(",")}}`;
+        const locationIdsArray = Prisma.join(
+          values.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
         return Prisma.sql`${whereClause} AND EXISTS (
           SELECT 1 FROM public."Location"
-          WHERE id = a."locationId" AND id = ANY(${locationIdsArray}::text[])
+          WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
         )`;
       }
 
@@ -608,20 +655,26 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
           }
 
-          const kitIdsArray = `{${kitIds.join(",")}}`;
+          const kitIdsArray = Prisma.join(
+            kitIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
           return Prisma.sql`${whereClause} AND (
-            a."kitId" IS NULL 
+            a."kitId" IS NULL
             OR EXISTS (
               SELECT 1 FROM public."Kit"
-              WHERE id = a."kitId" AND id = ANY(${kitIdsArray}::text[])
+              WHERE id = a."kitId" AND id = ANY(ARRAY[${kitIdsArray}]::text[])
             )
           )`;
         }
 
-        const kitIdsArray = `{${values.join(",")}}`;
+        const kitIdsArray = Prisma.join(
+          values.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
         return Prisma.sql`${whereClause} AND EXISTS (
           SELECT 1 FROM public."Kit"
-          WHERE id = a."kitId" AND id = ANY(${kitIdsArray}::text[])
+          WHERE id = a."kitId" AND id = ANY(ARRAY[${kitIdsArray}]::text[])
         )`;
       }
 
@@ -655,8 +708,11 @@ function addRelationFilter(
         return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id ILIKE ${`%${filter.value}%`})`;
       case "matchesAny": {
         const values = (filter.value as string).split(",").map((v) => v.trim());
-        const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
-        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id = ANY(${valuesArray}::text[]))`;
+        const valuesArray = Prisma.join(
+          values.map((v) => Prisma.sql`${v}`),
+          ", "
+        );
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Qr" q WHERE q."assetId" = a.id AND q.id = ANY(ARRAY[${valuesArray}]::text[]))`;
       }
       case "containsAny": {
         const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -694,8 +750,11 @@ function addRelationFilter(
         const values = (filter.value as string)
           .split(",")
           .map((v) => v.trim().toUpperCase());
-        const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
-        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ANY(${valuesArray}::text[]))`;
+        const valuesArray = Prisma.join(
+          values.map((v) => Prisma.sql`${v}`),
+          ", "
+        );
+        return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."Barcode" b WHERE b."assetId" = a.id AND b.type::text = ${barcodeType} AND b.value = ANY(ARRAY[${valuesArray}]::text[]))`;
       }
       case "containsAny": {
         const values = (filter.value as string)
@@ -729,10 +788,13 @@ function addRelationFilter(
       )}.name ILIKE ${`%${filter.value}%`}`;
     case "matchesAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
-      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      const valuesArray = Prisma.join(
+        values.map((v) => Prisma.sql`${v}`),
+        ", "
+      );
       return Prisma.sql`${whereClause} AND ${Prisma.raw(
         alias
-      )}.name = ANY(${valuesArray}::text[])`;
+      )}.name = ANY(ARRAY[${valuesArray}]::text[])`;
     }
     case "containsAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -821,45 +883,51 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           return Prisma.sql`${whereClause} AND cu.id IS NULL`;
         }
 
-        const custodianIdsArray = `{${custodianIds.join(",")}}`;
+        const custodianIdsArray = Prisma.join(
+          custodianIds.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NULL 
+          cu.id IS NULL
           OR EXISTS (
-            SELECT 1 FROM "Custody" cu 
-            WHERE cu."assetId" = a.id 
-            AND cu."teamMemberId" = ANY(${custodianIdsArray}::text[])
+            SELECT 1 FROM "Custody" cu
+            WHERE cu."assetId" = a.id
+            AND cu."teamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
           )
           OR EXISTS (
-            SELECT 1 FROM "Booking" b 
+            SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
             AND (
-              b."custodianTeamMemberId" = ANY(${custodianIdsArray}::text[])
+              b."custodianTeamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
               OR b."custodianUserId" IN (
-                SELECT "userId" FROM "TeamMember" tm 
-                WHERE tm.id = ANY(${custodianIdsArray}::text[])
+                SELECT "userId" FROM "TeamMember" tm
+                WHERE tm.id = ANY(ARRAY[${custodianIdsArray}]::text[])
               )
             )
           )
         )`;
       }
 
-      const custodianIdsArray = `{${values.join(",")}}`;
+      const custodianIdsArray = Prisma.join(
+        values.map((id) => Prisma.sql`${id}`),
+        ", "
+      );
       return Prisma.sql`${whereClause} AND (
         EXISTS (
-          SELECT 1 FROM "Custody" cu 
-          WHERE cu."assetId" = a.id 
-          AND cu."teamMemberId" = ANY(${custodianIdsArray}::text[])
+          SELECT 1 FROM "Custody" cu
+          WHERE cu."assetId" = a.id
+          AND cu."teamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
         )
         OR EXISTS (
-          SELECT 1 FROM "Booking" b 
+          SELECT 1 FROM "Booking" b
           JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
-            b."custodianTeamMemberId" = ANY(${custodianIdsArray}::text[])
+            b."custodianTeamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
             OR b."custodianUserId" IN (
-              SELECT "userId" FROM "TeamMember" tm 
-              WHERE tm.id = ANY(${custodianIdsArray}::text[])
+              SELECT "userId" FROM "TeamMember" tm
+              WHERE tm.id = ANY(ARRAY[${custodianIdsArray}]::text[])
             )
           )
         )
@@ -882,17 +950,38 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
    */
   switch (filter.operator) {
     case "contains": {
+      // Handle "untagged" special case
+      if (filter.value === "untagged") {
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM "_AssetToTag" att
+          WHERE att."A" = a.id
+        )`;
+      }
       // Single tag filtering using the existing join
       return Prisma.sql`${whereClause} AND t.id = ${filter.value}`;
     }
     case "containsAll": {
       // ALL tags must be present
       const values = (filter.value as string).split(",").map((v) => v.trim());
+
+      // If "untagged" is included, return assets with no tags
+      // (an asset can't be both untagged and have tags)
+      if (values.includes("untagged")) {
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM "_AssetToTag" att
+          WHERE att."A" = a.id
+        )`;
+      }
+
+      const valuesArray = Prisma.join(
+        values.map((v) => Prisma.sql`${v}`),
+        ", "
+      );
       return Prisma.sql`${whereClause} AND NOT EXISTS (
-        SELECT unnest(${values}::text[]) AS required_tag
+        SELECT unnest(ARRAY[${valuesArray}]::text[]) AS required_tag
         EXCEPT
         SELECT t.id
-        FROM "_AssetToTag" att 
+        FROM "_AssetToTag" att
         JOIN "Tag" t ON t.id = att."B"
         WHERE att."A" = a.id
       )`;
@@ -900,8 +989,37 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     case "containsAny": {
       // ANY of the tags must be present
       const values = (filter.value as string).split(",").map((v) => v.trim());
-      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
-      return Prisma.sql`${whereClause} AND t.id = ANY(ARRAY(SELECT unnest(${valuesArray}::text[])))`;
+
+      // If "untagged" is included, we need OR logic:
+      // Either the asset has no tags OR it has one of the other specified tags
+      if (values.includes("untagged")) {
+        // Remove "untagged" from the values array
+        const tagIds = values.filter((v) => v !== "untagged");
+
+        if (tagIds.length === 0) {
+          // Only "untagged" was selected - return assets with no tags
+          return Prisma.sql`${whereClause} AND NOT EXISTS (
+            SELECT 1 FROM "_AssetToTag" att
+            WHERE att."A" = a.id
+          )`;
+        }
+
+        // Return assets that are either untagged OR have one of the specified tags
+        const valuesArray = Prisma.join(
+          tagIds.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
+        return Prisma.sql`${whereClause} AND (
+          NOT EXISTS (SELECT 1 FROM "_AssetToTag" att WHERE att."A" = a.id)
+          OR t.id = ANY(ARRAY[${valuesArray}]::text[])
+        )`;
+      }
+
+      const valuesArray = Prisma.join(
+        values.map((v) => Prisma.sql`${v}`),
+        ", "
+      );
+      return Prisma.sql`${whereClause} AND t.id = ANY(ARRAY[${valuesArray}]::text[])`;
     }
 
     case "excludeAny": {
@@ -911,18 +1029,21 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (values.includes("untagged")) {
         // If "untagged" is included, we want to ensure assets have at least one tag
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM "_AssetToTag" att2 
+          SELECT 1 FROM "_AssetToTag" att2
           WHERE att2."A" = a.id
         )`;
       }
 
-      const valuesArray = `{${values.map((v) => `"${v}"`).join(",")}}`;
+      const valuesArray = Prisma.join(
+        values.map((v) => Prisma.sql`${v}`),
+        ", "
+      );
       return Prisma.sql`${whereClause} AND NOT EXISTS (
-        SELECT 1 
+        SELECT 1
         FROM "_AssetToTag" att2
         JOIN "Tag" t2 ON t2.id = att2."B"
-        WHERE att2."A" = a.id 
-        AND t2.id = ANY(${valuesArray}::text[])
+        WHERE att2."A" = a.id
+        AND t2.id = ANY(ARRAY[${valuesArray}]::text[])
       )`;
     }
     default:
@@ -1084,6 +1205,7 @@ type DirectAssetField =
   | "status"
   | "description"
   | "createdAt"
+  | "updatedAt"
   | "availableToBook";
 
 const directAssetFields: Record<DirectAssetField, string> = {
@@ -1094,6 +1216,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   status: "assetStatus",
   description: "assetDescription",
   createdAt: "assetCreatedAt",
+  updatedAt: "assetUpdatedAt",
   availableToBook: "assetAvailableToBook",
 };
 
@@ -1465,6 +1588,15 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       c.id AS "categoryId",
       c.name AS "categoryName",
       c.color AS "categoryColor",
+      l."parentId" AS "locationParentId",
+      CASE
+        WHEN l.id IS NOT NULL THEN (
+          SELECT COUNT(*)::integer
+          FROM public."Location" lc
+          WHERE lc."parentId" = l.id
+        )
+        ELSE 0
+      END AS "locationChildCount",
       CASE 
         WHEN l.name IS NOT NULL THEN l.name
         ELSE NULL
@@ -1620,7 +1752,15 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
           'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
           'tags', aq.tags,
-          'location', jsonb_build_object('name', aq."locationName"),
+          'location', CASE 
+            WHEN aq."assetLocationId" IS NOT NULL THEN jsonb_build_object(
+              'id', aq."assetLocationId",
+              'name', aq."locationName",
+              'parentId', aq."locationParentId",
+              'childCount', aq."locationChildCount"
+            )
+            ELSE NULL
+          END,
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
           'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
@@ -1630,3 +1770,13 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
     ) AS assets
   `;
 };
+
+export async function parseFiltersWithHierarchy(
+  filtersString: string,
+  columns: Column[],
+  organizationId?: string
+): Promise<Filter[]> {
+  const parsed = parseFilters(filtersString, columns);
+  if (!organizationId) return parsed;
+  return expandLocationHierarchyFilters({ filters: parsed, organizationId });
+}

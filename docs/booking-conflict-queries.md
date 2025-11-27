@@ -289,7 +289,7 @@ const assets = await db.asset.findMany({
 });
 
 // 2. Return raw asset data (no server-side computation)
-return json({ assets }); // Simple, no enrichment
+return payload({ assets }); // Simple, no enrichment
 
 // 3. Use helper functions client-side
 const isAlreadyBooked = hasAssetBookingConflicts(asset, booking.id);

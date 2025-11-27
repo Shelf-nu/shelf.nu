@@ -18,7 +18,7 @@ export interface PermissionCheckProps {
 
 export async function hasPermission(
   params: PermissionCheckProps
-): Promise<Boolean> {
+): Promise<boolean> {
   let { userId, entity, action, organizationId, roles } = params;
 
   try {

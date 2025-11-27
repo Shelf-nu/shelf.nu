@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import React from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
@@ -59,7 +59,7 @@ export type ListProps = {
   className?: string;
   customEmptyStateContent?: {
     title: string;
-    text: React.ReactNode;
+    text: ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;
@@ -68,12 +68,12 @@ export type ListProps = {
   /**
    * Allow bulk actions on List by providing Bulk actions dropdown
    */
-  bulkActions?: React.ReactElement;
+  bulkActions?: ReactElement;
 
   /** Optionally recieve an element for custom pagination */
-  customPagination?: React.ReactElement;
+  customPagination?: ReactElement;
   /** Any extra content to the right in Header */
-  headerExtraContent?: React.ReactNode;
+  headerExtraContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
 
@@ -155,9 +155,10 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           >
             <ListHeader
               bulkActions={bulkActions}
-              children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
-            />
+            >
+              {headerChildren}
+            </ListHeader>
             <tbody>
               {items.map((item, i) => (
                 <ListItem

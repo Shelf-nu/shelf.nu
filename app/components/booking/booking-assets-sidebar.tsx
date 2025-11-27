@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
@@ -57,7 +58,7 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
 
 interface BookingAssetsSidebarProps {
   booking: BookingWithAssets;
-  trigger?: React.ReactNode;
+  trigger?: ReactNode;
 }
 
 // Group assets by kits and individual assets - similar to the original pagination structure
@@ -255,7 +256,7 @@ export function BookingAssetsSidebar({
                                             mainImageExpiration:
                                               asset.mainImageExpiration,
                                           }}
-                                          alt={asset.title}
+                                          alt={`Image of ${asset.title}`}
                                           className="size-full rounded-[4px] border border-gray-300 object-cover"
                                           withPreview
                                         />
@@ -325,7 +326,7 @@ export function BookingAssetsSidebar({
                                     mainImageExpiration:
                                       asset.mainImageExpiration,
                                   }}
-                                  alt={asset.title}
+                                  alt={`Image of ${asset.title}`}
                                   className="size-full rounded-[4px] border object-cover"
                                   withPreview
                                 />

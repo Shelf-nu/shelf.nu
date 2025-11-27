@@ -1,10 +1,11 @@
+import type { RefObject } from "react";
 import { useState, useCallback, useRef } from "react";
 import type FullCalendar from "@fullcalendar/react";
 import { scrollToNow } from "~/utils/calendar";
 
 interface UseCalendarNowIndicatorFixOptions {
   resources: any[] | undefined;
-  calendarRef: React.RefObject<FullCalendar>;
+  calendarRef: RefObject<FullCalendar | null>;
   targetView: string;
   setCalendarView: (view: string) => void;
 }

@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from "react";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { InfoBox } from "~/components/shared/info-box";
@@ -30,11 +31,11 @@ export function DatesFields({
   startDateName: string;
   disabled: boolean;
   startDateError?: string;
-  setStartDate?: React.Dispatch<React.SetStateAction<string>>;
+  setStartDate?: Dispatch<SetStateAction<string>>;
   endDate: string | undefined;
   endDateName: string;
   endDateError?: string;
-  setEndDate: React.Dispatch<React.SetStateAction<string>>;
+  setEndDate: Dispatch<SetStateAction<string>>;
   isNewBooking?: boolean;
   workingHoursData: NonNullable<ReturnType<typeof useWorkingHours>>;
 }) {

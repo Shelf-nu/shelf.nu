@@ -1,12 +1,14 @@
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 import { z } from "zod";
-import { NewNoteSchema } from "~/components/assets/notes/new";
+import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
+import { db } from "~/database/db.server";
 import { createNote, deleteNote } from "~/modules/note/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -17,6 +19,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Asset notes") }];
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { assetId } = getParams(params, z.object({ assetId: z.string() }));
@@ -32,20 +36,40 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
 
+    // Validate that the asset belongs to the user's organization
+    const asset = await db.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true, organizationId: true },
+    });
+
+    if (!asset || asset.organizationId !== organizationId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Asset not found or access denied",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 404,
+      });
+    }
+
     const method = getActionMethod(request);
 
     switch (method) {
       case "POST": {
-        const payload = parseData(await request.formData(), NewNoteSchema, {
-          additionalData: { userId, assetId },
-        });
+        const { content } = parseData(
+          await request.formData(),
+          MarkdownNoteSchema,
+          {
+            additionalData: { userId, assetId },
+          }
+        );
 
         sendNotification({
           title: "Note created",
@@ -55,12 +79,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         const note = await createNote({
-          ...payload,
+          content,
           assetId,
           userId,
         });
 
-        return json(data({ note }));
+        return payload({ note });
       }
       case "DELETE": {
         const { noteId } = parseData(
@@ -85,13 +109,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
         });
 
-        return json(data(null));
+        return payload(null);
       }
     }
 
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

@@ -1,16 +1,32 @@
 import type { Prisma } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export type BulkQrDownloadLoaderData = {
+  assets: Array<{
+    id: string;
+    title: string;
+    sequentialId: string | null;
+    createdAt: Date;
+    qr: {
+      id: string;
+      src: string;
+      size: "small" | "cable" | "medium" | "large";
+    };
+  }>;
+  qrIdDisplayPreference: string;
+  showShelfBranding: boolean;
+};
 
 /**
  * This API find all/some assets in current organization and returns the required data
@@ -21,7 +37,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
@@ -53,7 +69,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
 
     const assets = await db.asset.findMany({
       where,
-      select: { id: true, title: true, createdAt: true },
+      select: { id: true, title: true, createdAt: true, sequentialId: true },
     });
 
     if (assets.length > 100) {
@@ -80,9 +96,15 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return json(data({ assets: assetsWithQrObj }));
+    return data(
+      payload({
+        assets: assetsWithQrObj,
+        qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
+        showShelfBranding: currentOrganization.showShelfBranding,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

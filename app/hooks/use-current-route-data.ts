@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useLocation, useMatches } from "@remix-run/react";
+import { useLocation, useMatches } from "react-router";
 
 /**
  * This base hook is used to access data related to the current route

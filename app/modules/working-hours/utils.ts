@@ -1,10 +1,4 @@
-import {
-  addHours,
-  addDays,
-  format,
-  parseISO,
-  differenceInHours,
-} from "date-fns";
+import { addHours, addDays, format, differenceInHours } from "date-fns";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type {
   DaySchedule,
@@ -90,7 +84,7 @@ export function normalizeWorkingHoursForValidation(
     }
 
     return undefined;
-  } catch (error) {
+  } catch (_error) {
     return undefined;
   }
 }
@@ -317,7 +311,7 @@ export function getBookingDefaultStartEndTimes(
     const [closeHours, closeMinutes] = todaySchedule.closeTime
       .split(":")
       .map(Number);
-    let endDateTime = new Date(now);
+    const endDateTime = new Date(now);
     endDateTime.setHours(closeHours, closeMinutes, 0, 0);
 
     // If start time is beyond today's close time, find next working day
@@ -429,7 +423,7 @@ export function calculateEffectiveEndDate(
 
     // Check for date-specific override first
     const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+      const overrideDate = format(override.date, "yyyy-MM-dd");
       return overrideDate === dateString;
     });
 
@@ -494,7 +488,7 @@ export function calculateBusinessHoursDuration(
 
     // Check for date-specific override first
     const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+      const overrideDate = format(override.date, "yyyy-MM-dd");
       return overrideDate === dateString;
     });
 

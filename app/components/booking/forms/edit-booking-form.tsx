@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
@@ -11,7 +11,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
-} from "~/routes/_layout+/bookings.$bookingId";
+} from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -81,7 +81,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, userId, currentOrganization } =
+  const { teamMembers, teamMembersForForm, userId, currentOrganization } =
     useLoaderData<BookingPageLoaderData>();
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
@@ -139,7 +139,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   });
 
   /** This is used when we have selfSErvice or Base as we are setting the default */
-  const defaultTeamMember = teamMembers?.find(
+  // Use teamMembersForForm for BASE/SELF_SERVICE users to ensure their team member is always available
+  const teamMembersToUse = teamMembersForForm || teamMembers;
+  const defaultTeamMember = teamMembersToUse?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
@@ -203,6 +205,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   type="hidden"
                   name="nameChangeOnly"
                   value={bookingStatus?.isDraft ? "no" : "yes"}
+                  key={id}
                 />
                 <Button
                   type="submit"
@@ -252,7 +255,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
               <CheckoutDialog
                 portalContainer={zo.form}
-                booking={{ id, name: name!, from: startDate! }}
+                booking={{ id, name: name!, from: new Date(startDate!) }}
                 disabled={
                   disabled ||
                   isLoadingWorkingHours ||
@@ -282,7 +285,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             >
               <CheckinDropdown
                 portalContainer={zo.form}
-                booking={{ id, name: name!, to: endDate!, from: startDate! }}
+                booking={{
+                  id,
+                  name: name!,
+                  to: new Date(endDate),
+                  from: new Date(startDate),
+                }}
                 disabled={disabled || isLoadingWorkingHours}
               />
             </When>
@@ -291,7 +299,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       ) : null}
       <div className="mb-4">
         <div className="m-0 flex w-full flex-col gap-3">
-          {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
+          {id ? (
+            <input type="hidden" name="id" defaultValue={id} key={id} />
+          ) : null}
           <h3>Booking details</h3>
           <div
             className={tw(
@@ -302,6 +312,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <div className="w-full lg:w-2/5">
               <div>
                 <NameField
+                  key={id}
                   name={name || undefined}
                   fieldName={zo.fields.name()}
                   disabled={
@@ -320,6 +331,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </div>
               <div className="mt-[10px]">
                 <DatesFields
+                  key={`${id}-dates`}
                   startDate={startDate}
                   startDateName={zo.fields.startDate()}
                   startDateError={
@@ -340,6 +352,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </div>
               <div className="mt-[10px]">
                 <CustodianField
+                  key={`${id}-custodian`}
                   defaultTeamMember={defaultTeamMember}
                   disabled={
                     disabled ||
@@ -363,6 +376,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 )}
               >
                 <TagField
+                  key={`${id}-tags`}
                   disabled={
                     disabled ||
                     isLoadingWorkingHours ||
@@ -380,6 +394,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 />
 
                 <DescriptionField
+                  key={`${id}-description`}
                   description={description || undefined}
                   fieldName={zo.fields.description()}
                   disabled={

@@ -1,6 +1,8 @@
+import type { JSX } from "react";
 import { CalendarIcon, RowsIcon } from "@radix-ui/react-icons";
 import {
   CalendarCheck,
+  MapPinIcon,
   MousePointerClick,
   Package,
   PackageCheck,
@@ -27,7 +29,6 @@ import {
   WriteIcon,
   TagsIcon,
   CategoriesIcon,
-  LocationMarkerIcon,
   AssetsIcon,
   DownloadIcon,
   PrintIcon,
@@ -160,7 +161,7 @@ export const iconsMap: IconsMap = {
   "tag-add": <AddTagsIcon />,
   "tag-remove": <RemoveTagsIcon />,
   category: <CategoriesIcon />,
-  location: <LocationMarkerIcon />,
+  location: <MapPinIcon />,
   gps: <GpsMarkerIcon />,
   duplicate: <DuplicateIcon />,
   asset: <AssetsIcon />,

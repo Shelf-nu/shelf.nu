@@ -4,8 +4,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -95,7 +95,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     };
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -118,7 +118,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

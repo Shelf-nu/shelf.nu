@@ -1,8 +1,9 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
@@ -79,7 +80,7 @@ export default function AssignCustodyDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

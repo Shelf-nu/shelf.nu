@@ -6,14 +6,11 @@ import {
   type User,
   type CustomTierLimit,
   OrganizationRoles,
+  type UserBusinessIntel,
+  type Prisma,
 } from "@prisma/client";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  SerializeFrom,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData, Link, useFetcher } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, useLoaderData, Link, useFetcher } from "react-router";
 
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -26,14 +23,17 @@ import { Spinner } from "~/components/shared/spinner";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getParams,
   isDelete,
@@ -47,6 +47,8 @@ import {
   getStripeCustomer,
   getStripePricesAndProducts,
 } from "~/utils/stripe.server";
+
+export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
 export type QrCodeWithAsset = Qr & {
   asset: {
@@ -66,22 +68,56 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     z.object({ userId: z.string() }),
     { additionalData: { userId } }
   );
+  const premiumIsEnabled = config.enablePremiumFeatures;
 
   try {
     await requireAdmin(userId);
 
     const user = await getUserByID(shelfUserId, {
-      qrCodes: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          asset: {
-            select: {
-              title: true,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        profilePicture: true,
+        createdAt: true,
+        updatedAt: true,
+        tierId: true,
+        skipSubscriptionCheck: true,
+        customerId: true,
+        usedFreeTrial: true,
+        sso: true,
+        customTierLimit: {
+          select: {
+            maxOrganizations: true,
+            isEnterprise: true,
+          },
+        },
+        qrCodes: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            createdAt: true,
+            asset: {
+              select: {
+                title: true,
+              },
             },
           },
         },
-      },
-      customTierLimit: true,
+        businessIntel: {
+          select: {
+            howDidYouHearAboutUs: true,
+            jobTitle: true,
+            teamSize: true,
+            companyName: true,
+            primaryUseCase: true,
+            currentSolution: true,
+            timeline: true,
+          },
+        },
+      } satisfies Prisma.UserSelect,
     });
 
     const userOrganizations = await db.userOrganization
@@ -156,24 +192,25 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     );
 
     /** Get the Stripe customer */
-    const customer = (await getStripeCustomer(
-      await getOrCreateCustomerId(user)
-    )) as CustomerWithSubscriptions;
+    const customer = premiumIsEnabled
+      ? ((await getStripeCustomer(
+          await getOrCreateCustomerId(user)
+        )) as CustomerWithSubscriptions)
+      : null;
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
-    return json(
-      data({
-        user,
-        organizations: userOrganizations.map((uo) => uo.organization),
-        ssoUsersByDomain,
-        customer,
-        prices,
-      })
-    );
+    return payload({
+      user,
+      organizations: userOrganizations.map((uo) => uo.organization),
+      ssoUsersByDomain,
+      customer,
+      prices,
+      premiumIsEnabled,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, shelfUserId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -219,7 +256,18 @@ export const action = async ({
           })
         );
 
+        // Get current tier before updating
+        const currentUser = await db.user.findUniqueOrThrow({
+          where: { id: shelfUserId },
+          select: { tierId: true },
+        });
+
         const user = await updateUserTierId(shelfUserId, tierId);
+
+        // Reset personal workspace branding when downgrading from Plus to Free
+        if (currentUser.tierId === TierId.tier_1 && tierId === TierId.free) {
+          await resetPersonalWorkspaceBranding(shelfUserId);
+        }
 
         sendNotification({
           title: "Tier updated",
@@ -267,16 +315,24 @@ export const action = async ({
             icon: { name: "trash", variant: "error" },
             senderId: userId,
           });
-          return json(data({ success: true }));
+          return payload({ success: true });
         }
+        break;
       case "createCustomerId": {
-        const user = await getUserByID(shelfUserId);
+        const user = await getUserByID(shelfUserId, {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
         await createStripeCustomer({
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
           userId: user.id,
         });
-        return json(data(null));
+        return payload(null);
       }
       case "toggleSubscriptionCheck": {
         const { skipSubscriptionCheck } = parseData(
@@ -289,6 +345,7 @@ export const action = async ({
         await db.user.update({
           where: { id: shelfUserId },
           data: { skipSubscriptionCheck },
+          select: { id: true },
         });
 
         sendNotification({
@@ -303,29 +360,43 @@ export const action = async ({
       }
     }
 
-    return json(data(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, shelfUserId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
 export default function Area51UserPage() {
-  // Get the loader data type
-  type LoaderData = SerializeFrom<typeof loader>;
-
-  const { user, organizations, ssoUsersByDomain, customer, prices } =
-    useLoaderData<LoaderData>();
+  const {
+    user,
+    organizations,
+    ssoUsersByDomain,
+    customer,
+    prices,
+    premiumIsEnabled,
+  } = useLoaderData<typeof loader>();
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
   // Extract user type from loader data
-  type User = NonNullable<LoaderData["user"]>;
+  type User = NonNullable<Awaited<ReturnType<typeof loader>>["user"]>;
+  type BusinessIntel = Pick<
+    UserBusinessIntel,
+    | "howDidYouHearAboutUs"
+    | "jobTitle"
+    | "teamSize"
+    | "companyName"
+    | "primaryUseCase"
+    | "currentSolution"
+    | "timeline"
+  >;
 
   const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
     switch (key) {
       case "tierId":
         return <TierUpdateForm tierId={user.tierId} />;
       case "customerId":
+        if (!premiumIsEnabled) return null;
         return !value ? (
           <Form className="inline-block" method="POST">
             <input type="hidden" name="intent" value="createCustomerId" />
@@ -358,6 +429,20 @@ export default function Area51UserPage() {
           : null;
     }
   };
+  const renderBusinessIntelValue = (
+    value: BusinessIntel[keyof BusinessIntel]
+  ): ReactNode => {
+    if (value === null || value === undefined) {
+      return "—";
+    }
+
+    if (typeof value === "string" && value.trim().length === 0) {
+      return "—";
+    }
+
+    return value;
+  };
+
   const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
 
   return user ? (
@@ -373,7 +458,12 @@ export default function Area51UserPage() {
               {user
                 ? Object.entries(user)
                     .filter(
-                      ([k, _v]) => !["qrCodes", "customTierLimit"].includes(k)
+                      ([k, _v]) =>
+                        ![
+                          "qrCodes",
+                          "customTierLimit",
+                          "businessIntel",
+                        ].includes(k)
                     )
                     .map(([key, value]) => (
                       <li key={key}>
@@ -383,6 +473,21 @@ export default function Area51UserPage() {
                     ))
                 : null}
             </ul>
+            {user.businessIntel ? (
+              <div className="mt-6">
+                <h4 className="font-semibold">Business intel</h4>
+                <ul className="mt-2 space-y-1">
+                  {Object.entries(user.businessIntel).map(([key, value]) => (
+                    <li key={key}>
+                      <span className="font-semibold">{key}</span>:{" "}
+                      {renderBusinessIntelValue(
+                        value as BusinessIntel[keyof BusinessIntel]
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           {hasCustomTier && (
@@ -462,7 +567,7 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
       method="post"
       onChange={(e) => {
         const form = e.currentTarget;
-        fetcher.submit(form);
+        void fetcher.submit(form);
       }}
       className="inline-flex items-center gap-2"
     >
@@ -497,7 +602,7 @@ function SubscriptionCheckUpdateForm({
       method="post"
       onChange={(e) => {
         const form = e.currentTarget;
-        fetcher.submit(form);
+        void fetcher.submit(form);
       }}
       className="inline-flex items-center gap-2"
     >

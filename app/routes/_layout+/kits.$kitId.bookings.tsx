@@ -1,16 +1,16 @@
 import { BookingStatus } from "@prisma/client";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -32,6 +32,10 @@ const BOOKING_STATUS_TO_SHOW = [
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
   BookingStatus.RESERVED,
+];
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -104,29 +108,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "bookings",
     };
 
-    const items = formatBookingsDates(bookings, request);
-
-    return json(
-      data({
-        header,
-        items,
-        search,
-        page,
-        perPage,
-        totalItems: bookingCount,
-        totalPages,
-        modelName,
-        ...teamMembersData,
-        ...tagsData,
-        searchFieldTooltip: {
-          title: "Search your bookings",
-          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
-        },
-      })
-    );
+    return payload({
+      header,
+      items: bookings,
+      search,
+      page,
+      perPage,
+      totalItems: bookingCount,
+      totalPages,
+      modelName,
+      ...teamMembersData,
+      ...tagsData,
+      searchFieldTooltip: {
+        title: "Search your bookings",
+        text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

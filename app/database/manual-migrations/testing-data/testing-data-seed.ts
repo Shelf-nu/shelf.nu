@@ -30,11 +30,13 @@ async function seed() {
       });
     }
 
-    assets.map(async (asset) => {
-      await prisma.asset.create({
-        data: asset,
-      });
-    });
+    await Promise.all(
+      assets.map(async (asset) => {
+        await prisma.asset.create({
+          data: asset,
+        });
+      })
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,

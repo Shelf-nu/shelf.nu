@@ -1,11 +1,14 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveShowShelfBranding } from "~/utils/branding";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
@@ -34,7 +37,7 @@ export interface CodeType {
 
 interface CodePreviewProps {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   hideButton?: boolean;
   item: {
     id: string; // Need the ID to construct the action URL
@@ -56,6 +59,8 @@ interface CodePreviewProps {
   onCodeChange?: (code: CodeType | null) => void;
   selectedBarcodeId?: string;
   onRefetchData?: () => void; // Callback to refetch data when barcode is added
+  sequentialId?: string | null;
+  showShelfBranding?: boolean;
 }
 
 export const CodePreview = ({
@@ -68,11 +73,18 @@ export const CodePreview = ({
   onCodeChange,
   selectedBarcodeId,
   onRefetchData,
+  sequentialId,
+  showShelfBranding,
 }: CodePreviewProps) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService } = useUserRoleHelper();
+  const organization = useCurrentOrganization();
+  const resolvedShowShelfBranding = resolveShowShelfBranding(
+    showShelfBranding,
+    organization?.showShelfBranding
+  );
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list
@@ -146,6 +158,31 @@ export const CodePreview = ({
     (code) => code.id === selectedCodeId
   );
 
+  useEffect(() => {
+    // Keep selection in sync when codes change (e.g., new QR after relink)
+    const hasSelectedCode = availableCodes.some(
+      (code) => code.id === selectedCodeId
+    );
+
+    if (hasSelectedCode) return;
+
+    // Prefer the externally requested barcode, then fallback to QR, then any barcode
+    const selectedBarcode = selectedBarcodeId
+      ? availableCodes.find((code) => code.id === selectedBarcodeId)
+      : undefined;
+
+    if (selectedBarcode) {
+      setSelectedCodeId(selectedBarcode.id);
+      return;
+    }
+
+    const fallbackQr = availableCodes.find((code) => code.type === "qr");
+    const fallbackBarcode = availableCodes.find(
+      (code) => code.type === "barcode"
+    );
+    setSelectedCodeId(fallbackQr?.id || fallbackBarcode?.id || "");
+  }, [availableCodes, selectedBarcodeId, selectedCodeId]);
+
   const fileName = useMemo(() => {
     if (!selectedCode) return "";
 
@@ -157,7 +194,7 @@ export const CodePreview = ({
     }
   }, [item, selectedCode]);
 
-  function downloadCode(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
+  function downloadCode(e: MouseEvent<HTMLButtonElement>) {
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 
@@ -185,7 +222,7 @@ export const CodePreview = ({
     }
   }
 
-  const printCode = useReactToPrint({ content: () => captureDivRef.current });
+  const printCode = useReactToPrint({ contentRef: captureDivRef });
 
   // Don't render if no codes available
   if (availableCodes.length === 0) {
@@ -202,6 +239,7 @@ export const CodePreview = ({
         <div className="flex items-center justify-center gap-2">
           <select
             id="code-selector"
+            aria-label="Select code to display"
             value={selectedCodeId}
             onChange={(e) => {
               setSelectedCodeId(e.target.value);
@@ -227,6 +265,7 @@ export const CodePreview = ({
               variant="secondary"
               size="sm"
               onClick={() => setIsAddBarcodeDialogOpen(true)}
+              aria-label="Add code to asset"
               disabled={
                 !canUseBarcodes
                   ? {
@@ -255,12 +294,16 @@ export const CodePreview = ({
             ref={captureDivRef}
             data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
             title={item.name}
+            qrIdDisplayPreference={organization?.qrIdDisplayPreference}
+            sequentialId={sequentialId}
+            showShelfBranding={resolvedShowShelfBranding}
           />
         ) : selectedCode?.type === "barcode" ? (
           <BarcodeLabel
             ref={captureDivRef}
             data={selectedCode.barcodeData}
             title={item.name}
+            showShelfBranding={resolvedShowShelfBranding}
           />
         ) : null}
       </div>
@@ -310,11 +353,20 @@ export type QrDef = {
 interface QrLabelProps {
   data?: { qr?: QrDef };
   title: string;
+  qrIdDisplayPreference?: string;
+  sequentialId?: string | null;
+  showShelfBranding?: boolean;
 }
 
 export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
   function QrLabel(props, ref) {
-    const { data, title } = props ?? {};
+    const {
+      data,
+      title,
+      qrIdDisplayPreference,
+      sequentialId,
+      showShelfBranding = true,
+    } = props ?? {};
     return (
       <div
         style={{
@@ -353,11 +405,17 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
           />
         </figure>
         <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
-          <div style={{ fontWeight: 600 }}>{data?.qr?.id}</div>
-          <div>
-            Powered by{" "}
-            <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+          <div style={{ fontWeight: 600 }}>
+            {qrIdDisplayPreference === "SAM_ID" && sequentialId
+              ? sequentialId
+              : data?.qr?.id}
           </div>
+          {showShelfBranding ? (
+            <div>
+              Powered by{" "}
+              <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -371,11 +429,12 @@ interface BarcodeLabelProps {
     value: string;
   };
   title: string;
+  showShelfBranding?: boolean;
 }
 
 export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
   function BarcodeLabel(props, ref) {
-    const { data, title } = props ?? {};
+    const { data, title, showShelfBranding = true } = props ?? {};
 
     if (!data) return null;
 
@@ -445,10 +504,12 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
               )}
             </div>
           </div>
-          <div>
-            Powered by{" "}
-            <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
-          </div>
+          {showShelfBranding ? (
+            <div>
+              Powered by{" "}
+              <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );

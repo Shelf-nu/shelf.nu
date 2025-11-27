@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
@@ -6,7 +7,7 @@ import When from "../when/when";
 
 type CategoriesInputProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   disabled?: boolean;
   name: (index: number) => string;
   categories: string[];

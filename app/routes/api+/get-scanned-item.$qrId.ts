@@ -1,11 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -25,6 +26,7 @@ import {
   KIT_INCLUDE,
   QR_INCLUDE,
 } from "~/utils/scanner-includes.server";
+import { parseSequentialId } from "~/utils/sequential-id";
 
 // Re-export types for backward compatibility
 export type AssetFromQr = AssetFromScanner;
@@ -59,7 +61,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for assetExtraInclude");
             }
           }),
@@ -70,7 +72,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for kitExtraInclude");
             }
           }),
@@ -80,17 +82,53 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude: Prisma.KitInclude | undefined;
     };
 
+    const assetInclude: Prisma.AssetInclude = {
+      ...ASSET_INCLUDE,
+      ...(assetExtraInclude ?? {}),
+    };
+
+    const kitInclude: Prisma.KitInclude = {
+      ...KIT_INCLUDE,
+      ...(kitExtraInclude ?? {}),
+    };
+
+    const sequentialId = parseSequentialId(qrId);
+
+    if (sequentialId) {
+      const asset = await db.asset.findFirst({
+        where: {
+          organizationId,
+          sequentialId,
+        },
+        include: assetInclude,
+      });
+
+      if (!asset) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This SAM ID doesn't exist or it doesn't belong to your current organization.",
+          title: "SAM ID not found",
+          additionalData: { sequentialId, shouldSendNotification: false },
+          label: "Scan",
+          shouldBeCaptured: false,
+        });
+      }
+
+      return data(
+        payload({
+          qr: {
+            type: "asset" as const,
+            asset,
+          },
+        })
+      );
+    }
+
     const include = {
       ...QR_INCLUDE,
-
-      // Include additional data based on search params. This will override the default includes
-      ...(assetExtraInclude
-        ? { asset: { include: { ...ASSET_INCLUDE, ...assetExtraInclude } } }
-        : undefined),
-
-      ...(kitExtraInclude
-        ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
-        : undefined),
+      asset: { include: assetInclude },
+      kit: { include: kitInclude },
     };
 
     const qr = await getQr({
@@ -119,8 +157,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
+    return data(
+      payload({
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
@@ -133,7 +171,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const shouldSendNotification =
       typeof sendNotification === "boolean" && sendNotification;
 
-    return json(error(reason, shouldSendNotification), {
+    return data(error(reason, shouldSendNotification), {
       status: reason.status,
     });
   }

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
@@ -75,7 +75,7 @@ export const AssetImage = ({
   const refreshImage = useCallback(() => {
     if (assetId && mainImage && !hasAttemptedRefresh) {
       setHasAttemptedRefresh(true);
-      imageFetcher.submit(
+      void imageFetcher.submit(
         { assetId, mainImage },
         {
           method: "get",
@@ -89,7 +89,7 @@ export const AssetImage = ({
   const generateThumbnail = useCallback(() => {
     if (assetId && !hasAttemptedRefresh) {
       setHasAttemptedRefresh(true);
-      thumbnailFetcher.submit(
+      void thumbnailFetcher.submit(
         { assetId },
         {
           method: "get",

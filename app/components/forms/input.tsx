@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { RefObject, InputHTMLAttributes } from "react";
 import { forwardRef } from "react";
 
 import { tw } from "~/utils/tw";
@@ -7,7 +7,7 @@ import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
 export interface InputProps
-  extends React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
+  extends InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
   name?: string;
 
   /** Label for the input field */
@@ -53,6 +53,13 @@ export interface InputProps
   hasAttachedButton?: boolean;
 
   required?: boolean;
+
+  /**
+   * Autocomplete attribute for better form UX and accessibility.
+   * Common values: "email", "name", "username", "new-password", "current-password", "tel", etc.
+   * See: https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/autocomplete
+   */
+  autoComplete?: string;
 }
 
 const Input = forwardRef(function Input(

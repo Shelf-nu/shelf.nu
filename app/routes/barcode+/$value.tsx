@@ -1,10 +1,11 @@
 import type { Organization } from "@prisma/client";
-import { redirect, json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
@@ -13,6 +14,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Barcode") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -34,7 +37,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (!canUseBarcodes) {
       throw new ShelfError({
         cause: null,
-        message: "Barcode scanning is not enabled for this organization.",
+        message:
+          "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code.",
         additionalData: { value, shouldSendNotification: false },
         label: "Barcode",
         shouldBeCaptured: false,
@@ -54,6 +58,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (!barcode) {
       throw new ShelfError({
         cause: null,
+        title: "Barcode not found",
         message:
           "This barcode doesn't exist or it doesn't belong to your current organization.",
         additionalData: { value, shouldSendNotification: false },
@@ -131,10 +136,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, value });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
+export const ErrorBoundary = () => <ErrorContent />;
+
 export default function BarcodeScanner() {
-  return <ErrorContent />;
+  return null;
 }

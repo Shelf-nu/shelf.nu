@@ -1,5 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useState, useEffect } from "react";
+import { darkenColor } from "~/utils/color-contrast";
 import { getRandomColor } from "~/utils/get-random-color";
 import Input from "./input";
 
@@ -26,6 +27,9 @@ export const ColorInput = ({
     setColor(() => `${getRandomColor()}`);
   };
 
+  // Use darkened color for icon text to match Badge component
+  const iconColor = color ? darkenColor(color, 0.5) : undefined;
+
   return (
     <div className="flex items-end gap-1">
       <Input
@@ -41,9 +45,12 @@ export const ColorInput = ({
         size="sm"
         as="a"
         onClick={handleRefresh}
-        className="cursor-pointer p-2.5"
-        style={{ backgroundColor: `${color}33` }}
-        title="Generate random color"
+        className="cursor-pointer p-2"
+        style={{
+          backgroundColor: `${color}33`,
+          color: iconColor,
+        }}
+        title="Generate random color (preview shows how badge will look)"
         data-test-id="generateRandomColor"
       />
     </div>

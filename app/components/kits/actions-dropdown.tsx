@@ -1,5 +1,7 @@
+import { useState } from "react";
 import type { Prisma } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { MapPinIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
@@ -12,6 +14,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import DeleteKit from "./delete-kit";
+import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -70,6 +73,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
+
+  const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
 
   const disableReleaseForSelfService =
     isSelfService && kitCustody?.custodian?.userId !== user?.id;
@@ -194,6 +199,39 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
             >
               <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
+                  to="assets/update-location"
+                  role="link"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  width="full"
+                  onClick={() => setOpen(false)}
+                >
+                  <span className="flex items-center gap-2">
+                    <MapPinIcon className="size-4" /> Update location
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
+                  role="button"
+                  variant="link"
+                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  width="full"
+                  onClick={() => {
+                    setOpen(false);
+                    setIsRelinkQrDialogOpen(true);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="barcode" />
+                    Relink QR Code
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem className="px-4 py-1 md:p-0">
+                <Button
                   to="edit"
                   role="link"
                   variant="link"
@@ -227,6 +265,14 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <When truthy={isRelinkQrDialogOpen}>
+        <RelinkQrCodeDialog
+          key={kit.qrCodes[0]?.id || kit.id}
+          open={isRelinkQrDialogOpen}
+          onClose={() => setIsRelinkQrDialogOpen(false)}
+        />
+      </When>
     </>
   );
 }

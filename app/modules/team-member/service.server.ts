@@ -1,5 +1,6 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { BookingStatus } from "@prisma/client";
+import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -21,6 +22,16 @@ type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
     };
   };
 }>;
+
+type TeamMemberWithSelect<T extends Prisma.TeamMemberSelect | undefined> =
+  T extends Prisma.TeamMemberSelect
+    ? Prisma.TeamMemberGetPayload<{ select: T }>
+    : TeamMember;
+
+type TeamMemberWithInclude<T extends Prisma.TeamMemberInclude | undefined> =
+  T extends Prisma.TeamMemberInclude
+    ? Prisma.TeamMemberGetPayload<{ include: T }>
+    : TeamMember;
 
 export async function createTeamMember({
   name,
@@ -140,7 +151,7 @@ export async function getTeamMembers(params: {
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.TeamMemberWhereInput = {
+    const where: Prisma.TeamMemberWhereInput = {
       deletedAt: null,
       organizationId,
       ...params.where,
@@ -301,7 +312,6 @@ export async function getTeamMemberForCustodianFilter({
 
     /** Checks and fixes teamMember names if they are broken */
     await fixTeamMembersNames(teamMembers);
-
     return {
       teamMembers,
       totalTeamMembers,
@@ -316,23 +326,285 @@ export async function getTeamMemberForCustodianFilter({
   }
 }
 
-export async function getTeamMember({
-  id,
+/**
+ * Fetches team member(s) for use in booking form custodian select.
+ *
+ * Behavior based on booking status:
+ * 1. Ongoing/Overdue/Complete/Cancelled/Archived/Reserved: Only fetch current custodian
+ * 2. Draft: Fetch team members list, always including current custodian
+ * 3. New booking (no status): Standard fetch without custodian guarantee
+ *
+ * For BASE/SELF_SERVICE users: Returns only their team member (optimized single query)
+ * For ADMIN users: Returns paginated list with conditional custodian inclusion
+ *
+ * This is separate from getTeamMemberForCustodianFilter to avoid mixing concerns:
+ * - Filter: needs paginated list for sidebar filters
+ * - Form: Needs conditional fetching based on booking state
+ */
+export async function getTeamMemberForForm({
   organizationId,
+  userId,
+  isSelfServiceOrBase,
+  getAll,
+  custodianUserId,
+  custodianTeamMemberId,
+  bookingStatus,
 }: {
-  id: TeamMember["id"];
   organizationId: Organization["id"];
+  userId: string;
+  isSelfServiceOrBase: boolean;
+  getAll?: boolean;
+  custodianUserId?: string;
+  custodianTeamMemberId?: string;
+  bookingStatus?: BookingStatus;
 }) {
   try {
-    return await db.teamMember.findUniqueOrThrow({
-      where: { id, organizationId },
+    // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member
+    if (isSelfServiceOrBase) {
+      const teamMember = await db.teamMember.findFirst({
+        where: {
+          organizationId,
+          userId,
+          deletedAt: null,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      await fixTeamMembersNames(teamMember ? [teamMember] : []);
+
+      return {
+        teamMembers: teamMember ? [teamMember] : [],
+        totalTeamMembers: teamMember ? 1 : 0,
+      };
+    }
+
+    // For ADMIN users with locked booking statuses, only return the current custodian
+    const lockedStatuses: BookingStatus[] = [
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.COMPLETE,
+      BookingStatus.CANCELLED,
+      BookingStatus.ARCHIVED,
+    ];
+    const isLockedStatus =
+      bookingStatus && lockedStatuses.includes(bookingStatus);
+
+    if (isLockedStatus) {
+      // Find the custodian's team member (try by team member id first, then by user id)
+      const custodianTeamMember = custodianTeamMemberId
+        ? await db.teamMember.findFirst({
+            where: {
+              id: custodianTeamMemberId,
+              organizationId,
+              deletedAt: null,
+            },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          })
+        : custodianUserId
+        ? await db.teamMember.findFirst({
+            where: {
+              userId: custodianUserId,
+              organizationId,
+              deletedAt: null,
+            },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          })
+        : null;
+
+      await fixTeamMembersNames(
+        custodianTeamMember ? [custodianTeamMember] : []
+      );
+
+      return {
+        teamMembers: custodianTeamMember ? [custodianTeamMember] : [],
+        totalTeamMembers: custodianTeamMember ? 1 : 0,
+      };
+    }
+
+    // ADMIN users get paginated list
+    // For DRAFT bookings, ensure custodian is included in selectedTeamMembers
+    const selectedTeamMembers: string[] = [];
+
+    if (bookingStatus === "DRAFT") {
+      // Find custodian team member id if we have custodianUserId but no custodianTeamMemberId
+      if (custodianUserId && !custodianTeamMemberId) {
+        const custodian = await db.teamMember.findFirst({
+          where: {
+            userId: custodianUserId,
+            organizationId,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (custodian) {
+          selectedTeamMembers.push(custodian.id);
+        }
+      } else if (custodianTeamMemberId) {
+        selectedTeamMembers.push(custodianTeamMemberId);
+      }
+    }
+
+    return await getTeamMemberForCustodianFilter({
+      organizationId,
+      selectedTeamMembers,
+      getAll,
+      userId,
+      filterByUserId: false,
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Team member not found",
-      additionalData: { id },
+      message: "Failed to fetch team member for form",
+      additionalData: { organizationId, userId, isSelfServiceOrBase },
       label,
+    });
+  }
+}
+
+type GetTeamMemberArgsBase = {
+  id: TeamMember["id"];
+  organizationId: Organization["id"];
+};
+
+/**
+ * Retrieves a team member by ID with organization validation.
+ * Supports flexible data fetching with select/include options.
+ *
+ * @param args - Base arguments containing team member ID and organization ID
+ * @returns Promise resolving to the complete TeamMember object
+ * @throws ShelfError if team member not found or doesn't belong to organization
+ *
+ * @example
+ * ```typescript
+ * const member = await getTeamMember({
+ *   id: "member-123",
+ *   organizationId: "org-456"
+ * });
+ * ```
+ */
+export async function getTeamMember(
+  args: GetTeamMemberArgsBase
+): Promise<TeamMember>;
+
+/**
+ * Retrieves a team member with specific field selection.
+ *
+ * @param args - Arguments with select object to specify which fields to return
+ * @returns Promise resolving to TeamMember with only selected fields
+ * @throws ShelfError if team member not found or doesn't belong to organization
+ *
+ * @example
+ * ```typescript
+ * const member = await getTeamMember({
+ *   id: "member-123",
+ *   organizationId: "org-456",
+ *   select: { id: true, userId: true }
+ * });
+ * ```
+ */
+export async function getTeamMember<T extends Prisma.TeamMemberSelect>(
+  args: GetTeamMemberArgsBase & { select: T; include?: never }
+): Promise<TeamMemberWithSelect<T>>;
+
+/**
+ * Retrieves a team member with related data included.
+ *
+ * @param args - Arguments with include object to specify which relations to include
+ * @returns Promise resolving to TeamMember with included relations
+ * @throws ShelfError if team member not found or doesn't belong to organization
+ *
+ * @example
+ * ```typescript
+ * const member = await getTeamMember({
+ *   id: "member-123",
+ *   organizationId: "org-456",
+ *   include: { user: true }
+ * });
+ * ```
+ */
+export async function getTeamMember<T extends Prisma.TeamMemberInclude>(
+  args: GetTeamMemberArgsBase & { include: T; select?: never }
+): Promise<TeamMemberWithInclude<T>>;
+export async function getTeamMember({
+  id,
+  organizationId,
+  select,
+  include,
+}: GetTeamMemberArgsBase & {
+  select?: Prisma.TeamMemberSelect;
+  include?: Prisma.TeamMemberInclude;
+}) {
+  try {
+    if (select && include) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot use both select and include when fetching a team member.",
+        additionalData: { id, organizationId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const queryOptions: Prisma.TeamMemberFindUniqueOrThrowArgs = {
+      where: { id, organizationId },
+    };
+    if (select) {
+      queryOptions.select = select;
+    } else if (include) {
+      queryOptions.include = include;
+    }
+    const teamMember = await db.teamMember.findUniqueOrThrow(queryOptions);
+
+    if (select) {
+      return teamMember as TeamMemberWithSelect<typeof select>;
+    }
+
+    if (include) {
+      return teamMember as TeamMemberWithInclude<typeof include>;
+    }
+
+    return teamMember as TeamMember;
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      title: "Team member not found",
+      message: "The selected team member could not be found.",
+      additionalData: { id, organizationId },
+      label,
+      status: 404,
     });
   }
 }
@@ -418,11 +690,11 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
      * 4. Using "Unknown" as last resort if no email exists
      */
     await Promise.all(
-      teamMembersWithEmptyNames.map((teamMember) => {
-        let name: string;
-
-        if (teamMember.user) {
-          const { firstName, lastName, email } = teamMember.user;
+      teamMembersWithEmptyNames
+        .filter((teamMember) => teamMember.user !== null)
+        .map((teamMember) => {
+          let name: string;
+          const { firstName, lastName, email } = teamMember.user!;
 
           if (firstName?.trim() || lastName?.trim()) {
             // At least one name exists - concatenate available names
@@ -442,9 +714,7 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
             where: { id: teamMember.id },
             data: { name },
           });
-        }
-        return null;
-      })
+        })
     );
 
     /** If there are broken ones, log them so we know what is going on. If this keeps on appearing in the logs that means its an ongoing issue and the cause should be found. */

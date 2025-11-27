@@ -1,5 +1,5 @@
 import type { Asset, Category } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
@@ -95,7 +95,7 @@ const Row = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
                 withPreview
               />

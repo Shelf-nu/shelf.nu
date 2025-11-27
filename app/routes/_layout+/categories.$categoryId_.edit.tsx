@@ -1,6 +1,11 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -14,7 +19,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import { error, getParams, payload, parseData } from "~/utils/http.server";
 
 import {
   PermissionAction,
@@ -57,10 +62,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title };
 
-    return json(data({ header, colorFromServer, category }));
+    return payload({ header, colorFromServer, category });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -111,7 +116,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     return redirect(`/categories`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

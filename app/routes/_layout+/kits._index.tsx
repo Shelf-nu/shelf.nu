@@ -1,12 +1,12 @@
+import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, Link, useLoaderData } from "react-router";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -24,6 +24,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -34,6 +35,8 @@ import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -43,7 +46,7 @@ import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -95,6 +98,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
+      { locations, totalLocations },
     ] = await Promise.all([
       getPaginatedAndFilterableKits({
         request,
@@ -126,6 +130,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
           category: true,
+          location: LOCATION_WITH_HIERARCHY,
         },
       }),
       db.teamMember
@@ -149,6 +154,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           });
         }),
       db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+      }),
     ]);
 
     if (totalPages !== 0 && page > totalPages) {
@@ -166,8 +175,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "kits",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: kits,
         page,
@@ -183,6 +192,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
         },
+        locations,
+        totalLocations,
       }),
       {
         headers: [...(filtersCookie ? [setCookie(filtersCookie)] : [])],
@@ -190,7 +201,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -225,7 +236,7 @@ export default function KitsIndexPage() {
     <>
       <Header>
         {canCreateKit && (
-          <Button to="new" role="link" aria-label="new kit" icon="kit">
+          <Button to="new" role="link" aria-label="new kit">
             New kit
           </Button>
         )}
@@ -321,6 +332,7 @@ export default function KitsIndexPage() {
             headerChildren={
               <>
                 <Th>Category</Th>
+                <Th>Location</Th>
                 <Th>Description</Th>
                 <Th>Assets</Th>
                 <Th className="flex items-center gap-1 whitespace-nowrap">
@@ -364,11 +376,16 @@ function ListContent({
           select: { id: true; availableToBook: true; status: true };
         };
         category: true;
+        location: typeof LOCATION_WITH_HIERARCHY;
       }
     >;
   }>;
-  bulkActions?: React.ReactNode;
+  bulkActions?: ReactNode;
 }) {
+  const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
+    typeof LOCATION_WITH_HIERARCHY
+  > | null;
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -408,6 +425,19 @@ function ListContent({
 
       <Td>
         <CategoryBadge category={item.category} />
+      </Td>
+
+      <Td>
+        {locationWithHierarchy ? (
+          <LocationBadge
+            location={{
+              id: locationWithHierarchy.id,
+              name: locationWithHierarchy.name,
+              parentId: locationWithHierarchy.parentId ?? undefined,
+              childCount: locationWithHierarchy._count?.children ?? 0,
+            }}
+          />
+        ) : null}
       </Td>
 
       <Td className="max-w-62 md:max-w-96">

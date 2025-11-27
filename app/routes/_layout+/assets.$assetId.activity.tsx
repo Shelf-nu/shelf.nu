@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { Notes } from "~/components/assets/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
@@ -8,10 +8,8 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -59,19 +57,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${asset.title}'s activity`,
     };
 
-    const notes = asset.notes.map((note) => ({
-      ...note,
-      dateDisplay: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(note.createdAt),
-      content: parseMarkdownToReact(note.content),
-    }));
-
-    return json(data({ asset: { ...asset, notes }, header }));
+    return payload({ asset, header });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 

@@ -1,4 +1,5 @@
 import { Fragment, useCallback } from "react";
+import type { CSSProperties } from "react";
 import type { NavItem } from "~/hooks/use-sidebar-nav-items";
 import ChildNavItem from "./child-nav-item";
 import ParentNavItem from "./parent-nav-item";
@@ -14,7 +15,7 @@ import UpdatesNavItem from "./updates-nav-item";
 
 type SidebarNavProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   items: NavItem[];
 };
 
@@ -68,16 +69,17 @@ export default function SidebarNav({
 
         case "label": {
           return (
-            <SidebarGroupLabel
-              asChild
-              className={
-                navItem.title.toLowerCase() === "organization"
-                  ? "mt-4"
-                  : undefined
-              }
-            >
-              <li>{navItem.title}</li>
-            </SidebarGroupLabel>
+            <SidebarMenuItem>
+              <SidebarGroupLabel
+                className={
+                  navItem.title.toLowerCase() === "organization"
+                    ? "mt-4"
+                    : undefined
+                }
+              >
+                {navItem.title}
+              </SidebarGroupLabel>
+            </SidebarMenuItem>
           );
         }
 

@@ -7,6 +7,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import {
   BOOKING_INCLUDE_FOR_EMAIL,
@@ -19,6 +20,7 @@ import {
 } from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
+import { createSystemBookingNote } from "../booking-note/service.server";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const booking = await db.booking
@@ -38,6 +40,16 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   const email = booking.custodianUser?.email;
 
   if (email && booking.from && booking.to) {
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
+        new Date(booking.from),
+        new Date()
+      )}.`,
+      assetCount: booking._count.assets,
+      hints: data.hints,
+    });
+
     sendEmail({
       to: email,
       subject: `🔔 Checkout reminder (${booking.name}) - shelf.nu`,
@@ -52,15 +64,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         bookingId: booking.id,
         hints: data.hints,
       }),
-      html: bookingUpdatesTemplateString({
-        booking,
-        heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
-          new Date(booking.from),
-          new Date()
-        )}.`,
-        assetCount: booking._count.assets,
-        hints: data.hints,
-      }),
+      html,
     });
   }
 };
@@ -91,7 +95,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     booking.to &&
     booking.status === BookingStatus.ONGOING
   ) {
-    sendCheckinReminder(booking, booking._count.assets, data.hints);
+    await sendCheckinReminder(booking, booking._count.assets, data.hints);
   }
 
   //schedule the next job
@@ -133,10 +137,32 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     return;
   }
 
+  // Create status transition note for automatic overdue transition
+  const fromStatusBadge = wrapBookingStatusForNote(
+    "ONGOING",
+    booking.custodianUserId || undefined
+  );
+  const toStatusBadge = wrapBookingStatusForNote(
+    "OVERDUE",
+    booking.custodianUserId || undefined
+  );
+
+  await createSystemBookingNote({
+    bookingId: booking.id,
+    content: `Booking became overdue. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+  });
+
   /** Send the OVERDUE email */
   const email = booking.custodianUser?.email;
 
   if (email) {
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
+      assetCount: booking._count.assets,
+      hints: data.hints,
+    });
+
     sendEmail({
       to: email,
       subject: `⚠️ Overdue booking (${booking.name}) - shelf.nu`,
@@ -151,12 +177,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         bookingId: booking.id,
         hints: data.hints,
       }),
-      html: bookingUpdatesTemplateString({
-        booking,
-        heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
-        assetCount: booking._count.assets,
-        hints: data.hints,
-      }),
+      html,
     });
   }
 };

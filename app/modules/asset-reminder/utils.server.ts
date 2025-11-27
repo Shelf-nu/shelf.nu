@@ -1,13 +1,13 @@
 import type { AssetReminder } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
 import { DateTime } from "luxon";
+import { redirect } from "react-router";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { data, parseData, safeRedirect } from "~/utils/http.server";
+import { payload, parseData, safeRedirect } from "~/utils/http.server";
 import { deleteAssetReminder, editAssetReminder } from "./service.server";
 
 /**
@@ -76,12 +76,12 @@ export async function resolveRemindersActions({
         senderId: userId,
       });
 
-      return json(data({ success: true }));
+      return payload({ success: true });
     }
 
     default: {
       checkExhaustiveSwitch(intent);
-      return json(data(null));
+      return payload(null);
     }
   }
 }

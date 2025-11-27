@@ -1,4 +1,5 @@
-import { useFetcher } from "@remix-run/react";
+import type { ComponentProps } from "react";
+import { useFetcher } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 import { Button } from "../shared/button";
 
@@ -8,7 +9,7 @@ export const CustomerPortalForm = ({
   className,
 }: {
   buttonText?: string;
-  buttonProps?: React.ComponentProps<typeof Button>;
+  buttonProps?: ComponentProps<typeof Button>;
   className?: string;
 }) => {
   const customerPortalFetcher = useFetcher();

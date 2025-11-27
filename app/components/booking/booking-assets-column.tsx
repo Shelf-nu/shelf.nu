@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
@@ -17,6 +17,7 @@ import { ListHeader } from "../list/list-header";
 import { ListItem } from "../list/list-item";
 import ListTitle from "../list/list-title";
 import { Button } from "../shared/button";
+import { InfoTooltip } from "../shared/info-tooltip";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Th } from "../table";
 import { BookingPagination } from "./booking-pagination";
@@ -41,14 +42,16 @@ export function BookingAssetsColumn() {
   // Determine if we should show the check-in columns
   const shouldShowCheckinColumns = useMemo(() => {
     // const currentStatusFilter = searchParams.get("status");
-    const isOngoing =
+    const hasValidStatus =
       booking.status === BookingStatus.ONGOING ||
-      booking.status === BookingStatus.OVERDUE;
+      booking.status === BookingStatus.OVERDUE ||
+      booking.status === BookingStatus.COMPLETE ||
+      booking.status === BookingStatus.ARCHIVED;
     const hasPartialCheckins = partialCheckinProgress?.hasPartialCheckins;
     // const isNotCheckedOutFilter =
     //   currentStatusFilter !== AssetStatus.CHECKED_OUT;
 
-    return isOngoing && hasPartialCheckins;
+    return hasValidStatus && hasPartialCheckins;
     // && isNotCheckedOutFilter;
   }, [
     booking.status,
@@ -59,14 +62,12 @@ export function BookingAssetsColumn() {
   const manageAssetsUrl = useMemo(
     () =>
       `manage-assets?${new URLSearchParams({
-        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
-        // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from as string).toISOString(),
-        bookingTo: new Date(booking.to as string).toISOString(),
+        bookingFrom: new Date(booking.from).toISOString(),
+        bookingTo: new Date(booking.to).toISOString(),
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`,
-    [booking]
+    [booking.from, booking.to, booking.id]
   );
 
   // Self service can only manage assets for bookings that are DRAFT
@@ -95,12 +96,7 @@ export function BookingAssetsColumn() {
 
   const manageAssetsButtonDisabled = useMemo(
     () =>
-      !booking.from ||
-      !booking.to ||
-      isCompleted ||
-      isArchived ||
-      isCancelled ||
-      cantManageAssetsAsBase
+      isCompleted || isArchived || isCancelled || cantManageAssetsAsBase
         ? {
             reason: isCompleted
               ? "Booking is completed. You cannot change the assets anymore"
@@ -109,18 +105,11 @@ export function BookingAssetsColumn() {
               : isCancelled
               ? "Booking is cancelled. You cannot change the assets anymore"
               : cantManageAssetsAsBase
-              ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+              ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
               : "You need to select a start and end date and save your booking before you can add assets to your booking",
           }
         : false,
-    [
-      booking.from,
-      booking.to,
-      isCompleted,
-      isArchived,
-      isCancelled,
-      cantManageAssetsAsBase,
-    ]
+    [isCompleted, isArchived, isCancelled, cantManageAssetsAsBase]
   );
 
   /**
@@ -194,8 +183,30 @@ export function BookingAssetsColumn() {
                     <Th>Category</Th>
                     {shouldShowCheckinColumns && (
                       <>
-                        <Th className="whitespace-nowrap">Checked in on</Th>
-                        <Th className="whitespace-nowrap">Checked in by</Th>
+                        <Th className="whitespace-nowrap">
+                          Checked in on{" "}
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p>
+                                Shows the date when the asset was checked in via
+                                a partial check-in.
+                              </p>
+                            }
+                          />
+                        </Th>
+                        <Th className="whitespace-nowrap">
+                          Checked in by{" "}
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p>
+                                Shows the user who checked in the asset via a
+                                partial check-in.
+                              </p>
+                            }
+                          />
+                        </Th>
                       </>
                     )}
                     <Th> </Th>
@@ -346,7 +357,7 @@ function BookingAssetsHeader({
             className="flex-1 whitespace-nowrap"
             disabled={manageAssetsButtonDisabled}
           >
-            Manage assets
+            Add assets
           </Button>
         </div>
       </When>

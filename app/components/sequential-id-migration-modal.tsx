@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -39,7 +39,7 @@ export function SequentialIdMigrationModal({
     if (state === "starting") {
       setState("running");
       setMessage("Setting up sequential IDs for your organization...");
-      fetcher.submit(
+      void fetcher.submit(
         {},
         { action: "/api/generate-sequential-ids", method: "post" }
       );

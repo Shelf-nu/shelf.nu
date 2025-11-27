@@ -1,4 +1,4 @@
-import { useNavigation, type Fetcher } from "@remix-run/react";
+import { useNavigation, type Fetcher } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 
 /**

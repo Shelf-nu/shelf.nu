@@ -1,13 +1,14 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
-  json,
+  data,
   redirect,
   useActionData,
   useLoaderData,
   useNavigation,
-} from "@remix-run/react";
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
@@ -15,10 +16,11 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -44,12 +46,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const teamMember = await getTeamMember({ id: nrmId, organizationId });
 
-    return json(data({ showModal: true, teamMember }));
+    return payload({ showModal: true, teamMember });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, nrmId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
+export const meta = () => [{ title: appendToMetaTitle("Edit team member") }];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -84,7 +87,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect("/settings/team/nrm");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, nrmId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

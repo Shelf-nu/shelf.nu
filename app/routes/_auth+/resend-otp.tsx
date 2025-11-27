@@ -1,10 +1,15 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { sendOTP } from "~/modules/auth/service.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getActionMethod,
+  parseData,
+} from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -26,7 +31,7 @@ export async function action({ request }: ActionFunctionArgs) {
         );
 
         await sendOTP(email);
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
     }
 
@@ -36,6 +41,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const isRateLimitError = cause.code === "over_email_send_rate_limit";
 
     const reason = makeShelfError(cause, {}, !isRateLimitError);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

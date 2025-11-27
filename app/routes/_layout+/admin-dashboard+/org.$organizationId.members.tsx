@@ -1,14 +1,18 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { db } from "~/database/db.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [
+  { title: appendToMetaTitle("Organization members") },
+];
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -26,19 +30,28 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       where: {
         userOrganizations: { some: { organizationId } },
       },
-      include: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        sso: true,
+        createdAt: true,
         userOrganizations: {
           where: {
             organizationId,
+          },
+          select: {
+            roles: true,
           },
         },
       },
     });
 
-    return json(data({ members }));
+    return payload({ members });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 

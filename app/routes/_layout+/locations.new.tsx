@@ -1,10 +1,10 @@
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect, redirectDocument } from "@remix-run/node";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, redirect, redirectDocument } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import {
@@ -13,6 +13,7 @@ import {
 } from "~/components/location/form";
 import { Card } from "~/components/shared/card";
 
+import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   createLocation,
   updateLocationImage,
@@ -20,7 +21,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -33,21 +34,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
       action: PermissionAction.create,
     });
 
+    const { locations, totalLocations } = await getLocationsForCreateAndEdit({
+      organizationId,
+      request,
+    });
+
     const header = {
       title,
     };
 
-    return json(data({ header }));
+    return payload({ header, locations, totalLocations });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -87,7 +93,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address, addAnother, preventRedirect } = payload;
+    const { name, description, address, addAnother, parentId, preventRedirect } = payload;
 
     const location = await createLocation({
       name,
@@ -95,6 +101,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       address,
       userId: authSession.userId,
       organizationId,
+      parentId,
     });
 
     await updateLocationImage({
@@ -122,7 +129,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(`/locations/${location.id}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

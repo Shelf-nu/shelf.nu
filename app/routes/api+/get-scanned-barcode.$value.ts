@@ -1,11 +1,11 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -46,7 +46,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     if (!canUseBarcodes) {
       throw new ShelfError({
         cause: null,
-        message: "Barcode scanning is not enabled for this organization.",
+        message:
+          "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code.",
         additionalData: { shouldSendNotification: false },
         label: "Barcode",
         shouldBeCaptured: false,
@@ -77,7 +78,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for assetExtraInclude");
             }
           }),
@@ -88,7 +89,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for kitExtraInclude");
             }
           }),
@@ -138,8 +139,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
+    return data(
+      payload({
         barcode: {
           ...barcode,
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
@@ -152,7 +153,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const shouldSendNotification =
       typeof sendNotification === "boolean" && sendNotification;
 
-    return json(error(reason, shouldSendNotification), {
+    return data(error(reason, shouldSendNotification), {
       status: reason.status,
     });
   }

@@ -1,9 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -63,9 +63,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       include: TEAM_MEMBER_INCLUDE,
     });
 
-    return json(data({ teamMembers }));
+    return data(payload({ teamMembers }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
