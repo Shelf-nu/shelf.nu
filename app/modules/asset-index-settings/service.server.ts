@@ -17,6 +17,24 @@ import {
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
+/**
+ * Derive the default asset index mode for a given organization role.
+ * BASE and SELF_SERVICE should remain in simple mode; elevated roles default to advanced.
+ */
+function getDefaultModeForRole(
+  role?: OrganizationRoles | null
+): AssetIndexMode {
+  if (
+    !role ||
+    role === OrganizationRoles.BASE ||
+    role === OrganizationRoles.SELF_SERVICE
+  ) {
+    return AssetIndexMode.SIMPLE;
+  }
+
+  return AssetIndexMode.ADVANCED;
+}
+
 const label: ErrorLabel = "Asset Index Settings";
 
 export async function createUserAssetIndexSettings({
@@ -67,14 +85,8 @@ export async function createUserAssetIndexSettings({
       ...customFieldsColumns,
     ];
 
-    // BASE and SELF_SERVICE users should default to SIMPLE mode
-    // All other roles default to ADVANCED mode when a role is provided
-    const defaultMode: AssetIndexMode =
-      !role ||
-      role === OrganizationRoles.BASE ||
-      role === OrganizationRoles.SELF_SERVICE
-        ? AssetIndexMode.SIMPLE
-        : AssetIndexMode.ADVANCED;
+    // Align initial mode based on the user's role
+    const defaultMode = getDefaultModeForRole(role);
 
     const settings = await _db.assetIndexSettings.create({
       data: {
@@ -142,6 +154,50 @@ export async function getAssetIndexSettings({
       label,
     });
   }
+}
+
+/**
+ * Ensure a user's asset index settings align with the defaults for their role.
+ * Creates settings when missing and promotes to ADVANCED when the role allows.
+ */
+export async function ensureAssetIndexModeForRole({
+  userId,
+  organizationId,
+  role,
+  tx,
+}: {
+  userId: string;
+  organizationId: string;
+  role?: OrganizationRoles | null;
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+}) {
+  const client = tx || db;
+  const desiredMode = getDefaultModeForRole(role);
+
+  let settings = await client.assetIndexSettings.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+  });
+
+  if (!settings) {
+    return createUserAssetIndexSettings({
+      userId,
+      organizationId,
+      role: role ?? undefined,
+      tx: client,
+    });
+  }
+
+  if (
+    desiredMode === AssetIndexMode.ADVANCED &&
+    settings.mode !== AssetIndexMode.ADVANCED
+  ) {
+    settings = await client.assetIndexSettings.update({
+      where: { userId_organizationId: { userId, organizationId } },
+      data: { mode: AssetIndexMode.ADVANCED },
+    });
+  }
+
+  return settings;
 }
 
 export async function changeMode({
