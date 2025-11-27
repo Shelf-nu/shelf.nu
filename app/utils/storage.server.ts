@@ -57,27 +57,74 @@ export async function createSignedUrl({
   filename: string;
   bucketName?: string;
 }) {
+  const normalizedFilename = filename.startsWith("/")
+    ? filename.substring(1)
+    : filename;
+  const maxAttempts = 2;
+
   try {
-    // Check if there is a leading slash and we need to remove it as signing will not work with the slash included
-    if (filename.startsWith("/")) {
-      filename = filename.substring(1); // Remove the first character
-    }
+    let lastError: unknown;
 
-    const { data, error } = await getSupabaseAdmin()
-      .storage.from(bucketName)
-      .createSignedUrl(filename, 24 * 60 * 60); //24h
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { data, error } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .createSignedUrl(normalizedFilename, 24 * 60 * 60); //24h
 
-    if (error) {
+      if (!error) {
+        return data.signedUrl;
+      }
+
+      lastError = error;
+
+      // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
+      // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
+      // transient CDN hiccups from bubbling up as user-facing ShelfErrors.
+      if (isSupabaseHtmlError(error) && attempt < maxAttempts) {
+        Logger.warn(
+          new ShelfError({
+            cause: error,
+            message:
+              "Supabase returned a non-JSON response while creating a signed URL. Retrying.",
+            additionalData: {
+              filename: normalizedFilename,
+              bucketName,
+              attempt,
+            },
+            label,
+            shouldBeCaptured: false,
+          })
+        );
+        await wait(250);
+        continue;
+      }
+
       throw error;
     }
 
-    return data.signedUrl;
+    throw lastError;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while creating a signed URL. Please try again. If the issue persists contact support.",
-      additionalData: { filename, bucketName },
+      additionalData: {
+        filename: normalizedFilename,
+        bucketName,
+        errorName:
+          typeof cause === "object" &&
+          cause !== null &&
+          "name" in cause &&
+          typeof (cause as { name?: unknown }).name === "string"
+            ? (cause as { name: string }).name
+            : undefined,
+        errorMessage:
+          typeof cause === "object" &&
+          cause !== null &&
+          "message" in cause &&
+          typeof (cause as { message?: unknown }).message === "string"
+            ? (cause as { message: string }).message
+            : undefined,
+      },
       label,
     });
   }
@@ -777,3 +824,35 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
     });
   }
 }
+
+/**
+ * Supabase can sporadically return HTML error pages (e.g., CDN/edge 50x) that the storage
+ * client surfaces as StorageUnknownError due to JSON parsing. Detect that shape so callers
+ * can retry once instead of immediately failing user-visible flows.
+ */
+function isSupabaseHtmlError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+
+  const isUnexpectedHtml =
+    message.includes("Unexpected token <") ||
+    message.includes("not valid JSON");
+  const isStorageUnknown =
+    name === "StorageUnknownError" ||
+    ("__isStorageError" in error &&
+      typeof error.__isStorageError === "boolean" &&
+      error.__isStorageError === true);
+
+  return isUnexpectedHtml && isStorageUnknown;
+}
+
+// Small helper for spaced retries when recovering from transient Supabase edge errors.
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
