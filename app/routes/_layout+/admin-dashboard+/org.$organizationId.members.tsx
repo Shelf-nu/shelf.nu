@@ -5,9 +5,14 @@ import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { db } from "~/database/db.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [
+  { title: appendToMetaTitle("Organization members") },
+];
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

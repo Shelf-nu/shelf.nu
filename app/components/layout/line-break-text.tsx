@@ -1,10 +1,10 @@
-import type { HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
 import { createElement, useMemo } from "react";
 import { tw } from "~/utils/tw";
 
 type LineBreakTextProps = HTMLAttributes<HTMLParagraphElement> & {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 
   /** Element tag which will be rendered */
   as?: "p" | "span" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li";
@@ -45,9 +45,12 @@ export default function LineBreakText({
     return lines;
   }, [charactersPerLine, numberOfLines, text]);
 
-  return createElement(as, {
-    className: tw("w-60 whitespace-pre-wrap", className),
-    style,
-    children: lines.map((line, i) => <span key={i}>{line}</span>),
-  });
+  return createElement(
+    as,
+    {
+      className: tw("w-60 whitespace-pre-wrap", className),
+      style,
+    },
+    lines.map((line, i) => <span key={i}>{line}</span>)
+  );
 }

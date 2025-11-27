@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useParams } from "react-router";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -16,6 +16,7 @@ import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocationKits } from "~/modules/location/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -33,6 +34,10 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();

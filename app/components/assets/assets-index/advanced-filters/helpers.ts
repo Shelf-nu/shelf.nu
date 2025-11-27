@@ -276,7 +276,7 @@ export function extractQrIdFromValue(value: string): string {
       }
 
       return value;
-    } catch (e) {
+    } catch (_e) {
       // If URL parsing fails, return original value (raw QR ID case)
       return value;
     }

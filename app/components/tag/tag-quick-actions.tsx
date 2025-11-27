@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Tag } from "@prisma/client";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
@@ -13,7 +14,7 @@ import { DeleteTag } from "./delete-tag";
 
 type TagQuickActionsProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   tag: Pick<Tag, "id" | "name">;
 };
 

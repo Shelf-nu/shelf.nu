@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -107,8 +107,8 @@ export function AssetsListComponent({
                   className="size-5"
                   asset={{
                     id: asset.id,
-                    thumbnailImage: asset.mainImage,
-                    mainImage: asset.mainImage,
+                    thumbnailImage: asset.mainImage ?? null,
+                    mainImage: asset.mainImage ?? null,
                     mainImageExpiration: null,
                   }}
                   alt={`${asset.title} main image`}

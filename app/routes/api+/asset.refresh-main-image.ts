@@ -67,10 +67,10 @@ async function generateThumbnailIfMissing(asset: {
     const buffer = Buffer.from(arrayBuffer);
 
     // Create an async iterable from the buffer - use a proper async generator
-    async function* createAsyncIterable() {
+    const createAsyncIterable = async function* () {
       await Promise.resolve(); // Add await to satisfy eslint
       yield new Uint8Array(buffer);
-    }
+    };
 
     // Generate thumbnail filename
     let thumbnailPath: string;

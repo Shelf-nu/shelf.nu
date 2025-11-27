@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { useFetcher, useParams } from "react-router";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
@@ -54,16 +55,14 @@ export const UpdateGpsCoordinatesForm = ({
     });
   }
 
-  async function handleSubmit(
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
-  ) {
+  async function handleSubmit(e: MouseEvent<HTMLButtonElement>) {
     callback();
 
     e.preventDefault();
     try {
       const coords = await requestGeoCoordinates();
 
-      fetcher.submit(
+      void fetcher.submit(
         {
           assetId: assetId as string,
           latitude: String(coords.latitude),

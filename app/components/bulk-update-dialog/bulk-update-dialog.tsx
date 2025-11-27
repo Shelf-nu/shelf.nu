@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect } from "react";
+import type { ElementRef, ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 
@@ -163,12 +164,10 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
   onSuccess?: () => void;
   /**
    * Content to be rendered inside the Dialog.
-   * It can either be a `React.ReactNode` or it can be a function returning `React.ReactNode`
+   * It can either be a `ReactNode` or it can be a function returning `ReactNode`
    * The function can receive props like `disabled`, `handleCloseDialog`, `fetcherError` with {@link DialogContentChildrenProps}
    */
-  children:
-    | React.ReactNode
-    | ((props: DialogContentChildrenProps) => React.ReactNode);
+  children: ReactNode | ((props: DialogContentChildrenProps) => ReactNode);
   /**
    * Id of the array input field
    */
@@ -181,7 +180,7 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
 
 /** This component is basically the body of the Dialog */
 const BulkUpdateDialogContent = forwardRef<
-  React.ElementRef<"form">,
+  ElementRef<"form">,
   BulkUpdateDialogContentProps
 >(function (
   {

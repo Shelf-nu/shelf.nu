@@ -1,4 +1,4 @@
-import type React from "react";
+import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -213,15 +213,19 @@ export function AdvancedIndexColumn({
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
 
-    case "valuation":
+    case "valuation": {
       const value = item?.valuation?.toLocaleString(locale, {
         currency: currentOrganization.currency,
         style: "currency",
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
-      return <TextColumn value={value ?? ""} />;
-
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {value ? value : <EmptyTableValue />}
+        </Td>
+      );
+    }
     case "createdAt":
       return <DateColumn value={item.createdAt} includeTime />;
 
@@ -324,7 +328,7 @@ function TextColumn({
   className,
   ...rest
 }: {
-  value: string | React.ReactNode;
+  value: string | ReactNode;
   className?: string;
 }) {
   return (
@@ -364,10 +368,13 @@ function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
 }
 
 function DescriptionColumn({ value }: { value: string }) {
+  const isEmpty = !value || value.trim().length === 0;
+
   return (
-    <Td className="max-w-62 whitepsace-pre-wrap">
-      {/* Only show tooltip when value is more than 60 - 2 rows of 30 */}
-      {value.length > 60 ? (
+    <Td className="max-w-62 whitespace-pre-wrap">
+      {isEmpty ? (
+        <EmptyTableValue />
+      ) : value.length > 60 ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger className="text-left">
@@ -447,7 +454,7 @@ function CustodyColumn({
   );
 }
 
-function Td({ className, ...rest }: React.ComponentProps<typeof BaseTd>) {
+function Td({ className, ...rest }: ComponentProps<typeof BaseTd>) {
   return <BaseTd className={tw("p-[2px]", className)} {...rest} />;
 }
 

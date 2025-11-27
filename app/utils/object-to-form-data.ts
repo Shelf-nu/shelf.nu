@@ -21,7 +21,10 @@ export function objectToFormData(
 
   // Handle each property in the object
   for (const key in obj) {
-    if (obj.hasOwnProperty(key) && obj[key] !== undefined) {
+    if (
+      Object.prototype.hasOwnProperty.call(obj, key) &&
+      obj[key] !== undefined
+    ) {
       // Create the property name with namespace if needed
       const formKey = namespace ? `${namespace}[${key}]` : key;
 

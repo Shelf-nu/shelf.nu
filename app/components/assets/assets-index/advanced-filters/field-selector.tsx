@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ChangeEvent } from "react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Popover,
@@ -15,6 +15,7 @@ import {
   type Column,
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { getAvailableColumns, getUIFieldType } from "./helpers";
 import type { Filter } from "./schema";
@@ -54,7 +55,7 @@ export function FieldSelector({
     );
   }, [baseAvailableColumns, searchQuery]);
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0); // Reset selection when search changes
   };
@@ -147,7 +148,11 @@ export function FieldSelector({
                     "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                 ]
               )}
+              role="option"
+              aria-selected={selectedIndex === index}
+              tabIndex={0}
               onClick={() => setFilter(column.name)}
+              onKeyDown={handleActivationKeyPress(() => setFilter(column.name))}
             >
               <span className="font-medium">
                 {parseColumnName(column.name)}

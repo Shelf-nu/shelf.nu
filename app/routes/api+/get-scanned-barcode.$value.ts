@@ -78,7 +78,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for assetExtraInclude");
             }
           }),
@@ -89,7 +89,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for kitExtraInclude");
             }
           }),

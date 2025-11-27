@@ -77,17 +77,12 @@ export async function createBarcode({
       if (target && target.includes("value")) {
         // Use existing validation function for detailed error messages
         const relationshipType = assetId ? "asset" : "kit";
-        try {
-          await validateBarcodeUniqueness(
-            [{ type, value }],
-            organizationId,
-            undefined, // No currentItemId for creates
-            relationshipType as "asset" | "kit"
-          );
-        } catch (validationError) {
-          // Re-throw the detailed validation error
-          throw validationError;
-        }
+        await validateBarcodeUniqueness(
+          [{ type, value }],
+          organizationId,
+          undefined, // No currentItemId for creates
+          relationshipType as "asset" | "kit"
+        );
       }
     }
 
@@ -161,17 +156,12 @@ export async function createBarcodes({
       if (target && target.includes("value")) {
         // Use existing validation function for detailed error messages
         const relationshipType = assetId ? "asset" : "kit";
-        try {
-          await validateBarcodeUniqueness(
-            barcodes,
-            organizationId,
-            undefined, // No currentItemId for creates
-            relationshipType as "asset" | "kit"
-          );
-        } catch (validationError) {
-          // Re-throw the detailed validation error
-          throw validationError;
-        }
+        await validateBarcodeUniqueness(
+          barcodes,
+          organizationId,
+          undefined, // No currentItemId for creates
+          relationshipType as "asset" | "kit"
+        );
       }
     }
 
@@ -234,17 +224,12 @@ export async function updateBarcode({
         const relationshipType = assetId ? "asset" : "kit";
         const currentItemId = assetId || kitId;
 
-        try {
-          await validateBarcodeUniqueness(
-            [{ type: type || "Code128", value }], // Use provided type or default
-            organizationId,
-            currentItemId,
-            relationshipType as "asset" | "kit"
-          );
-        } catch (validationError) {
-          // Re-throw the detailed validation error
-          throw validationError;
-        }
+        await validateBarcodeUniqueness(
+          [{ type: type || "Code128", value }], // Use provided type or default
+          organizationId,
+          currentItemId,
+          relationshipType as "asset" | "kit"
+        );
       }
     }
 
@@ -681,17 +666,13 @@ export async function updateBarcodes({
         // Use existing validation function for detailed error messages
         const currentItemId = assetId || kitId;
         const relationshipType = assetId ? "asset" : "kit";
-        try {
-          await validateBarcodeUniqueness(
-            barcodes,
-            organizationId,
-            currentItemId,
-            relationshipType as "asset" | "kit"
-          );
-        } catch (validationError) {
-          // Re-throw the detailed validation error
-          throw validationError;
-        }
+        await validateBarcodeUniqueness(
+          barcodes,
+          organizationId,
+          currentItemId,
+          relationshipType as "asset" | "kit"
+        );
+
         // If validateBarcodeUniqueness completes without throwing,
         // it means no duplicates were found, so continue with the generic error
       }

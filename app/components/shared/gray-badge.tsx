@@ -1,11 +1,11 @@
-import type { PropsWithChildren } from "react";
+import type { CSSProperties, HTMLAttributes, PropsWithChildren } from "react";
 import { tw } from "~/utils/tw";
 
 type GrayBadgeProps = PropsWithChildren<{
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }> &
-  React.HTMLAttributes<HTMLSpanElement>;
+  HTMLAttributes<HTMLSpanElement>;
 
 export function GrayBadge({
   className,

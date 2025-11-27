@@ -38,7 +38,7 @@ export const usePosition = () => {
   useEffect(() => {
     if (position && scanId) {
       // Here we update the position
-      fetcher.submit(
+      void fetcher.submit(
         {
           latitude: position.latitude.toString(),
           longitude: position.longitude.toString(),

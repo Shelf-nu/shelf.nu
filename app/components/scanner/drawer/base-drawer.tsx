@@ -1,3 +1,4 @@
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronUpIcon } from "lucide-react";
@@ -11,23 +12,21 @@ import { useGlobalModeViaObserver } from "../code-scanner";
 
 // Type for the base drawer props
 type BaseDrawerProps = {
-  children: React.ReactNode | ((expanded: boolean) => React.ReactNode);
+  children: ReactNode | ((expanded: boolean) => ReactNode);
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   defaultExpanded?: boolean;
-  title?: string | React.ReactNode;
+  title?: string | ReactNode;
   onClear?: () => void;
   hasItems: boolean;
-  emptyStateContent?:
-    | React.ReactNode
-    | ((expanded: boolean) => React.ReactNode);
-  headerContent?: React.ReactNode;
+  emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
+  headerContent?: ReactNode;
 };
 
 /** Used for calculating expanded size */
 const TOP_GAP = 80 + 53 + 8 + 16;
 
-const Portal = ({ children }: { children: React.ReactNode }) =>
+const Portal = ({ children }: { children: ReactNode }) =>
   createPortal(children, document.body);
 
 /**

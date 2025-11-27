@@ -276,7 +276,7 @@ export function Table({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   const { containerRef, isOverflowing } = useTableIsOverflowing();

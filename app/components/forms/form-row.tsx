@@ -1,12 +1,11 @@
-import type { JSX } from "react";
-import type React from "react";
+import type { JSX, ReactNode } from "react";
 import { tw } from "~/utils/tw";
 import SubHeading from "../shared/sub-heading";
 
 interface Props {
   /** Label to be rendered on the left side of the row */
   rowLabel: string;
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
   subHeading?: string | JSX.Element;
   required?: boolean;

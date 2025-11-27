@@ -9,6 +9,7 @@ import { getTeamMemberForForm } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
 } from "~/routes/_layout+/bookings.new";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -22,6 +23,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Create kit booking") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);

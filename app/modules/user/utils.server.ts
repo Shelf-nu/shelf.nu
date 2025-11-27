@@ -207,7 +207,7 @@ export async function resolveUserAction(
       /** Invalidate all previous invites for current user for current organization */
 
       const [_invalidatedInvites, invite] = await Promise.all([
-        await db.invite
+        db.invite
           .updateMany({
             where: {
               inviteeEmail,

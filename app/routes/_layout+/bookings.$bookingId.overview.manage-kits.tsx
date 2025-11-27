@@ -64,6 +64,7 @@ import {
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -73,6 +74,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 

@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { isValidElement, createElement } from "react";
 import * as React from "react";
 
@@ -6,7 +6,7 @@ interface SwitchChild {
   when?: boolean;
 }
 
-export const Switch = ({ children }: { children: React.ReactNode }) => {
+export const Switch = ({ children }: { children: ReactNode }) => {
   const components = React.Children.toArray(children);
 
   // Check if components[] has a non-ReactNode type Element
@@ -22,6 +22,7 @@ export const Switch = ({ children }: { children: React.ReactNode }) => {
     !("when" in lastComponent.props);
 
   if (hasInvalidComponent) {
+    // eslint-disable-next-line no-console
     console.warn(
       "Children of <Switch /> component should be a type of ReactNode"
     );

@@ -50,7 +50,7 @@ export default function OrganizationSelector() {
     const formData = new FormData();
     formData.append("organizationId", organizationId);
 
-    fetcher.submit(formData, {
+    void fetcher.submit(formData, {
       method: "POST",
       action: "/api/user/change-current-organization",
     });

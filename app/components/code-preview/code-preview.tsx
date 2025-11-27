@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
@@ -36,7 +37,7 @@ export interface CodeType {
 
 interface CodePreviewProps {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   hideButton?: boolean;
   item: {
     id: string; // Need the ID to construct the action URL
@@ -193,7 +194,7 @@ export const CodePreview = ({
     }
   }, [item, selectedCode]);
 
-  function downloadCode(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
+  function downloadCode(e: MouseEvent<HTMLButtonElement>) {
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 

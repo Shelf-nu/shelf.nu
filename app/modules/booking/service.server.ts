@@ -99,18 +99,23 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Booking";
 
 async function cancelScheduler(
-  b?: Pick<Booking, "activeSchedulerReference"> | null
+  booking: Pick<Booking, "id" | "activeSchedulerReference">
 ) {
   try {
-    if (b?.activeSchedulerReference) {
-      await scheduler.cancel(b.activeSchedulerReference);
+    if (!booking.activeSchedulerReference) {
+      Logger.error(
+        `Skipping scheduler cancellation for booking ${booking.id} because no activeSchedulerReference was found.`
+      );
+      return;
     }
+
+    await scheduler.cancel(booking.activeSchedulerReference);
   } catch (cause) {
     Logger.error(
       new ShelfError({
         cause,
         message: "Failed to cancel the scheduler for booking",
-        additionalData: { booking: b },
+        additionalData: { booking },
         label,
       })
     );
@@ -656,7 +661,7 @@ export async function updateBasicBooking({
             content: custodianChangeMessage,
           });
         }
-      } catch (error) {
+      } catch (_error) {
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
         await createSystemBookingNote({
           bookingId: booking.id,
@@ -1798,45 +1803,41 @@ export async function partialCheckinBooking({
       const isCompletingBooking = remainingCount === 0;
 
       if (isCompletingBooking) {
-        try {
-          // Update booking status to COMPLETE
-          const completedBooking = await tx.booking.update({
-            where: { id },
-            data: { status: BookingStatus.COMPLETE },
-            include: {
-              assets: true,
-              custodianUser: true,
-              custodianTeamMember: true,
-              _count: { select: { assets: true } },
-            },
-          });
+        // Update booking status to COMPLETE
+        const completedBooking = await tx.booking.update({
+          where: { id },
+          data: { status: BookingStatus.COMPLETE },
+          include: {
+            assets: true,
+            custodianUser: true,
+            custodianTeamMember: true,
+            _count: { select: { assets: true } },
+          },
+        });
 
-          // Create combined completion message
-          const fromStatusBadge = wrapBookingStatusForNote(
-            updatedBookingForNote.status,
-            completedBooking.custodianUserId || undefined
-          );
-          const toStatusBadge = wrapBookingStatusForNote(
-            BookingStatus.COMPLETE,
-            completedBooking.custodianUserId || undefined
-          );
+        // Create combined completion message
+        const fromStatusBadge = wrapBookingStatusForNote(
+          updatedBookingForNote.status,
+          completedBooking.custodianUserId || undefined
+        );
+        const toStatusBadge = wrapBookingStatusForNote(
+          BookingStatus.COMPLETE,
+          completedBooking.custodianUserId || undefined
+        );
 
-          await createSystemBookingNote({
-            bookingId: id,
-            content: `${wrapUserLinkForNote(
-              user!
-            )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
-          });
+        await createSystemBookingNote({
+          bookingId: id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+        });
 
-          return {
-            booking: completedBooking,
-            checkedInAssetCount: assetIds.length,
-            remainingAssetCount: 0,
-            isComplete: true,
-          };
-        } catch (error) {
-          throw error;
-        }
+        return {
+          booking: completedBooking,
+          checkedInAssetCount: assetIds.length,
+          remainingAssetCount: 0,
+          isComplete: true,
+        };
       } else {
         // Regular partial check-in
         const remainingText = ` (Remaining: ${remainingCount})`;
@@ -3035,12 +3036,8 @@ export async function deleteBooking(
 ) {
   try {
     const { id, organizationId } = booking;
-    const activeBooking = await db.booking.findFirst({
-      where: {
-        id,
-        status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
-        organizationId,
-      },
+    const currentBooking = await db.booking.findUnique({
+      where: { id, organizationId },
       include: {
         assets: {
           select: {
@@ -3050,6 +3047,13 @@ export async function deleteBooking(
         },
       },
     });
+
+    const activeBooking =
+      currentBooking &&
+      (currentBooking.status === BookingStatus.OVERDUE ||
+        currentBooking.status === BookingStatus.ONGOING)
+        ? currentBooking
+        : null;
 
     const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
     const uniqueKitIds = new Set(
@@ -3112,7 +3116,12 @@ export async function deleteBooking(
         });
       }
     }
-    await cancelScheduler(b);
+    await cancelScheduler(
+      currentBooking ?? {
+        id: b.id,
+        activeSchedulerReference: b.activeSchedulerReference,
+      }
+    );
 
     return b;
   } catch (cause) {
@@ -3555,7 +3564,7 @@ export async function bulkDeleteBookings({
     );
 
     /** We have to cancel scheduler for the bookings */
-    const bookingsWithSchedulerReference = overdueOrOngoingBookings.filter(
+    const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
     );
 
@@ -3814,7 +3823,7 @@ export async function bulkCancelBookings({
     );
 
     /** We have to cancel scheduler for the bookings */
-    const bookingsWithSchedulerReference = ongoingOrOverdueBookings.filter(
+    const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
     );
 

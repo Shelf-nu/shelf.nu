@@ -29,7 +29,7 @@ export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
   </div>
 );
 
-export interface Price {
+export interface PriceType {
   id: string;
   metadata?: {
     show_on_table?: boolean;
@@ -53,7 +53,7 @@ export const Price = ({
   price,
   previousPlanName,
 }: {
-  price: Price;
+  price: PriceType;
   previousPlanName?: string;
 }) => {
   const isFreePlan = price.id === "free";

@@ -3,6 +3,7 @@
  * This is not an actual <label> element. By default its a span, but can be used as a label as well
  */
 
+import type { ReactNode } from "react";
 import { tw } from "~/utils/tw";
 
 export function InnerLabel({
@@ -16,7 +17,7 @@ export function InnerLabel({
   hideLg?: boolean;
   hideMd?: boolean;
   required?: boolean;
-  children: string | React.ReactNode;
+  children: string | ReactNode;
   className?: string;
 }) {
   return (

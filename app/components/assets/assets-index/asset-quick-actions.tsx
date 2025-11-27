@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { CopyIcon, PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
@@ -14,7 +15,7 @@ import { DeleteAsset } from "../delete-asset";
 
 type AssetQuickActionsProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   asset: Pick<AssetsFromViewItem, "id" | "title" | "mainImage"> & {
     qrId: string;
     sequentialId?: string | null;

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import type { Organization, Currency } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
@@ -36,7 +37,7 @@ export const NewWorkspaceFormSchema = z.object({
 interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
-  children?: string | React.ReactNode;
+  children?: string | ReactNode;
 }
 
 export const WorkspaceForm = ({ name, currency, children }: Props) => {

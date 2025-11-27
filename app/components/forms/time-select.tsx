@@ -1,3 +1,4 @@
+import type { FC } from "react";
 import { useEffect, useState } from "react";
 import { format, parse } from "date-fns";
 import {
@@ -58,7 +59,7 @@ function convert24To12Hour(time24: string): string {
     const date = parse(time24, TIME_FORMAT_24H, new Date(2000, 0, 1));
     // Format it as 12-hour time with AM/PM (uppercase)
     return format(date, TIME_FORMAT_12H);
-  } catch (error) {
+  } catch (_error) {
     throw new Error(`Invalid 24-hour time format: ${time24}`);
   }
 }
@@ -74,7 +75,7 @@ function convert12To24Hour(time12: string): string {
     const date = parse(time12, TIME_FORMAT_12H, new Date(2000, 0, 1));
     // Format it as 24-hour time
     return format(date, TIME_FORMAT_24H);
-  } catch (error) {
+  } catch (_error) {
     throw new Error(`Invalid 12-hour time format: ${time12}`);
   }
 }
@@ -169,7 +170,7 @@ const TIME_OPTIONS = generateTimeOptions();
  * />
  * ```
  */
-export const TimeSelect: React.FC<TimeSelectProps> = ({
+export const TimeSelect: FC<TimeSelectProps> = ({
   name,
   value,
   defaultValue,
