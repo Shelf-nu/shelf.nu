@@ -50,6 +50,7 @@ import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
+import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { isLink } from "~/utils/misc";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -367,33 +368,42 @@ function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
   );
 }
 
+/**
+ * Displays a truncated plain-text preview of the asset description and shows
+ * the full markdown-rendered content inside a tooltip on hover.
+ */
 function DescriptionColumn({ value }: { value: string }) {
-  const isEmpty = !value || value.trim().length === 0;
+  const plainPreview = cleanMarkdownFormatting(value ?? "");
+  const hasContent = Boolean(value && value.trim().length > 0);
+  const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
 
   return (
     <Td className="max-w-62 whitespace-pre-wrap">
-      {isEmpty ? (
+      {!hasContent ? (
         <EmptyTableValue />
-      ) : value.length > 60 ? (
+      ) : (plainPreview || value).length > 60 ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger className="text-left">
-              <LineBreakText text={value} />
+              <LineBreakText text={previewText} charactersPerLine={28} />
             </TooltipTrigger>
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              <p className="text-sm">{value}</p>
+              <MarkdownViewer content={value} className="mt-2 text-sm" />
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       ) : (
-        <span>{value}</span>
+        <span>{previewText}</span>
       )}
     </Td>
   );
 }
 
+/**
+ * Renders a compact date cell with optional time information.
+ */
 function DateColumn({
   value,
   includeTime = false,
