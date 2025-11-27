@@ -5,7 +5,7 @@ import { getDateTimeFormatFromHints, useHints } from "~/utils/client-hints";
  * Formats a date using locale-specific formatting without timezone conversion.
  * Used for absolute dates that should display exactly as stored (e.g., working hours overrides).
  */
-function formatAbsoluteDate(
+export function formatAbsoluteDate(
   date: string | Date,
   options?: Intl.DateTimeFormatOptions
 ): string {
