@@ -1,0 +1,132 @@
+CSV IMPORT MAPPING GUIDE
+========================
+
+Shelf.nu Expected Headers (shelf-import-headers.txt)
+-----------------------------------------------------
+title, description, category, kit, tags, location, custodian, bookable,
+imageUrl, valuation, qrId, barcode_Code128, barcode_Code39, barcode_DataMatrix,
+barcode_ExternalQR, barcode_EAN13
+
+
+Client CSV to Shelf Mapping
+----------------------------
+
+DIRECT MAPPINGS (use as-is):
+1. name → title
+   Rationale: Client's "name" is the asset name, maps to Shelf's "title" field
+
+2. description → description
+   Rationale: Direct match. Client has HTML content, Shelf accepts HTML
+
+3. tags → tags
+   Rationale: Direct match. Client uses comma-separated tags
+
+4. location → location
+   Rationale: Direct match. All client assets show "Production Studio"
+
+5. valuation → valuation
+   Rationale: Client has "purchase_price" field with actual values, this should map
+   to valuation. Note: Client uses European decimal format (21,84) - needs conversion
+   to standard decimal (21.84)
+
+BARCODE MAPPINGS:
+6. barcode → qrId
+   Rationale: Client's "barcode" field contains either numeric barcodes or QR URLs.
+   The URLs (https://bqbl.it/...) should map to qrId as they appear to be QR codes
+
+FIELDS REQUIRING LOOKUP/TRANSFORMATION:
+7. product_group_id → category
+   Rationale: Client uses UUID for category reference. Need to either:
+   - Create category import/mapping first
+   - Use category names instead of IDs
+   - Leave empty if categories don't exist in Shelf yet
+
+FIELDS TO SKIP (not in Shelf import):
+- id (Shelf generates its own)
+- price_type, discountable, extra_information, taxable
+- sku, quantity, bulk, stock_identifier, available, status
+- base_price*, deposit*, date_of_purchase
+- vendor, vendor_art_nr, specifications, product_website
+- storage_room, usage_type, warranty_date, price_ruleset, tax_category
+
+FIELDS NOT IN CLIENT CSV (will be empty):
+- kit: Client doesn't have kit data
+- custodian: Client doesn't have custodian assignments
+- bookable: Client has "available" but it's different concept
+- imageUrl: Client doesn't have image URLs in this export
+- barcode_Code128, barcode_Code39, barcode_DataMatrix, barcode_ExternalQR, barcode_EAN13:
+  Client has generic "barcode" field only
+
+
+CRITICAL TRANSFORMATION NOTES
+------------------------------
+
+1. VALUATION FORMAT:
+   Client: "21,84" (European format with comma)
+   Shelf needs: "21.84" (decimal with period)
+   Action: Replace commas with periods in purchase_price values
+
+2. DESCRIPTION HTML:
+   Client: Contains <p> tags and proper HTML
+   Shelf: Accepts HTML
+   Action: Use as-is, but strip outer quotes if present
+
+3. TAGS FORMAT:
+   Client: "electronics,display,barcode_test,prodstud-rental,prodstud"
+   Shelf: Expects comma-separated
+   Action: Use as-is
+
+4. LOCATION:
+   Client: Single location "Production Studio"
+   Shelf: Expects location name
+   Action: Use as-is (ensure location exists in Shelf first)
+
+5. QR/BARCODE:
+   Client mixed formats:
+   - Numeric: "7543910390593"
+   - URLs: "https://bqbl.it/1a6fc3d9-dfd8-4750-9037-6fb447d8158f"
+
+   Recommendation:
+   - URLs → qrId
+   - Numeric → leave empty or use barcode_EAN13 if 13 digits
+
+
+RECOMMENDED WORKFLOW
+--------------------
+
+1. Pre-import setup in Shelf:
+   - Create location "Production Studio" if it doesn't exist
+   - Determine category mapping strategy
+
+2. Create transformed CSV with columns:
+   title, description, category, tags, location, valuation, qrId
+
+3. Leave empty: kit, custodian, bookable, imageUrl, barcode fields
+
+4. Example row transformation:
+
+   Client data:
+   name: "1602 LCD Display RGB Module"
+   description: "<p>The 1602 LCD Display...</p>"
+   tags: "electronics,display,barcode_test,prodstud-rental,prodstud"
+   location: "Production Studio"
+   purchase_price: "21,84"
+   barcode: "7543910390593"
+
+   Shelf import row:
+   title: "1602 LCD Display RGB Module"
+   description: "<p>The 1602 LCD Display...</p>"
+   category: "" (or mapped category name)
+   kit: ""
+   tags: "electronics,display,barcode_test,prodstud-rental,prodstud"
+   location: "Production Studio"
+   custodian: ""
+   bookable: ""
+   imageUrl: ""
+   valuation: "21.84"
+   qrId: ""
+   barcode_Code128: ""
+   barcode_Code39: ""
+   barcode_DataMatrix: ""
+   barcode_ExternalQR: ""
+   barcode_EAN13: "7543910390593"

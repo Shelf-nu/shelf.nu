@@ -1,0 +1,16 @@
+title
+description
+category
+kit
+tags
+location
+custodian
+bookable
+imageUrl
+valuation
+qrId
+barcode_Code128
+barcode_Code39
+barcode_DataMatrix
+barcode_ExternalQR
+barcode_EAN13
