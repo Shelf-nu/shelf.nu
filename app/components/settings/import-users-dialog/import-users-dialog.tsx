@@ -1,6 +1,7 @@
+import type { ChangeEvent, ReactElement } from "react";
 import { cloneElement, useState } from "react";
-import { useNavigate } from "@remix-run/react";
 import { UploadIcon } from "lucide-react";
+import { useNavigate } from "react-router";
 import type { z } from "zod";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { isFormProcessing } from "~/utils/form";
@@ -15,7 +16,7 @@ import ImportUsersSuccessContent from "./import-users-success-content";
 
 type ImportUsersDialogProps = {
   className?: string;
-  trigger?: React.ReactElement<{ onClick: () => void }>;
+  trigger?: ReactElement<{ onClick: () => void }>;
 };
 
 type ImportUser = z.infer<typeof InviteUserFormSchema>;
@@ -50,7 +51,7 @@ export default function ImportUsersDialog({
     setIsDialogOpen(false);
   }
 
-  function handleSelectFile(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleSelectFile(event: ChangeEvent<HTMLInputElement>) {
     setError("");
 
     const file = event.target.files?.[0];
@@ -63,7 +64,7 @@ export default function ImportUsersDialog({
   }
 
   function goToInvites() {
-    navigate("/settings/team/invites");
+    void navigate("/settings/team/invites");
     closeDialog();
   }
 

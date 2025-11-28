@@ -4,8 +4,8 @@ import {
   OrganizationType,
   type QrIdDisplayPreference,
 } from "@prisma/client";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -81,13 +81,29 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  let schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
+  const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const fetcher = useFetcher({ key: "general" });
   const disabled = useDisabled(fetcher);
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
+
+  const fetcherError = (
+    fetcher.data as
+      | {
+          error?: {
+            message: string;
+            additionalData?: { field?: string };
+          };
+        }
+      | undefined
+  )?.error;
+
+  const imageError =
+    (fetcherError?.additionalData?.field === "image"
+      ? fetcherError.message
+      : undefined) ?? fileError;
 
   return (
     <fetcher.Form
@@ -138,7 +154,7 @@ const WorkspaceGeneralEditForms = ({
               onChange={validateFile}
               label={"Main image"}
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
@@ -288,7 +304,7 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
 const WorkspacePermissionsEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
   const fetcher = useFetcher({ key: "permissions" });
-  let schema = EditWorkspacePermissionsSettingsFormSchema();
+  const schema = EditWorkspacePermissionsSettingsFormSchema();
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = useDisabled(fetcher);
 
@@ -451,7 +467,7 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
   const fetcher = useFetcher({ key: "sso" });
-  let schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
+  const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = useDisabled(fetcher);
 

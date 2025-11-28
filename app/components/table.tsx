@@ -1,5 +1,4 @@
-import type { TdHTMLAttributes } from "react";
-import React from "react";
+import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useTableIsOverflowing } from "~/hooks/use-table-overflow";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -9,7 +8,7 @@ export function Table({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   const { vh } = useViewportHeight();
@@ -62,10 +61,10 @@ export function Th({
   colSpan,
   ...rest
 }: {
-  children?: React.ReactNode;
+  children?: ReactNode;
   className?: string;
   colSpan?: number;
-} & React.ThHTMLAttributes<HTMLTableCellElement>) {
+} & ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
       className={tw(
@@ -84,14 +83,14 @@ export function Tr({
   children,
   className,
 }: {
-  children?: React.ReactNode;
+  children?: ReactNode;
   className?: string;
 }) {
   return <tr className={tw("hover:bg-gray-50", className)}>{children}</tr>;
 }
 
 interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }
 

@@ -138,7 +138,7 @@ export default function YourDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

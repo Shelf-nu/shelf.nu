@@ -1,8 +1,11 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
+import { data, type LoaderFunctionArgs } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -64,7 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
-    const header: HeaderData = { title: "Bookings" };
+    const header: HeaderData = { title: "My bookings" };
 
     const modelName = {
       singular: "booking",
@@ -93,6 +96,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: appendToMetaTitle(loaderData?.header.title) },
+];
 
 export default function MyBookings() {
   return <BookingsIndexPage disableBulkActions />;

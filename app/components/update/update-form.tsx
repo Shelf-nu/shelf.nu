@@ -43,10 +43,14 @@ export function UpdateForm({
       />
 
       <div>
-        <label className="mb-[6px] block text-sm font-medium text-gray-700">
+        <label
+          className="mb-[6px] block text-sm font-medium text-gray-700"
+          htmlFor="update-content-editor"
+        >
           Content
         </label>
         <MarkdownEditor
+          id="update-content-editor"
           defaultValue={content}
           label="content"
           name="content"
@@ -66,7 +70,10 @@ export function UpdateForm({
       />
 
       <div>
-        <label className="mb-[6px] block text-sm font-medium text-gray-700">
+        <label
+          className="mb-[6px] block text-sm font-medium text-gray-700"
+          htmlFor="publishDate"
+        >
           Publish Date & Time
         </label>
         <Input
@@ -79,7 +86,10 @@ export function UpdateForm({
       </div>
 
       <div>
-        <label className="mb-3 block text-sm font-medium text-gray-700">
+        <label
+          className="mb-3 block text-sm font-medium text-gray-700"
+          htmlFor="targetAdmin"
+        >
           Target Roles
         </label>
         <div className="space-y-2">
@@ -128,7 +138,10 @@ export function UpdateForm({
       </div>
 
       <div>
-        <label className="mb-3 block text-sm font-medium text-gray-700">
+        <label
+          className="mb-3 block text-sm font-medium text-gray-700"
+          htmlFor="status"
+        >
           Status
         </label>
         <div className="flex items-center gap-3">

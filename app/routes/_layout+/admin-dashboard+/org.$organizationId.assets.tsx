@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import {
@@ -9,6 +9,7 @@ import {
 } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -18,6 +19,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requireAdmin, requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Organization assets") }];
 
 export const loader = async ({
   request,

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import type { RefObject, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
@@ -78,9 +79,9 @@ export const StickyHeader = ({
   stickyHeaderRef,
   coords,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   isSticky: boolean;
-  stickyHeaderRef: React.RefObject<HTMLDivElement>;
+  stickyHeaderRef: RefObject<HTMLDivElement>;
   coords: {
     top: number;
     left: number;

@@ -1,6 +1,7 @@
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { getUserAssetsTabLoaderData } from "~/modules/asset/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -15,6 +16,7 @@ import { requirePermission } from "~/utils/roles.server";
 export const handle = {
   name: "me.assets",
 };
+export const meta = () => [{ title: appendToMetaTitle("My assets") }];
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();

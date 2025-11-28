@@ -1,6 +1,6 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/_layout+/bookings.new";
@@ -102,8 +102,8 @@ vi.mock("~/modules/organization/context.server", () => ({
 }));
 
 // why: mocking redirect, json, and data response helpers for testing route handler status codes
-vi.mock("@remix-run/node", async () => {
-  const actual = await vi.importActual("@remix-run/node");
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   const mockResponse = (data: any, init?: { status?: number }) =>
     new Response(JSON.stringify(data), {
       status: init?.status || 200,

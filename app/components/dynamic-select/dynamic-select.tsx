@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -6,13 +7,14 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,
   ModelFilterProps,
 } from "~/hooks/use-model-filters";
 import { isFormProcessing } from "~/utils/form";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { EmptyState } from "../dynamic-dropdown/empty-state";
 import { InnerLabel } from "../forms/inner-label";
@@ -26,14 +28,14 @@ import When from "../when/when";
 type Props = ModelFilterProps & {
   className?: string;
   triggerWrapperClassName?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   fieldName?: string;
 
   /** This is the html label */
-  label?: React.ReactNode;
+  label?: ReactNode;
 
   /** This is to be shown inside the popover */
-  contentLabel?: React.ReactNode;
+  contentLabel?: ReactNode;
 
   /** Hide the label */
   hideLabel?: boolean;
@@ -43,8 +45,8 @@ type Props = ModelFilterProps & {
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
-  renderItem?: (item: ModelFilterItem) => React.ReactNode;
-  extraContent?: React.ReactNode;
+  renderItem?: (item: ModelFilterItem) => ReactNode;
+  extraContent?: ReactNode;
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
@@ -306,9 +308,15 @@ export default function DynamicSelect({
                         "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                         withoutValueItem.id === selectedValue && "bg-gray-100"
                       )}
+                      role="option"
+                      aria-selected={withoutValueItem.id === selectedValue}
+                      tabIndex={0}
                       onClick={() => {
                         handleItemChange(withoutValueItem.id);
                       }}
+                      onKeyDown={handleActivationKeyPress(() =>
+                        handleItemChange(withoutValueItem.id)
+                      )}
                     >
                       <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                         {withoutValueItem.name}
@@ -342,9 +350,15 @@ export default function DynamicSelect({
                         "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                         item.id === selectedValue && "bg-gray-100"
                       )}
+                      role="option"
+                      aria-selected={item.id === selectedValue}
+                      tabIndex={0}
                       onClick={() => {
                         handleItemChange(item.id);
                       }}
+                      onKeyDown={handleActivationKeyPress(() =>
+                        handleItemChange(item.id)
+                      )}
                     >
                       <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
                         {value}

@@ -1,6 +1,6 @@
 import type { OrganizationRoles } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
-import { redirect } from "@remix-run/node";
+import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -207,7 +207,7 @@ export async function resolveUserAction(
       /** Invalidate all previous invites for current user for current organization */
 
       const [_invalidatedInvites, invite] = await Promise.all([
-        await db.invite
+        db.invite
           .updateMany({
             where: {
               inviteeEmail,

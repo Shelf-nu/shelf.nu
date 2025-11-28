@@ -1,5 +1,5 @@
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData, useSubmit } from "@remix-run/react";
+import { useLoaderData, useSubmit } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -114,7 +114,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 onClick={() => {
                   const formData = new FormData();
                   formData.append("intent", "archive");
-                  submit(formData, { method: "post" });
+                  void submit(formData, { method: "post" });
                 }}
               >
                 Archive

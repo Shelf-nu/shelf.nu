@@ -1,8 +1,7 @@
 /* eslint-disable no-console */
 import { useState } from "react";
-import { data } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, Form, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -10,6 +9,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { PUBLIC_BUCKET } from "~/utils/constants";
 import { cropImage } from "~/utils/crop-image";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -26,6 +26,9 @@ export const MigrationFormSchema = z.object({
     .transform((value) => value === "on"),
 });
 
+export const meta = () => [
+  { title: appendToMetaTitle("Move location images") },
+];
 export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 

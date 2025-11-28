@@ -1,5 +1,5 @@
+import type { ComponentType, SVGProps } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useRouteLoaderData } from "@remix-run/react";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
@@ -13,6 +13,7 @@ import {
   UserIcon,
   UserPlus2Icon,
 } from "lucide-react";
+import { useNavigate, useRouteLoaderData } from "react-router";
 
 import {
   CommandDialog,
@@ -102,7 +103,7 @@ type QuickCommand = {
   description?: string;
   href: string;
   keywords?: string[];
-  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
   isVisible?: (context: CommandContext) => boolean;
 };
 
@@ -615,7 +616,7 @@ export function CommandPalette() {
 
   const handleSelect = (href: string) => {
     setOpen(false);
-    navigate(href);
+    void navigate(href);
   };
 
   return (

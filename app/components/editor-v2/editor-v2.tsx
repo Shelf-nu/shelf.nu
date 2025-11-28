@@ -15,6 +15,7 @@ import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
 import { createEditorSchema } from "~/modules/editor-v2/markdoc-utils";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 
 import { BubbleMenu } from "./components/bubble-menu";
@@ -194,6 +195,8 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
           </div>
           <div
             className="relative bg-gray-50 px-3 py-4 focus-within:ring-2 focus-within:ring-gray-300"
+            role="textbox"
+            tabIndex={0}
             onMouseDown={(event) => {
               if (!(event.target instanceof HTMLElement)) {
                 return;
@@ -204,11 +207,14 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
               event.preventDefault();
               viewRef.current?.focus();
             }}
+            onKeyDown={handleActivationKeyPress(() => viewRef.current?.focus())}
           >
             <div
               ref={editorContainerRef}
               className="min-h-[200px]"
               data-testid="editor-v2-content"
+              role="document"
+              tabIndex={-1}
               onMouseDown={(event) => {
                 if (!(event.target instanceof HTMLElement)) {
                   return;

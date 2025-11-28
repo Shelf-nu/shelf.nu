@@ -1,7 +1,8 @@
+import type { ReactElement } from "react";
 import { cloneElement, useState } from "react";
 import type { TeamMember } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { CalendarRangeIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserData } from "~/hooks/use-user-data";
 import { tw } from "~/utils/tw";
@@ -10,7 +11,7 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 
 type CreateBookingDialogProps = {
   className?: string;
-  trigger: React.ReactElement<{ onClick: () => void }>;
+  trigger: ReactElement<{ onClick: () => void }>;
 };
 
 export default function CreateBookingDialog({

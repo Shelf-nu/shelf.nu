@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   Popover,
@@ -5,8 +6,8 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
+import { useFetcher, useLoaderData } from "react-router";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight, HandleIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -183,9 +184,11 @@ export function ConfigureColumnsDropdown() {
                             onChange={() => handleCheckboxChange(index)}
                           />
 
-                          <label
-                            htmlFor={column.name}
+                          <div
+                            role="checkbox"
+                            aria-checked={column.visible}
                             tabIndex={0}
+                            onClick={() => handleCheckboxChange(index)}
                             onKeyDown={(e) => {
                               if (e.key === " " || e.key === "Enter") {
                                 e.preventDefault();
@@ -210,7 +213,7 @@ export function ConfigureColumnsDropdown() {
                                 (cf)
                               </span>
                             )}
-                          </label>
+                          </div>
                           <button
                             type="button"
                             ref={(el) => {
@@ -257,7 +260,7 @@ function ColumnRow({
   children,
   className,
 }: {
-  children: React.ReactNode | string;
+  children: ReactNode | string;
   className?: string;
 }) {
   return <div className={tw("px-[10px] py-[6px]", className)}>{children}</div>;

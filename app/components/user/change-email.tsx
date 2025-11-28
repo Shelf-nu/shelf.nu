@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Form, useActionData, useFetcher } from "@remix-run/react";
+import { Form, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -291,7 +291,7 @@ function ResendCodeForm({
           formData.append("intent", "initiateEmailChange");
           formData.append("email", formState.newEmail || "");
           formData.append("confirmEmail", formState.newEmail || "");
-          fetcher.submit(formData, {
+          void fetcher.submit(formData, {
             method: "POST",
           });
         }}

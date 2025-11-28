@@ -1,8 +1,13 @@
 import { BookingStatus } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { redirect, data } from "@remix-run/node";
-import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import {
+  redirect,
+  data,
+  useLoaderData,
+  Outlet,
+  useMatches,
+} from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
@@ -108,7 +113,7 @@ export default function AssetDetailsPage() {
   const { booking } = useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
 
-  let items = [
+  const items = [
     { to: "overview", content: "Overview" },
     ...(userHasPermission({
       roles,

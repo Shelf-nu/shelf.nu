@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, unstable_parseMultipartFormData } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import { parseFormData } from "@remix-run/form-data-parser";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -20,7 +20,7 @@ import { WarningBox } from "~/components/shared/warning-box";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
 import { createTeamMemberIfNotExists } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
-import { memoryUploadHandler } from "~/utils/csv.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error } from "~/utils/http.server";
@@ -30,6 +30,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanImportNRM } from "~/utils/subscription.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Import team members") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -67,11 +69,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await assertUserCanImportNRM({ organizationId, organizations });
 
-    // Upload handler to store file in memory
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      memoryUploadHandler
-    );
+    // Files are automatically stored in memory with parseFormData
+    const formData = await parseFormData(request);
 
     const csvFile = formData.get("file") as File;
     const text = await csvFile.text();
@@ -235,7 +234,7 @@ function ImportForm() {
                   type="submit"
                   onClick={() => {
                     // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                    fetcher.submit(formRef.current);
+                    void fetcher.submit(formRef.current);
                   }}
                   disabled={disabled}
                 >

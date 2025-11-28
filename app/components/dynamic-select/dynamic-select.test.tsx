@@ -1,13 +1,14 @@
-import { render, screen, within } from "@testing-library/react";
+import type { ChangeEvent } from "react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import DynamicSelect from "./dynamic-select";
 
 // why: controlling navigation state to test component without triggering actual Remix navigation
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-  const actual = await vi.importActual("@remix-run/react");
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     useNavigation: vi.fn(() => ({ state: "idle" })),
@@ -41,7 +42,7 @@ function createMockUseModelFiltersReturn(
   return {
     searchQuery: "",
     setSearchQuery: vi.fn(),
-    handleSearchQueryChange: vi.fn((e: React.ChangeEvent<HTMLInputElement>) => {
+    handleSearchQueryChange: vi.fn((e: ChangeEvent<HTMLInputElement>) => {
       // Update searchQuery in subsequent calls
       mockUseModelFilters.mockReturnValue({
         ...createMockUseModelFiltersReturn(items, {
@@ -101,12 +102,17 @@ describe("DynamicSelect", () => {
 
       const user = userEvent.setup();
       const trigger = screen.getByRole("button");
-      await user.click(trigger);
 
-      // All items should be visible
-      expect(screen.getByText("Item 1")).toBeInTheDocument();
-      expect(screen.getByText("Item 2")).toBeInTheDocument();
-      expect(screen.getByText("Item 3")).toBeInTheDocument();
+      await act(async () => {
+        await user.click(trigger);
+      });
+
+      // Wait for popover to open and items to be visible
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+        expect(screen.getByText("Item 2")).toBeInTheDocument();
+        expect(screen.getByText("Item 3")).toBeInTheDocument();
+      });
     });
 
     it("updates trigger text when regular item is selected", async () => {
@@ -128,14 +134,26 @@ describe("DynamicSelect", () => {
 
       const user = userEvent.setup();
       const trigger = screen.getByRole("button");
-      await user.click(trigger);
+
+      await act(async () => {
+        await user.click(trigger);
+      });
+
+      // Wait for popover to open
+      await waitFor(() => {
+        expect(screen.getByText("Item 2")).toBeInTheDocument();
+      });
 
       // Click on Item 2
       const item2 = screen.getByText("Item 2");
-      await user.click(item2);
+      await act(async () => {
+        await user.click(item2);
+      });
 
-      // Trigger should now show "Item 2"
-      expect(trigger).toHaveTextContent("Item 2");
+      // Wait for popover to close and trigger to update
+      await waitFor(() => {
+        expect(trigger).toHaveTextContent("Item 2");
+      });
       expect(onChange).toHaveBeenCalledWith("item-2");
     });
 
@@ -176,10 +194,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
-      // WithoutValueItem should appear
-      expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      // Wait for popover to open and withoutValueItem to appear
+      await waitFor(() => {
+        expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      });
     });
 
     it("does not render withoutValueItem when not provided", async () => {
@@ -198,10 +220,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
-      // Should only show regular items
-      expect(screen.getByText("Item 1")).toBeInTheDocument();
+      // Wait for popover to open and items to appear
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+      });
       expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
     });
 
@@ -226,7 +252,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      // Wait for popover to open
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
 
       // Get all text content from the dropdown
       const popoverContent = screen.getByRole("dialog");
@@ -266,14 +299,25 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      // Wait for popover to open
+      await waitFor(() => {
+        expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      });
 
       // Click on Uncategorized
       const uncategorizedOption = screen.getByText("Uncategorized");
-      await user.click(uncategorizedOption);
+      await act(async () => {
+        await user.click(uncategorizedOption);
+      });
 
-      // onChange should be called with the correct ID
-      expect(onChange).toHaveBeenCalledWith("uncategorized");
+      // Wait for the click to be processed
+      await waitFor(() => {
+        expect(onChange).toHaveBeenCalledWith("uncategorized");
+      });
     });
 
     it("displays withoutValueItem name in trigger when selected", () => {
@@ -323,7 +367,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      // Wait for popover to open
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
 
       // Find the Untagged option in the dropdown (not the trigger)
       const popoverContent = screen.getByRole("dialog");
@@ -362,10 +413,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
-      // WithoutValueItem should be visible
-      expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      // Wait for popover to open and withoutValueItem to be visible
+      await waitFor(() => {
+        expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      });
     });
 
     it("hides withoutValueItem when user types in search", async () => {
@@ -391,10 +446,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
       // WithoutValueItem should be visible initially
-      expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("Uncategorized")).toBeInTheDocument();
+      });
 
       // Update mock to simulate search query
       mockUseModelFilters.mockReturnValue(
@@ -439,10 +498,14 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
       // WithoutValueItem should be hidden during search
-      expect(screen.queryByText("Without kit")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText("Without kit")).not.toBeInTheDocument();
+      });
 
       // Clear search
       mockUseModelFilters.mockReturnValue(
@@ -485,12 +548,16 @@ describe("DynamicSelect", () => {
       );
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
       // All regular items should be searchable
-      expect(screen.getByText("Item 1")).toBeInTheDocument();
-      expect(screen.getByText("Item 2")).toBeInTheDocument();
-      expect(screen.getByText("Item 3")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+        expect(screen.getByText("Item 2")).toBeInTheDocument();
+        expect(screen.getByText("Item 3")).toBeInTheDocument();
+      });
     });
   });
 
@@ -522,11 +589,15 @@ describe("DynamicSelect", () => {
       expect(screen.getByRole("button")).toHaveTextContent("Uncategorized");
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
       // Select a regular item
       const item1 = screen.getByText("Item 1");
-      await user.click(item1);
+      await act(async () => {
+        await user.click(item1);
+      });
 
       // Rerender with new selection
       rerender(
@@ -573,11 +644,15 @@ describe("DynamicSelect", () => {
       expect(screen.getByRole("button")).toHaveTextContent("Item 1");
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button"));
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
 
       // Select withoutValueItem
       const withoutCustody = screen.getByText("Without custody");
-      await user.click(withoutCustody);
+      await act(async () => {
+        await user.click(withoutCustody);
+      });
 
       // Rerender with new selection
       rerender(

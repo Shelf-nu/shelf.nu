@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { newBookingHeader } from "~/components/booking/new-booking-header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -9,6 +9,7 @@ import { getTeamMemberForForm } from "~/modules/team-member/service.server";
 import NewBooking, {
   action as newBookingAction,
 } from "~/routes/_layout+/bookings.new";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -22,6 +23,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Create kit booking") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);

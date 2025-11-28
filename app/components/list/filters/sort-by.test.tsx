@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,8 +11,8 @@ const mockSearchParams = vi.hoisted(
 const mockSetSearchParams = vi.hoisted(() => vi.fn());
 
 // why: control navigation state to test disabled behavior without actual navigation
-vi.mock("@remix-run/react", async () => {
-  const actual = (await vi.importActual("@remix-run/react")) as Record<
+vi.mock("react-router", async () => {
+  const actual = (await vi.importActual("react-router")) as Record<
     string,
     unknown
   >;
@@ -29,13 +30,11 @@ vi.mock("~/hooks/search-params", () => ({
 
 // why: Radix Popover doesn't render content in JSDOM, so we render it always for testing
 vi.mock("@radix-ui/react-popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => (
+  Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  PopoverTrigger: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  PopoverPortal: ({ children }: { children: React.ReactNode }) => (
+  PopoverPortal: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
   PopoverContent: ({ children, ...props }: any) => (

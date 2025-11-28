@@ -1,6 +1,7 @@
-import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
+import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Package } from "lucide-react";
+import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -205,7 +206,7 @@ export const ListAssetContent = ({
   isUserPage,
 }: {
   item: AssetsFromViewItem;
-  bulkActions?: React.ReactNode;
+  bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;

@@ -1,10 +1,12 @@
-import { Link, useMatches } from "@remix-run/react";
-import { Outlet } from "react-router";
+import { Link, useMatches, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import SubHeading from "~/components/shared/sub-heading";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const loader = () => null;
+
+export const meta = () => [{ title: appendToMetaTitle("Authentication") }];
 
 export default function App() {
   const matches = useMatches();

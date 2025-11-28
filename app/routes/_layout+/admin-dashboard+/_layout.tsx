@@ -1,9 +1,9 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data, Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -21,6 +21,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta = () => [{ title: appendToMetaTitle("Admin dashboard") }];
 
 export const handle = {
   breadcrumb: () => <Link to="/admin-dashboard">Admin dashboard</Link>,

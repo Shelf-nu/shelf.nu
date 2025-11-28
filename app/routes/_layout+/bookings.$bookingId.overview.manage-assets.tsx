@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Booking, Category, Custody, Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
+import { useAtomValue, useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+} from "react-router";
 import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+} from "react-router";
 import { z } from "zod";
 import {
   disabledBulkItemsAtom,
@@ -66,6 +67,7 @@ import {
 } from "~/modules/booking/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -91,6 +93,8 @@ export type AssetWithBooking = Asset & {
   kitId?: string | null;
   qrScanned: string;
 };
+
+export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -522,7 +526,7 @@ export default function AddAssetsToNewBooking() {
           return;
         }
 
-        navigate(manageKitsUrl);
+        void navigate(manageKitsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -701,10 +705,10 @@ export default function AddAssetsToNewBooking() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageKitsUrl);
+          void navigate(manageKitsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some assets to the booking but haven't saved it yet. Do

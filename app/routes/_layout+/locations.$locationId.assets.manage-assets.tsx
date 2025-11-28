@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import { useAtomValue, useSetAtom } from "jotai";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -44,6 +49,7 @@ import { db } from "~/database/db.server";
 import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { updateLocationAssets } from "~/modules/location/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -53,6 +59,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -120,13 +130,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       singular: "asset",
       plural: "assets",
     };
+    const header = {
+      title: `Move assets to ‘${location?.name}’ location`,
+      subHeading:
+        "Search your database for assets that you would like to move to this location.",
+    };
 
     return payload({
-      header: {
-        title: `Move assets to ‘${location?.name}’ location`,
-        subHeading:
-          "Search your database for assets that you would like to move to this location.",
-      },
+      header,
       showSidebar: true,
       noScroll: true,
       items: assets,
@@ -169,7 +180,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds, redirectTo } = parseData(
+    const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -255,7 +266,7 @@ export default function AddAssetsToLocation() {
           return;
         }
 
-        navigate(manageKitsUrl);
+        void navigate(manageKitsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -411,10 +422,10 @@ export default function AddAssetsToLocation() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageKitsUrl);
+          void navigate(manageKitsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some assets to the booking but haven't saved it yet. Do

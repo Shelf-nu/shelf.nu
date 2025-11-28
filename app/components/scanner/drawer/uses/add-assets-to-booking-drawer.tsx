@@ -1,6 +1,7 @@
+import type { CSSProperties } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
@@ -46,7 +47,7 @@ export default function AddAssetsToBookingDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

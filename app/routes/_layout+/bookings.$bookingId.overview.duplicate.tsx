@@ -1,10 +1,16 @@
-import { data, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  Form,
+  useActionData,
+  useLoaderData,
+} from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { duplicateBooking, getBooking } from "~/modules/booking/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -15,6 +21,8 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ bookingId: z.string() });
+
+export const meta = () => [{ title: appendToMetaTitle("Duplicate booking") }];
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();

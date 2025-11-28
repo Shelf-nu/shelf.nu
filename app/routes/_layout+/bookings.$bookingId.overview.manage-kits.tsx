@@ -5,20 +5,21 @@ import {
   KitStatus,
   type Prisma,
 } from "@prisma/client";
+import { useAtomValue, useSetAtom } from "jotai";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   ActionFunctionArgs,
-} from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+} from "react-router";
 import {
+  data,
+  redirect,
   Form,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -63,6 +64,7 @@ import {
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -72,6 +74,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -518,7 +522,7 @@ export default function AddKitsToBooking() {
           return;
         }
 
-        navigate(manageAssetsUrl);
+        void navigate(manageAssetsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -631,10 +635,10 @@ export default function AddKitsToBooking() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageAssetsUrl);
+          void navigate(manageAssetsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some kits to the booking but haven't saved it yet. Do you

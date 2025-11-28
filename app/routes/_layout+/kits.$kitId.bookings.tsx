@@ -1,11 +1,12 @@
 import { BookingStatus } from "@prisma/client";
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -31,6 +32,10 @@ const BOOKING_STATUS_TO_SHOW = [
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
   BookingStatus.RESERVED,
+];
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

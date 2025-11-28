@@ -1,11 +1,14 @@
 /* eslint-disable no-console */
 import { useEffect, useState } from "react";
-import { data, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { Button } from "~/components/shared/button";
 import { supabaseClient } from "~/integrations/supabase/client";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Test Supabase RLS") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

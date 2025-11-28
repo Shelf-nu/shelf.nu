@@ -1,3 +1,4 @@
+import type { ComponentProps, ForwardedRef, ReactElement } from "react";
 import { cloneElement, forwardRef, useState } from "react";
 import type { Asset, Kit, BarcodeType } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
@@ -22,9 +23,9 @@ type CodePreviewDialogProps = {
         qrId: string;
         type: "kit";
       });
-  trigger: React.ReactElement<{
+  trigger: ReactElement<{
     onClick: () => void;
-    ref: React.ForwardedRef<HTMLButtonProps>;
+    ref: ForwardedRef<HTMLButtonProps>;
   }>;
   selectedBarcodeId?: string;
 };
@@ -38,7 +39,7 @@ export const CodePreviewDialog = forwardRef<
   const { canUseBarcodes } = useBarcodePermissions();
 
   const { isLoading, data, error, refetch } = useApiQuery<{
-    qrObj: React.ComponentProps<typeof CodePreview>["qrObj"];
+    qrObj: ComponentProps<typeof CodePreview>["qrObj"];
     barcodes: Array<{
       id: string;
       type: BarcodeType;

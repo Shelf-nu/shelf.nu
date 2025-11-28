@@ -2,9 +2,8 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";

@@ -1,12 +1,13 @@
+import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "~/hooks/search-params";
 
 type UseControlledDropdownMenuReturn = {
-  ref: React.RefObject<HTMLDivElement>;
+  ref: RefObject<HTMLDivElement | null>;
   defaultOpen: boolean;
   defaultApplied: boolean;
   open: boolean;
-  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setOpen: Dispatch<SetStateAction<boolean>>;
 };
 
 interface Options {

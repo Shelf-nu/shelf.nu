@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
 
 interface CommandPaletteContextValue {
@@ -27,11 +28,7 @@ export function useCommandPaletteSafe() {
   return context;
 }
 
-export function CommandPaletteProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
 
   const value = useMemo(

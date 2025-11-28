@@ -1,4 +1,9 @@
 import * as React from "react";
+import type {
+  ComponentPropsWithoutRef,
+  ElementRef,
+  HTMLAttributes,
+} from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 // import { Check, ChevronRight, Circle } from "lucide-react";
 
@@ -18,8 +23,8 @@ const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 const DropdownMenuSubTrigger = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
+  ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
     inset?: boolean;
   }
 >(function DropdownMenuSubTrigger(
@@ -43,8 +48,8 @@ const DropdownMenuSubTrigger = React.forwardRef<
 });
 
 const DropdownMenuSubContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
+  ElementRef<typeof DropdownMenuPrimitive.SubContent>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
 >(function DropdownMenuSubContent({ className, ...props }, ref) {
   return (
     <DropdownMenuPrimitive.SubContent
@@ -59,8 +64,8 @@ const DropdownMenuSubContent = React.forwardRef<
 });
 
 const DropdownMenuContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
+  ElementRef<typeof DropdownMenuPrimitive.Content>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
     portalContainer?: HTMLElement;
   }
 >(function DropdownMenuContent(
@@ -83,8 +88,8 @@ const DropdownMenuContent = React.forwardRef<
 });
 
 const DropdownMenuItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
+  ElementRef<typeof DropdownMenuPrimitive.Item>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean;
   }
 >(function DropdownMenuItem(
@@ -106,8 +111,8 @@ const DropdownMenuItem = React.forwardRef<
 });
 
 const DropdownMenuCheckboxItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
+  ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
 >(function DropdownMenuCheckboxItem(
   { className, children, checked, ...props },
   ref
@@ -133,8 +138,8 @@ const DropdownMenuCheckboxItem = React.forwardRef<
 });
 
 const DropdownMenuRadioItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
+  ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
 >(function DropdownMenuRadioItem({ className, children, ...props }, ref) {
   return (
     <DropdownMenuPrimitive.RadioItem
@@ -156,8 +161,8 @@ const DropdownMenuRadioItem = React.forwardRef<
 });
 
 const DropdownMenuLabel = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Label>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & {
+  ElementRef<typeof DropdownMenuPrimitive.Label>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & {
     inset?: boolean;
   }
 >(function DropdownMenuLabel({ className, inset, ...props }, ref) {
@@ -175,8 +180,8 @@ const DropdownMenuLabel = React.forwardRef<
 });
 
 const DropdownMenuSeparator = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Separator>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
+  ElementRef<typeof DropdownMenuPrimitive.Separator>,
+  ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
 >(function DropdownMenuSeparator({ className, ...props }, ref) {
   return (
     <DropdownMenuPrimitive.Separator
@@ -190,7 +195,7 @@ const DropdownMenuSeparator = React.forwardRef<
 const DropdownMenuShortcut = ({
   className,
   ...props
-}: React.HTMLAttributes<HTMLSpanElement>) => (
+}: HTMLAttributes<HTMLSpanElement>) => (
   <span
     className={tw("ml-auto text-xs tracking-widest ", className)}
     {...props}

@@ -2,6 +2,7 @@ import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 import { loader } from "~/routes/api+/assets";
+import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -20,8 +21,8 @@ const createDataMock = vitest.hoisted(() => {
     });
 });
 
-vitest.mock("@remix-run/node", async () => {
-  const actual = await vitest.importActual("@remix-run/node");
+vitest.mock("react-router", async () => {
+  const actual = await vitest.importActual("react-router");
   return {
     ...actual,
     data: createDataMock(),
@@ -83,11 +84,13 @@ describe("/api/assets", () => {
 
       (db.asset.findMany as any).mockResolvedValue(mockAssets);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(requirePermission).toHaveBeenCalledWith({
         request: mockRequest,
@@ -111,8 +114,10 @@ describe("/api/assets", () => {
         },
       });
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: mockAssets,
       });
@@ -121,14 +126,18 @@ describe("/api/assets", () => {
     it("should return empty array when no ids parameter provided", async () => {
       const mockRequest = new Request("http://localhost:3000/api/assets");
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: [],
       });
@@ -139,14 +148,18 @@ describe("/api/assets", () => {
     it("should return empty array when ids parameter is empty", async () => {
       const mockRequest = new Request("http://localhost:3000/api/assets?ids=");
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: [],
       });
@@ -161,11 +174,13 @@ describe("/api/assets", () => {
 
       (db.asset.findMany as any).mockResolvedValue(mockAssets);
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.asset.findMany).toHaveBeenCalledWith({
         where: {
@@ -191,11 +206,13 @@ describe("/api/assets", () => {
       const singleAsset = [mockAssets[0]];
       (db.asset.findMany as any).mockResolvedValue(singleAsset);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.asset.findMany).toHaveBeenCalledWith({
         where: {
@@ -212,8 +229,10 @@ describe("/api/assets", () => {
         },
       });
 
-      // Success case returns plain object, not Response
-      expect(result).toEqual({
+      // Success case returns Response wrapping the payload
+      expect(result instanceof Response).toBe(true);
+      const responseData = await (result as unknown as Response).json();
+      expect(responseData).toEqual({
         error: null,
         assets: singleAsset,
       });
@@ -224,11 +243,13 @@ describe("/api/assets", () => {
         "http://localhost:3000/api/assets?ids=asset-1,asset-2"
       );
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.asset.findMany).toHaveBeenCalledWith({
         where: {
@@ -257,11 +278,13 @@ describe("/api/assets", () => {
       const shelfError = { status: 403, message: "Permission denied" };
       (makeShelfError as any).mockReturnValue(shelfError);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(makeShelfError).toHaveBeenCalledWith(permissionError, {
         userId: "user-1",
@@ -289,11 +312,13 @@ describe("/api/assets", () => {
       const shelfError = { status: 500, message: "Database error" };
       (makeShelfError as any).mockReturnValue(shelfError);
 
-      const result = await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      const result = await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(makeShelfError).toHaveBeenCalledWith(dbError, {
         userId: "user-1",
@@ -317,11 +342,13 @@ describe("/api/assets", () => {
 
       (db.asset.findMany as any).mockResolvedValue(mockAssets);
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.asset.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -339,11 +366,13 @@ describe("/api/assets", () => {
 
       (db.asset.findMany as any).mockResolvedValue([mockAssets[0]]);
 
-      await loader({
-        request: mockRequest,
-        context: mockContext,
-        params: {},
-      });
+      await loader(
+        createLoaderArgs({
+          request: mockRequest,
+          context: mockContext,
+          params: {},
+        })
+      );
 
       expect(db.asset.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

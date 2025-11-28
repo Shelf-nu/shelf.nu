@@ -1,7 +1,7 @@
 import type { ImgHTMLAttributes } from "react";
 import { useEffect, useState } from "react";
 import type { Kit } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import type { action } from "~/routes/api+/kit.refresh-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
@@ -43,7 +43,7 @@ export default function KitImage({
       const now = new Date();
       const expiration = new Date(imageExpiration);
       if (now > expiration) {
-        fetcher.submit(
+        void fetcher.submit(
           { kitId, image },
           {
             method: "post",

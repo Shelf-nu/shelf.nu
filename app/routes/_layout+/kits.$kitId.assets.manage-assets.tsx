@@ -1,10 +1,15 @@
 import { useEffect, useRef } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
-import { data, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircleIcon } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  useNavigation,
+  useSubmit,
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -50,6 +55,7 @@ import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { updateKitAssets } from "~/modules/kit/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -60,6 +66,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
+export const meta = () => [{ title: appendToMetaTitle("Manage kit assets") }];
 
 type LoaderData = typeof loader;
 
@@ -183,7 +191,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds } = parseData(
+    const { assetIds } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -249,7 +257,7 @@ export default function ManageAssetsInKit() {
   }, [items, kitAssetIds, setDisabledBulkItems]);
 
   function handleSubmit() {
-    submit(formRef.current);
+    void submit(formRef.current);
   }
 
   return (

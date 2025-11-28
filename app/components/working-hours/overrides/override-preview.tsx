@@ -1,6 +1,6 @@
 import type { WorkingHoursOverride } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
 import { TrashIcon } from "lucide-react";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { TimeRangeDisplay } from "~/components/shared/time-display";
@@ -17,7 +17,7 @@ export function OverridePreview({ override }: OverridePreviewProps) {
 
   const handleDelete = () => {
     if (window.confirm("Are you sure you want to delete this override?")) {
-      deleteFetcher.submit(
+      void deleteFetcher.submit(
         {
           intent: "deleteOverride",
           overrideId: override.id,

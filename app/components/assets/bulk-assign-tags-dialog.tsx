@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -44,7 +44,7 @@ export default function BulkAssignTagsDialog() {
   }, [fetcher.data]);
 
   useEffect(() => {
-    fetcher.submit(
+    void fetcher.submit(
       {
         name: "tag",
         queryKey: "name",

@@ -11,6 +11,7 @@ import { CheckIcon, ChevronDownIcon } from "lucide-react";
 
 import Input from "~/components/forms/input";
 import When from "~/components/when/when";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { resolveSelectState } from "~/utils/options";
 import { tw } from "~/utils/tw";
 
@@ -212,7 +213,12 @@ export function SelectWithOther({
                     "flex items-center justify-between px-4 py-3 text-sm text-gray-700 hover:cursor-pointer hover:bg-gray-50",
                     isHovered && "bg-gray-50"
                   )}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSelect(option)}
+                  onKeyDown={handleActivationKeyPress(() =>
+                    handleSelect(option)
+                  )}
                 >
                   <span className="font-medium">{option}</span>
                   <When truthy={isSelected}>
@@ -227,7 +233,12 @@ export function SelectWithOther({
                 "flex items-center justify-between px-4 py-3 text-sm text-gray-700 hover:cursor-pointer hover:bg-gray-50",
                 selectedIndex === options.length && "bg-gray-50"
               )}
+              role="button"
+              tabIndex={0}
               onClick={() => handleSelect(OTHER_OPTION_VALUE)}
+              onKeyDown={handleActivationKeyPress(() =>
+                handleSelect(OTHER_OPTION_VALUE)
+              )}
             >
               <span className="font-medium">Other</span>
               <When truthy={selection === OTHER_OPTION_VALUE}>

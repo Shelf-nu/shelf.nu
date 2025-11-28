@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
@@ -7,7 +8,7 @@ import type { SlashCommandItem, SlashState } from "../types";
 
 export function useSlashCommands(
   commands: SlashCommandItem[],
-  viewRef: React.RefObject<EditorView | null>
+  viewRef: RefObject<EditorView | null>
 ) {
   const [slashState, setSlashState] = useState<SlashState | null>(null);
   const slashStateRef = useRef<SlashState | null>(null);

@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
@@ -36,7 +37,7 @@ export interface CodeType {
 
 interface CodePreviewProps {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   hideButton?: boolean;
   item: {
     id: string; // Need the ID to construct the action URL
@@ -157,6 +158,31 @@ export const CodePreview = ({
     (code) => code.id === selectedCodeId
   );
 
+  useEffect(() => {
+    // Keep selection in sync when codes change (e.g., new QR after relink)
+    const hasSelectedCode = availableCodes.some(
+      (code) => code.id === selectedCodeId
+    );
+
+    if (hasSelectedCode) return;
+
+    // Prefer the externally requested barcode, then fallback to QR, then any barcode
+    const selectedBarcode = selectedBarcodeId
+      ? availableCodes.find((code) => code.id === selectedBarcodeId)
+      : undefined;
+
+    if (selectedBarcode) {
+      setSelectedCodeId(selectedBarcode.id);
+      return;
+    }
+
+    const fallbackQr = availableCodes.find((code) => code.type === "qr");
+    const fallbackBarcode = availableCodes.find(
+      (code) => code.type === "barcode"
+    );
+    setSelectedCodeId(fallbackQr?.id || fallbackBarcode?.id || "");
+  }, [availableCodes, selectedBarcodeId, selectedCodeId]);
+
   const fileName = useMemo(() => {
     if (!selectedCode) return "";
 
@@ -168,7 +194,7 @@ export const CodePreview = ({
     }
   }, [item, selectedCode]);
 
-  function downloadCode(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
+  function downloadCode(e: MouseEvent<HTMLButtonElement>) {
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 
@@ -196,7 +222,7 @@ export const CodePreview = ({
     }
   }
 
-  const printCode = useReactToPrint({ content: () => captureDivRef.current });
+  const printCode = useReactToPrint({ contentRef: captureDivRef });
 
   // Don't render if no codes available
   if (availableCodes.length === 0) {

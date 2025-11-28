@@ -1,7 +1,12 @@
 import { InviteStatuses } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  Form,
+  useActionData,
+  useLoaderData,
+} from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
@@ -14,6 +19,7 @@ import {
   updateInviteStatus,
 } from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -85,6 +91,8 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     );
   }
 }
+
+export const meta = () => [{ title: appendToMetaTitle("Accept team invite") }];
 
 export async function action({ context, request }: LoaderFunctionArgs) {
   try {

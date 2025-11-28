@@ -1,6 +1,7 @@
+import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
@@ -49,7 +50,7 @@ export default function AddAssetsToKitDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

@@ -1,9 +1,10 @@
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
 import { createNote, deleteNote } from "~/modules/note/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -18,6 +19,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Asset notes") }];
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { assetId } = getParams(params, z.object({ assetId: z.string() }));

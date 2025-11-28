@@ -1,14 +1,16 @@
 import { UpdateStatus, OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";
 import { getUpdateById, updateUpdate } from "~/modules/update/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Edit update") }];
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

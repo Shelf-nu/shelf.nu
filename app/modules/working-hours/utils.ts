@@ -84,7 +84,7 @@ export function normalizeWorkingHoursForValidation(
     }
 
     return undefined;
-  } catch (error) {
+  } catch (_error) {
     return undefined;
   }
 }
@@ -311,7 +311,7 @@ export function getBookingDefaultStartEndTimes(
     const [closeHours, closeMinutes] = todaySchedule.closeTime
       .split(":")
       .map(Number);
-    let endDateTime = new Date(now);
+    const endDateTime = new Date(now);
     endDateTime.setHours(closeHours, closeMinutes, 0, 0);
 
     // If start time is beyond today's close time, find next working day

@@ -218,9 +218,10 @@ function addCustomFieldDateFilter(
       return Prisma.sql`${whereClause} AND (${subquery})::date < ${filter.value}::date`;
     case "after":
       return Prisma.sql`${whereClause} AND (${subquery})::date > ${filter.value}::date`;
-    case "between":
+    case "between": {
       const [start, end] = filter.value as [string, string];
       return Prisma.sql`${whereClause} AND (${subquery})::date BETWEEN ${start}::date AND ${end}::date`;
+    }
     case "inDates": {
       const dates = (filter.value as string).split(",").map((d) => d.trim());
       const datesArray = Prisma.join(
@@ -305,12 +306,13 @@ function addCustomFieldNumberFilter(
       return Prisma.sql`${whereClause} AND (${subquery})::float >= ${numericValue}`;
     case "lte":
       return Prisma.sql`${whereClause} AND (${subquery})::float <= ${numericValue}`;
-    case "between":
+    case "between": {
       const [min, max] = filter.value as [number, number];
       // Ensure min and max are numbers
       const minValue = typeof min === "string" ? parseFloat(min) : min;
       const maxValue = typeof max === "string" ? parseFloat(max) : max;
       return Prisma.sql`${whereClause} AND (${subquery})::float BETWEEN ${minValue} AND ${maxValue}`;
+    }
     default:
       return whereClause;
   }
@@ -385,11 +387,12 @@ function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" <= ${
         filter.value
       }`;
-    case "between":
+    case "between": {
       const [min, max] = filter.value as [number, number];
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
       )}" BETWEEN ${min} AND ${max}`;
+    }
     default:
       return whereClause;
   }
@@ -419,11 +422,12 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
         filter.value
       }::date`;
-    case "between":
+    case "between": {
       const [start, end] = filter.value as [string, string];
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
       )}" BETWEEN ${start}::date AND ${end}::date`;
+    }
     case "inDates": {
       // Split comma-separated dates and remove whitespace
       const dates = (filter.value as string).split(",").map((d) => d.trim());

@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import React from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
 import { tw } from "~/utils/tw";
@@ -24,9 +23,9 @@ export default function Header({
    * This is very useful for interactive adjustments of the title
    */
   title?: string | ReactNode | null;
-  children?: React.ReactNode;
-  subHeading?: React.ReactNode;
-  preHeading?: React.ReactNode;
+  children?: ReactNode;
+  subHeading?: ReactNode;
+  preHeading?: ReactNode;
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;

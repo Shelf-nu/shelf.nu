@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import {
   Select,
   SelectContent,

@@ -1,4 +1,5 @@
-import { useLoaderData } from "@remix-run/react";
+import type { CSSProperties } from "react";
+import { useLoaderData } from "react-router";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
 import ReminderTeamMembers from "../asset-reminder/reminder-team-members";
@@ -7,7 +8,7 @@ import { DateS } from "../shared/date";
 
 type AssetReminderCardsProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 };
 
 export function AssetReminderCards({

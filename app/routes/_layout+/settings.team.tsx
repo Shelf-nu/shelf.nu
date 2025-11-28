@@ -1,11 +1,11 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Outlet, useLoaderData, useParams } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data, Outlet, useLoaderData, useParams } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import When from "~/components/when/when";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -19,6 +19,7 @@ export type UserFriendlyRoles =
   | "Owner"
   | "Base"
   | "Self service";
+export const meta = () => [{ title: appendToMetaTitle("Team settings") }];
 
 export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

@@ -1,8 +1,11 @@
 import { useEffect, useMemo } from "react";
 
-import { data, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
+import { data, redirect, useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
@@ -11,6 +14,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -153,8 +157,13 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title, subHeading });
+  return data(payload({ title, subHeading }));
 }
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.title) : "" },
+];
+
 export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();
   const { data } = fetcher;
@@ -183,7 +192,7 @@ export default function LoginCallback() {
           redirectTo
         );
 
-        fetcher.submit(formData, { method: "post" });
+        void fetcher.submit(formData, { method: "post" });
       }
     });
 

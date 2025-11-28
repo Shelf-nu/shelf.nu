@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useFetcher, useParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
+import { useFetcher, useParams } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 
 const positionAtom = atom<GeolocationCoordinates | null>(null);
@@ -38,7 +38,7 @@ export const usePosition = () => {
   useEffect(() => {
     if (position && scanId) {
       // Here we update the position
-      fetcher.submit(
+      void fetcher.submit(
         {
           latitude: position.latitude.toString(),
           longitude: position.longitude.toString(),

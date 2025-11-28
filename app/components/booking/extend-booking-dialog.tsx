@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
 import { CalendarIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -61,11 +61,8 @@ export default function ExtendBookingDialog({
 
   useEffect(
     function closeOnSuccess() {
-      if (
-        fetcher?.data &&
-        "success" in fetcher?.data &&
-        fetcher?.data?.success
-      ) {
+      const data = fetcher?.data;
+      if (data && "success" in data && data.success) {
         handleClose();
       }
     },

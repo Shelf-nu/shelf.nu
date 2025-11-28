@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useSetAtom } from "jotai";
+import { useFetcher, useLoaderData } from "react-router";
 import invariant from "tiny-invariant";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { Button } from "~/components/shared/button";
@@ -50,7 +50,7 @@ export default function OrganizationSelector() {
     const formData = new FormData();
     formData.append("organizationId", organizationId);
 
-    fetcher.submit(formData, {
+    void fetcher.submit(formData, {
       method: "POST",
       action: "/api/user/change-current-organization",
     });

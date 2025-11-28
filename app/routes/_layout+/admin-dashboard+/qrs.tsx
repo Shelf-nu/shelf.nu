@@ -1,7 +1,16 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data, redirect } from "@remix-run/node";
-import { Link, useLoaderData, useNavigation } from "@remix-run/react";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import { z } from "zod";
 import { GenerateBatchQr } from "~/components/admin/generate-batch-qr";
 import { MarkBatchAsPrinted } from "~/components/admin/mark-batch-as-printed";
@@ -23,6 +32,7 @@ import {
   getPaginatedAndFilterableQrCodes,
   markBatchAsPrinted,
 } from "~/modules/qr/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -72,6 +82,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: appendToMetaTitle(loaderData?.header.title) },
+];
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

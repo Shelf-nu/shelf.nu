@@ -1,6 +1,12 @@
 import React from "react";
+import type {
+  ReactNode,
+  ButtonHTMLAttributes,
+  ComponentType,
+  MouseEvent,
+} from "react";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
-import { Link, type LinkProps } from "@remix-run/react";
+import { Link, type LinkProps } from "react-router";
 import { tw } from "~/utils/tw";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { IconType } from "./icons-map";
@@ -20,7 +26,7 @@ export type DisabledProp =
   | boolean
   | {
       title?: string;
-      reason: React.ReactNode | string;
+      reason: ReactNode | string;
     };
 
 /**
@@ -46,7 +52,7 @@ export interface CommonButtonProps {
   onlyNewTabIconOnHover?: boolean;
   error?: string;
   hideErrorText?: boolean;
-  children?: React.ReactNode;
+  children?: ReactNode;
   disabled?: DisabledProp;
   /**
    * Accessible label for the button. Only required for icon-only buttons.
@@ -67,7 +73,7 @@ export interface CommonButtonProps {
 export interface HTMLButtonProps
   extends Omit<CommonButtonProps, "disabled" | "title">,
     Omit<
-      React.ButtonHTMLAttributes<HTMLButtonElement>,
+      ButtonHTMLAttributes<HTMLButtonElement>,
       keyof CommonButtonProps | "disabled"
     > {
   as?: "button";
@@ -91,7 +97,7 @@ export interface LinkButtonProps
  * Props for custom component buttons
  */
 export interface CustomComponentButtonProps extends CommonButtonProps {
-  as: React.ComponentType<any>;
+  as: ComponentType<any>;
   [key: string]: any;
 }
 
@@ -298,8 +304,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               {...props}
               className={finalStyles}
               aria-label={ariaLabel}
-              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-              onClick={(e: React.MouseEvent) => e.preventDefault()}
+              onMouseDown={(e: MouseEvent) => e.preventDefault()}
+              onClick={(e: MouseEvent) => e.preventDefault()}
             >
               {buttonContent}
             </Component>
@@ -330,8 +336,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
                 disabled={isDisabled}
                 /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */
                 {...(isDisabled && {
-                  onClick: (e: React.MouseEvent) => e.preventDefault(),
-                  onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+                  onClick: (e: MouseEvent) => e.preventDefault(),
+                  onMouseDown: (e: MouseEvent) => e.preventDefault(),
                 })}
               >
                 {buttonContent}
@@ -357,8 +363,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           disabled={isDisabled}
           /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */
           {...(isDisabled && {
-            onClick: (e: React.MouseEvent) => e.preventDefault(),
-            onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+            onClick: (e: MouseEvent) => e.preventDefault(),
+            onMouseDown: (e: MouseEvent) => e.preventDefault(),
           })}
         >
           {buttonContent}

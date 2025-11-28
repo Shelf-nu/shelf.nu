@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, FC } from "react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 
 /**
@@ -33,7 +33,7 @@ export function createAvailabilityLabels(
     /** Sort labels by priority (default: true) */
     sortByPriority?: boolean;
   } = {}
-): [boolean, React.FC] {
+): [boolean, FC] {
   const { maxLabels, sortByPriority = true } = options;
 
   // Filter the active labels based on conditions
@@ -54,7 +54,7 @@ export function createAvailabilityLabels(
   const hasLabels = activeLabels.length > 0;
 
   // Create the component that will render the labels
-  const AvailabilityLabels: React.FC = () => {
+  const AvailabilityLabels: FC = () => {
     if (!hasLabels) return null;
 
     return (

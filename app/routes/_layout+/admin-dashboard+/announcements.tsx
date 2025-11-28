@@ -1,16 +1,18 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { Outlet, useFetcher, useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, Outlet, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Announcements") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -127,7 +129,7 @@ export default function Announcements() {
                     method="post"
                     onChange={(e) => {
                       e.preventDefault();
-                      fetcher.submit(e.currentTarget);
+                      void fetcher.submit(e.currentTarget);
                     }}
                   >
                     <input type="hidden" name="id" value={a.id} />

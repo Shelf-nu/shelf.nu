@@ -1,16 +1,16 @@
+import { ChevronLeft } from "lucide-react";
 import {
   data,
   type LoaderFunctionArgs,
   type ActionFunctionArgs,
-} from "@remix-run/node";
+} from "react-router";
 import {
   Outlet,
   useActionData,
   useFetcher,
   useLoaderData,
   useNavigation,
-} from "@remix-run/react";
-import { ChevronLeft } from "lucide-react";
+} from "react-router";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Form } from "~/components/custom-form";
@@ -28,6 +28,8 @@ import {
   toggleBarcodeEnabled,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -36,6 +38,9 @@ import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
 
+export const meta = () => [
+  { title: appendToMetaTitle("Organization details") },
+];
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -113,7 +118,7 @@ export const action = async ({
     );
 
     switch (intent) {
-      case "toggleSso":
+      case "toggleSso": {
         const { enabledSso } = parseData(
           await request.formData(),
           z.object({
@@ -126,7 +131,8 @@ export const action = async ({
         await toggleOrganizationSso({ organizationId, enabledSso });
 
         return payload({ message: "SSO toggled" });
-      case "disableWorkspace":
+      }
+      case "disableWorkspace": {
         const { workspaceDisabled } = parseData(
           await request.formData(),
           z.object({
@@ -142,7 +148,8 @@ export const action = async ({
         return payload({
           message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
         });
-      case "toggleBarcodes":
+      }
+      case "toggleBarcodes": {
         const { barcodesEnabled } = parseData(
           await request.formData(),
           z.object({
@@ -157,7 +164,8 @@ export const action = async ({
         return payload({
           message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
         });
-      case "updateSsoDetails":
+      }
+      case "updateSsoDetails": {
         const { adminGroupId, selfServiceGroupId, domain } = parseData(
           await request.formData(),
           z.object({
@@ -204,7 +212,8 @@ export const action = async ({
         });
 
         return payload({ message: "SSO details updated" });
-      case "content":
+      }
+      case "content": {
         const csvData = await csvDataFromRequest({ request });
         if (csvData.length < 2) {
           throw new ShelfError({
@@ -225,6 +234,7 @@ export const action = async ({
           organizationId,
         });
         return payload(null);
+      }
       default:
         throw new ShelfError({
           cause: null,

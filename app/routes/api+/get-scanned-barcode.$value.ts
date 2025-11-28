@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { data } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { data } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -78,7 +78,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for assetExtraInclude");
             }
           }),
@@ -89,7 +89,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             if (!val) return undefined;
             try {
               return JSON.parse(val);
-            } catch (error) {
+            } catch (_error) {
               throw new Error("Invalid JSON input for kitExtraInclude");
             }
           }),
@@ -139,12 +139,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    return payload({
-      barcode: {
-        ...barcode,
-        type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
-      },
-    });
+    return data(
+      payload({
+        barcode: {
+          ...barcode,
+          type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
+        },
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     const sendNotification = reason.additionalData?.shouldSendNotification;

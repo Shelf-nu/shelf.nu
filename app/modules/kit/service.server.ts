@@ -18,7 +18,7 @@ import {
   KitStatus,
   NoteType,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -26,6 +26,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -292,6 +293,7 @@ export async function updateKitImage({
         width: 800,
         withoutEnlargement: true,
       },
+      maxFileSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string;
@@ -312,8 +314,10 @@ export async function updateKitImage({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating image for kit.",
-      additionalData: { kitId, userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating image for kit.",
+      additionalData: { kitId, userId, field: "image" },
       label,
     });
   }
@@ -631,7 +635,7 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    let where: Prisma.AssetWhereInput = { organizationId, kitId };
+    const where: Prisma.AssetWhereInput = { organizationId, kitId };
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();
@@ -1374,7 +1378,6 @@ export async function updateKitQrCode({
   kitId: string;
   newQrId: string;
 }) {
-  // Disconnect all existing QR codes
   try {
     // Disconnect all existing QR codes
     await db.kit
@@ -1416,11 +1419,94 @@ export async function updateKitQrCode({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating asset QR code",
+      message: "Something went wrong while updating kit QR code",
       label,
       additionalData: { kitId, organizationId, newQrId },
     });
   }
+}
+
+/**
+ * Relinks a kit to a different QR code, unlinking any previous code.
+ * Throws when the QR belongs to another org or is already linked to an asset/kit.
+ */
+export async function relinkKitQrCode({
+  qrId,
+  kitId,
+  organizationId,
+  userId,
+}: {
+  qrId: Qr["id"];
+  kitId: Kit["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}) {
+  const [qr, kit] = await Promise.all([
+    getQr({ id: qrId }),
+    db.kit.findFirst({
+      where: { id: kitId, organizationId },
+      select: { qrCodes: { select: { id: true } } },
+    }),
+  ]);
+
+  if (!kit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Kit not found.",
+      label,
+      additionalData: { kitId, organizationId, qrId },
+    });
+  }
+
+  if (qr.organizationId && qr.organizationId !== organizationId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR not valid.",
+      message: "This QR code does not belong to your organization",
+      label,
+    });
+  }
+
+  if (qr.assetId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (qr.kitId && qr.kitId !== kitId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const oldQrCode = kit.qrCodes[0];
+
+  await Promise.all([
+    db.qr.update({
+      where: { id: qr.id },
+      data: { organizationId, userId },
+    }),
+    updateKitQrCode({
+      kitId,
+      newQrId: qr.id,
+      organizationId,
+    }),
+  ]);
+
+  return {
+    oldQrCodeId: oldQrCode?.id,
+    newQrId: qr.id,
+  };
 }
 
 export async function getAvailableKitAssetForBooking(
@@ -2048,19 +2134,20 @@ export async function updateKitAssets({
      */
     if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+      const assetIds = removedAssets.map((a) => a.id);
       await Promise.all([
         db.custody.deleteMany({
-          where: { assetId: { in: removedAssets.map((a) => a.id) } },
+          where: { assetId: { in: assetIds } },
         }),
         db.asset.updateMany({
-          where: { id: { in: removedAssets.map((a) => a.id) }, organizationId },
+          where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         }),
-        await createNotes({
+        createNotes({
           content: `${actor} released ${custodianDisplay}'s custody.`,
           type: NoteType.UPDATE,
           userId,
-          assetIds: removedAssets.map((asset) => asset.id),
+          assetIds,
         }),
       ]);
     }

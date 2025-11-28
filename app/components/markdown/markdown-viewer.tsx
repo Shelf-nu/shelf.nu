@@ -1,4 +1,5 @@
 import React from "react";
+import type { ComponentType } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
 import { markdocConfig } from "~/utils/markdoc.config";
@@ -6,6 +7,7 @@ import { parseMarkdownToReact } from "~/utils/md";
 import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
 import { BookingStatusComponent } from "./booking-status-component";
+import { CategoryBadgeComponent } from "./category-badge-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
@@ -30,7 +32,7 @@ const RawBlockComponent = ({ raw }: { raw: string }) => (
 
 interface Props {
   content: string | RenderableTreeNodes;
-  components?: Record<string, React.ComponentType>;
+  components?: Record<string, ComponentType>;
   className?: string;
   pre?: string;
 }
@@ -43,6 +45,7 @@ const defaultComponents = {
   LinkComponent,
   BookingStatusComponent,
   DescriptionComponent,
+  CategoryBadgeComponent,
   RawBlock: RawBlockComponent,
   TagComponent,
 };

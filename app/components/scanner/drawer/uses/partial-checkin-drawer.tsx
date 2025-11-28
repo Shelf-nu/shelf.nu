@@ -1,8 +1,9 @@
 import { useRef } from "react";
+import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import type { Booking } from "@prisma/client";
-import { useLoaderData, Form } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
@@ -13,6 +14,7 @@ import {
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckinDialog from "~/components/booking/checkin-dialog";
+import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
@@ -47,7 +49,7 @@ export default function PartialCheckinDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

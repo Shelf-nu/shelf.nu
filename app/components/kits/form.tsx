@@ -1,12 +1,14 @@
 import { useRef } from "react";
 import type { Barcode, Kit } from "@prisma/client";
-import { useActionData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
+import type { action as createKitAction } from "~/routes/_layout+/kits.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
@@ -61,17 +63,26 @@ export default function KitsForm({
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
+  const actionData = useActionData<
+    typeof createKitAction | typeof editKitAction
+  >();
+
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
+  const [, validateFile] = useAtom(assetImageValidateFileAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
-
-  const actionData = useActionData<{ error?: any }>();
 
   const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
     serverValidationErrors?.name?.message ?? zo.errors.name()?.message;
+
+  const imageError =
+    serverValidationErrors?.image?.message ??
+    (actionData?.error?.additionalData?.field === "image"
+      ? actionData?.error?.message
+      : undefined) ??
+    fileError;
 
   return (
     <Card className={tw("w-full md:w-min", className)}>
@@ -261,12 +272,12 @@ export default function KitsForm({
               onChange={validateFile}
               label="Image"
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG or JPEG (max.8 MB)
             </p>
           </div>
         </FormRow>

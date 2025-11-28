@@ -1,9 +1,10 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createLoaderArgs } from "@mocks/remix";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 
 // why: mocking location descendants to avoid database queries during tests
@@ -98,11 +99,15 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
   });
 
   it("returns a CSV response with formatted asset notes", async () => {
-    const response = await loader({
-      context,
-      request: new Request("https://example.com/assets/asset-123/activity.csv"),
-      params: { assetId: "asset-123" },
-    } as LoaderFunctionArgs);
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/assets/asset-123/activity.csv"
+        ),
+        params: { assetId: "asset-123" },
+      })
+    );
 
     expect(requirePermissionMock).toHaveBeenNthCalledWith(
       1,

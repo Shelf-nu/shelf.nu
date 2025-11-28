@@ -1,5 +1,6 @@
+import type { JSX } from "react";
 import { tw } from "~/utils/tw";
-import type { Price } from "./prices";
+import type { PriceType } from "./prices";
 import {
   DoubleLayerIcon,
   HelpIcon,
@@ -14,7 +15,7 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 
-export const PriceBox = ({ price }: { price: Price }) => {
+export const PriceBox = ({ price }: { price: PriceType }) => {
   const amount =
     price.unit_amount != null
       ? price?.recurring?.interval === "year"

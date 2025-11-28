@@ -10,9 +10,9 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { redirect } from "@remix-run/node";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
+import { redirect } from "react-router";
 import z from "zod";
 import type { AuthSession } from "@server/session";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -99,18 +99,23 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Booking";
 
 async function cancelScheduler(
-  b?: Pick<Booking, "activeSchedulerReference"> | null
+  booking: Pick<Booking, "id" | "activeSchedulerReference">
 ) {
   try {
-    if (b?.activeSchedulerReference) {
-      await scheduler.cancel(b.activeSchedulerReference);
+    if (!booking.activeSchedulerReference) {
+      Logger.error(
+        `Skipping scheduler cancellation for booking ${booking.id} because no activeSchedulerReference was found.`
+      );
+      return;
     }
+
+    await scheduler.cancel(booking.activeSchedulerReference);
   } catch (cause) {
     Logger.error(
       new ShelfError({
         cause,
         message: "Failed to cancel the scheduler for booking",
-        additionalData: { booking: b },
+        additionalData: { booking },
         label,
       })
     );
@@ -656,7 +661,7 @@ export async function updateBasicBooking({
             content: custodianChangeMessage,
           });
         }
-      } catch (error) {
+      } catch (_error) {
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
         await createSystemBookingNote({
           bookingId: booking.id,
@@ -915,7 +920,7 @@ export async function reserveBooking({
         bookingId: bookingFound.id,
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: bookingFound,
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
@@ -934,18 +939,20 @@ export async function reserveBooking({
 
         const adminSubject = `Booking reservation request (${bookingFound.name}) by ${custodian} - shelf.nu`;
 
+        const adminHtml = await bookingUpdatesTemplateString({
+          booking: bookingFound,
+          heading: `Booking reservation request for ${custodian}`,
+          assetCount: bookingFound._count.assets,
+          hints,
+          isAdminEmail: true,
+        });
+
         sendEmail({
           to: adminsEmails.join(","),
           subject: adminSubject,
           text,
           /** We need to invoke this function separately for the admin email as the footer of emails is different */
-          html: bookingUpdatesTemplateString({
-            booking: bookingFound,
-            heading: `Booking reservation request for ${custodian}`,
-            assetCount: bookingFound._count.assets,
-            hints,
-            isAdminEmail: true,
-          }),
+          html: adminHtml,
         });
       }
 
@@ -1146,7 +1153,11 @@ export async function checkoutBooking({
      */
     if (lessThanOneHourToCheckin) {
       if (bookingFound.custodianUser?.email) {
-        sendCheckinReminder(bookingFound, bookingFound._count.assets, hints);
+        await sendCheckinReminder(
+          bookingFound,
+          bookingFound._count.assets,
+          hints
+        );
       }
 
       if (bookingFound.to) {
@@ -1529,7 +1540,7 @@ export async function checkinBooking({
         hints: hints,
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: updatedBooking,
         heading: `Your booking has been completed: "${updatedBooking.name}".`,
         assetCount: updatedBooking._count.assets,
@@ -1792,45 +1803,41 @@ export async function partialCheckinBooking({
       const isCompletingBooking = remainingCount === 0;
 
       if (isCompletingBooking) {
-        try {
-          // Update booking status to COMPLETE
-          const completedBooking = await tx.booking.update({
-            where: { id },
-            data: { status: BookingStatus.COMPLETE },
-            include: {
-              assets: true,
-              custodianUser: true,
-              custodianTeamMember: true,
-              _count: { select: { assets: true } },
-            },
-          });
+        // Update booking status to COMPLETE
+        const completedBooking = await tx.booking.update({
+          where: { id },
+          data: { status: BookingStatus.COMPLETE },
+          include: {
+            assets: true,
+            custodianUser: true,
+            custodianTeamMember: true,
+            _count: { select: { assets: true } },
+          },
+        });
 
-          // Create combined completion message
-          const fromStatusBadge = wrapBookingStatusForNote(
-            updatedBookingForNote.status,
-            completedBooking.custodianUserId || undefined
-          );
-          const toStatusBadge = wrapBookingStatusForNote(
-            BookingStatus.COMPLETE,
-            completedBooking.custodianUserId || undefined
-          );
+        // Create combined completion message
+        const fromStatusBadge = wrapBookingStatusForNote(
+          updatedBookingForNote.status,
+          completedBooking.custodianUserId || undefined
+        );
+        const toStatusBadge = wrapBookingStatusForNote(
+          BookingStatus.COMPLETE,
+          completedBooking.custodianUserId || undefined
+        );
 
-          await createSystemBookingNote({
-            bookingId: id,
-            content: `${wrapUserLinkForNote(
-              user!
-            )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
-          });
+        await createSystemBookingNote({
+          bookingId: id,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+        });
 
-          return {
-            booking: completedBooking,
-            checkedInAssetCount: assetIds.length,
-            remainingAssetCount: 0,
-            isComplete: true,
-          };
-        } catch (error) {
-          throw error;
-        }
+        return {
+          booking: completedBooking,
+          checkedInAssetCount: assetIds.length,
+          remainingAssetCount: 0,
+          isComplete: true,
+        };
       } else {
         // Regular partial check-in
         const remainingText = ` (Remaining: ${remainingCount})`;
@@ -2149,7 +2156,7 @@ export async function cancelBooking({
         hints,
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: booking,
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
@@ -2427,7 +2434,7 @@ export async function extendBooking({
         timeStyle: "short",
       });
 
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: updatedBooking,
         heading: `Booking extended from ${format(booking.to)} to ${format(
           newEndDate
@@ -2458,7 +2465,7 @@ export async function extendBooking({
      */
     if (hours < 1) {
       if (updatedBooking?.custodianUser?.email) {
-        sendCheckinReminder(
+        await sendCheckinReminder(
           updatedBooking,
           updatedBooking._count.assets,
           hints
@@ -2641,7 +2648,7 @@ export async function getBookings(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assetss belonging to current org */
-    let where: Prisma.BookingWhereInput = { organizationId };
+    const where: Prisma.BookingWhereInput = { organizationId };
 
     /** The idea is that only the creator of a draft booking can see it
      * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
@@ -3029,12 +3036,8 @@ export async function deleteBooking(
 ) {
   try {
     const { id, organizationId } = booking;
-    const activeBooking = await db.booking.findFirst({
-      where: {
-        id,
-        status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
-        organizationId,
-      },
+    const currentBooking = await db.booking.findUnique({
+      where: { id, organizationId },
       include: {
         assets: {
           select: {
@@ -3044,6 +3047,13 @@ export async function deleteBooking(
         },
       },
     });
+
+    const activeBooking =
+      currentBooking &&
+      (currentBooking.status === BookingStatus.OVERDUE ||
+        currentBooking.status === BookingStatus.ONGOING)
+        ? currentBooking
+        : null;
 
     const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
     const uniqueKitIds = new Set(
@@ -3078,7 +3088,7 @@ export async function deleteBooking(
         bookingId: b.id,
         hints: hints,
       });
-      const html = bookingUpdatesTemplateString({
+      const html = await bookingUpdatesTemplateString({
         booking: b,
         heading: `Your booking has been deleted: "${b.name}".`,
         assetCount: b._count.assets,
@@ -3106,7 +3116,12 @@ export async function deleteBooking(
         });
       }
     }
-    await cancelScheduler(b);
+    await cancelScheduler(
+      currentBooking ?? {
+        id: b.id,
+        activeSchedulerReference: b.activeSchedulerReference,
+      }
+    );
 
     return b;
   } catch (cause) {
@@ -3549,7 +3564,7 @@ export async function bulkDeleteBookings({
     );
 
     /** We have to cancel scheduler for the bookings */
-    const bookingsWithSchedulerReference = overdueOrOngoingBookings.filter(
+    const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
     );
 
@@ -3604,28 +3619,30 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    const emailConfigs = bookingsToSendEmail.map((b) => ({
-      to: b.custodianUser?.email ?? "",
-      subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-      text: deletedBookingEmailContent({
-        bookingName: b.name,
-        assetsCount: b.assets.length,
-        custodian:
-          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
-          (b.custodianTeamMember?.name as string),
-        from: b.from as Date,
-        to: b.to as Date,
-        bookingId: b.id,
-        hints,
-      }),
-      html: bookingUpdatesTemplateString({
-        booking: b,
-        heading: `Your booking as been deleted: "${b.name}"`,
-        assetCount: b.assets.length,
-        hints,
-        hideViewButton: true,
-      }),
-    }));
+    const emailConfigs = await Promise.all(
+      bookingsToSendEmail.map(async (b) => ({
+        to: b.custodianUser?.email ?? "",
+        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
+        text: deletedBookingEmailContent({
+          bookingName: b.name,
+          assetsCount: b.assets.length,
+          custodian:
+            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+            (b.custodianTeamMember?.name as string),
+          from: b.from as Date,
+          to: b.to as Date,
+          bookingId: b.id,
+          hints,
+        }),
+        html: await bookingUpdatesTemplateString({
+          booking: b,
+          heading: `Your booking as been deleted: "${b.name}"`,
+          assetCount: b.assets.length,
+          hints,
+          hideViewButton: true,
+        }),
+      }))
+    );
 
     return emailConfigs.map(sendEmail);
   } catch (cause) {
@@ -3806,7 +3823,7 @@ export async function bulkCancelBookings({
     );
 
     /** We have to cancel scheduler for the bookings */
-    const bookingsWithSchedulerReference = ongoingOrOverdueBookings.filter(
+    const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
     );
 
@@ -3877,7 +3894,7 @@ export async function bulkCancelBookings({
 
     /** Sending cancellation emails */
     await Promise.all(
-      bookingsToSendEmail.map((b) => {
+      bookingsToSendEmail.map(async (b) => {
         const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
@@ -3891,7 +3908,7 @@ export async function bulkCancelBookings({
           hints: hints,
         });
 
-        const html = bookingUpdatesTemplateString({
+        const html = await bookingUpdatesTemplateString({
           booking: b,
           heading: `Your booking has been cancelled: "${b.name}".`,
           assetCount: b._count.assets,
@@ -4098,18 +4115,47 @@ export async function addScannedAssetsToBooking({
   userId: string;
 }) {
   try {
-    /** Step 1: Add assets to booking */
-    const updatedBooking = await db.booking.update({
-      where: { id: bookingId, organizationId },
-      data: {
-        assets: {
-          connect: assetIds.map((id) => ({ id })),
+    /**
+     * Step 1: Add assets to booking inside a transaction so we can mirror the
+     * status-sync behaviour used in manage-assets.
+     */
+    const updatedBooking = await db.$transaction(async (tx) => {
+      const booking = await tx.booking.update({
+        where: { id: bookingId, organizationId },
+        data: {
+          assets: {
+            connect: assetIds.map((id) => ({ id })),
+          },
         },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      });
+
+      /** When booking is active, newly added items must be flagged checked out */
+      const isActiveBooking =
+        booking.status === BookingStatus.ONGOING ||
+        booking.status === BookingStatus.OVERDUE;
+
+      if (isActiveBooking) {
+        if (assetIds.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: assetIds }, organizationId },
+            data: { status: AssetStatus.CHECKED_OUT },
+          });
+        }
+
+        if (kitIds.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
+      }
+
+      return booking;
     });
 
     /** Step 2: Create activity notes */

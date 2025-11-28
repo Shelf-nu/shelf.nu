@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "react-router";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
@@ -211,7 +212,7 @@ export function AvailabilityBadge({
 }: {
   badgeText: string;
   tooltipTitle: string;
-  tooltipContent: string | React.ReactNode;
+  tooltipContent: string | ReactNode;
   className?: string;
 }) {
   return (

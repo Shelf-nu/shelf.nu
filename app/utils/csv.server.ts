@@ -8,11 +8,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import {
-  unstable_composeUploadHandlers,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+import { parseFormData } from "@remix-run/form-data-parser";
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
@@ -48,10 +44,8 @@ import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
-import {
-  cleanMarkdownFormatting,
-  sanitizeNoteContent,
-} from "./note-sanitizer.server";
+import { cleanMarkdownFormatting } from "./markdown-cleaner";
+import { sanitizeNoteContent } from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -108,11 +102,8 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   try {
-    // Upload handler to store file in memory
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      memoryUploadHandler
-    );
+    // Files are automatically stored in memory with parseFormData
+    const formData = await parseFormData(request);
 
     const csvFile = formData.get("file") as File;
 
@@ -130,10 +121,6 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
     });
   }
 };
-
-export const memoryUploadHandler = unstable_composeUploadHandlers(
-  unstable_createMemoryUploadHandler()
-);
 
 export const buildCsvBackupDataFromAssets = ({
   assets,
@@ -553,9 +540,10 @@ const formatCustomFieldForCsv = (
       }
       return fieldValue.valueBoolean ? "Yes" : "No";
 
-    case CustomFieldType.MULTILINE_TEXT:
+    case CustomFieldType.MULTILINE_TEXT: {
       const rawText = String(fieldValue.raw || "");
       return cleanMarkdownFormatting(rawText);
+    }
 
     case CustomFieldType.DATE:
       if (!fieldValue.valueDate) return "";
@@ -905,7 +893,7 @@ export const buildCsvExportDataFromBookings = (
             ? format(booking.to).split(",")
             : "";
           break;
-        case "custodian":
+        case "custodian": {
           const teamMember = {
             name: booking.custodianTeamMember?.name ?? "",
             user: booking?.custodianUser
@@ -919,6 +907,7 @@ export const buildCsvExportDataFromBookings = (
 
           value = resolveTeamMemberName(teamMember, true);
           break;
+        }
         case "description":
           value = booking.description ?? "";
           break;

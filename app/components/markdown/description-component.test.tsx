@@ -147,7 +147,7 @@ describe("DescriptionComponent", () => {
 
     it("should handle newText only case", () => {
       render(<DescriptionComponent newText="Only new text" />);
-      expect(screen.getByText("Description updated")).toBeInTheDocument();
+      expect(screen.getByText("Only new text")).toBeInTheDocument();
     });
 
     it("should handle empty strings", () => {

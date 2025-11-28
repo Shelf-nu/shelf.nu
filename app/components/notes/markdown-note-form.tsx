@@ -1,7 +1,7 @@
 import type { ChangeEvent, FocusEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FetcherWithComponents } from "@remix-run/react";
 import { useAtom, type PrimitiveAtom } from "jotai";
+import type { FetcherWithComponents } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 
@@ -119,7 +119,7 @@ export function MarkdownNoteForm({
         setDisabled(true);
         // Submit the form
         if (formElement) {
-          fetcher.submit(formElement);
+          void fetcher.submit(formElement);
         }
         return true; // Event handled, prevent default
       }

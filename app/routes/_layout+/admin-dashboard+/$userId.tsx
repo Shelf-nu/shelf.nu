@@ -9,9 +9,8 @@ import {
   type UserBusinessIntel,
   type Prisma,
 } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { data } from "@remix-run/node";
-import { useLoaderData, Link, useFetcher } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, useLoaderData, Link, useFetcher } from "react-router";
 
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -30,6 +29,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -47,6 +47,8 @@ import {
   getStripeCustomer,
   getStripePricesAndProducts,
 } from "~/utils/stripe.server";
+
+export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
 export type QrCodeWithAsset = Qr & {
   asset: {
@@ -315,6 +317,7 @@ export const action = async ({
           });
           return payload({ success: true });
         }
+        break;
       case "createCustomerId": {
         const user = await getUserByID(shelfUserId, {
           select: {
@@ -564,7 +567,7 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
       method="post"
       onChange={(e) => {
         const form = e.currentTarget;
-        fetcher.submit(form);
+        void fetcher.submit(form);
       }}
       className="inline-flex items-center gap-2"
     >
@@ -599,7 +602,7 @@ function SubscriptionCheckUpdateForm({
       method="post"
       onChange={(e) => {
         const form = e.currentTarget;
-        fetcher.submit(form);
+        void fetcher.submit(form);
       }}
       className="inline-flex items-center gap-2"
     >

@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { useCallback, useState } from "react";
 import type { Schema } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
@@ -7,7 +8,7 @@ import type { LinkDialogState } from "../types";
 
 export function useLinkDialog(
   schema: Schema,
-  viewRef: React.RefObject<EditorView | null>
+  viewRef: RefObject<EditorView | null>
 ) {
   const [linkDialog, setLinkDialog] = useState<LinkDialogState>({
     open: false,

@@ -22,8 +22,8 @@ import {
   Prisma,
   TagUseFor,
 } from "@prisma/client";
-import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import { LRUCache } from "lru-cache";
+import { redirect, type LoaderFunctionArgs } from "react-router";
 import type {
   SortingDirection,
   SortingOptions,
@@ -47,6 +47,7 @@ import {
   createLocationChangeNote,
   createLocationsIfNotExists,
 } from "~/modules/location/service.server";
+import { createLoadUserForNotes } from "~/modules/note/load-user-for-notes.server";
 import { getQr, parseQrCodesFromImportData } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
@@ -54,8 +55,11 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
-
-import { LEGACY_CUID_LENGTH } from "~/utils/constants";
+import { getLocale } from "~/utils/client-hints";
+import {
+  ASSET_MAX_IMAGE_UPLOAD_SIZE,
+  LEGACY_CUID_LENGTH,
+} from "~/utils/constants";
 import {
   getFiltersFromRequest,
   setCookie,
@@ -89,14 +93,12 @@ import {
   wrapCustodianForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
-import { createLoadUserForNotes } from "~/utils/note/load-user-for-notes.server";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
   createSignedUrl,
   parseFileFormData,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
-
 import { resolveTeamMemberName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
@@ -129,8 +131,11 @@ import {
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
-
 import {
+  createAssetCategoryChangeNote,
+  createAssetDescriptionChangeNote,
+  createAssetNameChangeNote,
+  createAssetValuationChangeNote,
   createNote,
   createTagChangeNoteIfNeeded,
   type TagSummary,
@@ -138,6 +143,52 @@ import {
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
+
+const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
+  title: true,
+  description: true,
+  category: {
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  },
+  valuation: true,
+  organization: {
+    select: {
+      currency: true,
+    },
+  },
+  tags: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+});
+
+/**
+ * Fetches the snapshot of fields required to build change notes before an update.
+ */
+async function fetchAssetBeforeUpdate({
+  id,
+  organizationId,
+  shouldFetch,
+}: {
+  id: Asset["id"];
+  organizationId: Asset["organizationId"];
+  shouldFetch: boolean;
+}) {
+  if (!shouldFetch) {
+    return null;
+  }
+
+  return db.asset.findUnique({
+    where: { id, organizationId },
+    select: ASSET_BEFORE_UPDATE_SELECT,
+  });
+}
 
 /**
  * Sets kit custody for imported assets after all assets have been created
@@ -473,7 +524,7 @@ export async function getAssets(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    let where: Prisma.AssetWhereInput = { organizationId };
+    const where: Prisma.AssetWhereInput = { organizationId };
 
     if (availableToBookOnly) {
       where.availableToBook = true;
@@ -1160,6 +1211,7 @@ export async function updateAsset({
   customFieldsValues: customFieldsValuesFromForm,
   barcodes,
   organizationId,
+  request,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
@@ -1192,22 +1244,26 @@ export async function updateAsset({
     }
 
     const isTagUpdate = Boolean(tags?.set);
-    let previousTags: TagSummary[] = [];
-    if (isTagUpdate) {
-      const assetBeforeUpdate = await db.asset.findUnique({
-        where: { id, organizationId },
-        select: {
-          tags: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      });
 
-      previousTags = assetBeforeUpdate?.tags ?? [];
-    }
+    const trackedFieldUpdates = Boolean(
+      typeof title !== "undefined" ||
+        typeof description !== "undefined" ||
+        typeof categoryId !== "undefined" ||
+        typeof valuation !== "undefined"
+    );
+
+    const assetBeforeUpdate = await fetchAssetBeforeUpdate({
+      id,
+      organizationId,
+      shouldFetch: trackedFieldUpdates || isTagUpdate,
+    });
+
+    const previousTags: TagSummary[] = isTagUpdate
+      ? (assetBeforeUpdate?.tags ?? []).map((tag) => ({
+          id: tag.id,
+          name: tag.name ?? "",
+        }))
+      : [];
 
     const loadUserForNotes = createLoadUserForNotes(userId);
 
@@ -1329,7 +1385,12 @@ export async function updateAsset({
     const asset = await db.asset.update({
       where: { id, organizationId },
       data,
-      include: { location: true, tags: true },
+      include: {
+        location: true,
+        tags: true,
+        category: true,
+        organization: true,
+      },
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */
@@ -1376,6 +1437,47 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+    }
+
+    if (assetBeforeUpdate && trackedFieldUpdates) {
+      await Promise.all([
+        createAssetNameChangeNote({
+          assetId: asset.id,
+          userId,
+          previousName: assetBeforeUpdate.title,
+          newName: title,
+          loadUserForNotes,
+        }),
+        createAssetDescriptionChangeNote({
+          assetId: asset.id,
+          userId,
+          previousDescription: assetBeforeUpdate.description,
+          newDescription: description,
+          loadUserForNotes,
+        }),
+        createAssetCategoryChangeNote({
+          assetId: asset.id,
+          userId,
+          previousCategory: assetBeforeUpdate.category,
+          newCategory: asset.category
+            ? {
+                id: asset.category.id,
+                name: asset.category.name ?? "Unnamed category",
+                color: asset.category.color ?? "#575757",
+              }
+            : null,
+          loadUserForNotes,
+        }),
+        createAssetValuationChangeNote({
+          assetId: asset.id,
+          userId,
+          previousValuation: assetBeforeUpdate.valuation,
+          newValuation: asset.valuation,
+          currency: assetBeforeUpdate.organization.currency,
+          locale: getLocale(request),
+          loadUserForNotes,
+        }),
+      ]);
     }
 
     if (isTagUpdate) {
@@ -1507,6 +1609,7 @@ export async function updateAssetMainImage({
       },
       generateThumbnail: true, // Enable thumbnail generation
       thumbnailSize: 108, // Size matches what we use in AssetImage component
+      maxFileSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("mainImage") as string | null;
@@ -1548,6 +1651,7 @@ export async function updateAssetMainImage({
       mainImageExpiration: oneDayFromNow(),
       userId,
       organizationId,
+      request,
     });
 
     /**
@@ -1568,7 +1672,7 @@ export async function updateAssetMainImage({
       message: isShelfError
         ? cause.message
         : "Something went wrong while updating asset main image",
-      additionalData: { assetId, userId },
+      additionalData: { assetId, userId, field: "mainImage" },
       label,
     });
   }
@@ -2202,7 +2306,7 @@ export async function createAssetsFromContentImport({
       ]);
 
     // Process assets sequentially to handle image uploads
-    for (let asset of data) {
+    for (const asset of data) {
       // Generate asset ID upfront
       const assetId = id(LEGACY_CUID_LENGTH); // This generates our standard CUID format. We use legacy length(25 chars) so it fits with the length of IDS generated by prisma
 
@@ -2597,7 +2701,7 @@ export async function createAssetsFromBackupImport({
         if (asset.tags && asset.tags.length > 0) {
           const tagsNames = asset.tags.map((t) => t.name);
           // now we loop through the categories and check if they exist
-          let tags: Record<string, string> = {};
+          const tags: Record<string, string> = {};
           for (const tag of tagsNames) {
             const existingTag = await db.tag.findFirst({
               where: {
@@ -3521,7 +3625,11 @@ export async function bulkMarkAvailability({
   }
 }
 
-export async function relinkQrCode({
+/**
+ * Relinks an asset to a different QR code, unlinking any previous code.
+ * Throws if the QR belongs to another org, asset, or kit.
+ */
+export async function relinkAssetQrCode({
   qrId,
   assetId,
   organizationId,
@@ -3554,6 +3662,17 @@ export async function relinkQrCode({
       title: "QR not valid.",
       message: "This QR code does not belong to your organization",
       label: "QR",
+    });
+  }
+
+  if (qr.kitId) {
+    throw new ShelfError({
+      cause: null,
+      title: "QR already linked.",
+      message:
+        "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
+      label: "QR",
+      shouldBeCaptured: false,
     });
   }
 

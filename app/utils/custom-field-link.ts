@@ -11,7 +11,7 @@ export function buildCustomFieldLinkHref(rawValue: string) {
     }
 
     return url.toString();
-  } catch (error) {
+  } catch (_error) {
     const [withoutHash, hashFragment] = rawValue.split("#");
     const [base, queryString] = withoutHash.split("?");
     const params = new URLSearchParams(queryString);

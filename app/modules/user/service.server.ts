@@ -7,7 +7,7 @@ import type {
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import sharp from "sharp";
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
@@ -23,6 +23,7 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -972,7 +973,7 @@ async function getUsers({
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = {};
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -1046,6 +1047,7 @@ export async function updateProfilePicture({
         fit: sharp.fit.cover,
         withoutEnlargement: true,
       },
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const profilePicture = fileData.get("profile-picture") as string;
@@ -1067,9 +1069,10 @@ export async function updateProfilePicture({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while updating your profile picture. Please try again or contact support.",
-      additionalData: { userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating your profile picture. Please try again or contact support.",
+      additionalData: { userId, field: "profile-picture" },
       label,
     });
   }
