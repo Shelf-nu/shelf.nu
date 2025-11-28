@@ -58,7 +58,7 @@ async function assertPresetOwnership({
 /**
  * List all filter presets for a user within an organization
  */
-export async function listPresetsForUser({
+export function listPresetsForUser({
   organizationId,
   ownerId,
 }: {

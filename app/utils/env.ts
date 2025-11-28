@@ -263,12 +263,6 @@ export const SEND_ONBOARDING_EMAIL =
     isRequired: false,
   }) === "true" || false;
 
-export const ENABLE_SAVED_ASSET_FILTERS =
-  getEnv("ENABLE_SAVED_ASSET_FILTERS", {
-    isSecret: false,
-    isRequired: false,
-  }) === "true" || false;
-
 export const CHROME_EXECUTABLE_PATH = getEnv("CHROME_EXECUTABLE_PATH", {
   isSecret: false,
   isRequired: false,

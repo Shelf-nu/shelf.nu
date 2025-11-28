@@ -39,7 +39,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ENABLE_SAVED_ASSET_FILTERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
@@ -180,21 +179,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: intent2ActionMap[intent],
     });
-
-    // Check feature flag for preset actions
-    const isPresetIntent =
-      intent === "create-preset" ||
-      intent === "rename-preset" ||
-      intent === "delete-preset";
-
-    if (isPresetIntent && !ENABLE_SAVED_ASSET_FILTERS) {
-      throw new ShelfError({
-        cause: null,
-        label: "Assets",
-        message: "Saved filter presets are not available.",
-        status: 404,
-      });
-    }
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
