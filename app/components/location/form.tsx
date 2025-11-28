@@ -207,6 +207,7 @@ export const LocationForm = ({
           <LocationSelect
             isBulk={false}
             className="w-full max-w-full"
+            popoverZIndexClassName={hasOnSuccessFunc ? "z-[10000]" : undefined}
             fieldName={zo.fields.parentId()}
             placeholder="No parent"
             defaultValue={parentId ?? undefined}

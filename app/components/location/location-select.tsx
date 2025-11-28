@@ -33,6 +33,8 @@ type LocationSelectProps = BulkProps & {
   fieldName?: string;
   /** Additional classes for the outer container. */
   className?: string;
+  /** Custom z-index class for dropdown when used inside dialogs. */
+  popoverZIndexClassName?: string;
   /** External value to pre-populate the selector with. */
   defaultValue?: string | null;
   /**
@@ -53,6 +55,7 @@ export const LocationSelect = ({
   placeholder,
   fieldName = "newLocationId",
   className,
+  popoverZIndexClassName,
   defaultValue,
   hideCurrentLocationInput = false,
   excludeIds,
@@ -80,7 +83,7 @@ export const LocationSelect = ({
           value={locationIdToUse ?? undefined}
         />
       )}
-      <div className="flex items-center gap-2">
+      <div className={tw("flex items-center gap-2")}>
         <DynamicSelect
           disabled={disabled}
           fieldName={fieldName}
@@ -94,6 +97,7 @@ export const LocationSelect = ({
           allowClear
           excludeItems={excludeIds}
           onChange={(value) => setLocationId(value)}
+          popoverZIndexClassName={popoverZIndexClassName}
           extraContent={({ onItemCreated, closePopover }) => (
             <InlineEntityCreationDialog
               type="location"

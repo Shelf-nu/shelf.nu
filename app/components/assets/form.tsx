@@ -495,34 +495,34 @@ export const AssetForm = ({
               defaultValue={locationId || undefined}
               model={{ name: "location", queryKey: "name" }}
               contentLabel="Locations"
-            label="Location"
-            hideLabel
-            initialDataKey="locations"
-            countKey="totalLocations"
-            closeOnSelect
-            allowClear
-            extraContent={({ onItemCreated, closePopover }) => (
-              <InlineEntityCreationDialog
-                type="location"
-                title="Create new location"
-                buttonLabel="Create new location"
-                onCreated={(created) => {
-                  if (created?.type !== "location") return;
-                  const location = created.entity;
-                  onItemCreated({
-                    id: location.id,
-                    name: location.name,
-                    metadata: { ...location },
-                  });
-                  closePopover();
-                }}
-              />
-            )}
-            renderItem={({ name, metadata }) => (
-              <div className="flex items-center gap-2">
-                {metadata?.thumbnailUrl ? (
-                  <ImageWithPreview
-                    thumbnailUrl={metadata.thumbnailUrl}
+              label="Location"
+              hideLabel
+              initialDataKey="locations"
+              countKey="totalLocations"
+              closeOnSelect
+              allowClear
+              extraContent={({ onItemCreated, closePopover }) => (
+                <InlineEntityCreationDialog
+                  type="location"
+                  title="Create new location"
+                  buttonLabel="Create new location"
+                  onCreated={(created) => {
+                    if (created?.type !== "location") return;
+                    const location = created.entity;
+                    onItemCreated({
+                      id: location.id,
+                      name: location.name,
+                      metadata: { ...location },
+                    });
+                    closePopover();
+                  }}
+                />
+              )}
+              renderItem={({ name, metadata }) => (
+                <div className="flex items-center gap-2">
+                  {metadata?.thumbnailUrl ? (
+                    <ImageWithPreview
+                      thumbnailUrl={metadata.thumbnailUrl}
                       alt={metadata.name}
                       className="size-6 rounded-[2px]"
                     />

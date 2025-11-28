@@ -40,6 +40,8 @@ type Props = ModelFilterProps & {
   triggerWrapperClassName?: string;
   style?: CSSProperties;
   fieldName?: string;
+  /** Optional custom z-index class for the popover content. */
+  popoverZIndexClassName?: string;
 
   /** This is the html label */
   label?: ReactNode;
@@ -111,6 +113,7 @@ export default function DynamicSelect({
   hidden = false,
   hideShowAll = false,
   withoutValueItem,
+  popoverZIndexClassName,
   ...hookProps
 }: Props) {
   const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
@@ -274,7 +277,8 @@ export default function DynamicSelect({
           <PopoverPortal>
             <PopoverContent
               className={tw(
-                "z-[100] overflow-y-auto rounded-md border border-gray-300 bg-white",
+                popoverZIndexClassName ?? "z-[100]",
+                "overflow-y-auto rounded-md border border-gray-300 bg-white",
                 className
               )}
               style={{
