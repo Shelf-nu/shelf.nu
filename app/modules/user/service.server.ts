@@ -4,7 +4,12 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
-import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
+import {
+  Prisma,
+  Roles,
+  OrganizationRoles,
+  AssetIndexMode,
+} from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "react-router";
@@ -43,6 +48,7 @@ import type { MergeInclude } from "~/utils/utils";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
+import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
@@ -248,7 +254,7 @@ export async function createUserOrAttachOrg({
         }
       );
 
-      return await createUser({
+      const newUser = await createUser({
         email,
         userId: authAccount.id,
         username: randomUsernameFromEmail(email),
@@ -257,6 +263,14 @@ export async function createUserOrAttachOrg({
         firstName,
         createdWithInvite,
       });
+
+      await ensureAssetIndexModeForRole({
+        userId: newUser.id,
+        organizationId,
+        role: roles[0],
+      });
+
+      return newUser;
     }
 
     /** If the user already exists, we just attach the new org to it */
@@ -264,6 +278,12 @@ export async function createUserOrAttachOrg({
       userId: shelfUser.id,
       organizationIds: [organizationId],
       roles,
+    });
+
+    await ensureAssetIndexModeForRole({
+      userId: shelfUser.id,
+      organizationId,
+      role: roles[0],
     });
 
     return shelfUser;
@@ -712,7 +732,7 @@ export async function createUser(
                     // Creating asset index settings for new users' personal org
                     assetIndexSettings: {
                       create: {
-                        mode: "SIMPLE",
+                        mode: AssetIndexMode.ADVANCED,
                         columns: defaultFields,
                         user: {
                           connect: {

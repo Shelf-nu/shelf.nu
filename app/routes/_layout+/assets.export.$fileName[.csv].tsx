@@ -19,7 +19,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations, currentOrganization } =
+    const { organizationId, organizations, currentOrganization, role } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -34,6 +34,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       userId,
       organizationId,
       canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+      role,
     });
     const { mode } = settings;
 

@@ -19,7 +19,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -31,6 +31,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
 
     const formData = await request.formData();

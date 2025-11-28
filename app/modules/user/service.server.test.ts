@@ -1,4 +1,4 @@
-import { Roles } from "@prisma/client";
+import { Roles, AssetIndexMode } from "@prisma/client";
 
 import { matchRequestUrl, rest } from "msw";
 import { server } from "@mocks";
@@ -252,7 +252,7 @@ describe(createUserAccountForTesting.name, () => {
               },
               assetIndexSettings: {
                 create: {
-                  mode: "SIMPLE",
+                  mode: AssetIndexMode.ADVANCED,
                   columns: defaultFields,
                   user: {
                     connect: {

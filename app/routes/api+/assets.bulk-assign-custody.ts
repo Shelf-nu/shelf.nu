@@ -33,6 +33,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
 
     const formData = await request.formData();

@@ -7,11 +7,11 @@ import {
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
-  MetaFunction,
-  LoaderFunctionArgs,
   LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
 } from "react-router";
-import { data, redirect, Outlet, useMatches } from "react-router";
+import { Outlet, useMatches, data, redirect } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";

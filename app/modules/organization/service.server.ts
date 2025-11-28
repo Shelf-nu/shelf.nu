@@ -1,4 +1,9 @@
-import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
+import {
+  AssetIndexMode,
+  OrganizationRoles,
+  OrganizationType,
+  Roles,
+} from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
@@ -174,7 +179,7 @@ export async function createOrganization({
 
       assetIndexSettings: {
         create: {
-          mode: "SIMPLE",
+          mode: AssetIndexMode.ADVANCED,
           columns: defaultFields,
           user: {
             connect: {
