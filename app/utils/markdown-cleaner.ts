@@ -42,4 +42,3 @@ export const cleanMarkdownFormatting = (
 
   return cleaned.trim();
 };
-
