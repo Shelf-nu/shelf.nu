@@ -63,36 +63,38 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
     return [];
   }
 
-  return value
-    .map((preset) => {
-      // Skip non-object entries
-      if (!preset || typeof preset !== "object") {
-        return null;
-      }
+  return (
+    value
+      .map((preset) => {
+        // Skip non-object entries
+        if (!preset || typeof preset !== "object") {
+          return null;
+        }
 
-      // Extract and validate required fields
-      const record = preset as Record<string, unknown>;
-      const id = typeof record.id === "string" ? record.id : null;
-      const name = typeof record.name === "string" ? record.name : null;
-      const query = typeof record.query === "string" ? record.query : null;
+        // Extract and validate required fields
+        const record = preset as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id : null;
+        const name = typeof record.name === "string" ? record.name : null;
+        const query = typeof record.query === "string" ? record.query : null;
 
-      // Reject presets missing any required field
-      if (!id || !name || !query) {
-        return null;
-      }
+        // Reject presets missing any required field
+        if (!id || !name || !query) {
+          return null;
+        }
 
-      // Normalize view to lowercase, defaulting to "table"
-      const rawView = typeof record.view === "string" ? record.view : null;
+        // Normalize view to lowercase, defaulting to "table"
+        const rawView = typeof record.view === "string" ? record.view : null;
 
-      return {
-        id,
-        name,
-        query,
-        view: String(rawView ?? "table").toLowerCase() as SavedFilterView,
-      } satisfies NormalizedPreset;
-    })
-    // Filter out null entries from validation failures
-    .filter((preset): preset is NormalizedPreset => preset !== null);
+        return {
+          id,
+          name,
+          query,
+          view: String(rawView ?? "table").toLowerCase() as SavedFilterView,
+        } satisfies NormalizedPreset;
+      })
+      // Filter out null entries from validation failures
+      .filter((preset): preset is NormalizedPreset => preset !== null)
+  );
 }
 
 /**
@@ -320,11 +322,7 @@ export function SavedFilterPresetsControls() {
       {presets.length > 0 && (
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger asChild>
-            <Button
-              variant="secondary"
-              size="sm"
-              title="View saved presets"
-            >
+            <Button variant="secondary" size="sm" title="View saved presets">
               <svg
                 className="size-3.5"
                 fill="none"
