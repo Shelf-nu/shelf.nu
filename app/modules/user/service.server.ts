@@ -92,8 +92,8 @@ export async function getUserByID(
       ...(select
         ? { select }
         : include
-        ? { include }
-        : { select: { id: true } }),
+          ? { include }
+          : { select: { id: true } }),
     });
 
     return user;

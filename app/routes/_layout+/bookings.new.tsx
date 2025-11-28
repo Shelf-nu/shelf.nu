@@ -275,7 +275,7 @@ export default function NewBooking() {
 
   const pageTitle = dynamicTitle?.trim().length
     ? dynamicTitle
-    : header?.title ?? newBookingHeader.title;
+    : (header?.title ?? newBookingHeader.title);
 
   return (
     <div className="relative">
