@@ -1,0 +1,295 @@
+CSV HEADERS ANALYSIS AND RECOMMENDATIONS
+==========================================
+
+Original CSV Format: Semicolon-delimited (;)
+Total Columns: 34
+
+HEADER LIST WITH DETAILED ANALYSIS
+===================================
+
+1. id
+   Type: UUID (Universal Unique Identifier)
+   Sample: 887a24bb-d2d6-495d-9834-232918033c71
+   Decision: Keep as-is
+   Rationale: Standard unique identifier for each asset/product. Critical for data integrity
+             and relationships. Follows UUID v4 format.
+
+2. name
+   Type: String (Variable length)
+   Sample: "1602 LCD Display RGB Module"
+   Decision: Keep as-is
+   Rationale: Human-readable product name. Essential for identification and search.
+
+3. price_type
+   Type: Enum/String
+   Sample: "none"
+   Decision: Keep as-is
+   Rationale: Indicates pricing model (fixed, variable, none). All samples show "none"
+             suggesting rental/inventory-only items without direct purchase pricing.
+
+4. discountable
+   Type: Boolean
+   Sample: TRUE
+   Decision: Keep as-is
+   Rationale: Business logic flag indicating if item can have discounts applied.
+             All samples are TRUE, but header is needed for future flexibility.
+
+5. extra_information
+   Type: String (Long text)
+   Sample: "the sssnake 1808 Adapter", "USB DAW Controller"
+   Decision: Keep as-is
+   Rationale: Additional short notes or quick reference info. Distinct from full description.
+
+6. description
+   Type: String (HTML formatted)
+   Sample: "<p>The 1602 LCD Display RGB Module is a 16x2 character...</p>"
+   Decision: Keep as-is
+   Rationale: Rich text product description with technical specifications. HTML formatting
+             allows for structured presentation in UI. Critical for product details.
+
+7. taxable
+   Type: Boolean
+   Sample: TRUE
+   Decision: Keep as-is
+   Rationale: Tax calculation flag. All items are TRUE, indicating standard tax treatment.
+             Essential for financial calculations and compliance.
+
+8. product_group_id
+   Type: UUID
+   Sample: 91999761-052c-4880-a84f-170e5fd11ad4
+   Decision: Keep as-is
+   Rationale: Foreign key linking to product category/group table. Enables hierarchical
+             organization and filtering of inventory.
+
+9. sku
+   Type: String (Uppercase with underscores)
+   Sample: "1602_LCD_DISPLAY_RGB_MODULE"
+   Decision: Keep as-is
+   Rationale: Stock Keeping Unit - standardized internal inventory code. Often derived from
+             product name but normalized for system use. Critical for inventory management.
+
+10. location
+    Type: String
+    Sample: "Production Studio"
+    Decision: Keep as-is
+    Rationale: Physical location of item. Important for asset tracking and retrieval.
+              All samples show "Production Studio" but header allows for multiple locations.
+
+11. quantity
+    Type: Integer
+    Sample: 1, 5, 3
+    Decision: Keep as-is
+    Rationale: Total quantity of this item type. Distinct from individual stock identifiers
+              which track specific units.
+
+12. bulk
+    Type: Boolean
+    Sample: TRUE, FALSE
+    Decision: Keep as-is
+    Rationale: Indicates if item is managed in bulk (interchangeable units) vs. individually
+              tracked units. TRUE = bulk tracking, FALSE = individual serial tracking.
+
+13. stock_identifier
+    Type: String
+    Sample: "3M_1708_OVERHEAD_PROJ-1", "ACER_AL_1916_CS-1"
+    Decision: Keep as-is
+    Rationale: Individual unit identifier for non-bulk items. Enables tracking of specific
+              units with serial numbers. Empty for bulk items.
+
+14. available
+    Type: Integer
+    Sample: 1, 5, 3
+    Decision: Keep as-is
+    Rationale: Current available quantity (not checked out/reserved). Used for availability
+              calculations and booking system. Empty for some records suggests optional field.
+
+15. status
+    Type: Enum/String
+    Sample: "in_stock"
+    Decision: Keep as-is
+    Rationale: Current status of item (in_stock, out_for_repair, retired, etc.).
+              Important for filtering available vs. unavailable items.
+
+16. price_ruleset
+    Type: String (Empty in all samples)
+    Sample: (empty)
+    Decision: Keep as-is
+    Rationale: Reference to pricing rules/tiers. Empty suggests flat pricing or rental-only
+              model. Placeholder for future dynamic pricing features.
+
+17. tags
+    Type: String (Comma-separated)
+    Sample: "electronics,display,barcode_test,prodstud-rental,prodstud"
+    Decision: Keep as-is
+    Rationale: Flexible categorization and filtering system. Tags like "prodstud-rental"
+              indicate rental eligibility, others indicate categories or features.
+              Essential for search and filtering functionality.
+
+18. barcode
+    Type: String (Numeric or URL)
+    Sample: "7543910390593", "https://bqbl.it/1a6fc3d9-dfd8-4750-9037-6fb447d8158f"
+    Decision: Keep as-is
+    Rationale: Barcode/QR code identifier. Can be numeric barcode or URL to QR code.
+              Critical for scanning and quick asset lookup. Mixed format suggests
+              system evolution or multiple barcode types.
+
+19. tax_category
+    Type: String (Empty in all samples)
+    Sample: (empty)
+    Decision: Keep as-is
+    Rationale: Tax classification (standard rate, reduced rate, exempt). Empty suggests
+              default tax category applied. Placeholder for complex tax scenarios.
+
+20. base_price
+    Type: String (Currency formatted)
+    Sample: "€ 0,00"
+    Decision: Keep as-is
+    Rationale: Human-readable price display. All samples show €0.00 confirming rental/
+              inventory-only model without purchase prices. Used for display purposes.
+
+21. base_price_as_decimal
+    Type: Decimal
+    Sample: 0.0
+    Decision: Keep as-is
+    Rationale: Numeric representation of price for calculations. Decimal type ensures
+              precision in financial calculations. Corresponds to base_price value.
+
+22. base_price_in_cents
+    Type: Integer
+    Sample: 0
+    Decision: Keep as-is
+    Rationale: Price stored in smallest currency unit (cents) to avoid floating-point
+              errors in calculations. Standard practice for financial systems.
+              All three price fields maintain data consistency.
+
+23. deposit
+    Type: String (Currency formatted)
+    Sample: "€ 0,00"
+    Decision: Keep as-is
+    Rationale: Security deposit amount for rentals. Human-readable format.
+
+24. deposit_as_decimal
+    Type: Decimal
+    Sample: 0.0
+    Decision: Keep as-is
+    Rationale: Numeric deposit value for calculations. Mirrors base_price structure.
+
+25. deposit_in_cents
+    Type: Integer
+    Sample: 0
+    Decision: Keep as-is
+    Rationale: Deposit in cents for precise calculations. Completes deposit value trio.
+
+26. date_of_purchase
+    Type: Date (YYYY-MM-DD)
+    Sample: "2022-10-18", "2025-01-27"
+    Decision: Keep as-is
+    Rationale: Asset acquisition date. Important for depreciation, warranty tracking,
+              and asset lifecycle management. Empty for some items suggests optional
+              or unknown purchase dates.
+
+27. vendor
+    Type: String
+    Sample: "Amazon", "Thomann", "Martin Limbach"
+    Decision: Keep as-is
+    Rationale: Supplier/vendor name. Important for procurement, warranties, and
+              vendor relationship management.
+
+28. vendor_art_nr
+    Type: String (Alphanumeric)
+    Sample: "B095HBY7YP", "105135", "434029"
+    Decision: Keep as-is
+    Rationale: Vendor's article/product number. Critical for reordering, warranty claims,
+              and cross-referencing with vendor catalogs. Varies by vendor system.
+
+29. specifications
+    Type: String (Long text)
+    Sample: "1602 LCD Display RGB Module, 16 x 2 Character LCD Display..."
+    Decision: Keep as-is
+    Rationale: Detailed technical specifications. Longer than extra_information,
+              contains full vendor description. Important for technical reference.
+
+30. purchase_price
+    Type: Decimal/Currency
+    Sample: "21,84", "24,00", "145,00"
+    Decision: Keep as-is
+    Rationale: Actual purchase price paid (vs. base_price which is selling/rental price).
+              Important for asset valuation, depreciation, and ROI calculations.
+              Uses comma as decimal separator (European format).
+
+31. product_website
+    Type: String (URL)
+    Sample: "https://amazon.de/dp/B07YLJ6NJD"
+    Decision: Keep as-is
+    Rationale: Link to product page on vendor website. Useful for additional information,
+              reordering, and product research.
+
+32. storage_room
+    Type: String
+    Sample: "Production Studio / Storage room", "Production Studio / Office"
+    Decision: Keep as-is
+    Rationale: Specific storage location within broader location. More granular than
+              'location' field. Important for precise asset location tracking.
+
+33. usage_type
+    Type: String (Empty in all samples)
+    Sample: (empty)
+    Decision: Keep as-is
+    Rationale: Intended usage classification (rental, internal use, display, etc.).
+              Empty suggests single use type or pending implementation. Placeholder
+              for future usage categorization.
+
+34. warranty_date
+    Type: Date (Empty in all samples)
+    Sample: (empty)
+    Decision: Keep as-is
+    Rationale: Warranty expiration date. Empty suggests either no warranty, expired
+              warranty, or data not tracked. Important for maintenance planning
+              when populated.
+
+KEY DECISIONS SUMMARY
+=====================
+
+1. KEEP ALL 34 HEADERS: Even empty fields serve as placeholders for future data or
+   represent optional information that may exist for some products.
+
+2. DELIMITER: Semicolon (;) is correct choice as product descriptions contain commas
+   and complex text that would break CSV parsing with comma delimiter.
+
+3. DATA REDUNDANCY: Multiple price representations (formatted, decimal, cents) is
+   intentional and follows financial best practices:
+   - Formatted for display
+   - Decimal for human-readable calculations
+   - Cents/integer for precise system calculations
+
+4. EMPTY FIELDS: Not all fields populated for all products. This is acceptable as:
+   - Some are optional (warranty_date, product_website)
+   - Some are system placeholders (usage_type, tax_category)
+   - Some depend on item type (stock_identifier only for non-bulk items)
+
+5. BOOLEAN vs. ENUM: Fields like 'discountable', 'taxable', 'bulk' use TRUE/FALSE
+   (boolean), while 'status' and 'price_type' use strings (enum) - this suggests
+   simple binary choices vs. multiple possible states.
+
+6. UUID vs. STRING IDs: UUIDs used for system IDs (id, product_group_id), while
+   human-readable strings used for business IDs (sku, stock_identifier).
+
+7. HTML IN CSV: Description field contains HTML. This is acceptable as:
+   - Properly escaped/quoted in CSV
+   - Allows rich formatting in application
+   - Standard practice for content management systems
+
+RECOMMENDED IMPORT MAPPING
+===========================
+
+For shelf.nu asset import, this CSV structure maps to the Asset model with:
+- Core fields: id, name, sku, description, location
+- Inventory: quantity, bulk, stock_identifier, available, status
+- Financial: base_price_*, deposit_*, taxable, tax_category
+- Categorization: product_group_id, tags
+- Procurement: vendor, vendor_art_nr, purchase_price, date_of_purchase
+- Tracking: barcode, storage_room
+- Business logic: discountable, price_type, price_ruleset, usage_type
+
+All headers are valid and serve specific business purposes in the Shelf.nu
+asset management system.
