@@ -44,10 +44,8 @@ import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
-import {
-  cleanMarkdownFormatting,
-  sanitizeNoteContent,
-} from "./note-sanitizer.server";
+import { cleanMarkdownFormatting } from "./markdown-cleaner";
+import { sanitizeNoteContent } from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
