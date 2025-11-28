@@ -13,6 +13,7 @@ export const Dialog = ({
   onClose,
   className,
   headerClassName,
+  wrapperClassName,
 }: {
   title: string | ReactNode;
   children: ReactNode;
@@ -20,6 +21,7 @@ export const Dialog = ({
   onClose: () => void;
   className?: string;
   headerClassName?: string;
+  wrapperClassName?: string;
 }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const onCloseRef = useRef(onClose);
@@ -48,9 +50,12 @@ export const Dialog = ({
     document.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
+      dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]") ||
+      dialog.querySelector<HTMLElement>("[autofocus]") ||
       dialog.querySelector<HTMLElement>(
-        '[data-dialog-initial-focus],[autofocus],button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
-      ) ?? dialog;
+        'input,select,textarea,button,[href],[tabindex]:not([tabindex="-1"])'
+      ) ||
+      dialog;
 
     focusTarget.focus();
 
@@ -63,7 +68,7 @@ export const Dialog = ({
 
   return open ? (
     <div
-      className="dialog-backdrop"
+      className={tw("dialog-backdrop", wrapperClassName)}
       role="button"
       tabIndex={0}
       onClick={(event) => {

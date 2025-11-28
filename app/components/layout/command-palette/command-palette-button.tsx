@@ -33,7 +33,11 @@ export function CommandPaletteButton({
 }) {
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
-  const shouldRenderButton = !["bookings.$bookingId.overview"].includes(
+  const shouldRenderButton = ![
+    "bookings.$bookingId.overview",
+    "locations.new",
+    "locations.$locationId.edit",
+  ].includes(
     // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
     currentRoute?.handle?.name
   );

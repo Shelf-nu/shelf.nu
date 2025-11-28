@@ -124,7 +124,7 @@
       {
         "paths": [
           {
-            "name": "@remix-run/react",
+            "name": "react-router",
             "importNames": ["useSearchParams"]
           }
         ]
