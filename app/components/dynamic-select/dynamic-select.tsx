@@ -25,6 +25,16 @@ import type { IconType } from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
+const dedupeItems = (list: ModelFilterItem[]) => {
+  const map = new Map<string, ModelFilterItem>();
+  list.forEach((item) => {
+    if (!map.has(item.id)) {
+      map.set(item.id, item);
+    }
+  });
+  return Array.from(map.values());
+};
+
 type Props = ModelFilterProps & {
   className?: string;
   triggerWrapperClassName?: string;
@@ -46,7 +56,12 @@ type Props = ModelFilterProps & {
   showSearch?: boolean;
   defaultValue?: string;
   renderItem?: (item: ModelFilterItem) => ReactNode;
-  extraContent?: ReactNode;
+  extraContent?:
+    | ReactNode
+    | ((helpers: {
+        onItemCreated: (item: ModelFilterItem) => void;
+        closePopover: () => void;
+      }) => ReactNode);
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
@@ -98,6 +113,7 @@ export default function DynamicSelect({
   withoutValueItem,
   ...hookProps
 }: Props) {
+  const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const navigation = useNavigation();
@@ -109,6 +125,7 @@ export default function DynamicSelect({
 
   const {
     searchQuery,
+    setSearchQuery,
     handleSearchQueryChange,
     items,
     totalItems,
@@ -119,10 +136,17 @@ export default function DynamicSelect({
     getAllEntries,
   } = useModelFilters({ model, selectionMode, ...hookProps });
 
+  const itemsWithCreated = useMemo(
+    () => dedupeItems([...createdItems, ...items]),
+    [createdItems, items]
+  );
+
   const itemsToRender = useMemo(
     () =>
-      excludeItems ? items.filter((i) => !excludeItems.includes(i.id)) : items,
-    [excludeItems, items]
+      excludeItems
+        ? itemsWithCreated.filter((i) => !excludeItems.includes(i.id))
+        : itemsWithCreated,
+    [excludeItems, itemsWithCreated]
   );
 
   // Create array that includes withoutValueItem if provided
@@ -182,6 +206,22 @@ export default function DynamicSelect({
       />
     );
   }
+
+  const handleItemCreated = (item: ModelFilterItem) => {
+    setCreatedItems((prev) => dedupeItems([item, ...prev]));
+    handleItemChange(item.id);
+    setSearchQuery("");
+    resetModelFiltersFetcher();
+    setIsPopoverOpen(false);
+  };
+
+  const extraContentNode =
+    typeof extraContent === "function"
+      ? extraContent({
+          onItemCreated: handleItemCreated,
+          closePopover: () => setIsPopoverOpen(false),
+        })
+      : extraContent;
 
   return (
     <>
@@ -399,8 +439,8 @@ export default function DynamicSelect({
                 </div>
               </When>
 
-              <When truthy={typeof extraContent !== "undefined"}>
-                <div className="border-t px-3 pb-3">{extraContent}</div>
+              <When truthy={typeof extraContentNode !== "undefined"}>
+                <div className="border-t px-3 pb-3">{extraContentNode}</div>
               </When>
             </PopoverContent>
           </PopoverPortal>

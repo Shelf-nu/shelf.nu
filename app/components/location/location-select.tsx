@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 
 import { XIcon } from "../icons/library";
@@ -30,6 +31,8 @@ type LocationSelectProps = BulkProps & {
   placeholder?: string;
   /** Which form field name to bind the selected value to. */
   fieldName?: string;
+  /** Additional classes for the outer container. */
+  className?: string;
   /** External value to pre-populate the selector with. */
   defaultValue?: string | null;
   /**
@@ -49,6 +52,7 @@ export const LocationSelect = ({
   hideClearButton = false,
   placeholder,
   fieldName = "newLocationId",
+  className,
   defaultValue,
   hideCurrentLocationInput = false,
   excludeIds,
@@ -68,7 +72,7 @@ export const LocationSelect = ({
   }, [initialLocationId]);
 
   return (
-    <div className="relative w-full">
+    <div className={tw("relative w-full", className)}>
       {showCurrentLocationInput && (
         <input
           type="hidden"
@@ -90,13 +94,29 @@ export const LocationSelect = ({
           allowClear
           excludeItems={excludeIds}
           onChange={(value) => setLocationId(value)}
-          extraContent={
+          extraContent={({ onItemCreated, closePopover }) => (
             <InlineEntityCreationDialog
               type="location"
               title="Create new location"
               buttonLabel="Create new location"
+              onCreated={(created) => {
+                if (created?.type !== "location") return;
+                const createdLocation = created.entity;
+
+                const item = {
+                  id: createdLocation.id,
+                  name: createdLocation.name,
+                  metadata: {
+                    ...createdLocation,
+                  },
+                };
+
+                setLocationId(createdLocation.id);
+                onItemCreated(item);
+                closePopover();
+              }}
             />
-          }
+          )}
           renderItem={({ name, metadata }) => (
             <div className="flex items-center gap-2">
               {metadata?.thumbnailUrl ? (

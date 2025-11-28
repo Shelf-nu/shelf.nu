@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { Category, Location } from "@prisma/client";
 import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { LocationForm } from "../location/form";
@@ -8,12 +9,29 @@ type InlineEntityCreationDialogProps = {
   title: string;
   buttonLabel: string;
   type: "location" | "category";
+  onCreated?: (
+    entity:
+      | {
+          type: "location";
+          entity: Pick<Location, "id" | "name"> & {
+            thumbnailUrl?: string | null;
+            imageUrl?: string | null;
+          };
+        }
+      | {
+          type: "category";
+          entity: Pick<Category, "id" | "name" | "color"> & {
+            description?: string | null;
+          };
+        }
+  ) => void;
 };
 
 export default function InlineEntityCreationDialog({
   title,
   buttonLabel,
   type,
+  onCreated,
 }: InlineEntityCreationDialogProps) {
   const [open, setOpen] = useState(false);
 
@@ -55,7 +73,21 @@ export default function InlineEntityCreationDialog({
                       className="w-full flex-col"
                       inputClassName="w-full lg:max-w-full"
                       buttonsClassName="w-full mt-4"
-                      onSuccess={handleClose}
+                      onSuccess={(data) => {
+                        if (data?.category) {
+                          onCreated?.({
+                            type: "category",
+                            entity: {
+                              id: data.category.id,
+                              name: data.category.name,
+                              color: data.category.color,
+                              description: data.category.description,
+                            },
+                          });
+                        }
+
+                        handleClose();
+                      }}
                     />
                   );
                 }
@@ -64,7 +96,21 @@ export default function InlineEntityCreationDialog({
                   return (
                     <LocationForm
                       apiUrl="/locations/new"
-                      onSuccess={handleClose}
+                      onSuccess={(data) => {
+                        if (data?.location) {
+                          onCreated?.({
+                            type: "location",
+                            entity: {
+                              id: data.location.id,
+                              name: data.location.name,
+                              thumbnailUrl: data.location.thumbnailUrl,
+                              imageUrl: data.location.imageUrl,
+                            },
+                          });
+                        }
+
+                        handleClose();
+                      }}
                     />
                   );
                 }

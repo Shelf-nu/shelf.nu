@@ -19,10 +19,9 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
-import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import When from "../when/when";
@@ -189,13 +188,24 @@ export default function KitsForm({
             closeOnSelect
             selectionMode="none"
             allowClear={true}
-            extraContent={
+            extraContent={({ onItemCreated, closePopover }) => (
               <InlineEntityCreationDialog
                 type="category"
                 title="Create new category"
                 buttonLabel="Create new category"
+                onCreated={(created) => {
+                  if (created?.type !== "category") return;
+                  const category = created.entity;
+                  onItemCreated({
+                    id: category.id,
+                    name: category.name,
+                    color: category.color,
+                    metadata: { ...category },
+                  });
+                  closePopover();
+                }}
               />
-            }
+            )}
           />
         </FormRow>
 
@@ -231,17 +241,23 @@ export default function KitsForm({
             countKey="totalLocations"
             closeOnSelect
             allowClear
-            extraContent={
-              <Button
-                to="/locations/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new location
-              </Button>
-            }
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                type="location"
+                title="Create new location"
+                buttonLabel="Create new location"
+                onCreated={(created) => {
+                  if (created?.type !== "location") return;
+                  const location = created.entity;
+                  onItemCreated({
+                    id: location.id,
+                    name: location.name,
+                    metadata: { ...location },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
                 {metadata?.thumbnailUrl ? (

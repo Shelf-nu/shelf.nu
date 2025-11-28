@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import type { Category } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -23,7 +24,7 @@ type NewCategoryFormProps = {
   inputClassName?: string;
   buttonsClassName?: string;
   apiUrl?: string;
-  onSuccess?: () => void;
+  onSuccess?: (data?: { category?: Category }) => void;
 };
 
 export default function NewCategoryForm({
@@ -38,6 +39,7 @@ export default function NewCategoryForm({
   const fetcher = useFetcherWithReset<{
     error?: { message: string };
     success: boolean;
+    category?: Category;
   }>();
   const disabled = useDisabled(fetcher);
 
@@ -49,7 +51,7 @@ export default function NewCategoryForm({
     }
 
     if (fetcher.data?.success) {
-      onSuccess();
+      onSuccess(fetcher.data);
       fetcher.reset();
     }
   }, [fetcher, onSuccess]);
@@ -74,6 +76,7 @@ export default function NewCategoryForm({
           error={zo.errors.name()?.message}
           hideErrorText
           autoFocus
+          data-dialog-initial-focus
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
         />
         <Input
@@ -108,11 +111,17 @@ export default function NewCategoryForm({
             to="/categories"
             size="sm"
             className="flex-1"
+            disabled={disabled}
           >
             Cancel
           </Button>
-          <Button type="submit" size="sm" className="flex-1">
-            Create
+          <Button
+            type="submit"
+            size="sm"
+            className="flex-1"
+            disabled={disabled}
+          >
+            {disabled ? "Creating..." : "Create"}
           </Button>
         </div>
 

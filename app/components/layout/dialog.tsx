@@ -50,9 +50,12 @@ export const Dialog = ({
     document.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
+      dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]") ||
+      dialog.querySelector<HTMLElement>("[autofocus]") ||
       dialog.querySelector<HTMLElement>(
-        '[data-dialog-initial-focus],[autofocus],button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
-      ) ?? dialog;
+        'input,select,textarea,button,[href],[tabindex]:not([tabindex="-1"])'
+      ) ||
+      dialog;
 
     focusTarget.focus();
 

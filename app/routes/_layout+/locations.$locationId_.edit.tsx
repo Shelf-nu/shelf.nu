@@ -14,7 +14,6 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 import { Button } from "~/components/shared/button";
-import { Card } from "~/components/shared/card";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getLocation,
@@ -95,6 +94,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => <span>Edit</span>,
+  name: "locations.$locationId.edit",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -178,7 +178,7 @@ export default function LocationEditPage() {
           </Button>
         }
       />
-      <Card className="items-top flex w-full justify-between md:w-min">
+      <div className="items-top flex w-full justify-between md:w-min">
         <LocationForm
           name={location.name}
           description={location.description}
@@ -187,7 +187,7 @@ export default function LocationEditPage() {
           referer={referer}
           excludeLocationId={location.id}
         />
-      </Card>
+      </div>
     </div>
   );
 }

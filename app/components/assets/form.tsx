@@ -27,7 +27,6 @@ import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
-import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
@@ -390,13 +389,24 @@ export const AssetForm = ({
             closeOnSelect
             selectionMode="set"
             allowClear={true}
-            extraContent={
+            extraContent={({ onItemCreated, closePopover }) => (
               <InlineEntityCreationDialog
                 title="Create new category"
                 type="category"
                 buttonLabel="Create new category"
+                onCreated={(created) => {
+                  if (created?.type !== "category") return;
+                  const category = created.entity;
+                  onItemCreated({
+                    id: category.id,
+                    name: category.name,
+                    color: category.color,
+                    metadata: { ...category },
+                  });
+                  closePopover();
+                }}
               />
-            }
+            )}
           />
         </FormRow>
 
@@ -448,40 +458,6 @@ export const AssetForm = ({
             name="currentLocationId"
             value={locationId || ""}
           />
-          <DynamicSelect
-            disabled={disabled}
-            selectionMode="set"
-            fieldName="newLocationId"
-            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-            defaultValue={locationId || undefined}
-            model={{ name: "location", queryKey: "name" }}
-            contentLabel="Locations"
-            label="Location"
-            hideLabel
-            initialDataKey="locations"
-            countKey="totalLocations"
-            closeOnSelect
-            allowClear
-            extraContent={
-              <InlineEntityCreationDialog
-                type="location"
-                title="Create new location"
-                buttonLabel="Create new location"
-              />
-            }
-            renderItem={({ name, metadata }) => (
-              <div className="flex items-center gap-2">
-                {metadata?.thumbnailUrl ? (
-                  <ImageWithPreview
-                    thumbnailUrl={metadata.thumbnailUrl}
-                    alt={metadata.name}
-                    className="size-6 rounded-[2px]"
-                  />
-                ) : null}
-                <div>{name}</div>
-              </div>
-            )}
-          />
           {isKitAsset ? (
             <HoverCard openDelay={50} closeDelay={50}>
               <HoverCardTrigger className="disabled w-full cursor-not-allowed">
@@ -519,28 +495,34 @@ export const AssetForm = ({
               defaultValue={locationId || undefined}
               model={{ name: "location", queryKey: "name" }}
               contentLabel="Locations"
-              label="Location"
-              hideLabel
-              initialDataKey="locations"
-              countKey="totalLocations"
-              closeOnSelect
-              allowClear
-              extraContent={
-                <Button
-                  to="/locations/new"
-                  variant="link"
-                  icon="plus"
-                  className="w-full justify-start pt-4"
-                  target="_blank"
-                >
-                  Create new location
-                </Button>
-              }
-              renderItem={({ name, metadata }) => (
-                <div className="flex items-center gap-2">
-                  {metadata?.thumbnailUrl ? (
-                    <ImageWithPreview
-                      thumbnailUrl={metadata.thumbnailUrl}
+            label="Location"
+            hideLabel
+            initialDataKey="locations"
+            countKey="totalLocations"
+            closeOnSelect
+            allowClear
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                type="location"
+                title="Create new location"
+                buttonLabel="Create new location"
+                onCreated={(created) => {
+                  if (created?.type !== "location") return;
+                  const location = created.entity;
+                  onItemCreated({
+                    id: location.id,
+                    name: location.name,
+                    metadata: { ...location },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
+            renderItem={({ name, metadata }) => (
+              <div className="flex items-center gap-2">
+                {metadata?.thumbnailUrl ? (
+                  <ImageWithPreview
+                    thumbnailUrl={metadata.thumbnailUrl}
                       alt={metadata.name}
                       className="size-6 rounded-[2px]"
                     />
