@@ -33,12 +33,16 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
+  const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
+    useUserRoleHelper();
+
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
       action: "new",
       workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
 
@@ -49,7 +53,6 @@ export default function CreateBookingForSelectedAssetsDialog() {
     );
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
 
   const user = useUserData();
   // Use teamMembersForForm for BASE/SELF_SERVICE users to ensure their team member is always available

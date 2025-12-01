@@ -67,6 +67,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
 
+  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
+    useUserRoleHelper();
+
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
@@ -74,10 +77,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       action: "new",
       workingHours: workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
-
-  const { roles, isBaseOrSelfService } = useUserRoleHelper();
 
   /** Use teamMembersForForm when available (from dialog contexts), otherwise fall back to teamMembers */
   const teamMembersToUse = teamMembersForForm || teamMembers;
