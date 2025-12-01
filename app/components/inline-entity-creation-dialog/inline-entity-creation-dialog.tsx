@@ -107,6 +107,7 @@ export default function InlineEntityCreationDialog({
                 className="w-full flex-col"
                 inputClassName="w-full lg:max-w-full"
                 buttonsClassName="w-full mt-4"
+                onCancel={handleClose}
                 onSuccess={(data) => {
                   if (data?.category) {
                     onCreated?.({
@@ -129,6 +130,7 @@ export default function InlineEntityCreationDialog({
             <When truthy={type === "location"}>
               <LocationForm
                 apiUrl="/locations/new"
+                onCancel={handleClose}
                 onSuccess={(data) => {
                   if (data?.location) {
                     onCreated?.({

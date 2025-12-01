@@ -24,6 +24,9 @@ type NewCategoryFormProps = {
   inputClassName?: string;
   buttonsClassName?: string;
   apiUrl?: string;
+  /** Callback function to handle cancel action when form is used inline (e.g., in a dialog). When provided, Cancel button will call this instead of navigating. */
+  onCancel?: () => void;
+  /** Callback function triggered on successful category creation */
   onSuccess?: (data?: { category?: Category }) => void;
 };
 
@@ -33,6 +36,7 @@ export default function NewCategoryForm({
   inputClassName,
   buttonsClassName,
   apiUrl,
+  onCancel,
   onSuccess,
 }: NewCategoryFormProps) {
   const zo = useZorm("NewQuestionWizardScreen", NewCategoryFormSchema);
@@ -106,15 +110,28 @@ export default function NewCategoryForm({
 
       <div className={buttonsClassName}>
         <div className="flex items-center gap-1">
-          <Button
-            variant="secondary"
-            to="/categories"
-            size="sm"
-            className="flex-1"
-            disabled={disabled}
-          >
-            Cancel
-          </Button>
+          {/* When onCancel is provided (inline mode), use onClick instead of navigation */}
+          {onCancel ? (
+            <Button
+              variant="secondary"
+              onClick={onCancel}
+              size="sm"
+              className="flex-1"
+              disabled={disabled}
+            >
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              to="/categories"
+              size="sm"
+              className="flex-1"
+              disabled={disabled}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             type="submit"
             size="sm"

@@ -5,12 +5,13 @@ import InlineEntityCreationDialog from "./inline-entity-creation-dialog";
 
 // why: Mock NewCategoryForm to avoid router dependencies and test dialog behavior in isolation
 vi.mock("../category/new-category-form", () => ({
-  default: ({ onSuccess }: any) => (
+  default: ({ onSuccess, onCancel }: any) => (
     <div data-testid="category-form">
       <label htmlFor="category-name">Name</label>
       <input id="category-name" />
       <label htmlFor="category-description">Description</label>
       <textarea id="category-description" />
+      <button onClick={() => onCancel?.()}>Cancel</button>
       <button
         onClick={() =>
           onSuccess?.({
@@ -31,12 +32,13 @@ vi.mock("../category/new-category-form", () => ({
 
 // why: Mock LocationForm to avoid router dependencies and test dialog behavior in isolation
 vi.mock("../location/form", () => ({
-  LocationForm: ({ onSuccess }: any) => (
+  LocationForm: ({ onSuccess, onCancel }: any) => (
     <div data-testid="location-form">
       <label htmlFor="location-name">Name</label>
       <input id="location-name" />
       <label htmlFor="location-description">Description</label>
       <textarea id="location-description" />
+      <button onClick={() => onCancel?.()}>Cancel</button>
       <button
         onClick={() =>
           onSuccess?.({
@@ -280,6 +282,41 @@ describe("InlineEntityCreationDialog", () => {
       await waitFor(() => {
         const dialog = screen.getByRole("dialog");
         expect(dialog).toBeInTheDocument();
+      });
+    });
+
+    it("closes dialog when cancel is clicked in inline mode", async () => {
+      render(
+        <InlineEntityCreationDialog
+          title="Create Category"
+          buttonLabel="+ New Category"
+          type="category"
+        />
+      );
+
+      const user = userEvent.setup();
+
+      // Open the dialog
+      await act(async () => {
+        await user.click(
+          screen.getByRole("button", { name: "+ New Category" })
+        );
+      });
+
+      // Verify dialog is open
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+
+      // Click cancel button (mocked form's cancel button)
+      const cancelButton = screen.getByText("Cancel");
+      await act(async () => {
+        await user.click(cancelButton);
+      });
+
+      // Verify dialog is closed
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       });
     });
   });

@@ -59,6 +59,9 @@ interface Props {
   address?: Location["address"];
   description?: Location["description"];
   apiUrl?: string;
+  /** Callback function to handle cancel action when form is used inline (e.g., in a dialog). When provided, Cancel button will call this instead of navigating. */
+  onCancel?: () => void;
+  /** Callback function triggered on successful location creation/update */
   onSuccess?: (data?: { location?: NewLocationPayload }) => void;
   parentId?: Location["parentId"];
   referer?: string | null;
@@ -75,6 +78,7 @@ export const LocationForm = ({
   parentId,
   referer,
   excludeLocationId,
+  onCancel,
 }: Props) => {
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
   const fetcher = useFetcherWithReset<{
@@ -147,7 +151,7 @@ export const LocationForm = ({
 
         {hasOnSuccessFunc ? null : (
           <AbsolutePositionedHeaderActions className="hidden md:flex">
-            <Actions disabled={disabled} referer={referer} />
+            <Actions disabled={disabled} referer={referer} onCancel={onCancel} />
           </AbsolutePositionedHeaderActions>
         )}
 
@@ -371,15 +375,24 @@ export const LocationForm = ({
 const Actions = ({
   disabled,
   referer,
+  onCancel,
 }: {
   disabled: boolean;
   referer?: string | null;
+  onCancel?: () => void;
 }) => (
   <>
     <ButtonGroup>
-      <Button to={referer ?? ".."} variant="secondary" disabled={disabled}>
-        Cancel
-      </Button>
+      {/* When onCancel is provided (inline mode), use onClick instead of navigation */}
+      {onCancel ? (
+        <Button onClick={onCancel} variant="secondary" disabled={disabled}>
+          Cancel
+        </Button>
+      ) : (
+        <Button to={referer ?? ".."} variant="secondary" disabled={disabled}>
+          Cancel
+        </Button>
+      )}
       <AddAnother disabled={disabled} />
     </ButtonGroup>
 
