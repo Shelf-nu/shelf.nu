@@ -44,6 +44,11 @@ type LocationSelectProps = BulkProps & {
   hideCurrentLocationInput?: boolean;
   /** List of location ids that should be hidden from the dropdown (e.g., the current record). */
   excludeIds?: string[];
+  /**
+   * When true, hides the "Create new location" button in extraContent.
+   * Used to prevent nested creation buttons when LocationSelect is used inside LocationForm.
+   */
+  hideExtraContent?: boolean;
 };
 
 /**
@@ -59,6 +64,7 @@ export const LocationSelect = ({
   defaultValue,
   hideCurrentLocationInput = false,
   excludeIds,
+  hideExtraContent = false,
   ...restProps
 }: LocationSelectProps) => {
   const navigation = useNavigation();
@@ -98,29 +104,33 @@ export const LocationSelect = ({
           excludeItems={excludeIds}
           onChange={(value) => setLocationId(value)}
           popoverZIndexClassName={popoverZIndexClassName}
-          extraContent={({ onItemCreated, closePopover }) => (
-            <InlineEntityCreationDialog
-              type="location"
-              title="Create new location"
-              buttonLabel="Create new location"
-              onCreated={(created) => {
-                if (created?.type !== "location") return;
-                const createdLocation = created.entity;
+          extraContent={
+            hideExtraContent
+              ? undefined
+              : ({ onItemCreated, closePopover }) => (
+                  <InlineEntityCreationDialog
+                    type="location"
+                    title="Create new location"
+                    buttonLabel="Create new location"
+                    onCreated={(created) => {
+                      if (created?.type !== "location") return;
+                      const createdLocation = created.entity;
 
-                const item = {
-                  id: createdLocation.id,
-                  name: createdLocation.name,
-                  metadata: {
-                    ...createdLocation,
-                  },
-                };
+                      const item = {
+                        id: createdLocation.id,
+                        name: createdLocation.name,
+                        metadata: {
+                          ...createdLocation,
+                        },
+                      };
 
-                setLocationId(createdLocation.id);
-                onItemCreated(item);
-                closePopover();
-              }}
-            />
-          )}
+                      setLocationId(createdLocation.id);
+                      onItemCreated(item);
+                      closePopover();
+                    }}
+                  />
+                )
+          }
           renderItem={({ name, metadata }) => (
             <div className="flex items-center gap-2">
               {metadata?.thumbnailUrl ? (

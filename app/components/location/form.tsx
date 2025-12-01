@@ -126,7 +126,13 @@ export const LocationForm = ({
   const FormComponent = hasOnSuccessFunc ? fetcher.Form : Form;
 
   return (
-    <Card className={tw("w-full max-w-full md:w-min", className)}>
+    <Card
+      className={tw(
+        "w-full max-w-full md:w-min",
+        hasOnSuccessFunc ? "border-none  shadow-none" : "",
+        className
+      )}
+    >
       <FormComponent
         ref={zo.ref}
         method="post"
@@ -208,6 +214,7 @@ export const LocationForm = ({
             isBulk={false}
             className="w-full max-w-full"
             popoverZIndexClassName={hasOnSuccessFunc ? "z-[10000]" : undefined}
+            hideExtraContent={hasOnSuccessFunc}
             fieldName={zo.fields.parentId()}
             placeholder="No parent"
             defaultValue={parentId ?? undefined}
