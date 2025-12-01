@@ -1,4 +1,4 @@
-import type { Asset, Category, Tag, Location } from "@prisma/client";
+import type { Asset, Category, Location, Tag } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
 import z from "zod";
@@ -7,6 +7,8 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -17,8 +19,11 @@ import { Button } from "~/components/shared/button";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocation } from "~/modules/location/service.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
@@ -29,12 +34,15 @@ import {
   getParams,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -47,30 +55,53 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      request,
-      userId,
-      entity: PermissionEntity.location,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, canSeeAllCustody } =
+      await requirePermission({
+        request,
+        userId,
+        entity: PermissionEntity.location,
+        action: PermissionAction.read,
+      });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, orderBy, orderDirection } =
-      getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
-
-    const { location, totalAssetsWithinLocation } = await getLocation({
-      organizationId,
-      id: locationId,
+    const {
       page,
-      perPage,
+      perPageParam,
       search,
       orderBy,
       orderDirection,
-      userOrganizations,
-      request,
-    });
+      teamMemberIds,
+    } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
+
+    const [
+      { location, totalAssetsWithinLocation },
+      { teamMembers, totalTeamMembers },
+    ] = await Promise.all([
+      getLocation({
+        organizationId,
+        id: locationId,
+        page,
+        perPage,
+        search,
+        orderBy,
+        orderDirection,
+        userOrganizations,
+        request,
+        teamMemberIds,
+      }),
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        // When the user cannot see all custody, only return their own team member
+        filterByUserId: !canSeeAllCustody,
+        userId,
+      }),
+    ]);
 
     const modelName = {
       singular: "asset",
@@ -94,6 +125,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalItems,
       perPage,
       totalPages,
+      teamMembers,
+      totalTeamMembers,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
@@ -108,6 +141,12 @@ export default function LocationAssets() {
     roles,
     entity: PermissionEntity.location,
     action: PermissionAction.manageAssets,
+  });
+
+  const organization = useCurrentOrganization();
+  const canReadCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
   });
 
   return (
@@ -128,7 +167,7 @@ export default function LocationAssets() {
             ),
           }}
         >
-          <div className="mt-2 flex w-full items-center gap-2  md:mt-0">
+          <div className="mt-2 flex w-full items-center gap-2 md:mt-0">
             <When truthy={userRoleCanManageAssets}>
               <Button
                 icon="scan"
@@ -146,6 +185,30 @@ export default function LocationAssets() {
               >
                 Add assets
               </Button>
+            </When>
+            <When truthy={canReadCustody}>
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Custodian
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                label="Filter by custodian"
+                placeholder="Search team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
+                withoutValueItem={{
+                  id: "without-custody",
+                  name: "Without custody",
+                }}
+                renderItem={(item) => resolveTeamMemberName(item, true)}
+              />
             </When>
           </div>
         </Filters>

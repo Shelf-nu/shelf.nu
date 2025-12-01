@@ -3,6 +3,8 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useParams } from "react-router";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import { ChevronRight } from "~/components/icons/library";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -14,8 +16,11 @@ import { Button } from "~/components/shared/button";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocationKits } from "~/modules/location/service.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
@@ -26,12 +31,16 @@ import {
   getParams,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -44,7 +53,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -52,20 +61,39 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, orderBy, orderDirection } =
-      getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
-
-    const { kits, totalKits } = await getLocationKits({
-      organizationId,
-      id: locationId,
+    const {
       page,
-      perPage,
+      perPageParam,
       search,
       orderBy,
       orderDirection,
-    });
+      teamMemberIds,
+    } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
+
+    const [{ kits, totalKits }, { teamMembers, totalTeamMembers }] =
+      await Promise.all([
+        getLocationKits({
+          organizationId,
+          id: locationId,
+          page,
+          perPage,
+          search,
+          orderBy,
+          orderDirection,
+          teamMemberIds,
+        }),
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          selectedTeamMembers: teamMemberIds,
+          filterByUserId: !canSeeAllCustody, // When the user cannot see all custody, only return their own team member
+          userId,
+        }),
+      ]);
 
     const modelName = {
       singular: "kit",
@@ -87,6 +115,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       totalPages,
       header,
+      teamMembers,
+      totalTeamMembers,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
@@ -101,6 +131,12 @@ export default function LocationKits() {
     roles,
     entity: PermissionEntity.location,
     action: PermissionAction.manageKits,
+  });
+
+  const organization = useCurrentOrganization();
+  const canReadCustody = userHasCustodyViewPermission({
+    roles,
+    organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
   });
 
   return (
@@ -131,6 +167,26 @@ export default function LocationKits() {
                   Add kits
                 </Button>
               </div>
+            </When>
+            <When truthy={canReadCustody}>
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Custodian
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                label="Filter by custodian"
+                placeholder="Search team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
+                renderItem={(item) => resolveTeamMemberName(item, true)}
+              />
             </When>
           </div>
         </Filters>

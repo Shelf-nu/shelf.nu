@@ -7,6 +7,7 @@ import type {
   Asset,
   Kit,
 } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -57,6 +58,7 @@ export async function getLocation(
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
     include?: Prisma.LocationInclude;
+    teamMemberIds?: string[] | null;
   }
 ) {
   const {
@@ -70,6 +72,7 @@ export async function getLocation(
     orderBy = "createdAt",
     orderDirection,
     include,
+    teamMemberIds,
   } = params;
 
   try {
@@ -88,6 +91,41 @@ export async function getLocation(
         contains: search,
         mode: "insensitive",
       };
+    }
+
+    if (teamMemberIds && teamMemberIds.length) {
+      assetsWhere.OR = [
+        ...(assetsWhere.OR ?? []),
+        {
+          custody: { teamMemberId: { in: teamMemberIds } },
+        },
+        {
+          custody: { custodian: { userId: { in: teamMemberIds } } },
+        },
+        {
+          bookings: {
+            some: {
+              custodianTeamMemberId: { in: teamMemberIds },
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        },
+        {
+          bookings: {
+            some: {
+              custodianUserId: { in: teamMemberIds },
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
+      ];
     }
 
     const parentInclude = {
@@ -954,6 +992,7 @@ export async function getLocationKits(
     search?: string | null;
     orderBy?: string;
     orderDirection?: "asc" | "desc";
+    teamMemberIds?: string[] | null;
   }
 ) {
   const {
@@ -964,6 +1003,7 @@ export async function getLocationKits(
     search,
     orderBy = "createdAt",
     orderDirection,
+    teamMemberIds,
   } = params;
 
   try {
@@ -974,6 +1014,14 @@ export async function getLocationKits(
       organizationId,
       locationId: id,
     };
+
+    if (teamMemberIds && teamMemberIds?.length) {
+      kitWhere.custody = {
+        custodianId: {
+          in: teamMemberIds,
+        },
+      };
+    }
 
     if (search) {
       kitWhere.name = {
