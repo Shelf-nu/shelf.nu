@@ -151,7 +151,11 @@ export const LocationForm = ({
 
         {hasOnSuccessFunc ? null : (
           <AbsolutePositionedHeaderActions className="hidden md:flex">
-            <Actions disabled={disabled} referer={referer} onCancel={onCancel} />
+            <Actions
+              disabled={disabled}
+              referer={referer}
+              onCancel={onCancel}
+            />
           </AbsolutePositionedHeaderActions>
         )}
 
