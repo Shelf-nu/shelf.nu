@@ -2,6 +2,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
 
 export const BulkCategoryUpdateSchema = z.object({
@@ -31,6 +32,24 @@ export default function BulkCategoryUpdateDialog() {
               contentLabel="Categories"
               closeOnSelect
               allowClear
+              extraContent={({ onItemCreated, closePopover }) => (
+                <InlineEntityCreationDialog
+                  type="category"
+                  title="Create new category"
+                  buttonLabel="Create new category"
+                  onCreated={(created) => {
+                    if (created?.type !== "category") return;
+                    const category = created.entity;
+                    onItemCreated({
+                      id: category.id,
+                      name: category.name,
+                      color: category.color,
+                      metadata: { ...category },
+                    });
+                    closePopover();
+                  }}
+                />
+              )}
             />
             {zo.errors.category()?.message ? (
               <p className="text-sm text-error-500">

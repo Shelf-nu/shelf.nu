@@ -1032,8 +1032,8 @@ describe("reserveBooking", () => {
     organizationId: "org-1",
     custodianUserId: "user-1",
     custodianTeamMemberId: "team-1",
-    from: new Date("2025-12-01T09:00:00Z"), // Future date
-    to: new Date("2025-12-01T17:00:00Z"),
+    from: new Date("2026-12-01T09:00:00Z"), // Future date
+    to: new Date("2026-12-01T17:00:00Z"),
     description: "Reserved booking description",
     hints: mockClientHints,
     isSelfServiceOrBase: false,
@@ -1046,6 +1046,8 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
       assets: [
         {
           id: "asset-1",
@@ -1078,8 +1080,8 @@ describe("reserveBooking", () => {
           name: "Reserved Booking",
           custodianUser: { connect: { id: "user-1" } },
           custodianTeamMember: { connect: { id: "team-1" } },
-          from: new Date("2025-12-01T09:00:00Z"),
-          to: new Date("2025-12-01T17:00:00Z"),
+          from: new Date("2026-12-01T09:00:00Z"),
+          to: new Date("2026-12-01T17:00:00Z"),
           description: "Reserved booking description",
         }),
       })
@@ -1123,6 +1125,8 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
       assets: [], // No assets to conflict
     };
     const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
