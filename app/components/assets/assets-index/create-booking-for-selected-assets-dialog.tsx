@@ -49,7 +49,8 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
       workingHours,
-      bookingSettings.bufferStartTime
+      bookingSettings.bufferStartTime,
+      isAdministratorOrOwner
     );
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);

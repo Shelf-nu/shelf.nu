@@ -58,17 +58,19 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
+
+  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
+    useUserRoleHelper();
+
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
       workingHours,
-      bookingSettings.bufferStartTime
+      bookingSettings.bufferStartTime,
+      isAdministratorOrOwner
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
-
-  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
-    useUserRoleHelper();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
