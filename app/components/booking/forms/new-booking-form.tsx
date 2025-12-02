@@ -58,10 +58,15 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
+
+  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
+    useUserRoleHelper();
+
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
       workingHours,
-      bookingSettings.bufferStartTime
+      bookingSettings.bufferStartTime,
+      isAdministratorOrOwner
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
@@ -74,10 +79,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       action: "new",
       workingHours: workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
-
-  const { roles, isBaseOrSelfService } = useUserRoleHelper();
 
   /** Use teamMembersForForm when available (from dialog contexts), otherwise fall back to teamMembers */
   const teamMembersToUse = teamMembersForForm || teamMembers;

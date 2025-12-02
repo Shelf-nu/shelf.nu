@@ -108,6 +108,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
+  const { roles, isBaseOrSelfService, isBase, isAdministratorOrOwner } =
+    useUserRoleHelper();
+
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
@@ -116,6 +119,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       status,
       workingHours: workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
 
@@ -124,8 +128,6 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
     actionData?.error
   );
-
-  const { roles, isBaseOrSelfService, isBase } = useUserRoleHelper();
 
   const canCheckInBooking = userHasPermission({
     roles,
