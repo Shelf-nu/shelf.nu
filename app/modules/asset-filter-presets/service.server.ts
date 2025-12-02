@@ -1,19 +1,8 @@
-import { AssetFilterPresetView } from "@prisma/client";
-
 import { db } from "~/database/db.server";
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import { ShelfError } from "~/utils/error";
 
-import { MAX_SAVED_FILTER_PRESETS, type SavedFilterView } from "./constants";
-
-const VIEW_MAP: Record<string, AssetFilterPresetView> = {
-  availability: AssetFilterPresetView.AVAILABILITY,
-  table: AssetFilterPresetView.TABLE,
-};
-
-function resolveView(view: string | null | undefined): AssetFilterPresetView {
-  return VIEW_MAP[view ?? "table"] ?? AssetFilterPresetView.TABLE;
-}
+import { MAX_SAVED_FILTER_PRESETS } from "./constants";
 
 function normalizeName(name: string): string {
   const trimmed = name.trim();
@@ -79,13 +68,11 @@ export async function createPreset({
   ownerId,
   name,
   query,
-  view,
 }: {
   organizationId: string;
   ownerId: string;
   name: string;
   query: string;
-  view?: SavedFilterView | string | null;
 }) {
   const trimmedName = normalizeName(name);
 
@@ -130,7 +117,6 @@ export async function createPreset({
         ownerId,
         name: trimmedName,
         query: sanitizedQuery,
-        view: resolveView(view),
       },
     });
   });

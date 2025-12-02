@@ -22,7 +22,11 @@ import {
 } from "~/modules/asset/data.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { SAVED_FILTER_VIEWS } from "~/modules/asset-filter-presets/constants";
+import {
+  CreatePresetFormSchema,
+  RenamePresetFormSchema,
+  DeletePresetFormSchema,
+} from "~/modules/asset-filter-presets/schemas";
 import {
   createPreset,
   deletePreset,
@@ -217,21 +221,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
 
       case "create-preset": {
-        const { name, query, view } = parseData(
-          formData,
-          z.object({
-            name: z.string().min(1).max(60),
-            query: z.string(),
-            view: z.enum(SAVED_FILTER_VIEWS).optional(),
-          })
-        );
+        const { name, query } = parseData(formData, CreatePresetFormSchema);
 
         await createPreset({
           organizationId,
           ownerId: userId,
           name,
           query,
-          view,
         });
 
         const savedFilterPresets = await listPresetsForUser({
@@ -243,13 +239,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
 
       case "rename-preset": {
-        const { presetId, name } = parseData(
-          formData,
-          z.object({
-            presetId: z.string().min(1),
-            name: z.string().min(1).max(60),
-          })
-        );
+        const { presetId, name } = parseData(formData, RenamePresetFormSchema);
 
         await renamePreset({
           id: presetId,
@@ -267,12 +257,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
 
       case "delete-preset": {
-        const { presetId } = parseData(
-          formData,
-          z.object({
-            presetId: z.string().min(1),
-          })
-        );
+        const { presetId } = parseData(formData, DeletePresetFormSchema);
 
         await deletePreset({
           id: presetId,

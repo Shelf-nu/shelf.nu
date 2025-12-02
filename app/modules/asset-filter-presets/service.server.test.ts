@@ -1,4 +1,3 @@
-import { AssetFilterPresetView } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ShelfError } from "~/utils/error";
@@ -18,12 +17,12 @@ const mockPreset = {
   ownerId: "user-1",
   name: "My preset",
   query: "status=AVAILABLE",
-  view: AssetFilterPresetView.TABLE,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
 
 type MockDb = {
+  $transaction: <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>;
   assetFilterPreset: {
     findMany: ReturnType<typeof vi.fn>;
     count: ReturnType<typeof vi.fn>;
@@ -35,6 +34,7 @@ type MockDb = {
 };
 
 const dbMock = vi.hoisted<MockDb>(() => ({
+  $transaction: vi.fn(<T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock as MockDb)) as <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>,
   assetFilterPreset: {
     findMany: vi.fn(),
     count: vi.fn(),
@@ -52,8 +52,13 @@ vi.mock("~/database/db.server", () => ({
 
 describe("asset-filter-presets service", () => {
   beforeEach(() => {
+    // Reset the transaction mock to re-execute callbacks
+    (dbMock.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+      <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock)
+    );
+
     Object.values(dbMock.assetFilterPreset).forEach((mock) => {
-      mock.mockReset();
+      (mock as ReturnType<typeof vi.fn>).mockReset();
     });
   });
 
@@ -85,7 +90,6 @@ describe("asset-filter-presets service", () => {
         ownerId: "user-1",
         name: "  Weekly overview  ",
         query: "page=2&status=AVAILABLE",
-        view: "availability",
       });
 
       expect(dbMock.assetFilterPreset.create).toHaveBeenCalledWith({
@@ -94,7 +98,6 @@ describe("asset-filter-presets service", () => {
           ownerId: "user-1",
           name: "Weekly overview",
           query: "status=AVAILABLE", // page param should be stripped
-          view: AssetFilterPresetView.AVAILABILITY,
         }),
       });
     });
@@ -108,7 +111,6 @@ describe("asset-filter-presets service", () => {
           ownerId: "user-1",
           name: "Latest",
           query: "status=AVAILABLE",
-          view: "table",
         })
       ).rejects.toBeInstanceOf(ShelfError);
     });
@@ -123,7 +125,6 @@ describe("asset-filter-presets service", () => {
           ownerId: "user-1",
           name: "My preset",
           query: "status=AVAILABLE",
-          view: "table",
         })
       ).rejects.toBeInstanceOf(ShelfError);
     });
@@ -135,7 +136,6 @@ describe("asset-filter-presets service", () => {
           ownerId: "user-1",
           name: "   ",
           query: "status=AVAILABLE",
-          view: "table",
         })
       ).rejects.toBeInstanceOf(ShelfError);
     });

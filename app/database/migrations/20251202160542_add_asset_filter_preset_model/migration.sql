@@ -1,6 +1,3 @@
--- CreateEnum
-CREATE TYPE "AssetFilterPresetView" AS ENUM ('table', 'availability');
-
 -- CreateTable
 CREATE TABLE "AssetFilterPreset" (
     "id" TEXT NOT NULL,
@@ -8,7 +5,7 @@ CREATE TABLE "AssetFilterPreset" (
     "ownerId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "query" TEXT NOT NULL,
-    "view" "AssetFilterPresetView" NOT NULL DEFAULT 'table',
+    "starred" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -26,3 +23,5 @@ ALTER TABLE "AssetFilterPreset" ADD CONSTRAINT "AssetFilterPreset_organizationId
 
 -- AddForeignKey
 ALTER TABLE "AssetFilterPreset" ADD CONSTRAINT "AssetFilterPreset_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "AssetFilterPreset" ENABLE row level security;

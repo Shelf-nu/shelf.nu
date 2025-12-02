@@ -219,10 +219,6 @@ enum AssetStatus {
   CHECKED_OUT
 }
 
-enum AssetFilterPresetView {
-  TABLE        @map("table")
-  AVAILABILITY @map("availability")
-}
 
 model AssetFilterPreset {
   id             String                @id @default(cuid())
@@ -230,7 +226,7 @@ model AssetFilterPreset {
   ownerId        String
   name           String
   query          String
-  view           AssetFilterPresetView @default(TABLE)
+  starred        Boolean               @default(false)
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
 

@@ -5,26 +5,29 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useFetcher, useLoaderData, useLocation } from "react-router";
-
-import Input from "~/components/forms/input";
-import { Dialog, DialogPortal } from "~/components/layout/dialog";
-import { Button } from "~/components/shared/button";
 import {
-  MAX_SAVED_FILTER_PRESETS,
-  type SavedFilterView,
-} from "~/modules/asset-filter-presets/constants";
-import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
-import type { DataOrErrorResponse } from "~/utils/http.server";
+  useActionData,
+  useLoaderData,
+  useLocation,
+  useNavigation,
+} from "react-router";
 
-/**
- * Displays validation errors for preset name inputs.
- * Shows nothing when no error is present.
- */
-function PresetNameFormError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="mt-2 text-sm text-error-500">{message}</p>;
-}
+import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
+import { MAX_SAVED_FILTER_PRESETS } from "~/modules/asset-filter-presets/constants";
+import type {
+  CreatePresetFormSchema,
+  RenamePresetFormSchema,
+} from "~/modules/asset-filter-presets/schemas";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
+import { CreatePresetDialog } from "./saved-filter-presets/create-preset-dialog";
+import {
+  PresetListItem,
+  type NormalizedPreset,
+} from "./saved-filter-presets/preset-list-item";
+import { RenamePresetDialog } from "./saved-filter-presets/rename-preset-dialog";
 
 /** Loader data from the asset index route. */
 type LoaderData = AssetIndexLoaderData;
@@ -34,15 +37,6 @@ type SavedPresetResponse = {
   id: string;
   name: string;
   query: string;
-  view: string | null;
-};
-
-/** Normalized preset with validated view field as SavedFilterView enum. */
-type NormalizedPreset = {
-  id: string;
-  name: string;
-  query: string;
-  view: SavedFilterView;
 };
 
 /** Action response data from preset mutation operations. */
@@ -53,10 +47,9 @@ type PresetActionData = DataOrErrorResponse<{
 /**
  * Validates and normalizes preset data from the server.
  * Filters out invalid preset objects and ensures all required fields are present.
- * Falls back to "table" view if the view field is missing or invalid.
  *
  * @param value - Raw preset data from loader or fetcher
- * @returns Array of validated presets with normalized view types
+ * @returns Array of validated presets
  */
 function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
   if (!Array.isArray(value)) {
@@ -82,14 +75,10 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
           return null;
         }
 
-        // Normalize view to lowercase, defaulting to "table"
-        const rawView = typeof record.view === "string" ? record.view : null;
-
         return {
           id,
           name,
           query,
-          view: String(rawView ?? "table").toLowerCase() as SavedFilterView,
         } satisfies NormalizedPreset;
       })
       // Filter out null entries from validation failures
@@ -98,17 +87,13 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
 }
 
 /**
- * Manages saved filter presets for the asset index.
+ * Manages saved filter presets for the asset index (advanced mode only).
  *
  * Provides UI controls for:
- * - Saving the current filter/view state as a named preset
- * - Loading saved presets (applies query params and switches view)
+ * - Saving the current filter state as a named preset
+ * - Loading saved presets (applies query params)
  * - Renaming existing presets
  * - Deleting presets
- *
- * Presets are stored per-user/per-organization and include:
- * - Filter query string (search, categories, tags, locations, etc.)
- * - View mode (table, grid, map)
  *
  * Limits the number of saved presets per user via `savedFilterPresetLimit`.
  */
@@ -120,11 +105,25 @@ export function SavedFilterPresetsControls() {
   } = loaderData;
 
   const location = useLocation();
+  const actionData = useActionData<PresetActionData>();
+  const navigation = useNavigation();
+  const [, setSearchParams] = useSearchParams();
 
-  // Separate fetchers for each mutation to avoid state conflicts
-  const createFetcher = useFetcher<PresetActionData>();
-  const renameFetcher = useFetcher<PresetActionData>();
-  const deleteFetcher = useFetcher<PresetActionData>();
+  // Extract validation errors from action data
+  const createValidationErrors = getValidationErrors<
+    typeof CreatePresetFormSchema
+  >(actionData?.error);
+  const renameValidationErrors = getValidationErrors<
+    typeof RenamePresetFormSchema
+  >(actionData?.error);
+
+  // Track which form is currently submitting based on navigation state
+  const isCreating =
+    navigation.state !== "idle" &&
+    navigation.formData?.get("intent") === "create-preset";
+  const isRenaming =
+    navigation.state !== "idle" &&
+    navigation.formData?.get("intent") === "rename-preset";
 
   // Dialog visibility state
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -151,16 +150,9 @@ export function SavedFilterPresetsControls() {
   };
 
   // Extract current URL search params (contains all active filters)
-  const searchParams = useMemo(
-    () => new URLSearchParams(location.search),
-    [location.search]
-  );
+  const searchParams = new URLSearchParams(location.search);
 
-  // Serialize search params into query string for storage
-  const queryString = useMemo(() => searchParams.toString(), [searchParams]);
-
-  // Current view mode (table, grid, or map)
-  const currentView = searchParams.get("view") ?? "table";
+  const queryString = searchParams.toString();
 
   // Normalize and validate presets from loader
   const presets = useMemo(
@@ -170,122 +162,62 @@ export function SavedFilterPresetsControls() {
 
   /**
    * Auto-close save dialog when create operation succeeds.
-   * Watches fetcher state and closes dialog on successful response.
+   * Watches navigation state and closes dialog on successful response.
    */
   useEffect(() => {
     if (
       isSaveDialogOpen &&
-      createFetcher.state === "idle" &&
-      createFetcher.data &&
-      !createFetcher.data.error
+      navigation.state === "idle" &&
+      actionData &&
+      !actionData.error &&
+      actionData.savedFilterPresets
     ) {
       // Success: close dialog and reset form
       setIsSaveDialogOpen(false);
       setPresetName("");
     }
-  }, [createFetcher.data, createFetcher.state, isSaveDialogOpen]);
+  }, [actionData, navigation.state, isSaveDialogOpen]);
 
   /**
    * Auto-close rename dialog when rename operation succeeds.
-   * Watches fetcher state and closes dialog on successful response.
+   * Watches navigation state and closes dialog on successful response.
    */
   useEffect(() => {
     if (
       presetBeingRenamed &&
-      renameFetcher.state === "idle" &&
-      renameFetcher.data &&
-      !renameFetcher.data.error
+      navigation.state === "idle" &&
+      actionData &&
+      !actionData.error &&
+      actionData.savedFilterPresets
     ) {
       // Success: close dialog and reset form
       setPresetBeingRenamed(null);
       setRenameValue("");
     }
-  }, [presetBeingRenamed, renameFetcher.data, renameFetcher.state]);
+  }, [actionData, navigation.state, presetBeingRenamed]);
 
   /**
-   * Detects if the current URL exactly matches a saved preset.
-   * Compares query strings and view mode to determine active preset.
-   */
-  const currentPresetId = useMemo(() => {
-    const match = presets.find(
-      (p) => p.query === queryString && p.view === currentView
-    );
-    return match?.id;
-  }, [presets, queryString, currentView]);
-
-  /** Check if user has reached their preset limit. */
-  const hasReachedLimit = presets.length >= savedFilterPresetLimit;
-
-  /** Extract error message from create fetcher. */
-  const createError = createFetcher.data?.error?.message;
-
-  /** Extract error message from rename fetcher. */
-  const renameError = renameFetcher.data?.error?.message;
-
-  /** Updates preset name as user types in save dialog. */
-  const handlePresetNameChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setPresetName(e.target.value);
-  };
-
-  /**
-   * Submits new preset to server.
-   * Sends current query string, view mode, and user-provided name.
-   */
-  const handleSavePreset = () => {
-    if (!presetName.trim()) return;
-
-    void createFetcher.submit(
-      { name: presetName.trim(), query: queryString, view: currentView },
-      { method: "post", action: "/api/assets/save-filter-preset" }
-    );
-  };
-
-  /**
-   * Opens rename dialog for the given preset.
-   * Pre-fills the dialog with the preset's current name.
+   * Opens rename dialog for a specific preset.
+   * Initializes the form with the preset's current name.
    */
   const openRenameDialog = (preset: NormalizedPreset) => {
     setPresetBeingRenamed(preset);
     setRenameValue(preset.name);
   };
 
-  /** Updates new name as user types in rename dialog. */
-  const handleRenameChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setRenameValue(e.target.value);
-  };
-
   /**
-   * Submits preset rename to server.
-   * Sends preset ID and new name.
+   * Identifies which preset (if any) matches the current query string.
+   * Used to highlight the active preset in the list.
    */
-  const handleRenamePreset = () => {
-    if (!presetBeingRenamed || !renameValue.trim()) return;
-
-    void renameFetcher.submit(
-      { id: presetBeingRenamed.id, name: renameValue.trim() },
-      { method: "post", action: "/api/assets/rename-filter-preset" }
-    );
-  };
+  const activePreset = presets.find((p) => p.query === queryString);
 
   /**
-   * Deletes a preset by ID.
-   * Shows browser confirmation before proceeding.
-   */
-  const handleDeletePreset = (id: string) => {
-    if (!confirm("Delete this preset?")) return;
-
-    void deleteFetcher.submit(
-      { id },
-      { method: "post", action: "/api/assets/delete-filter-preset" }
-    );
-  };
-
-  /**
-   * Applies a saved preset to the current view.
-   * Navigates to the asset index with the preset's query params and view mode.
+   * Applies a saved preset by updating search params with the preset's query.
+   * Uses setSearchParams to maintain client-side navigation.
    */
   const handleApplyPreset = (preset: NormalizedPreset) => {
-    window.location.href = `/assets?${preset.query}&view=${preset.view}`;
+    const presetParams = new URLSearchParams(preset.query);
+    setSearchParams(presetParams);
   };
 
   return (
@@ -295,122 +227,71 @@ export function SavedFilterPresetsControls() {
         variant="secondary"
         size="sm"
         onClick={() => setIsSaveDialogOpen(true)}
-        disabled={hasReachedLimit}
+        disabled={presets.length >= savedFilterPresetLimit}
         title={
-          hasReachedLimit
-            ? `You've reached the maximum of ${savedFilterPresetLimit} saved presets`
-            : "Save current filters as a preset"
+          presets.length >= savedFilterPresetLimit
+            ? `Maximum ${savedFilterPresetLimit} presets allowed`
+            : "Save current filters"
         }
       >
         <svg
-          className="size-3.5"
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          viewBox="0 0 24 24"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-          />
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+          <polyline points="17 21 17 13 7 13 7 21" />
+          <polyline points="7 3 7 8 15 8" />
         </svg>
-        Save filters
+        <span className="hidden md:inline">Save Filter</span>
       </Button>
 
-      {/* Saved presets popover - only show if presets exist */}
+      {/* Saved presets dropdown */}
       {presets.length > 0 && (
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger asChild>
-            <Button variant="secondary" size="sm" title="View saved presets">
+            <Button variant="secondary" size="sm">
               <svg
-                className="size-3.5"
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                viewBox="0 0 24 24"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 6h16M4 12h16M4 18h16"
-                />
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+                <path d="M8 11h8" />
+                <path d="M8 7h6" />
               </svg>
-              Saved presets ({presets.length})
+              <span className="hidden md:inline">
+                Saved Filters ({presets.length})
+              </span>
             </Button>
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent
-              className="z-50 w-72 rounded-lg border border-gray-200 bg-white p-2 shadow-lg"
+              className="z-[9999] w-64 rounded-md border bg-white p-3 shadow-lg"
               sideOffset={5}
+              align="end"
             >
-              <div className="mb-2 px-2 py-1 text-xs font-medium text-gray-500">
-                SAVED PRESETS
-              </div>
-              <div className="max-h-96 space-y-1 overflow-y-auto">
+              <div className="space-y-1">
                 {presets.map((preset) => (
-                  <div
+                  <PresetListItem
                     key={preset.id}
-                    className="group flex items-center justify-between gap-2 rounded px-2 py-1.5 hover:bg-gray-50"
-                  >
-                    {/* Apply preset button */}
-                    <button
-                      type="button"
-                      onClick={() => handleApplyPreset(preset)}
-                      className={
-                        "flex-1 truncate text-left text-sm " +
-                        (preset.id === currentPresetId
-                          ? "font-semibold text-primary"
-                          : "text-gray-700")
-                      }
-                      title={preset.name}
-                    >
-                      {preset.name}
-                    </button>
-                    {/* Rename and delete action buttons */}
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => openRenameDialog(preset)}
-                        className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                        title="Rename"
-                      >
-                        <svg
-                          className="size-3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                          />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePreset(preset.id)}
-                        className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                        title="Delete"
-                      >
-                        <svg
-                          className="size-3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+                    preset={preset}
+                    isActive={activePreset?.id === preset.id}
+                    onApply={handleApplyPreset}
+                    onRename={openRenameDialog}
+                  />
                 ))}
               </div>
             </PopoverContent>
@@ -418,77 +299,33 @@ export function SavedFilterPresetsControls() {
         </Popover>
       )}
 
-      {/* Save Dialog */}
-      <Dialog
+      <CreatePresetDialog
         open={isSaveDialogOpen}
-        onClose={closeSaveDialog}
-        title="Save filter preset"
-      >
-        <DialogPortal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-              <Input
-                label="Preset name"
-                value={presetName}
-                onChange={handlePresetNameChange}
-                placeholder="e.g., Available laptops"
-                maxLength={60}
-                autoFocus
-              />
-              <PresetNameFormError message={createError} />
-              <div className="mt-4 flex justify-end gap-2">
-                <Button variant="secondary" onClick={closeSaveDialog}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSavePreset}
-                  disabled={
-                    !presetName.trim() || createFetcher.state !== "idle"
-                  }
-                >
-                  {createFetcher.state !== "idle" ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </DialogPortal>
-      </Dialog>
+        onOpenChange={(open) => {
+          if (!open) closeSaveDialog();
+        }}
+        name={presetName}
+        onNameChange={(e: ChangeEvent<HTMLInputElement>) =>
+          setPresetName(e.target.value)
+        }
+        query={queryString}
+        isSubmitting={isCreating}
+        validationErrors={createValidationErrors}
+      />
 
-      {/* Rename Dialog */}
-      <Dialog
+      <RenamePresetDialog
         open={!!presetBeingRenamed}
-        onClose={closeRenameDialog}
-        title="Rename preset"
-      >
-        <DialogPortal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-              <Input
-                label="New name"
-                value={renameValue}
-                onChange={handleRenameChange}
-                placeholder="Enter new name"
-                maxLength={60}
-                autoFocus
-              />
-              <PresetNameFormError message={renameError} />
-              <div className="mt-4 flex justify-end gap-2">
-                <Button variant="secondary" onClick={closeRenameDialog}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleRenamePreset}
-                  disabled={
-                    !renameValue.trim() || renameFetcher.state !== "idle"
-                  }
-                >
-                  {renameFetcher.state !== "idle" ? "Renaming..." : "Rename"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </DialogPortal>
-      </Dialog>
+        onOpenChange={(open) => {
+          if (!open) closeRenameDialog();
+        }}
+        presetId={presetBeingRenamed?.id ?? ""}
+        name={renameValue}
+        onNameChange={(e: ChangeEvent<HTMLInputElement>) =>
+          setRenameValue(e.target.value)
+        }
+        isSubmitting={isRenaming}
+        validationErrors={renameValidationErrors}
+      />
     </div>
   );
 }
