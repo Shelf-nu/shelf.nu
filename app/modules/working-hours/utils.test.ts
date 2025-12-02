@@ -453,7 +453,11 @@ describe("getBookingDefaultStartEndTimes", () => {
 
     const disabledWorkingHours = { ...mockWorkingHours, enabled: false };
 
-    const result = getBookingDefaultStartEndTimes(disabledWorkingHours, 2);
+    const result = getBookingDefaultStartEndTimes(
+      disabledWorkingHours,
+      2,
+      false
+    );
 
     // Should use original logic with 2-hour buffer
     expect(result.startDate).toBe("2025-07-25T16:00"); // Current + 2 hours
@@ -462,7 +466,7 @@ describe("getBookingDefaultStartEndTimes", () => {
   it("should use fallback logic when no working hours data", () => {
     expect.assertions(1);
 
-    const result = getBookingDefaultStartEndTimes(null, 1);
+    const result = getBookingDefaultStartEndTimes(null, 1, false);
 
     // Should use original logic with 1-hour buffer
     expect(result.startDate).toBe("2025-07-25T15:00"); // Current + 1 hour
@@ -471,7 +475,7 @@ describe("getBookingDefaultStartEndTimes", () => {
   it("should handle current time within working hours", () => {
     expect.assertions(2);
 
-    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 0);
+    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 0, false);
 
     // Since we're within working hours (2 PM on Friday), use 10-minute buffer
     expect(result.startDate).toBe("2025-07-25T14:10"); // Current time + 10 minutes
@@ -481,7 +485,7 @@ describe("getBookingDefaultStartEndTimes", () => {
   it("should handle buffer time within working hours", () => {
     expect.assertions(2);
 
-    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 2);
+    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 2, false);
 
     // Since we're within working hours and buffer doesn't exceed closing time
     expect(result.startDate).toBe("2025-07-25T16:00"); // Current time + 2 hours buffer
@@ -494,7 +498,7 @@ describe("getBookingDefaultStartEndTimes", () => {
     // Mock time to Saturday (closed day)
     vitest.setSystemTime(new Date("2025-07-26T14:00:00Z"));
 
-    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 0);
+    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 0, false);
 
     expect(result.startDate).toBe("2025-07-28T09:00"); // Next Monday 9 AM UTC
     expect(result.endDate).toBe("2025-07-28T17:00"); // Next Monday 5 PM UTC
@@ -506,7 +510,7 @@ describe("getBookingDefaultStartEndTimes", () => {
     // Mock time to late Friday afternoon
     vitest.setSystemTime(new Date("2025-07-25T16:30:00Z"));
 
-    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 2);
+    const result = getBookingDefaultStartEndTimes(mockWorkingHours, 2, false);
 
     // Buffer would put us at 6:30 PM, past closing, so use next working day
     expect(result.startDate).toBe("2025-07-28T09:00"); // Next Monday 9 AM UTC
@@ -533,9 +537,55 @@ describe("getBookingDefaultStartEndTimes", () => {
       ],
     };
 
-    const result = getBookingDefaultStartEndTimes(workingHoursWithOverride, 0);
+    const result = getBookingDefaultStartEndTimes(
+      workingHoursWithOverride,
+      0,
+      false
+    );
 
     expect(result.startDate).toBe("2025-07-28T09:00"); // Next Monday 9 AM UTC
     expect(result.endDate).toBe("2025-07-28T17:00"); // Next Monday 5 PM UTC
+  });
+
+  it("should bypass buffer time for admin/owner users", () => {
+    expect.assertions(2);
+
+    // Base user with 24-hour buffer should get time 24 hours from now
+    const baseUserResult = getBookingDefaultStartEndTimes(
+      mockWorkingHours,
+      24,
+      false
+    );
+    expect(baseUserResult.startDate).toBe("2025-07-28T09:00"); // Next working day (buffer pushes to Monday)
+
+    // Admin user with same 24-hour buffer should get time ~10 minutes from now
+    const adminUserResult = getBookingDefaultStartEndTimes(
+      mockWorkingHours,
+      24,
+      true
+    );
+    expect(adminUserResult.startDate).toBe("2025-07-25T14:10"); // Current time + 10 minutes (buffer bypassed)
+  });
+
+  it("should bypass buffer time for admin/owner when working hours disabled", () => {
+    expect.assertions(2);
+
+    const disabledWorkingHours = { ...mockWorkingHours, enabled: false };
+
+    // Base user with 10-hour buffer
+    const baseUserResult = getBookingDefaultStartEndTimes(
+      disabledWorkingHours,
+      10,
+      false
+    );
+    expect(baseUserResult.startDate).toBe("2025-07-26T00:00"); // Current + 10 hours = next day midnight
+
+    // Admin user with same 10-hour buffer should get 10 minutes from now
+    const adminUserResult = getBookingDefaultStartEndTimes(
+      disabledWorkingHours,
+      10,
+      true
+    );
+    expect(adminUserResult.startDate).toBe("2025-07-25T14:10"); // Current time + 10 minutes (buffer bypassed)
   });
 });

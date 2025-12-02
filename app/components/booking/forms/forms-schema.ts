@@ -143,6 +143,12 @@ interface BookingFormSchemaParams {
     maxBookingLength: number | null; // Maximum booking length in hours
     maxBookingLengthSkipClosedDays: boolean; // Whether to skip closed days in max booking length calculation
   };
+  /**
+   * When true, time restrictions (bufferStartTime and maxBookingLength) are skipped.
+   * This should be set to true for ADMIN and OWNER users who should be able to
+   * create bookings without time restrictions.
+   */
+  isAdminOrOwner?: boolean;
 }
 
 /**
@@ -172,6 +178,7 @@ export function BookingFormSchema({
   status,
   workingHours: rawWorkingHours,
   bookingSettings,
+  isAdminOrOwner = false,
 }: BookingFormSchemaParams) {
   const {
     bufferStartTime,
@@ -179,6 +186,12 @@ export function BookingFormSchema({
     maxBookingLength,
     maxBookingLengthSkipClosedDays,
   } = bookingSettings;
+
+  // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
+  // They can still be restricted by working hours if enabled
+  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
+  const effectiveMaxBookingLength = isAdminOrOwner ? null : maxBookingLength;
+
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
@@ -216,10 +229,10 @@ export function BookingFormSchema({
   // Create enhanced date schemas with working hours and buffer validation
   const createValidatedStartDateSchema = () =>
     z.coerce.date().superRefine((data, ctx) => {
-      // 1. Validate future date with buffer
+      // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
-        bufferStartTime,
+        effectiveBufferStartTime,
         hints?.timeZone
       );
       if (!futureValidation.isValid) {
@@ -265,8 +278,8 @@ export function BookingFormSchema({
       });
     }
 
-    // Validate maximum booking length if configured
-    if (maxBookingLength && data.endDate && data.startDate) {
+    // Validate maximum booking length if configured (skipped for ADMIN/OWNER when effectiveMaxBookingLength is null)
+    if (effectiveMaxBookingLength && data.endDate && data.startDate) {
       const startDate = new Date(data.startDate);
       const endDate = new Date(data.endDate);
 
@@ -284,10 +297,10 @@ export function BookingFormSchema({
         durationInHours = differenceInHours(endDate, startDate);
       }
 
-      if (durationInHours > maxBookingLength) {
+      if (durationInHours > effectiveMaxBookingLength) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Booking duration cannot exceed ${maxBookingLength} hours`,
+          message: `Booking duration cannot exceed ${effectiveMaxBookingLength} hours`,
           path: ["endDate"],
         });
       }
@@ -351,15 +364,28 @@ interface ExtendBookingSchemaParams {
     BookingSettings,
     "bufferStartTime" | "maxBookingLength" | "maxBookingLengthSkipClosedDays"
   >;
+  /**
+   * When true, time restrictions (bufferStartTime and maxBookingLength) are skipped.
+   * This should be set to true for ADMIN and OWNER users who should be able to
+   * extend bookings without time restrictions.
+   */
+  isAdminOrOwner?: boolean;
 }
 
 export function ExtendBookingSchema({
   workingHours: rawWorkingHours,
   timeZone,
   bookingSettings,
+  isAdminOrOwner = false,
 }: ExtendBookingSchemaParams) {
   const { bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays } =
     bookingSettings;
+
+  // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
+  // They can still be restricted by working hours if enabled
+  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
+  const effectiveMaxBookingLength = isAdminOrOwner ? null : maxBookingLength;
+
   // Transform and validate working hours data (same as BookingFormSchema)
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
@@ -378,10 +404,10 @@ export function ExtendBookingSchema({
           return;
         }
 
-        // 1. Validate future date with buffer using existing function
+        // 1. Validate future date with buffer using existing function (skipped for ADMIN/OWNER)
         const futureValidation = validateFutureDate(
           dateTime,
-          bufferStartTime,
+          effectiveBufferStartTime,
           timeZone
         );
         if (!futureValidation.isValid) {
@@ -408,8 +434,8 @@ export function ExtendBookingSchema({
       }),
     })
     .superRefine((data, ctx) => {
-      // Cross-field validation for maximum booking length
-      if (maxBookingLength && data.startDate && data.endDate) {
+      // Cross-field validation for maximum booking length (skipped for ADMIN/OWNER)
+      if (effectiveMaxBookingLength && data.startDate && data.endDate) {
         const startDate = new Date(data.startDate);
         const endDate = new Date(data.endDate);
 
@@ -427,10 +453,10 @@ export function ExtendBookingSchema({
           durationInHours = differenceInHours(endDate, startDate);
         }
 
-        if (durationInHours > maxBookingLength) {
+        if (durationInHours > effectiveMaxBookingLength) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: `Booking duration cannot exceed ${maxBookingLength} hours`,
+            message: `Booking duration cannot exceed ${effectiveMaxBookingLength} hours`,
             path: ["endDate"],
           });
         }
