@@ -4,7 +4,9 @@ import { useZorm } from "react-zorm";
 import z from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import type { action } from "~/routes/_layout+/categories.new";
 import { getRandomColor } from "~/utils/get-random-color";
+import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { ColorInput } from "../forms/color-input";
@@ -40,11 +42,7 @@ export default function NewCategoryForm({
   onSuccess,
 }: NewCategoryFormProps) {
   const zo = useZorm("NewQuestionWizardScreen", NewCategoryFormSchema);
-  const fetcher = useFetcherWithReset<{
-    error?: { message: string };
-    success: boolean;
-    category?: Category;
-  }>();
+  const fetcher = useFetcherWithReset<typeof action>();
   const disabled = useDisabled(fetcher);
 
   const color = useMemo(() => getRandomColor(), []);
@@ -54,11 +52,29 @@ export default function NewCategoryForm({
       return;
     }
 
-    if (fetcher.data?.success) {
+    // Check if response is success (has category, not error)
+    if (fetcher.data && "category" in fetcher.data) {
       onSuccess(fetcher.data);
       fetcher.reset();
     }
   }, [fetcher, onSuccess]);
+
+  const hasOnSuccessFunc = typeof onSuccess === "function";
+
+  // Get validation errors from server response using the standard helper
+  const validationErrors = getValidationErrors<typeof NewCategoryFormSchema>(
+    fetcher.data?.error
+  );
+
+  // Compute field-specific errors: prefer Zod client-side validation errors,
+  // fall back to server validation errors only in inline mode
+  const nameError =
+    zo.errors.name()?.message ??
+    (hasOnSuccessFunc ? validationErrors?.name?.message : undefined);
+
+  const colorError =
+    zo.errors.color()?.message ??
+    (hasOnSuccessFunc ? validationErrors?.color?.message : undefined);
 
   return (
     <fetcher.Form
@@ -77,8 +93,8 @@ export default function NewCategoryForm({
           className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
           name={zo.fields.name()}
           disabled={disabled}
-          error={zo.errors.name()?.message}
-          hideErrorText
+          error={nameError}
+          hideErrorText={!hasOnSuccessFunc}
           autoFocus
           data-dialog-initial-focus
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
@@ -90,20 +106,21 @@ export default function NewCategoryForm({
           disabled={disabled}
           data-test-id="categoryDescription"
           className={tw("mb-4 lg:mb-0", inputClassName)}
+          hideErrorText={!hasOnSuccessFunc}
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.description)}
         />
         <div className={tw("mb-6 lg:mb-0", inputClassName)}>
           <ColorInput
             name={zo.fields.color()}
             disabled={disabled}
-            error={zo.errors.color()?.message}
-            hideErrorText
+            error={colorError}
+            hideErrorText={!hasOnSuccessFunc}
             colorFromServer={color}
             required={zodFieldIsRequired(NewCategoryFormSchema.shape.color)}
           />
         </div>
 
-        {typeof onSuccess === "function" ? (
+        {hasOnSuccessFunc ? (
           <input type="hidden" name="preventRedirect" value="true" />
         ) : null}
       </div>

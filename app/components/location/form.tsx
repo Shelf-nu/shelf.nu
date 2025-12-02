@@ -171,7 +171,7 @@ export const LocationForm = ({
                 error={nameError}
                 autoFocus
                 data-dialog-initial-focus
-                onChange={updateName}
+                onChange={hasOnSuccessFunc ? undefined : updateName}
                 className="w-full"
                 defaultValue={name || undefined}
                 placeholder="Storage room"
@@ -188,7 +188,7 @@ export const LocationForm = ({
             error={nameError}
             autoFocus
             data-dialog-initial-focus
-            onChange={updateName}
+            onChange={hasOnSuccessFunc ? undefined : updateName}
             className="w-full"
             defaultValue={name || undefined}
             placeholder="Storage room"

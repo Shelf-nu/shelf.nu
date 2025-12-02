@@ -84,7 +84,7 @@ export default function InlineEntityCreationDialog({
           wrapperClassName="!z-[9999]"
           open={open}
           onClose={handleClose}
-          title={title}
+          title={<h4>{title}</h4>}
           className={
             type === "location"
               ? "md:!w-full md:!max-w-3xl"
