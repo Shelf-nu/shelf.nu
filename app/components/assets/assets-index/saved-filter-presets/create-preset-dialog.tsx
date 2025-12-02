@@ -45,43 +45,42 @@ export function CreatePresetDialog({
     validationErrors?.name?.message ?? zo.errors.name()?.message;
 
   return (
-    <Dialog
-      open={open}
-      onClose={() => onOpenChange(false)}
-      title="Save filter preset"
-    >
-      <DialogPortal>
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <Form method="post" ref={zo.ref}>
-              <input type="hidden" name="intent" value="create-preset" />
-              <input type="hidden" name="query" value={query} />
-              <Input
-                label="Preset name"
-                name="name"
-                value={name}
-                onChange={onNameChange}
-                placeholder="e.g., Available laptops"
-                maxLength={60}
-                autoFocus
-                error={nameError}
-              />
-              <div className="mt-4 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={!name.trim() || isSubmitting}>
-                  {isSubmitting ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </Form>
-          </div>
+    <DialogPortal>
+      <Dialog
+        wrapperClassName="!z-[9999999]"
+        open={open}
+        onClose={() => onOpenChange(false)}
+        title={<h4>Save filter preset</h4>}
+      >
+        <div className="px-6 py-5">
+          <Form method="post" ref={zo.ref}>
+            <input type="hidden" name="intent" value="create-preset" />
+            <input type="hidden" name="query" value={query} />
+            <Input
+              label="Preset name"
+              name="name"
+              value={name}
+              onChange={onNameChange}
+              placeholder="e.g., Available laptops"
+              maxLength={60}
+              autoFocus
+              error={nameError}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!name.trim() || isSubmitting}>
+                {isSubmitting ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </Form>
         </div>
-      </DialogPortal>
-    </Dialog>
+      </Dialog>
+    </DialogPortal>
   );
 }

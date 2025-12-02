@@ -40,6 +40,7 @@ import {
 import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
 import { useFilterFormValidation } from "./advanced-filters/value.client.validator";
+import { SaveFilterButton } from "./saved-filter-presets";
 
 export interface Sort {
   name: string;
@@ -73,6 +74,7 @@ const getTriggerClasses = (
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
+
   const columns = settings.columns as Column[];
   const disabled = useDisabled();
   const [_searchParams, setSearchParams] = useSearchParams();
@@ -139,7 +141,7 @@ function AdvancedFilter() {
   const validation = getValidationState();
 
   return (
-    <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+    <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen} modal={false}>
       <PopoverTrigger asChild>
         <Button
           variant="secondary"
@@ -156,7 +158,7 @@ function AdvancedFilter() {
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[580px] rounded-md border border-gray-200 bg-white"
+            "z-[9999]  mt-2 min-w-[580px] rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="border-b p-4 pb-5">
@@ -311,21 +313,23 @@ function AdvancedFilter() {
                 Need more filtering options?
               </Button>
             </div>
-            <div className="flex items-center justify-between gap-4">
+            <div className="ml-8 flex items-center justify-between gap-2">
               {filters.length > 0 && (
                 <Button
                   variant="block-link"
                   size="xs"
-                  className="mt-0 text-[14px]"
+                  className="mt-0 whitespace-nowrap text-[14px]"
                   onClick={clearAllFilters}
                 >
                   Clear all
-                </Button>
-              )}
+              </Button>
+            )}
+
+              <SaveFilterButton />
 
               <Button
                 variant="secondary"
-                className="text-[14px] font-medium"
+                className="whitespace-nowrap text-[14px] font-medium"
                 size="xs"
                 disabled={!validation.canApplyFilters || disabled}
                 onClick={applyFilters}
@@ -414,7 +418,7 @@ function AdvancedSorting() {
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
+            "z-[9999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="border-b p-4 pb-5">
@@ -629,7 +633,7 @@ function PickAColumnToSortBy({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            "z-[9999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="flex items-center border-b">

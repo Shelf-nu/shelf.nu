@@ -185,13 +185,13 @@ function AdvancedAssetIndexFilters() {
         "right-of-search": (
           <div className="flex items-center gap-2">
             <AvailabilityViewToggle modeIsSimple={false} />
-            <SavedFilterPresetsControls />
           </div>
         ),
       }}
       searchClassName="leading-5"
     >
       <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+        <SavedFilterPresetsControls />
         <ConfigureColumnsDropdown />
       </div>
     </Filters>

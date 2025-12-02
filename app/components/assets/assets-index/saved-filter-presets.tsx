@@ -29,6 +29,8 @@ import {
 } from "./saved-filter-presets/preset-list-item";
 import { RenamePresetDialog } from "./saved-filter-presets/rename-preset-dialog";
 
+export { SaveFilterButton } from "./saved-filter-presets/save-filter-button";
+
 /** Loader data from the asset index route. */
 type LoaderData = AssetIndexLoaderData;
 
@@ -101,7 +103,7 @@ export function SavedFilterPresetsControls() {
   const loaderData = useLoaderData<LoaderData>();
   const {
     savedFilterPresets: loaderPresets = [],
-    savedFilterPresetLimit = MAX_SAVED_FILTER_PRESETS,
+    savedFilterPresetLimit: _savedFilterPresetLimit = MAX_SAVED_FILTER_PRESETS,
   } = loaderData;
 
   const location = useLocation();
@@ -222,36 +224,6 @@ export function SavedFilterPresetsControls() {
 
   return (
     <div className="flex items-center gap-2">
-      {/* Save current filters button */}
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => setIsSaveDialogOpen(true)}
-        disabled={presets.length >= savedFilterPresetLimit}
-        title={
-          presets.length >= savedFilterPresetLimit
-            ? `Maximum ${savedFilterPresetLimit} presets allowed`
-            : "Save current filters"
-        }
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-          <polyline points="17 21 17 13 7 13 7 21" />
-          <polyline points="7 3 7 8 15 8" />
-        </svg>
-        <span className="hidden md:inline">Save Filter</span>
-      </Button>
-
       {/* Saved presets dropdown */}
       {presets.length > 0 && (
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>

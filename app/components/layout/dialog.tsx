@@ -68,7 +68,10 @@ export const Dialog = ({
 
   return open ? (
     <div
-      className={tw("dialog-backdrop", wrapperClassName)}
+      className={tw(
+        "dialog-backdrop",
+        wrapperClassName
+      )}
       role="button"
       tabIndex={0}
       onClick={(event) => {

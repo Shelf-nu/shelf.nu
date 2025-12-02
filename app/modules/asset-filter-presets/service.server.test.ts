@@ -34,7 +34,10 @@ type MockDb = {
 };
 
 const dbMock = vi.hoisted<MockDb>(() => ({
-  $transaction: vi.fn(<T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock as MockDb)) as <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>,
+  $transaction: vi.fn(
+    <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> =>
+      callback(dbMock as MockDb)
+  ) as <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>,
   assetFilterPreset: {
     findMany: vi.fn(),
     count: vi.fn(),
