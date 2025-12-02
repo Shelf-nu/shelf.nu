@@ -6,6 +6,7 @@ import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useWorkingHours } from "~/hooks/use-working-hours";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
@@ -40,6 +41,7 @@ export default function ExtendBookingDialog({
   const bookingSettings = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
+  const { isAdministratorOrOwner } = useUserRoleHelper();
 
   const zo = useZorm(
     "ExtendBooking",
@@ -47,6 +49,7 @@ export default function ExtendBookingDialog({
       timeZone: hints.timeZone,
       workingHours: workingHoursData.workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
 
