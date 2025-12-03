@@ -108,7 +108,7 @@ export function BookingStatistics({
               items={tags}
               emptyMessage="No tags"
               renderItem={(tag) => (
-                <TagBadge key={tag.id} color={tag.color} withDot>
+                <TagBadge key={tag.id} color={tag.color ?? undefined} withDot>
                   {tag.name}
                 </TagBadge>
               )}

@@ -22,7 +22,7 @@ export const ListItemTagsColumn = ({
       showCount={2}
       className="justify-start text-left"
       renderItem={(tag) => (
-        <TagBadge key={tag.id} color={tag.color} withDot>
+        <TagBadge key={tag.id} color={tag.color ?? undefined} withDot>
           {tag.name}
         </TagBadge>
       )}
