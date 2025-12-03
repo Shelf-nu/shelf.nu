@@ -105,8 +105,8 @@ export async function simpleModeLoader({
     serializedCookie: filtersCookie,
     redirectNeeded,
   } = await getFiltersFromRequest(request, organizationId, {
-    name: "assetFilter",
-    path: "/assets",
+    name: "assetFilter_v2",
+    path: "/", // Use root path so cookie is sent with RR7 single fetch .data requests
   });
 
   if (filters && redirectNeeded) {
