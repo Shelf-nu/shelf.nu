@@ -12,7 +12,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { Search } from "lucide-react";
+import { Search, BookMarked, BookOpen } from "lucide-react";
 import {
   useActionData,
   useLoaderData,
@@ -334,128 +334,130 @@ export function SavedFilterPresetsControls() {
   return (
     <div className="flex items-center gap-2">
       {/* Saved presets dropdown */}
-      {presets.length > 0 && (
-        <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="secondary"
-              size="sm"
-              className={"font-normal text-gray-500"}
-            >
-              <div className="flex items-center gap-2">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
-                  <path d="M8 11h8" />
-                  <path d="M8 7h6" />
-                </svg>
-                <span className="hidden whitespace-nowrap md:inline">
-                  Saved Filters ({presets.length})
-                </span>
-              </div>
-            </Button>
-          </PopoverTrigger>
-          <PopoverPortal>
-            <PopoverContent
-              className="z-[9999] max-h-[500px] w-80 rounded-md border bg-white shadow-lg"
-              sideOffset={5}
-              align="end"
-            >
-              {/* Search bar */}
-              <div className="flex items-center border-b">
-                <Search className="ml-4 size-4 text-gray-500" />
-                <input
-                  ref={searchInputRef}
-                  placeholder="Search presets..."
-                  className="w-full border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
-                  value={searchQuery}
-                  onChange={handleSearch}
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
-              {presets.length === 0 ? (
-                <div className="px-3 py-6 text-center text-sm text-gray-500">
-                  No saved presets
+      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="secondary"
+            size="sm"
+            className={"font-normal text-gray-500"}
+          >
+            <div className="flex items-center gap-2">
+              <BookOpen className="size-4" />
+              <span className="hidden whitespace-nowrap md:inline">
+                {presets.length > 0
+                  ? `Saved Filters (${presets.length})`
+                  : "Saved Filters"}
+              </span>
+            </div>
+          </Button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            className="z-[9999] max-h-[500px] w-80 rounded-md border bg-white shadow-lg"
+            sideOffset={5}
+            align="end"
+          >
+            {presets.length === 0 ? (
+              <div className="space-y-4 p-6 text-center">
+                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-gray-100">
+                  <BookMarked className="size-6 text-gray-400" />
                 </div>
-              ) : allFilteredPresets.length === 0 ? (
-                <div className="px-3 py-6 text-center text-sm text-gray-500">
-                  No presets found
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-gray-900">
+                    No saved filters yet
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Save your current filter configuration to quickly access it
+                    later. Apply filters, then click Save in the filters menu to
+                    create your first preset.
+                  </p>
                 </div>
-              ) : (
-                <div className="max-h-[400px] space-y-3 overflow-y-auto p-3">
-                  {/* Starred section */}
-                  {filteredStarredPresets.length > 0 && (
-                    <div>
-                      <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Starred
-                      </div>
-                      <div className="space-y-1">
-                        {filteredStarredPresets.map((preset, index) => (
-                          <PresetListItem
-                            key={`starred-${preset.id}`}
-                            id={`preset-option-${index}`}
-                            preset={preset}
-                            isActive={activePreset?.id === preset.id}
-                            isSelected={selectedIndex === index}
-                            columns={settings.columns as Column[]}
-                            onApply={handleApplyPreset}
-                            onRename={openRenameDialog}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+              </div>
+            ) : (
+              <>
+                {/* Search bar */}
+                <div className="flex items-center border-b">
+                  <Search className="ml-4 size-4 text-gray-500" />
+                  <input
+                    ref={searchInputRef}
+                    placeholder="Search presets..."
+                    className="w-full border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
+                    value={searchQuery}
+                    onChange={handleSearch}
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
 
-                  {/* Divider between sections */}
-                  {filteredStarredPresets.length > 0 &&
-                    filteredRegularPresets.length > 0 && (
-                      <div className="border-t border-gray-200" />
-                    )}
-
-                  {/* Regular presets section */}
-                  {filteredRegularPresets.length > 0 && (
-                    <div>
-                      {filteredStarredPresets.length > 0 && (
+                {allFilteredPresets.length === 0 ? (
+                  <div className="px-3 py-6 text-center text-sm text-gray-500">
+                    No presets found
+                  </div>
+                ) : (
+                  <div className="max-h-[400px] space-y-3 overflow-y-auto p-3">
+                    {/* Starred section */}
+                    {filteredStarredPresets.length > 0 && (
+                      <div>
                         <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          All presets
+                          Starred
                         </div>
-                      )}
-                      <div className="space-y-1">
-                        {filteredRegularPresets.map((preset, index) => {
-                          const globalIndex =
-                            filteredStarredPresets.length + index;
-                          return (
+                        <div className="space-y-1">
+                          {filteredStarredPresets.map((preset, index) => (
                             <PresetListItem
-                              key={`regular-${preset.id}`}
-                              id={`preset-option-${globalIndex}`}
+                              key={`starred-${preset.id}`}
+                              id={`preset-option-${index}`}
                               preset={preset}
                               isActive={activePreset?.id === preset.id}
-                              isSelected={selectedIndex === globalIndex}
+                              isSelected={selectedIndex === index}
                               columns={settings.columns as Column[]}
                               onApply={handleApplyPreset}
                               onRename={openRenameDialog}
                             />
-                          );
-                        })}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </PopoverContent>
-          </PopoverPortal>
-        </Popover>
-      )}
+                    )}
+
+                    {/* Divider between sections */}
+                    {filteredStarredPresets.length > 0 &&
+                      filteredRegularPresets.length > 0 && (
+                        <div className="border-t border-gray-200" />
+                      )}
+
+                    {/* Regular presets section */}
+                    {filteredRegularPresets.length > 0 && (
+                      <div>
+                        {filteredStarredPresets.length > 0 && (
+                          <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            All presets
+                          </div>
+                        )}
+                        <div className="space-y-1">
+                          {filteredRegularPresets.map((preset, index) => {
+                            const globalIndex =
+                              filteredStarredPresets.length + index;
+                            return (
+                              <PresetListItem
+                                key={`regular-${preset.id}`}
+                                id={`preset-option-${globalIndex}`}
+                                preset={preset}
+                                isActive={activePreset?.id === preset.id}
+                                isSelected={selectedIndex === globalIndex}
+                                columns={settings.columns as Column[]}
+                                onApply={handleApplyPreset}
+                                onRename={openRenameDialog}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
 
       <CreatePresetDialog
         open={isSaveDialogOpen}
