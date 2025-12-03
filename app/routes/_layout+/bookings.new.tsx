@@ -140,6 +140,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
+
+    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
+    const isAdminOrOwner = !isSelfServiceOrBase;
+
     const payload = parseData(
       formData,
       BookingFormSchema({
@@ -147,6 +151,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         action: "new",
         workingHours,
         bookingSettings,
+        isAdminOrOwner,
       }),
       {
         additionalData: { userId, organizationId },

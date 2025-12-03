@@ -94,6 +94,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => <span>Edit</span>,
+  name: "locations.$locationId.edit",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -177,7 +178,7 @@ export default function LocationEditPage() {
           </Button>
         }
       />
-      <div className="items-top flex justify-between">
+      <div className="items-top flex w-full justify-between md:w-min">
         <LocationForm
           name={location.name}
           description={location.description}
