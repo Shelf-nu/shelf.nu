@@ -7,9 +7,10 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "@remix-run/react";
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import When from "../when/when";
 
@@ -101,7 +102,7 @@ export default function CurrencySelector({
         <button
           ref={triggerRef}
           className={tw(
-            "flex w-full items-center justify-between rounded-md border p-3",
+            "flex h-[44px] w-full items-center justify-between rounded-md border px-3 py-2",
             className
           )}
         >
@@ -140,9 +141,15 @@ export default function CurrencySelector({
                   "flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                   isHovered && "bg-gray-50"
                 )}
+                role="option"
+                aria-selected={isSelected}
+                tabIndex={0}
                 onClick={() => {
                   handleSelect(currency);
                 }}
+                onKeyDown={handleActivationKeyPress(() =>
+                  handleSelect(currency)
+                )}
               >
                 <span>{currency}</span>
                 <When truthy={isSelected}>

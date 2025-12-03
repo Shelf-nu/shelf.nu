@@ -1,12 +1,11 @@
 import type { Asset, Category, Tag, Location } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, useLoaderData } from "react-router";
 import z from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -20,10 +19,11 @@ import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocation } from "~/modules/location/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -37,6 +37,10 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -81,21 +85,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: location.id,
     };
 
-    return json(
-      data({
-        location,
-        header,
-        modelName,
-        items: location.assets,
-        page,
-        totalItems,
-        perPage,
-        totalPages,
-      })
-    );
+    return payload({
+      location,
+      header,
+      modelName,
+      items: location.assets,
+      page,
+      totalItems,
+      perPage,
+      totalPages,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -191,7 +193,7 @@ const ListAssetContent = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
                 withPreview
               />

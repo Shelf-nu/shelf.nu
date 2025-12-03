@@ -1,14 +1,16 @@
 import { UpdateStatus, OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";
 import { getUpdateById, updateUpdate } from "~/modules/update/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Edit update") }];
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -27,10 +29,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       throw new Error("Update not found");
     }
 
-    return json(data({ update }));
+    return payload({ update });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -81,7 +83,7 @@ export const action = async ({
     return redirect("/admin-dashboard/updates");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

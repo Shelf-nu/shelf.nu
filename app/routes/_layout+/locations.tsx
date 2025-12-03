@@ -1,13 +1,16 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, json } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { Link, Outlet, data } from "react-router";
 import { ErrorContent } from "~/components/errors";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Locations") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -21,10 +24,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    return json(data(null));
+    return payload(null);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

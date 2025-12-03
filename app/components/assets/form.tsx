@@ -1,13 +1,7 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
-import {
-  Link,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-  useParams,
-} from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useActionData, useLoaderData, useNavigation } from "react-router";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -23,7 +17,6 @@ import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
-import { zodFieldIsRequired } from "~/utils/zod";
 import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
@@ -31,8 +24,9 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
-import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
@@ -73,6 +67,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === "true"),
+  redirectTo: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -95,6 +90,7 @@ type Props = Partial<
   qrId?: Qr["id"] | null;
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
+  referer?: string | null;
 };
 
 export const AssetForm = ({
@@ -111,6 +107,7 @@ export const AssetForm = ({
   qrId,
   tags,
   barcodes,
+  referer,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -128,13 +125,49 @@ export const AssetForm = ({
       }
   ) as CustomFieldZodSchema[];
 
-  const FormSchema = mergedSchema({
-    baseSchema: NewAssetFormSchema,
-    customFields,
-  });
+  const FormSchema = useMemo(
+    () =>
+      mergedSchema({
+        baseSchema: NewAssetFormSchema,
+        customFields,
+      }),
+    [customFields]
+  );
 
-  const zo = useZorm("NewQuestionWizardScreen", FormSchema);
+  const zo = useZorm("NewAssetFormScreen", FormSchema);
   const disabled = isFormProcessing(navigation.state);
+
+  // Extract custom field errors into a plain object to pass to AssetCustomFields
+  // This avoids passing the complex zo object which causes React 19 issues
+  const customFieldErrors = useMemo(() => {
+    const errors: Record<string, string | undefined> = {};
+    // Type assertion: zo.errors has dynamic custom field keys from merged schema
+    const errorsObj = zo.errors as unknown as Record<
+      string,
+      (() => { message?: string } | undefined) | undefined
+    >;
+
+    customFields.forEach((cf) => {
+      const fieldKey = `cf-${cf.id}`;
+      try {
+        const errorFn = errorsObj[fieldKey];
+        if (typeof errorFn === "function") {
+          const error = errorFn();
+          if (error?.message) {
+            errors[cf.id] = error.message;
+          }
+        }
+      } catch {
+        // Ignore errors accessing zo.errors
+      }
+    });
+    return errors;
+  }, [customFields, zo.errors]);
+
+  const actionData = useActionData<{
+    errors?: Record<string, { message: string }>;
+    error?: { message: string; additionalData?: Record<string, unknown> };
+  }>();
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(assetImageValidateFileAtom);
@@ -143,14 +176,12 @@ export const AssetForm = ({
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
   const isKitAsset = Boolean(asset?.kit);
   const locationDisabled = disabled || isKitAsset;
-  const actionData = useActionData<{
-    errors?: {
-      title?: {
-        message: string;
-      };
-    };
-  }>();
-
+  const mainImageError =
+    actionData?.errors?.mainImage?.message ??
+    (actionData?.error?.additionalData?.field === "mainImage"
+      ? actionData?.error?.message
+      : undefined) ??
+    fileError;
   /** Get the tags from the loader */
   const tagsSuggestions = useLoaderData<typeof loader>().tags.map((tag) => ({
     label: tag.name,
@@ -162,6 +193,7 @@ export const AssetForm = ({
       <Form
         ref={zo.ref}
         method="post"
+        action="."
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
         onSubmit={(e) => {
@@ -180,12 +212,8 @@ export const AssetForm = ({
           }
         }}
       >
-        <AbsolutePositionedHeaderActions className="hidden md:flex">
-          <Actions disabled={disabled} />
-        </AbsolutePositionedHeaderActions>
-        {qrId ? (
-          <input type="hidden" name={zo.fields.qrId()} value={qrId} />
-        ) : null}
+        {qrId ? <input type="hidden" name="qrId" value={qrId} /> : null}
+        <RefererRedirectInput fieldName="redirectTo" referer={referer} />
 
         <div className="flex items-start justify-between border-b pb-5">
           <div className=" ">
@@ -193,7 +221,7 @@ export const AssetForm = ({
             <p>Basic information about your asset.</p>
           </div>
           <div className="hidden flex-1 justify-end gap-2 md:flex">
-            <Actions disabled={disabled} />
+            <Actions disabled={disabled} referer={referer} />
           </div>
         </div>
 
@@ -205,7 +233,7 @@ export const AssetForm = ({
           <Input
             label="Name"
             hideLabel
-            name={zo.fields.title()}
+            name="title"
             disabled={disabled}
             error={
               actionData?.errors?.title?.message || zo.errors.title()?.message
@@ -292,7 +320,7 @@ export const AssetForm = ({
                 onChange={validateFile}
                 label={"Main image"}
                 hideLabel
-                error={fileError}
+                error={mainImageError}
                 className="mt-2"
                 inputClassName="border-0 shadow-none p-0 rounded-none"
               />
@@ -314,20 +342,18 @@ export const AssetForm = ({
               </p>
             }
             className="border-b-0"
-            required={zodFieldIsRequired(FormSchema.shape.description)}
           >
             <Input
               inputType="textarea"
               maxLength={1000}
               label={"Description"}
-              name={zo.fields.description()}
+              name="description"
               defaultValue={description || ""}
               hideLabel
               placeholder="Add a description for your asset."
               disabled={disabled}
               data-test-id="assetDescription"
               className="w-full"
-              required={zodFieldIsRequired(FormSchema.shape.description)}
             />
           </FormRow>
         </div>
@@ -337,11 +363,18 @@ export const AssetForm = ({
           subHeading={
             <p>
               Make it unique. Each asset can have 1 category. It will show on
-              your index.
+              your index.{" "}
+              <Button
+                to="/categories/new"
+                variant="link-gray"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create categories
+              </Button>
             </p>
           }
           className="border-b-0 pb-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.category)}
         >
           <DynamicSelect
             disabled={disabled}
@@ -356,17 +389,24 @@ export const AssetForm = ({
             closeOnSelect
             selectionMode="set"
             allowClear={true}
-            extraContent={
-              <Button
-                to="/categories/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new category
-              </Button>
-            }
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                title="Create new category"
+                type="category"
+                buttonLabel="Create new category"
+                onCreated={(created) => {
+                  if (created?.type !== "category") return;
+                  const category = created.entity;
+                  onItemCreated({
+                    id: category.id,
+                    name: category.name,
+                    color: category.color,
+                    metadata: { ...category },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
           />
         </FormRow>
 
@@ -375,13 +415,18 @@ export const AssetForm = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Link to="/tags/new" className="text-gray-600 underline">
+              <Button
+                to="/tags/new"
+                className="text-gray-600 underline"
+                target="_blank"
+                variant="link-gray"
+              >
                 Create tags
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.tags)}
+          // required={zodFieldIsRequired(FormSchema.shape.tags)}
         >
           <TagsAutocomplete
             existingTags={tags ?? []}
@@ -396,13 +441,17 @@ export const AssetForm = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link to="/locations/new" className="text-gray-600 underline">
+              <Button
+                to="/locations/new"
+                className="text-gray-600 underline"
+                target="_blank"
+                variant="link-gray"
+              >
                 Create locations
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
         >
           <input
             type="hidden"
@@ -452,17 +501,23 @@ export const AssetForm = ({
               countKey="totalLocations"
               closeOnSelect
               allowClear
-              extraContent={
-                <Button
-                  to="/locations/new"
-                  variant="link"
-                  icon="plus"
-                  className="w-full justify-start pt-4"
-                  target="_blank"
-                >
-                  Create new location
-                </Button>
-              }
+              extraContent={({ onItemCreated, closePopover }) => (
+                <InlineEntityCreationDialog
+                  type="location"
+                  title="Create new location"
+                  buttonLabel="Create new location"
+                  onCreated={(created) => {
+                    if (created?.type !== "location") return;
+                    const location = created.entity;
+                    onItemCreated({
+                      id: location.id,
+                      name: location.name,
+                      metadata: { ...location },
+                    });
+                    closePopover();
+                  }}
+                />
+              )}
               renderItem={({ name, metadata }) => (
                 <div className="flex items-center gap-2">
                   {metadata?.thumbnailUrl ? (
@@ -488,7 +543,6 @@ export const AssetForm = ({
             </p>
           }
           className="border-b-0 py-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.valuation)}
         >
           <div className="relative w-full">
             <Input
@@ -496,14 +550,12 @@ export const AssetForm = ({
               label="Value"
               inputClassName="pl-[70px] valuation-input"
               hideLabel
-              name={zo.fields.valuation()}
+              name="valuation"
               disabled={disabled}
-              error={zo.errors.valuation()?.message}
               step="any"
               min={0}
               className="w-full"
               defaultValue={valuation || ""}
-              required={zodFieldIsRequired(FormSchema.shape.valuation)}
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
@@ -528,13 +580,14 @@ export const AssetForm = ({
           </FormRow>
         </When>
 
-        <AssetCustomFields zo={zo} schema={FormSchema} currency={currency} />
+        <AssetCustomFields
+          currency={currency}
+          fieldErrors={customFieldErrors}
+        />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
-          <div className="ml-auto">
-            <Button type="submit" disabled={disabled}>
-              Save
-            </Button>
+          <div className="flex flex-1 justify-end gap-2">
+            <Actions disabled={disabled} referer={referer} />
           </div>
         </FormRow>
       </Form>
@@ -542,28 +595,26 @@ export const AssetForm = ({
   );
 };
 
-const Actions = ({ disabled }: { disabled: boolean }) => {
-  const { assetId } = useParams<{ assetId?: string }>();
-
-  return (
-    <>
-      <ButtonGroup>
-        <Button
-          to={assetId ? `/assets/${assetId}/overview` : ".."}
-          variant="secondary"
-          disabled={disabled}
-        >
-          Cancel
-        </Button>
-        <AddAnother disabled={disabled} />
-      </ButtonGroup>
-
-      <Button type="submit" disabled={disabled}>
-        Save
+const Actions = ({
+  disabled,
+  referer,
+}: {
+  disabled: boolean;
+  referer?: string | null;
+}) => (
+  <>
+    <ButtonGroup>
+      <Button to={referer} variant="secondary" disabled={disabled}>
+        Cancel
       </Button>
-    </>
-  );
-};
+      <AddAnother disabled={disabled} />
+    </ButtonGroup>
+
+    <Button type="submit" disabled={disabled}>
+      Save
+    </Button>
+  </>
+);
 
 const AddAnother = ({ disabled }: { disabled: boolean }) => (
   <TooltipProvider delayDuration={100}>

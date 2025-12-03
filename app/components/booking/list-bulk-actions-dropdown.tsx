@@ -1,13 +1,13 @@
 import { useState } from "react";
 import type { BookingStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";

@@ -109,13 +109,13 @@ export function extractStoragePath(
             return urlPath;
           }
         }
-      } catch (tokenError) {
+      } catch (_tokenError) {
         // Ignore token parsing errors
       }
     }
 
     return null;
-  } catch (e) {
+  } catch (_e) {
     // If URL parsing fails, treat it as a direct path
     if (url.startsWith(`${bucketName}/`)) {
       return url.substring(bucketName.length + 1);

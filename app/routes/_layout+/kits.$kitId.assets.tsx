@@ -1,9 +1,9 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -12,21 +12,26 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -56,16 +61,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    return json(
-      data({
-        header,
-        ...assets,
-        modelName,
-      })
-    );
+    return payload({
+      header,
+      ...assets,
+      modelName,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -161,7 +164,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
                 withPreview
               />
@@ -194,9 +197,14 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
 
       <Td>
         {location ? (
-          <GrayBadge>
-            <span>{location.name}</span>
-          </GrayBadge>
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
       {/* Tags */}

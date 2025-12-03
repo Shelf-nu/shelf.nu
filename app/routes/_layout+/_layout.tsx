@@ -1,18 +1,29 @@
+import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
+import { useAtomValue } from "jotai";
+import { ScanBarcodeIcon } from "lucide-react";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
-import { ScanBarcodeIcon } from "lucide-react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  NavLink,
+  Outlet,
+  useLoaderData,
+} from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
+import {
+  CommandPaletteButton,
+  CommandPaletteRoot,
+} from "~/components/layout/command-palette";
 import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
@@ -20,6 +31,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "~/components/layout/sidebar/sidebar";
+import { SkipLinks } from "~/components/layout/skip-links";
 import { useCrisp } from "~/components/marketing/crisp";
 import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { SequentialIdMigrationModal } from "~/components/sequential-id-migration-modal";
@@ -41,7 +53,7 @@ import {
 } from "~/utils/cookies.server";
 import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -64,25 +76,30 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     const user = await getUserByID(userId, {
-      roles: true,
-      organizations: {
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          imageId: true,
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        profilePicture: true,
+        onboarded: true,
+        customerId: true,
+        skipSubscriptionCheck: true,
+        sso: true,
+        tierId: true,
+        roles: { select: { id: true, name: true } },
+        userOrganizations: {
+          where: {
+            userId: authSession.userId,
+          },
+          select: {
+            id: true,
+            roles: true,
+            organization: { select: { id: true } },
+          },
         },
-      },
-      userOrganizations: {
-        where: {
-          userId: authSession.userId,
-        },
-        select: {
-          id: true,
-          organization: true,
-          roles: true,
-        },
-      },
+      } satisfies Prisma.UserSelect,
     });
 
     let subscription = null;
@@ -147,8 +164,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    return json(
-      data({
+    return data(
+      payload({
         user,
         organizations,
         currentOrganizationId: organizationId,
@@ -182,7 +199,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId: authSession.userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -225,53 +242,59 @@ export default function App() {
     ) : null;
 
   return (
-    <SidebarProvider defaultOpen={!minimizedSidebar}>
-      <AtomsResetHandler />
-      <AppSidebar />
-      <SidebarInset>
-        {disabledTeamOrg ? (
-          <NoSubscription />
-        ) : workspaceSwitching ? (
-          <div className="flex size-full flex-col items-center justify-center text-center">
-            <Spinner />
-            <p className="mt-2">Activating workspace...</p>
-          </div>
-        ) : (
-          <>
-            <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
-              <Link to="." title="Home" className="block h-8">
-                <ShelfMobileLogo />
-              </Link>
-              <div className="flex items-center space-x-2">
-                <NavLink
-                  to="/scanner"
-                  title="Scan QR Code"
-                  className={({ isActive }) =>
-                    tw(
-                      "relative flex items-center justify-center px-2 transition",
-                      isActive ? "text-primary-600" : "text-gray-500"
-                    )
-                  }
-                >
-                  <ScanBarcodeIcon />
-                </NavLink>
-                <SidebarTrigger />
-              </div>
-            </header>
-            <Outlet />
-          </>
-        )}
-        <Toaster />
-        <ClientOnly fallback={null}>
-          {renderInstallPwaPromptOnMobile}
-        </ClientOnly>
+    <CommandPaletteRoot>
+      <SidebarProvider defaultOpen={!minimizedSidebar}>
+        <SkipLinks />
+        <AtomsResetHandler />
+        <AppSidebar id="navigation" />
+        <SidebarInset id="main-content" tabIndex={-1}>
+          {disabledTeamOrg ? (
+            <NoSubscription />
+          ) : workspaceSwitching ? (
+            <div className="flex size-full flex-col items-center justify-center text-center">
+              <Spinner />
+              <p className="mt-2">Activating workspace...</p>
+            </div>
+          ) : (
+            <>
+              <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+                <Link to="." title="Home" className="block h-8">
+                  <ShelfMobileLogo />
+                </Link>
+                <div className="flex items-center space-x-2">
+                  <CommandPaletteButton variant="icon" />
+                  <NavLink
+                    to="/scanner"
+                    title="Scan QR Code"
+                    className={({ isActive }) =>
+                      tw(
+                        "relative flex items-center justify-center px-2 transition",
+                        isActive ? "text-primary-600" : "text-gray-500"
+                      )
+                    }
+                  >
+                    <ScanBarcodeIcon />
+                  </NavLink>
+                  <SidebarTrigger />
+                </div>
+              </header>
+              <Outlet />
+            </>
+          )}
+          <Toaster />
+          <ClientOnly fallback={null}>
+            {renderInstallPwaPromptOnMobile}
+          </ClientOnly>
 
-        {/* Sequential ID Migration Modal */}
-        {needsSequentialIdMigration ? (
-          <SequentialIdMigrationModal organizationId={currentOrganizationId} />
-        ) : null}
-      </SidebarInset>
-    </SidebarProvider>
+          {/* Sequential ID Migration Modal */}
+          {needsSequentialIdMigration ? (
+            <SequentialIdMigrationModal
+              organizationId={currentOrganizationId}
+            />
+          ) : null}
+        </SidebarInset>
+      </SidebarProvider>
+    </CommandPaletteRoot>
   );
 }
 

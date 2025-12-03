@@ -1,8 +1,7 @@
 import type { User } from "@prisma/client";
 import { TierId } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useNavigate, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, useNavigate, useLoaderData } from "react-router";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -12,8 +11,9 @@ import { Pagination } from "~/components/list/pagination";
 import { DateS } from "~/components/shared/date";
 import { Td, Th } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -44,25 +44,27 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       custom: TierId.custom,
     };
 
-    return json(
-      data({
-        header,
-        items: users,
-        search,
-        page,
-        totalItems: totalUsers,
-        perPage,
-        totalPages,
-        modelName,
-        tierId,
-        tierItems,
-      })
-    );
+    return payload({
+      header,
+      items: users,
+      search,
+      page,
+      totalItems: totalUsers,
+      perPage,
+      totalPages,
+      modelName,
+      tierId,
+      tierItems,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
+];
 
 export default function Area51() {
   const navigate = useNavigate();

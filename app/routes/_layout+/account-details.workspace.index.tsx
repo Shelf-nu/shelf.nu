@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import { TierId } from "@prisma/client";
 import type { Organization } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import type { MetaFunction } from "react-router";
+import { useLoaderData } from "react-router";
+import { data } from "react-router";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
@@ -20,7 +22,7 @@ import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -85,31 +87,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "Workspaces",
     };
 
-    /** Get the organization that are owner by the current uer */
+    /** Get the organization that are owned by the current uer */
     const organizations = user.userOrganizations.map((r) => r.organization);
     /** Get the tier limit */
     const tierLimit = await getUserTierLimit(userId);
 
-    return json(
-      data({
-        userId,
-        tier: user.tier,
-        tierLimit,
-        currentOrganizationId: organizationId,
-        canCreateMoreOrganizations: canCreateMoreOrganizations({
-          tierLimit: tierLimit,
-          totalOrganizations: organizations.filter((o) => o.owner.id === userId)
-            .length,
-        }),
-        items: organizations,
-        totalItems: organizations.length,
-        modelName,
-        title: "Workspace",
-      })
-    );
+    return payload({
+      userId,
+      tier: user.tier,
+      tierLimit,
+      currentOrganizationId: organizationId,
+      canCreateMoreOrganizations: canCreateMoreOrganizations({
+        tierLimit: tierLimit,
+        totalOrganizations: organizations.filter((o) => o.owner.id === userId)
+          .length,
+      }),
+      items: organizations,
+      totalItems: organizations.length,
+      modelName,
+      title: "Workspace",
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -126,7 +126,7 @@ export default function WorkspacePage() {
   } = useLoaderData<typeof loader>();
   const user = useUserData();
 
-  let upgradeMessage: string | React.ReactNode = (
+  let upgradeMessage: string | ReactNode = (
     <>
       You are currently able to have a maximum of {tierLimit.maxOrganizations}{" "}
       workspaces. If you want to create more than{" "}
@@ -168,18 +168,14 @@ export default function WorkspacePage() {
         </div>
         <div className="flex-1 overflow-x-auto rounded border bg-white">
           <Table>
-            <ListHeader
-              children={
-                <>
-                  <Th className="whitespace-nowrap">Owner</Th>
-                  <Th>Type</Th>
-                  <Th>Assets</Th>
-                  <Th>Locations</Th>
-                  <Th className="whitespace-nowrap">Team members</Th>
-                  <Th>Actions</Th>
-                </>
-              }
-            />
+            <ListHeader>
+              <Th className="whitespace-nowrap">Owner</Th>
+              <Th>Type</Th>
+              <Th>Assets</Th>
+              <Th>Locations</Th>
+              <Th className="whitespace-nowrap">Team members</Th>
+              <Th>Actions</Th>
+            </ListHeader>
             <tbody>
               {organizations.map((org) => (
                 <ListItem item={org} key={org.id}>

@@ -1,4 +1,5 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import type { Prisma } from "@prisma/client";
+import { data, type ActionFunctionArgs } from "react-router";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
 import {
   processBooking,
@@ -8,7 +9,8 @@ import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -78,17 +80,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
     const booking = await updateBookingAssets({
       id,
       organizationId,
       assetIds: finalAssetIds,
     });
 
+    const actor = wrapUserLinkForNote({
+      id: authSession.userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name.trim()
+    );
     await createNotes({
-      content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
-        booking.name
-      }](/bookings/${booking.id})**.`,
+      content: `${actor} added asset to ${bookingLink}.`,
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
@@ -101,9 +116,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true, bookingId: booking.id }));
+    return data(payload({ success: true, bookingId: booking.id }));
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

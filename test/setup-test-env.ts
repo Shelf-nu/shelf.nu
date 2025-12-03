@@ -1,5 +1,30 @@
 import "@testing-library/jest-dom/vitest";
-import { server } from "mocks";
+import { server } from "./mocks";
+
+declare global {
+  // Let React know this environment supports act() (Vitest + happy-dom)
+  // so it does not warn during tests.
+  // eslint-disable-next-line no-var
+  var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+
+Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+  configurable: true,
+  get: () => true,
+  set: () => {
+    // Keep the flag stable for React act() detection.
+  },
+});
+
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    get: () => true,
+    set: () => {
+      // Keep the flag stable for React act() detection.
+    },
+  });
+}
 
 process.env.DATABASE_URL =
   "postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true";
@@ -29,6 +54,18 @@ process.env.SENTRY_DSN = "sentry-dsn";
 if (typeof window !== "undefined") {
   // @ts-expect-error missing vitest type
   window.happyDOM.settings.enableFileSystemHttpRequests = true;
+
+  // Make requestAnimationFrame run synchronously to prevent act() warnings
+  // from Radix UI components that use RAF for animations
+  let rafId = 0;
+  window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    const id = ++rafId;
+    queueMicrotask(() => cb(performance.now()));
+    return id;
+  };
+  window.cancelAnimationFrame = (_frameId: number) => {
+    // no-op
+  };
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));

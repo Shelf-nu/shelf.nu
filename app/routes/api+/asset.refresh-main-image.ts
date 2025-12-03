@@ -1,13 +1,17 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { data, parseData } from "~/utils/http.server";
+import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
@@ -19,6 +23,7 @@ async function generateThumbnailIfMissing(asset: {
   id: string;
   mainImage: string | null;
   thumbnailImage: string | null;
+  userId: string;
 }): Promise<string | null> {
   if (asset.thumbnailImage || !asset.mainImage) {
     return asset.thumbnailImage;
@@ -62,10 +67,10 @@ async function generateThumbnailIfMissing(asset: {
     const buffer = Buffer.from(arrayBuffer);
 
     // Create an async iterable from the buffer - use a proper async generator
-    async function* createAsyncIterable() {
+    const createAsyncIterable = async function* () {
       await Promise.resolve(); // Add await to satisfy eslint
       yield new Uint8Array(buffer);
-    }
+    };
 
     // Generate thumbnail filename
     let thumbnailPath: string;
@@ -94,6 +99,7 @@ async function generateThumbnailIfMissing(asset: {
           fit: "cover",
           withoutEnlargement: true,
         },
+        upsert: true,
       });
     } catch (uploadError: any) {
       // Check if it's a duplicate error (file already exists)
@@ -136,7 +142,7 @@ async function generateThumbnailIfMissing(asset: {
       new ShelfError({
         cause: error,
         message: `Error generating thumbnail for asset ${asset.id}`,
-        additionalData: { assetId: asset.id },
+        additionalData: { assetId: asset.id, userId: asset.userId },
         label: "Assets",
       })
     );
@@ -158,9 +164,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       })
     );
 
-    // Get asset details
+    // Validate user has permission to access assets in their organization
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    // Get asset details with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUniqueOrThrow({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       select: {
         id: true,
         mainImage: true,
@@ -222,6 +236,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         id: asset.id,
         mainImage: asset.mainImage,
         thumbnailImage: asset.thumbnailImage,
+        userId,
       });
     }
 
@@ -240,7 +255,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return json(data({ asset: updatedAsset }));
+    return data(payload({ asset: updatedAsset }));
   } catch (cause) {
     // Log the error for debugging
     Logger.error(
@@ -257,8 +272,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     );
 
     // Return a successful response with error flag
-    return json(
-      data({
+    return data(
+      payload({
         asset: null,
         error: "Error refreshing image.",
       })

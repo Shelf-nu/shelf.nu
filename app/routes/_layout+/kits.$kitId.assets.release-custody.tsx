@@ -1,8 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 
-import { useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
@@ -11,16 +10,19 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getKit, releaseCustody } from "~/modules/kit/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
+
+export const meta = () => [{ title: appendToMetaTitle("Release kit custody") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -55,15 +57,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       custody: NonNullable<typeof kit.custody>;
     } & typeof kit;
 
-    return json(
-      data({
-        showModal: true,
-        kit: kitWithCustody,
-      })
-    );
+    return payload({
+      showModal: true,
+      kit: kitWithCustody,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -131,7 +131,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

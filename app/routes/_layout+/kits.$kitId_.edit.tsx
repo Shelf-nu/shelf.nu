@@ -1,11 +1,10 @@
-import { json } from "@remix-run/node";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
-} from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
@@ -28,10 +27,12 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getParams,
+  getRefererPath,
   parseData,
+  safeRedirect,
 } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -92,19 +93,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: kit.id,
     };
 
-    return json(
-      data({
-        kit,
-        header,
-        categories,
-        totalCategories,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      kit,
+      header,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
+      referer: getRefererPath(request),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -137,7 +137,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
-    const payload = parseData(formData, NewKitFormSchema, {
+    const parsedData = parseData(formData, NewKitFormSchema, {
       additionalData: { userId, kitId, organizationId },
     });
 
@@ -158,10 +158,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateKit({
         id: kitId,
         createdById: userId,
-        name: payload.name,
-        description: payload.description,
+        name: parsedData.name,
+        description: parsedData.description,
         organizationId,
-        categoryId: payload.category ? payload.category : "uncategorized",
+        categoryId: parsedData.category ? parsedData.category : "uncategorized",
         barcodes,
         // Don't set locationId here - will be handled by updateKitLocation if changed
       }),
@@ -174,12 +174,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ]);
 
     // Handle location update separately to cascade to assets
-    if (payload.locationId !== currentKit.locationId) {
+    if (parsedData.locationId !== currentKit.locationId) {
       await updateKitLocation({
         id: kitId,
         organizationId,
         currentLocationId: currentKit.locationId,
-        newLocationId: payload.locationId || "", // Handle undefined case
+        newLocationId: parsedData.locationId || "", // Handle undefined case
         userId,
       });
     }
@@ -191,16 +191,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true }));
+    // If redirectTo is provided, redirect back to previous page
+    // Otherwise stay on current page (e.g., when opened in new tab)
+    if (parsedData.redirectTo) {
+      return redirect(safeRedirect(parsedData.redirectTo, `/kits/${kitId}`));
+    }
+
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
 export default function KitEdit() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, referer } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">
@@ -217,9 +223,9 @@ export default function KitEdit() {
           name={kit.name}
           description={kit.description}
           categoryId={kit.categoryId}
-          saveButtonLabel="Save"
           barcodes={kit.barcodes}
           locationId={kit?.locationId}
+          referer={referer}
         />
       </div>
     </div>

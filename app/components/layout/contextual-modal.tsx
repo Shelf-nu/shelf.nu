@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
-import { useCallback } from "react";
-import { Outlet, useMatches, useNavigate } from "@remix-run/react";
+import type { ReactNode, MouseEvent } from "react";
+import { useCallback, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
+import { Outlet, useMatches, useNavigate } from "react-router";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -20,15 +21,36 @@ const Dialog = ({
 
   const navigate = useNavigate();
   const handleBackdropClose = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
-      navigate(prevRoute);
+      void navigate(prevRoute);
     },
     [prevRoute, navigate]
   );
 
+  // Handle Escape key to close dialog
+  useEffect(() => {
+    if (!open) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        void navigate(prevRoute);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [open, navigate, prevRoute]);
+
   return open ? (
-    <div className="dialog-backdrop" onClick={handleBackdropClose}>
+    <div
+      className="dialog-backdrop"
+      role="button"
+      tabIndex={0}
+      onClick={handleBackdropClose}
+      onKeyDown={handleActivationKeyPress(() => navigate(prevRoute))}
+    >
       <dialog className="dialog" open={true}>
         <div
           className={tw(
@@ -42,6 +64,7 @@ const Dialog = ({
             className={
               "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
             }
+            aria-label="Close dialog"
           >
             <XIcon />
           </Button>

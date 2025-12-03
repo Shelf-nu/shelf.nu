@@ -1,11 +1,10 @@
-import { json } from "@remix-run/node";
+import { useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { useNavigation } from "@remix-run/react";
-import { useSetAtom } from "jotai";
+} from "react-router";
+import { data, useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
@@ -19,7 +18,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -75,10 +74,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
-    return json(data({ title, header, kit }));
+    return payload({ title, header, kit });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

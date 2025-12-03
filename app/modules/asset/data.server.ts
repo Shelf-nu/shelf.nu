@@ -2,7 +2,7 @@
 
 import type { AssetIndexSettings, Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
+import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -14,7 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
-import { data, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -35,7 +35,10 @@ import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
 import { getTagsForBookingTagsFilter } from "../tag/service.server";
-import { getTeamMemberForCustodianFilter } from "../team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
 interface Props {
@@ -75,14 +78,35 @@ export async function simpleModeLoader({
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const isSelfServiceOrBase =
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+
+  // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
+  // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
+  const urlSearchParams = getCurrentSearchParams(request);
+  let hasAdvancedSyntax = false;
+
+  for (const value of urlSearchParams.values()) {
+    if (/(is|contains|gt|lt|gte|lte|eq|ne|startsWith|endsWith):/.test(value)) {
+      hasAdvancedSyntax = true;
+      break;
+    }
+  }
+
+  if (hasAdvancedSyntax) {
+    // URL has advanced syntax but we're in simple mode - redirect to clean URL
+    // This handles browser back button after mode switch
+    return redirect("/assets");
+  }
+
   /** Parse filters */
   const {
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
   } = await getFiltersFromRequest(request, organizationId, {
-    name: "assetFilter",
-    path: "/assets",
+    name: "assetFilter_v2",
+    path: "/", // Use root path so cookie is sent with RR7 single fetch .data requests
   });
 
   if (filters && redirectNeeded) {
@@ -114,6 +138,7 @@ export async function simpleModeLoader({
       totalTeamMembers,
     },
     tagsData,
+    teamMembersForFormData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -158,6 +183,17 @@ export async function simpleModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
+    // Team members for booking form - BASE/SELF_SERVICE always get their team member
+    isSelfServiceOrBase
+      ? getTeamMemberForForm({
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+        })
+      : Promise.resolve(null),
   ]);
 
   assets = await updateAssetsWithBookingCustodians(assets);
@@ -183,8 +219,8 @@ export async function simpleModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  return json(
-    data({
+  return data(
+    payload({
       header,
       items: assets,
       categories,
@@ -215,6 +251,7 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
+      teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
       filters,
       organizationId,
       locale,
@@ -247,6 +284,8 @@ export async function advancedModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
+  const isSelfServiceOrBase =
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
 
   /** Parse filters */
   const {
@@ -275,7 +314,11 @@ export async function advancedModeLoader({
   }
 
   const { selectedTags, selectedCategory, selectedLocation } =
-    getAllSelectedValuesFromFilters(filters, settings.columns as Column[]);
+    await getAllSelectedValuesFromFilters(
+      filters,
+      settings.columns as Column[],
+      organizationId
+    );
 
   const {
     tags,
@@ -293,7 +336,7 @@ export async function advancedModeLoader({
   });
 
   /** Query tierLimit, assets & Asset index settings */
-  let [
+  const [
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
@@ -301,6 +344,7 @@ export async function advancedModeLoader({
     kits,
     totalKits,
     tagsData,
+    teamMembersForFormData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -321,7 +365,7 @@ export async function advancedModeLoader({
       includeAllCategories: true,
     }),
 
-    // team members/custodian
+    // team members/custodian for filters
     getTeamMemberForCustodianFilter({
       organizationId,
       selectedTeamMembers: teamMemberIds,
@@ -344,6 +388,17 @@ export async function advancedModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
+    // Team members for booking form - BASE/SELF_SERVICE always get their team member
+    isSelfServiceOrBase
+      ? getTeamMemberForForm({
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+        })
+      : Promise.resolve(null),
   ]);
 
   const header: HeaderData = {
@@ -367,8 +422,8 @@ export async function advancedModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  return json(
-    data({
+  return data(
+    payload({
       header,
       items: assets,
       search,
@@ -400,6 +455,8 @@ export async function advancedModeLoader({
 
       customFields,
       ...teamMembersData,
+      teamMembersForForm:
+        teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       categories,
       totalCategories,
       locations,

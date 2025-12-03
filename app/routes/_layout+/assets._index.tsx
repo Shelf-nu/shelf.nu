@@ -3,10 +3,9 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData } from "@remix-run/react";
+  ShouldRevalidateFunctionArgs,
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { ImportButton } from "~/components/assets/import-button";
@@ -34,7 +33,7 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -94,6 +93,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
     const mode = settings.mode;
 
@@ -137,7 +137,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -157,11 +157,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "bulk-delete": PermissionAction.delete,
     };
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: intent2ActionMap[intent],
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
     });
 
     switch (intent) {
@@ -178,6 +186,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           organizationId,
           userId,
           currentSearchParams,
+          settings,
         });
 
         sendNotification({
@@ -187,17 +196,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -241,7 +250,6 @@ export default function AssetIndexPage() {
               to="new"
               role="link"
               aria-label={`new asset`}
-              icon="asset"
               data-test-id="createNewAsset"
             >
               New asset

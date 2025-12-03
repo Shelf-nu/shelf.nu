@@ -1,5 +1,5 @@
 import type { Organization, SsoDetails } from "@prisma/client";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
@@ -9,7 +9,7 @@ import {
   emailMatchesDomains,
   parseDomains,
 } from "~/modules/organization/service.server";
-import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "~/modules/user/fields";
+import { USER_WITH_SSO_DETAILS_SELECT } from "~/modules/user/fields";
 import {
   createUserFromSSO,
   updateUserFromSSO,
@@ -64,13 +64,11 @@ export async function resolveUserAndOrgForSsoCallback({
 }) {
   try {
     // First check if user exists
-    let user = await db.user.findUnique({
+    const user = await db.user.findUnique({
       where: {
         email: authSession.email,
       },
-      include: {
-        ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
-      },
+      select: USER_WITH_SSO_DETAILS_SELECT,
     });
 
     // If user exists, check if they're trying to convert from email to SSO

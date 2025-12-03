@@ -3,9 +3,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+} from "react-router";
+import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -19,7 +18,7 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
-import { DeleteTag } from "~/components/tag/delete-tag";
+import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
@@ -34,7 +33,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsDelete,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -80,8 +79,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "tags",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: tags,
         search,
@@ -97,7 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -138,10 +137,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -160,7 +159,6 @@ export default function CategoriesPage() {
           to="new"
           role="link"
           aria-label={`new tag`}
-          icon="plus"
           data-test-id="createNewTag"
         >
           New tag
@@ -222,18 +220,7 @@ const TagItem = ({
       </div>
     </Td>
     <Td className="text-left">
-      <Button
-        to={`${item.id}/edit`}
-        role="link"
-        aria-label={`edit tags`}
-        variant="secondary"
-        size="sm"
-        className=" mx-2 text-[12px]"
-        icon={"write"}
-        title={"Edit"}
-        data-test-id="editTagsButton"
-      />
-      <DeleteTag tag={item} />
+      <TagQuickActions tag={item} />
     </Td>
   </>
 );

@@ -1,12 +1,13 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -20,11 +21,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, role, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.custody,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
     });
 
     const formData = await request.formData();
@@ -57,6 +66,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assetIds,
       organizationId,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({
@@ -66,9 +76,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

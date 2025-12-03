@@ -3,9 +3,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
@@ -40,7 +39,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,17 +78,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: "Bookings settings",
     };
 
-    return json(
-      data({
-        header,
-        organization: currentOrganization,
-        bookingSettings,
-        workingHours,
-      })
-    );
+    return payload({
+      header,
+      organization: currentOrganization,
+      bookingSettings,
+      workingHours,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -167,7 +164,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
       case "updateTagsRequired": {
         const { tagsRequired } = parseData(
@@ -194,7 +191,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
       case "toggle": {
         // Only use parseData for simple fields without numeric keys
@@ -215,7 +212,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
 
       case "updateSchedule": {
@@ -259,7 +256,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
       case "createOverride": {
         // Use parseData function following your standard pattern
@@ -284,7 +281,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
 
       case "deleteOverride": {
@@ -308,7 +305,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }), { status: 200 });
+        return data(payload({ success: true }), { status: 200 });
       }
 
       default: {
@@ -322,7 +319,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 export default function GeneralPage() {

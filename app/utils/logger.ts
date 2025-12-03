@@ -1,4 +1,4 @@
-import * as Sentry from "@sentry/remix";
+import * as Sentry from "@sentry/react-router";
 import pino from "pino";
 
 import { SENTRY_DSN, env } from "./env";
@@ -81,4 +81,70 @@ export class RequestTimeLogger {
     const duration = end - this.start;
     Logger.log(`${this.label} took ${duration}ms`);
   }
+}
+
+/**
+ * Log the full context when a form submission reaches the server without the expected `intent` field.
+ *
+ * Excludes sensitive headers (cookies/authorization) but preserves all other request metadata and the form payload so we
+ * can diagnose client issues after the fact.
+ */
+export function logMissingFormIntent({
+  formData,
+  request,
+  bookingId,
+  userId,
+}: {
+  formData: FormData;
+  request: Request;
+  bookingId: string;
+  userId: string;
+}) {
+  const intent = formData.get("intent");
+  if (typeof intent === "string" && intent.length > 0) {
+    return;
+  }
+
+  const safeHeaders = Object.fromEntries(
+    Array.from(request.headers.entries()).filter(
+      ([key]) => !["cookie", "authorization"].includes(key.toLowerCase())
+    )
+  );
+
+  const formSnapshot: Record<string, unknown> = {};
+  for (const [key, value] of formData.entries()) {
+    const isFile = typeof File !== "undefined" && value instanceof File;
+    const serialisedValue = isFile
+      ? {
+          kind: "file" as const,
+          name: value.name,
+          size: value.size,
+          type: value.type,
+        }
+      : value;
+
+    if (formSnapshot[key] === undefined) {
+      formSnapshot[key] = serialisedValue;
+    } else if (Array.isArray(formSnapshot[key])) {
+      (formSnapshot[key] as unknown[]).push(serialisedValue);
+    } else {
+      formSnapshot[key] = [formSnapshot[key], serialisedValue];
+    }
+  }
+
+  Logger.error({
+    name: "BookingIntentMissing",
+    message:
+      "Form submitted without an intent field. Capturing request snapshot for investigation.",
+    shouldBeCaptured: true,
+    additionalData: {
+      bookingId,
+      userId,
+      requestUrl: request.url,
+      method: request.method,
+      headers: safeHeaders,
+      formKeys: Array.from(new Set(Array.from(formData.keys()))),
+      formSnapshot,
+    },
+  });
 }

@@ -4,9 +4,8 @@ import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { type BookingStatus, type Tag } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
@@ -27,7 +26,10 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  getTeamMemberForForm,
+} from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -40,7 +42,7 @@ import {
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -107,50 +109,67 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-    const [teamMembersData, tagsData, events] = await Promise.all([
-      getTeamMemberForCustodianFilter({
-        organizationId,
-        selectedTeamMembers: teamMemberIds,
-        getAll:
-          searchParams.has("getAll") &&
-          hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: isSelfServiceOrBase, // We only need teamMembersData for the new booking dialog, so if the user is self service or base, we dont need to load other teamMembers
-        userId,
-      }),
-      getTagsForBookingTagsFilter({
-        organizationId,
-      }),
-      getBookingsForCalendar({
-        request,
-        organizationId,
-        userId,
-        canSeeAllBookings,
-        canSeeAllCustody,
-      }),
-    ]);
+    const [teamMembersData, teamMembersForFormData, tagsData, events] =
+      await Promise.all([
+        // Team members for filters - when canSeeAllCustody is false, only current user's team member
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          filterByUserId: !canSeeAllCustody,
+          userId,
+        }),
+        // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
+        isSelfServiceOrBase
+          ? getTeamMemberForForm({
+              organizationId,
+              userId,
+              isSelfServiceOrBase,
+              getAll:
+                searchParams.has("getAll") &&
+                hasGetAllValue(searchParams, "teamMember"),
+            })
+          : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        getTagsForBookingTagsFilter({
+          organizationId,
+        }),
+        getBookingsForCalendar({
+          request,
+          organizationId,
+          userId,
+          canSeeAllBookings,
+          canSeeAllCustody,
+        }),
+      ]);
 
     const modelName = {
       singular: "booking",
       plural: "bookings",
     };
 
-    return json(
-      data({
-        header,
-        events,
-        ...teamMembersData,
-        currentOrganization,
-        ...tagsData,
-        modelName,
-        searchFieldTooltip: {
-          title: "Search your bookings",
-          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
-        },
-      })
-    );
+    return payload({
+      header,
+      events,
+      ...teamMembersData,
+      // For BASE/SELF_SERVICE users, provide dedicated form team members
+      // For ADMIN users, reuse the filter team members
+      teamMembersForForm:
+        teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
+      currentOrganization,
+      ...tagsData,
+      modelName,
+      isSelfServiceOrBase,
+      userId,
+      searchFieldTooltip: {
+        title: "Search your bookings",
+        text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

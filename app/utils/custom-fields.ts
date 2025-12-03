@@ -9,7 +9,7 @@ import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
 } from "./client-hints";
-import { ShelfError } from "./error";
+import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
@@ -94,7 +94,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   let schema = z.object({});
 
   fields.forEach((field) => {
-    let fieldSchema = z.object({
+    const fieldSchema = z.object({
       [`cf-${field.id}`]: getSchema({
         id: field.id,
         params: {
@@ -167,6 +167,170 @@ export const extractCustomFieldValuesFromPayload = ({
  * @param def - The custom field definition
  * @returns Formatted custom field value or undefined if no valid value
  */
+const NUMERIC_VALUE_GUIDANCE =
+  "Expected format: Plain numbers with optional decimal separator (e.g., 600, 600.50, or 600,50). Currency symbols will be automatically removed.";
+
+const CURRENCY_SYMBOLS_REGEX = /[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]/g;
+
+function formatInvalidNumericMessage(
+  fieldName: string,
+  rawValue: unknown,
+  options?: { assetTitle?: string }
+) {
+  const value =
+    typeof rawValue === "string"
+      ? rawValue.trim()
+      : rawValue === undefined || rawValue === null
+      ? ""
+      : String(rawValue);
+  const assetPart = options?.assetTitle
+    ? ` (asset: '${options.assetTitle}')`
+    : "";
+  return `Custom field '${fieldName}'${assetPart}: Invalid value '${value}'.`;
+}
+
+/**
+ * Sanitizes and validates numeric input for AMOUNT and NUMBER custom fields.
+ *
+ * Accepted formats:
+ * - Plain numbers: 600, 1234
+ * - Decimal numbers with dot: 600.50
+ * - Decimal numbers with comma: 600,50 (converted to dot)
+ * - Negative numbers: -600, (600), 600-
+ * - Currency symbols are stripped: $600, €1234
+ *
+ * Rejected formats:
+ * - Thousand separators: 1,234 or 1.234.567
+ * - Multiple decimal separators: 1.2.3
+ * - Non-numeric characters: abc, 12abc
+ * - Special numeric values: NaN, Infinity
+ * - Scientific notation: 1e10
+ *
+ * @param raw - The raw input value (string or number)
+ * @param def - The custom field definition
+ * @returns Object with numericValue (number) and normalizedText (string representation)
+ * @throws {ShelfError} If the value cannot be parsed as a valid finite number
+ */
+function sanitizeNumericInput(
+  raw: unknown,
+  def: CustomField
+): { numericValue: number; normalizedText: string } {
+  const throwInvalid = (reason?: string): never => {
+    const baseMessage = formatInvalidNumericMessage(def.name, raw);
+    const message = reason
+      ? `${baseMessage} ${reason} ${NUMERIC_VALUE_GUIDANCE}`
+      : `${baseMessage} ${NUMERIC_VALUE_GUIDANCE}`;
+
+    throw new ShelfError({
+      cause: null,
+      label: "Custom fields",
+      message,
+      shouldBeCaptured: false,
+      additionalData: {
+        customFieldId: def.id,
+        customFieldType: def.type,
+        rawValue: raw == null ? raw : String(raw),
+      },
+    });
+  };
+
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) {
+      throwInvalid();
+    }
+    return {
+      numericValue: raw,
+      normalizedText: raw.toString(),
+    };
+  }
+
+  if (typeof raw === "string") {
+    let value = raw.trim();
+
+    if (!value) {
+      throwInvalid();
+    }
+
+    let isNegative = false;
+
+    if (value.startsWith("(") && value.endsWith(")")) {
+      isNegative = true;
+      value = value.slice(1, -1);
+    }
+
+    value = value.replace(CURRENCY_SYMBOLS_REGEX, "");
+
+    if (value.endsWith("-")) {
+      isNegative = true;
+      value = value.slice(0, -1);
+    }
+
+    if (value.startsWith("-")) {
+      isNegative = true;
+      value = value.slice(1);
+    }
+
+    if (value.startsWith("+")) {
+      value = value.slice(1);
+    }
+
+    // Count separators to detect thousand separators
+    const dotCount = (value.match(/\./g) || []).length;
+    const commaCount = (value.match(/,/g) || []).length;
+
+    // Reject if multiple separators are present (indicates thousand separators)
+    if (dotCount > 1 || commaCount > 1 || (dotCount > 0 && commaCount > 0)) {
+      throwInvalid(
+        "Contains thousand separator format (multiple dots/commas or mixed separators)."
+      );
+    }
+
+    // Check for single separator used as thousand separator
+    // Thousand separators typically have exactly 3 digits after them (e.g., 1,234 or 1.234)
+    // Decimals typically have 0-2 digits after them (e.g., 600.5 or 600.50)
+    if (commaCount === 1) {
+      const parts = value.split(",");
+      const afterComma = parts[1];
+      // If exactly 3 digits after comma and more than 1 digit before, likely thousand separator
+      if (afterComma.length === 3 && parts[0].length > 0) {
+        throwInvalid(
+          "Contains thousand separator format (comma with 3 digits after it)."
+        );
+      }
+      value = value.replace(",", ".");
+    } else if (dotCount === 1) {
+      const parts = value.split(".");
+      const afterDot = parts[1];
+      // If exactly 3 digits after dot and more than 1 digit before, likely thousand separator
+      if (afterDot.length === 3 && parts[0].length > 0) {
+        throwInvalid(
+          "Contains thousand separator format (dot with 3 digits after it)."
+        );
+      }
+    }
+
+    if (!/^[0-9]+(?:\.[0-9]+)?$/.test(value)) {
+      throwInvalid("Contains non-numeric characters.");
+    }
+
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+      throwInvalid("Value is not a finite number.");
+    }
+
+    const finalValue = isNegative ? -numericValue : numericValue;
+    const normalizedText = `${isNegative ? "-" : ""}${value}`;
+
+    return {
+      numericValue: finalValue,
+      normalizedText,
+    };
+  }
+
+  return throwInvalid();
+}
+
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
@@ -174,7 +338,12 @@ export const buildCustomFieldValue = (
   try {
     const { raw } = value;
     /** We handle boolean different because it returns false */
-    if (def.type !== "BOOLEAN" && !raw) {
+    if (
+      def.type !== "BOOLEAN" &&
+      (raw === undefined ||
+        raw === null ||
+        (typeof raw === "string" && raw.trim() === ""))
+    ) {
       return undefined;
     }
 
@@ -204,27 +373,41 @@ export const buildCustomFieldValue = (
       case "MULTILINE_TEXT":
         return { raw, valueMultiLineText: String(raw) };
       case "AMOUNT": {
-        return { raw: Number(raw), valueText: String(raw) };
+        const { numericValue, normalizedText } = sanitizeNumericInput(raw, def);
+        return { raw: numericValue, valueText: normalizedText };
       }
       case "NUMBER": {
-        return { raw: Number(raw), valueText: String(raw) };
+        const { numericValue, normalizedText } = sanitizeNumericInput(raw, def);
+        return { raw: numericValue, valueText: normalizedText };
       }
     }
 
     return { raw, valueText: String(raw) };
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause: cause,
       title:
         cause instanceof RangeError
           ? cause?.message
           : "Invalid custom field value",
-      message: `Failed to read/process custom field value for '${def.name}' with type '${def.type}'. The value we found is: '${value.raw}'. Make sure to format your dates using the format: YYYY-MM-DD`,
+      message: `Failed to read/process custom field value for '${
+        def.name
+      }' with type '${def.type}'. The value we found is: '${value.raw}'. ${
+        def.type === "DATE"
+          ? "Make sure to format your dates using the format: YYYY-MM-DD"
+          : "Please verify the provided value matches the expected format"
+      }`,
       label: "Custom fields",
       shouldBeCaptured: false,
     });
   }
 };
+
+export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage };
 
 /**
  * Returns a display value for a custom field based on its type

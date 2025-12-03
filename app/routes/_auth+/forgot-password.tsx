@@ -2,9 +2,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -24,7 +23,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -74,7 +73,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading }));
+  return data(payload({ title, subHeading }));
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -98,7 +97,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         /** We are going to get the user to make sure it exists and is confirmed
          * this will not allow the user to use the forgot password before they have confirmed their email
          */
-        const user = await db.user.findFirst({ where: { email } });
+        const user = await db.user.findFirst({
+          where: { email },
+          select: {
+            id: true,
+            sso: true,
+          },
+        });
 
         if (!user) {
           throw new ShelfError({
@@ -162,7 +167,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

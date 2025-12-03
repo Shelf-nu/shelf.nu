@@ -1,4 +1,4 @@
-import { type ActionFunctionArgs, redirect, json } from "@remix-run/node";
+import { type ActionFunctionArgs, redirect, data } from "react-router";
 import { z } from "zod";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
@@ -25,6 +25,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

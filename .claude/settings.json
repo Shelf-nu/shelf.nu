@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "afplay /System/Library/Sounds/Funk.aiff"
+            "command": "afplay ~/Documents/jobs_done.aiff"
           }
         ]
       }
@@ -21,6 +21,18 @@
           }
         ]
       }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.production)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.test)",
+      "Write(./.env)",
+      "Write(**/.env.*)"
     ]
   }
 }

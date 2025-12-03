@@ -1,12 +1,12 @@
 import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import {
   getBookingContextAssetStatus,
   isAssetPartiallyCheckedIn,
@@ -17,6 +17,7 @@ import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
+import { ReturnedBadge } from "../shared/returned-badge";
 import { UserBadge } from "../shared/user-badge";
 import { Td } from "../table";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
@@ -40,8 +41,9 @@ export default function ListAssetContent({
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
-  const { isCompleted, isArchived, isReserved, isDraft } =
-    useBookingStatusHelpers(booking.status);
+  const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
+    booking.status
+  );
   const user = useUserData();
 
   /** Weather the asset is checked out in a booking different than the current one */
@@ -134,7 +136,7 @@ export default function ListAssetContent({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className={tw(
                   "size-full rounded-[4px] border object-cover",
                   isKitAsset ? "border-gray-300" : ""
@@ -155,11 +157,15 @@ export default function ListAssetContent({
                 </Button>
               </span>
               <div>
-                <AssetStatusBadge
-                  id={item.id}
-                  status={contextStatus}
-                  availableToBook={item.availableToBook}
-                />
+                {isFinished ? (
+                  <ReturnedBadge />
+                ) : (
+                  <AssetStatusBadge
+                    id={item.id}
+                    status={contextStatus}
+                    availableToBook={item.availableToBook}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -172,7 +178,7 @@ export default function ListAssetContent({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {!isCompleted && !isArchived ? (
+        {!isFinished ? (
           <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
         ) : null}
       </Td>

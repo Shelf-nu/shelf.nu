@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   Popover,
@@ -5,12 +6,13 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { Reorder } from "framer-motion";
+import { useFetcher, useLoaderData } from "react-router";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight, HandleIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useKeyboardReorder } from "~/hooks/use-keyboard-reorder";
 import {
   parseColumnName,
   type Column,
@@ -34,6 +36,13 @@ export function ConfigureColumnsDropdown() {
   useEffect(() => {
     setCurrentColumns(initialColumns);
   }, [initialColumns]);
+
+  // Initialize keyboard reordering hook
+  const { handleKeyDown, announcement, itemRefs } = useKeyboardReorder({
+    items: currentColumns,
+    onReorder: setCurrentColumns,
+    getItemName: (column) => parseColumnName(column.name),
+  });
 
   const handleCheckboxChange = (index: number) => {
     setCurrentColumns((prevColumns) => {
@@ -84,6 +93,15 @@ export function ConfigureColumnsDropdown() {
         >
           <fetcher.Form action="/api/asset-index-settings" method="post">
             <input type="hidden" name="intent" value="changeColumns" />
+            {/* ARIA live region for screen reader announcements */}
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {announcement}
+            </div>
             <div className="content-inner relative mb-[60px] max-h-[412px] overflow-y-scroll">
               <div className="py-[2px]">
                 <div className="px-[10px] py-2 text-gray-500">
@@ -92,7 +110,7 @@ export function ConfigureColumnsDropdown() {
                 <ColumnRow className="flex items-center gap-1 pb-2">
                   <FakeCheckbox
                     checked={true}
-                    className={tw("mr-1 text-gray-400")}
+                    className={tw("mr-1 text-gray-600")}
                   />
                   Name
                 </ColumnRow>
@@ -100,18 +118,42 @@ export function ConfigureColumnsDropdown() {
 
               <div className="border-t py-[2px]">
                 <div className="flex items-center justify-between px-[10px] py-2 text-gray-500">
-                  <div>Columns ({currentColumns.length})</div>
+                  <div>
+                    <div>Columns ({currentColumns.length})</div>
+                    <div className="text-xs text-gray-400">
+                      Alt+↑↓ to reorder
+                    </div>
+                  </div>
                   <ColumnsBulkActions
                     onSelectAll={handleSelectAll}
                     onDeselectAll={handleDeselectAll}
                   />
                 </div>
+                {/* Screen reader instructions */}
+                <div className="sr-only" id="reorder-instructions">
+                  Use Tab to navigate between column labels and drag handles.
+                  Press Space or Enter on a column label to toggle its
+                  visibility. Focus the drag handle and press Alt plus arrow up
+                  or arrow down to reorder columns.
+                </div>
                 <Reorder.Group
                   values={currentColumns}
                   onReorder={setCurrentColumns}
+                  as="ul"
+                  role="list"
+                  aria-label="Reorderable columns list"
+                  aria-describedby="reorder-instructions"
                 >
                   {currentColumns.map((column, index) => (
-                    <Reorder.Item key={column.name} value={column}>
+                    <Reorder.Item
+                      key={column.name}
+                      value={column}
+                      as="li"
+                      role="listitem"
+                      aria-label={`${parseColumnName(column.name)}, position ${
+                        index + 1
+                      } of ${currentColumns.length}`}
+                    >
                       <ColumnRow key={column.name}>
                         <div className="flex items-center gap-1">
                           {/* We only add this data for custom fields, because cfType has to be  of type CustomFieldType. It cant be an empty string  */}
@@ -142,9 +184,18 @@ export function ConfigureColumnsDropdown() {
                             onChange={() => handleCheckboxChange(index)}
                           />
 
-                          <label
-                            htmlFor={column.name}
-                            className="flex flex-1 items-center text-[14px] font-medium text-gray-700 hover:cursor-pointer"
+                          <div
+                            role="checkbox"
+                            aria-checked={column.visible}
+                            tabIndex={0}
+                            onClick={() => handleCheckboxChange(index)}
+                            onKeyDown={(e) => {
+                              if (e.key === " " || e.key === "Enter") {
+                                e.preventDefault();
+                                handleCheckboxChange(index);
+                              }
+                            }}
+                            className="flex flex-1 items-center text-[14px] font-medium text-gray-700 hover:cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
                             title="Custom field"
                           >
                             {" "}
@@ -162,10 +213,26 @@ export function ConfigureColumnsDropdown() {
                                 (cf)
                               </span>
                             )}
-                          </label>
-                          <div className="h-auto w-2 cursor-move text-gray-500">
-                            <HandleIcon />
                           </div>
+                          <button
+                            type="button"
+                            ref={(el) => {
+                              itemRefs.current[index] = el;
+                            }}
+                            onKeyDown={(e) => handleKeyDown(e, index)}
+                            className="flex h-auto cursor-move items-center p-1 text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary"
+                            aria-label={`Reorder ${parseColumnName(
+                              column.name
+                            )}`}
+                            aria-describedby="reorder-instructions"
+                            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                            title="Drag to reorder or use Alt+Arrow keys"
+                            tabIndex={0}
+                          >
+                            <div className="h-auto w-2">
+                              <HandleIcon />
+                            </div>
+                          </button>
                         </div>
                       </ColumnRow>
                     </Reorder.Item>
@@ -193,7 +260,7 @@ function ColumnRow({
   children,
   className,
 }: {
-  children: React.ReactNode | string;
+  children: ReactNode | string;
   className?: string;
 }) {
   return <div className={tw("px-[10px] py-[6px]", className)}>{children}</div>;

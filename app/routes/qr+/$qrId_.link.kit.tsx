@@ -1,12 +1,17 @@
 import { useState } from "react";
 import type { Kit } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  useFetcher,
+  useLoaderData,
+  useParams,
+} from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -42,7 +47,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getCurrentSearchParams,
@@ -89,7 +94,7 @@ export const loader = async ({
     });
 
     const searchParams = getCurrentSearchParams(request);
-    let [
+    const [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
@@ -131,32 +136,30 @@ export const loader = async ({
       plural: "kits",
     };
 
-    return json(
-      data({
-        header: {
-          title: "Link with existing asset",
-          subHeading: "Choose an asset to link with this QR tag.",
-        },
-        qrId,
-        items: kits,
-        search,
-        page,
-        totalItems: totalKits,
-        perPage,
-        totalPages,
-        modelName,
-        searchFieldLabel: "Search kits",
-        searchFieldTooltip: {
-          title: "Search your kits database",
-          text: "Search kits based on name or description.",
-        },
-        teamMembers,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      header: {
+        title: "Link with existing asset",
+        subHeading: "Choose an asset to link with this QR tag.",
+      },
+      qrId,
+      items: kits,
+      search,
+      page,
+      totalItems: totalKits,
+      perPage,
+      totalPages,
+      modelName,
+      searchFieldLabel: "Search kits",
+      searchFieldTooltip: {
+        title: "Search your kits database",
+        text: "Search kits based on name or description.",
+      },
+      teamMembers,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -192,7 +195,7 @@ export const action = async ({
     return redirect(`/qr/${qrId}/successful-link?type=kit`);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
@@ -216,7 +219,7 @@ export default function QrLinkExisting() {
     setSelectedKitId(kitId);
   }
 
-  let isHydrated = useHydrated();
+  const isHydrated = useHydrated();
   const { vh } = useViewportHeight();
   const maxHeight = isHydrated ? vh - 12 + "px" : "100%"; // We need to handle SSR and we are also substracting 12px to properly handle spacing on the bottom
 

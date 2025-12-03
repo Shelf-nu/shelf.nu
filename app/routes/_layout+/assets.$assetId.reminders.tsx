@@ -1,18 +1,22 @@
-import { json } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { data, type MetaFunction } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import RemindersTable from "~/components/asset-reminder/reminders-table";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
 import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -30,7 +34,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { reminders, totalReminders, page, perPage, totalPages } =
+    const { reminders, totalReminders, page, perPage, totalPages, search } =
       await getPaginatedAndFilterableReminders({
         organizationId,
         request,
@@ -43,28 +47,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "reminders",
     };
 
-    const assetReminders = reminders.map((reminder) => ({
-      ...reminder,
-      displayDate: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(reminder.alertDateTime),
-    }));
-
-    return json(
-      data({
-        header,
-        modelName,
-        items: assetReminders,
-        totalItems: totalReminders,
-        page,
-        perPage,
-        totalPages,
-      })
-    );
+    return payload({
+      header,
+      modelName,
+      items: reminders,
+      totalItems: totalReminders,
+      page,
+      perPage,
+      totalPages,
+      search,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -87,7 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

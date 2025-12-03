@@ -1,5 +1,5 @@
-import { useActionData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { defaultValidateFileAtom, fileErrorAtom } from "~/atoms/file";
@@ -48,6 +48,12 @@ export function UserDetailsForm({
     (user.sso && {
       reason: "You cannot edit your details when using SSO.",
     });
+
+  const profilePictureError =
+    (data?.error?.additionalData?.field === "profile-picture"
+      ? data?.error?.message
+      : undefined) ?? fileError;
+
   return (
     <Card className="my-0">
       <div className="mb-6">
@@ -71,6 +77,7 @@ export function UserDetailsForm({
           <div className="flex gap-6">
             <Input
               label="First name"
+              autoComplete="given-name"
               type="text"
               name={zo.fields.firstName()}
               defaultValue={user?.firstName || undefined}
@@ -82,6 +89,7 @@ export function UserDetailsForm({
             />
             <Input
               label="Last name"
+              autoComplete="family-name"
               type="text"
               name={zo.fields.lastName()}
               defaultValue={user?.lastName || undefined}
@@ -93,7 +101,6 @@ export function UserDetailsForm({
             />
           </div>
         </FormRow>
-
         <FormRow
           rowLabel="Email address"
           className="relative"
@@ -111,6 +118,7 @@ export function UserDetailsForm({
           {/* Just previews the email address */}
           <Input
             label={zo.fields.email()}
+            autoComplete="email"
             icon="mail"
             hideLabel={true}
             placeholder="zaans@huisje.com"
@@ -125,7 +133,6 @@ export function UserDetailsForm({
           />
           <ChangeEmailForm currentEmail={user?.email} />
         </FormRow>
-
         <FormRow
           rowLabel="Username"
           required={zodFieldIsRequired(UserDetailsFormSchema.shape.username)}
@@ -144,7 +151,6 @@ export function UserDetailsForm({
             disabled={isDisabled}
           />
         </FormRow>
-
         <FormRow
           rowLabel="Profile picture"
           // subHeading="This will be displayed on your profile."
@@ -162,14 +168,13 @@ export function UserDetailsForm({
                 onChange={validateFile}
                 label={"profile-picture"}
                 hideLabel
-                error={fileError}
+                error={profilePictureError}
                 className="mt-2"
                 inputClassName="border-0 shadow-none p-0 rounded-none"
               />
             </div>
           </div>
         </FormRow>
-
         <div className="text-right">
           <input type="hidden" name="type" value="updateUser" />
           <Button

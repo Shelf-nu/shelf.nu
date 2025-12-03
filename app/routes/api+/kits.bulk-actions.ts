@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
@@ -13,10 +13,11 @@ import {
   bulkReleaseKitCustody,
   bulkUpdateKitLocation,
 } from "~/modules/kit/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -77,7 +78,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       case "bulk-assign-custody": {
@@ -86,21 +87,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkAssignKitCustodySchema
         );
 
-        if (isSelfService) {
-          const teamMember = await db.teamMember.findUnique({
-            where: { id: custodian.id },
-            select: { id: true, userId: true },
+        // Validate that the custodian belongs to the same organization
+        const teamMember = await getTeamMember({
+          id: custodian.id,
+          organizationId,
+          select: { id: true, userId: true },
+        }).catch((cause) => {
+          throw new ShelfError({
+            cause,
+            title: "Team member not found",
+            message: "The selected team member could not be found.",
+            additionalData: { userId, kitIds, custodian },
+            label: "Kit",
+            status: 404,
           });
+        });
 
-          if (teamMember?.userId !== userId) {
-            throw new ShelfError({
-              cause: null,
-              title: "Action not allowed",
-              message: "Self user can only assign custody to themselves only.",
-              additionalData: { userId, kitIds, custodian },
-              label: "Kit",
-            });
-          }
+        if (isSelfService && teamMember.userId !== userId) {
+          throw new ShelfError({
+            cause: null,
+            title: "Action not allowed",
+            message: "Self user can only assign custody to themselves only.",
+            additionalData: { userId, kitIds, custodian },
+            label: "Kit",
+          });
         }
 
         await bulkAssignKitCustody({
@@ -120,7 +130,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       case "bulk-release-custody": {
@@ -159,7 +169,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       case "bulk-update-location": {
@@ -183,16 +193,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return data(payload(null));
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

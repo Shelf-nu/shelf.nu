@@ -1,11 +1,13 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
+import { data, type LoaderFunctionArgs } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
@@ -65,20 +67,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
-    const header: HeaderData = { title: "Bookings" };
+    const header: HeaderData = { title: "My bookings" };
 
     const modelName = {
       singular: "booking",
       plural: "bookings",
     };
 
-    /** We format the dates on the server based on the users timezone and locale  */
-    const items = formatBookingsDates(bookings, request);
-
-    return json(
-      data({
+    return data(
+      payload({
         header,
-        items,
+        items: bookings,
         search,
         page,
         totalItems: bookingCount,
@@ -94,9 +93,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: appendToMetaTitle(loaderData?.header.title) },
+];
 
 export default function MyBookings() {
   return <BookingsIndexPage disableBulkActions />;

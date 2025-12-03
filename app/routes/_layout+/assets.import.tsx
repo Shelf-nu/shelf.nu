@@ -2,9 +2,8 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
   LoaderFunctionArgs,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+} from "react-router";
+import { data, Link } from "react-router";
 import { z } from "zod";
 import { ImportContent } from "~/components/assets/import-content";
 import Header from "~/components/layout/header";
@@ -13,7 +12,7 @@ import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import {
   PermissionAction,
@@ -66,10 +65,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       organizationId,
       canUseBarcodes,
     });
-    return json(data(null));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
@@ -87,16 +86,14 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     await assertUserCanImportAssets({ organizationId, organizations });
 
-    return json(
-      data({
-        header: {
-          title: "Import assets",
-        },
-      })
-    );
+    return payload({
+      header: {
+        title: "Import assets",
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 

@@ -1,6 +1,5 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, Link, Outlet, useLoaderData, useMatches } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -9,7 +8,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -40,12 +39,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       subHeading,
     };
 
-    return json(
-      data({ header, _isPersonalOrg: isPersonalOrg(currentOrganization) })
-    );
+    return payload({
+      header,
+      _isPersonalOrg: isPersonalOrg(currentOrganization),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

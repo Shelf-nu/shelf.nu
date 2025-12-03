@@ -1,11 +1,18 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import type { Prisma } from "@prisma/client";
 import { CalendarCheck } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 
 import {
   getExistingBookingDetails,
@@ -17,18 +24,22 @@ import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 
-import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
+
+export const meta = () => [{ title: appendToMetaTitle("Add kit to booking") }];
 
 const updateBookingSchema = z.object({
   bookingId: z.string().transform((val, ctx) => {
@@ -67,14 +78,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ids: kitId ? [kitId] : undefined,
     });
 
-    return json(data(loaderData), {
+    return data(payload(loaderData), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -166,18 +177,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         label: "Booking",
       });
     }
-    const user = await getUserByID(authSession.userId);
+    const user = await getUserByID(authSession.userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const booking = await updateBookingAssets({
       id: bookingId,
       organizationId,
       assetIds: finalAssetIds,
+      userId,
     });
 
+    const actor = wrapUserLinkForNote({
+      id: authSession.userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name.trim()
+    );
     await createNotes({
-      content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
-        booking.name
-      }](/bookings/${booking.id})**.`,
+      content: `${actor} added asset to ${bookingLink}.`,
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
@@ -193,7 +218,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${params.kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -252,7 +277,8 @@ export default function ExistingBooking() {
                     {item.name}
                   </div>
                   <div className="text-[14px]">
-                    {item.displayFrom} - {item.displayTo}
+                    <DateS date={item.from} includeTime /> -{" "}
+                    <DateS date={item.to} includeTime />
                   </div>
                 </div>
               ) : null
@@ -261,7 +287,7 @@ export default function ExistingBooking() {
           <div className="mt-2 text-gray-500">
             Only <span className="font-medium text-gray-600">Draft</span> and{" "}
             <span className="font-medium text-gray-600">Reserved</span> bookings
-            Shown
+            are visible
           </div>
         </div>
         {actionData?.error && (

@@ -1,5 +1,5 @@
-import type { SerializeFrom } from "@remix-run/node";
-import { useFetcher, useParams } from "@remix-run/react";
+import type { MouseEvent } from "react";
+import { useFetcher, useParams } from "react-router";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
 import { tw } from "~/utils/tw";
@@ -16,7 +16,7 @@ export const UpdateGpsCoordinatesForm = ({
 }: {
   callback: () => void;
 }) => {
-  const fetcher = useFetcher<SerializeFrom<typeof action>>();
+  const fetcher = useFetcher<typeof action>();
   const { assetId } = useParams();
   const [sendNotification] = useClientNotification();
 
@@ -55,16 +55,14 @@ export const UpdateGpsCoordinatesForm = ({
     });
   }
 
-  async function handleSubmit(
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
-  ) {
+  async function handleSubmit(e: MouseEvent<HTMLButtonElement>) {
     callback();
 
     e.preventDefault();
     try {
       const coords = await requestGeoCoordinates();
 
-      fetcher.submit(
+      void fetcher.submit(
         {
           assetId: assetId as string,
           latitude: String(coords.latitude),
@@ -85,7 +83,7 @@ export const UpdateGpsCoordinatesForm = ({
     <Button
       variant="link"
       className={tw(
-        "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+        "justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
       )}
       width="full"
       onClick={handleSubmit}

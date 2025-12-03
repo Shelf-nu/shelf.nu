@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
 import { CalendarIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -40,6 +41,7 @@ export default function ExtendBookingDialog({
   const bookingSettings = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
+  const { isAdministratorOrOwner } = useUserRoleHelper();
 
   const zo = useZorm(
     "ExtendBooking",
@@ -47,6 +49,7 @@ export default function ExtendBookingDialog({
       timeZone: hints.timeZone,
       workingHours: workingHoursData.workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
 
@@ -61,11 +64,8 @@ export default function ExtendBookingDialog({
 
   useEffect(
     function closeOnSuccess() {
-      if (
-        fetcher?.data &&
-        "success" in fetcher?.data &&
-        fetcher?.data?.success
-      ) {
+      const data = fetcher?.data;
+      if (data && "success" in data && data.success) {
         handleClose();
       }
     },
@@ -129,6 +129,9 @@ export default function ExtendBookingDialog({
               />
 
               <When truthy={!!fetcher?.data?.error}>
+                <div className="text-sm text-error-500">
+                  {fetcher?.data?.error?.message}
+                </div>
                 {fetcher.data?.error?.additionalData?.clashingBookings && (
                   <ul className="mb-4 mt-1 list-inside list-disc pl-4">
                     {(
@@ -166,7 +169,7 @@ export default function ExtendBookingDialog({
               <input
                 type="hidden"
                 name={zo.fields.startDate()}
-                value={booking?.from || ""}
+                value={booking.from.toISOString()}
               />
 
               <div className="flex items-center gap-2">

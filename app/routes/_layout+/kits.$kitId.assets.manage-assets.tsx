@@ -1,10 +1,15 @@
 import { useEffect, useRef } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircleIcon } from "lucide-react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  useNavigation,
+  useSubmit,
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -15,8 +20,8 @@ import {
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
@@ -27,9 +32,9 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
+import { LocationBadge } from "~/components/location/location-badge";
 import SelectWithSearchParams from "~/components/select-with-search-params/select-with-search-params";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,9 +55,10 @@ import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { updateKitAssets } from "~/modules/kit/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -60,6 +66,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
+export const meta = () => [{ title: appendToMetaTitle("Manage kit assets") }];
 
 type LoaderData = typeof loader;
 
@@ -104,7 +112,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ] = await Promise.all([
       db.kit
         .findFirstOrThrow({
-          where: { id: kitId },
+          where: { id: kitId, organizationId },
           select: {
             id: true,
             name: true,
@@ -134,38 +142,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    return json(
-      data({
-        header: {
-          title: `Add assets for ${kit.name}`,
-          subHeading: "Fill up the kit with the assets of your choice.",
-        },
-        searchFieldLabel: "Search assets",
-        searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        kit,
-        items: assets,
-        totalItems: totalAssets,
-        categories,
-        tags,
-        search,
-        page,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-        totalPages,
-        perPage,
-        modelName,
-      })
-    );
+    return payload({
+      header: {
+        title: `Add assets for ${kit.name}`,
+        subHeading: "Fill up the kit with the assets of your choice.",
+      },
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      kit,
+      items: assets,
+      totalItems: totalAssets,
+      categories,
+      tags,
+      search,
+      page,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      totalPages,
+      perPage,
+      modelName,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -185,7 +191,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds } = parseData(
+    const { assetIds } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -204,7 +210,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -251,7 +257,7 @@ export default function ManageAssetsInKit() {
   }, [items, kitAssetIds, setDisabledBulkItems]);
 
   function handleSubmit() {
-    submit(formRef.current);
+    void submit(formRef.current);
   }
 
   return (
@@ -476,7 +482,7 @@ const RowComponent = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
@@ -605,7 +611,16 @@ const RowComponent = ({
 
       {/* Location */}
       <Td className={allowCursor}>
-        {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
+        {location ? (
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
+        ) : null}
       </Td>
     </>
   );

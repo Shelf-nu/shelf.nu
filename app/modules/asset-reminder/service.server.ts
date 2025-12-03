@@ -1,10 +1,10 @@
 import type { AssetReminder, Prisma, TeamMember } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
 import {
   ASSETS_EVENT_TYPE_MAP,
@@ -36,37 +36,51 @@ export async function createAssetReminder({
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
-    const user = await getUserByID(createdById);
-
-    const [assetReminder] = await Promise.all([
-      db.assetReminder.create({
-        data: {
-          name,
-          message,
-          alertDateTime,
-          assetId,
-          createdById,
-          organizationId,
-          teamMembers: {
-            connect: teamMembers.map((id) => ({ id })),
-          },
+    const user = await getUserByID(createdById, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const assetReminder = await db.assetReminder.create({
+      data: {
+        name,
+        message,
+        alertDateTime,
+        assetId,
+        createdById,
+        organizationId,
+        teamMembers: {
+          connect: teamMembers.map((id) => ({ id })),
         },
-      }),
+      },
+    });
+
+    await Promise.all([
       createNote({
         assetId,
         userId: createdById,
         type: "UPDATE",
-        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has created a new reminder **${name.trim()}**.`,
+        content: `${wrapUserLinkForNote({
+          id: createdById,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        })} created a new reminder ${wrapLinkForNote(
+          `/assets/${assetId}/reminders?${new URLSearchParams({
+            s: assetReminder.name,
+          }).toString()}`,
+          assetReminder.name
+        )}.`,
+      }),
+      scheduleAssetReminder({
+        data: {
+          reminderId: assetReminder.id,
+          eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+        },
+        when: alertDateTime,
       }),
     ]);
-
-    await scheduleAssetReminder({
-      data: {
-        reminderId: assetReminder.id,
-        eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
-      },
-      when: alertDateTime,
-    });
 
     return assetReminder;
   } catch (cause) {
@@ -302,11 +316,9 @@ export async function deleteAssetReminder({
 export async function getRemindersForOverviewPage({
   assetId,
   organizationId,
-  request,
 }: {
   assetId: AssetReminder["assetId"];
   organizationId: AssetReminder["organizationId"];
-  request: Request;
 }) {
   try {
     const reminders = await db.assetReminder.findMany({
@@ -322,13 +334,7 @@ export async function getRemindersForOverviewPage({
       orderBy: { alertDateTime: "desc" },
     });
 
-    return reminders.map((reminder) => ({
-      ...reminder,
-      displayDate: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(reminder.alertDateTime),
-    }));
+    return reminders;
   } catch (cause) {
     throw new ShelfError({
       cause,

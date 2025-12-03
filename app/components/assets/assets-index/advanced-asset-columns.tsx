@@ -1,6 +1,6 @@
-import React from "react";
+import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { Booking, AssetStatus } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
@@ -9,12 +9,14 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "react-router";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
+import { LocationBadge } from "~/components/location/location-badge";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import {
   HoverCard,
   HoverCardContent,
@@ -48,6 +50,7 @@ import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
+import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { isLink } from "~/utils/misc";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -62,8 +65,7 @@ import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import AssetQuickActions from "./asset-quick-actions";
-// eslint-disable-next-line import/no-cycle
-import { ListItemTagsColumn } from "./assets-list";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
@@ -90,7 +92,11 @@ export function AdvancedIndexColumn({
       field?.value as unknown as ShelfAssetCustomFieldValueType["value"];
 
     if (!field) {
-      return <Td> </Td>;
+      return (
+        <Td>
+          <EmptyTableValue />
+        </Td>
+      );
     }
 
     const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
@@ -158,7 +164,7 @@ export function AdvancedIndexColumn({
                     thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
                   }}
-                  alt={item.title}
+                  alt={`Image of ${item.title}`}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
                   withPreview={true}
                 />
@@ -192,6 +198,7 @@ export function AdvancedIndexColumn({
             title: item.title,
             qrId: item.qrId,
             type: "asset",
+            sequentialId: item.sequentialId,
           }}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
@@ -202,28 +209,29 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return (
-        <StatusColumn
-          id={item.id}
-          status={item.status}
-          bookings={item.bookings}
-        />
-      );
+      return <StatusColumn id={item.id} status={item.status} />;
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
 
-    case "valuation":
+    case "valuation": {
       const value = item?.valuation?.toLocaleString(locale, {
         currency: currentOrganization.currency,
         style: "currency",
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
-      return <TextColumn value={value ?? ""} />;
-
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {value ? value : <EmptyTableValue />}
+        </Td>
+      );
+    }
     case "createdAt":
-      return <DateColumn value={item.createdAt} />;
+      return <DateColumn value={item.createdAt} includeTime />;
+
+    case "updatedAt":
+      return <DateColumn value={item.updatedAt} includeTime />;
 
     case "category":
       return <CategoryColumn category={item.category} />;
@@ -235,17 +243,23 @@ export function AdvancedIndexColumn({
       return (
         <TextColumn
           value={
-            item?.location?.name ? (
+            item.location ? (
               <Button
-                to={`/locations/${item.locationId}`}
-                title={item.location.name}
-                target="_blank"
-                variant="link-gray"
+                to={`/locations/${item.location.id}`}
+                variant="inherit"
+                className={"hover:no-underline"}
               >
-                {item.location.name}
+                <LocationBadge
+                  location={{
+                    id: item.location.id ?? item.locationId,
+                    name: item.location.name,
+                    parentId: item.location.parentId ?? undefined,
+                    childCount: item.location.childCount ?? 0,
+                  }}
+                />
               </Button>
             ) : (
-              ""
+              <EmptyTableValue />
             )
           }
         />
@@ -264,7 +278,7 @@ export function AdvancedIndexColumn({
                 {item.kit.name}
               </Link>
             ) : (
-              ""
+              <EmptyTableValue />
             )
           }
         />
@@ -302,7 +316,11 @@ export function AdvancedIndexColumn({
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 
     default:
-      return <Td> </Td>;
+      return (
+        <Td>
+          <EmptyTableValue />
+        </Td>
+      );
   }
 }
 
@@ -311,7 +329,7 @@ function TextColumn({
   className,
   ...rest
 }: {
-  value: string | React.ReactNode;
+  value: string | ReactNode;
   className?: string;
 }) {
   return (
@@ -342,55 +360,60 @@ function TextColumn({
   );
 }
 
-function StatusColumn({
-  id,
-  status,
-  bookings,
-}: {
-  id: string;
-  status: AssetStatus;
-  bookings?: Pick<Booking, "id" | "name" | "status">[];
-}) {
+function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge
-        bookings={bookings}
-        id={id}
-        status={status}
-        availableToBook={true}
-      />
+      <AssetStatusBadge id={id} status={status} availableToBook={true} />
     </Td>
   );
 }
 
+/**
+ * Displays a truncated plain-text preview of the asset description and shows
+ * the full markdown-rendered content inside a tooltip on hover.
+ */
 function DescriptionColumn({ value }: { value: string }) {
+  const plainPreview = cleanMarkdownFormatting(value ?? "");
+  const hasContent = Boolean(value && value.trim().length > 0);
+  const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
+
   return (
-    <Td className="max-w-62 whitepsace-pre-wrap">
-      {/* Only show tooltip when value is more than 60 - 2 rows of 30 */}
-      {value.length > 60 ? (
+    <Td className="max-w-62 whitespace-pre-wrap">
+      {!hasContent ? (
+        <EmptyTableValue />
+      ) : (plainPreview || value).length > 60 ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger className="text-left">
-              <LineBreakText text={value} />
+              <LineBreakText text={previewText} charactersPerLine={28} />
             </TooltipTrigger>
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              <p className="text-sm">{value}</p>
+              <MarkdownViewer content={value} className="mt-2 text-sm" />
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       ) : (
-        <span>{value}</span>
+        <span>{previewText}</span>
       )}
     </Td>
   );
 }
 
-function DateColumn({ value }: { value: string | Date }) {
+/**
+ * Renders a compact date cell with optional time information.
+ */
+function DateColumn({
+  value,
+  includeTime = false,
+}: {
+  value: string | Date;
+  includeTime?: boolean;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <DateS date={value} />
+      <DateS date={value} includeTime={includeTime} />
     </Td>
   );
 }
@@ -410,7 +433,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      {tags.length > 0 && <ListItemTagsColumn tags={tags} />}
+      <ListItemTagsColumn tags={tags} />
     </Td>
   );
 }
@@ -431,13 +454,17 @@ function CustodyColumn({
       })}
     >
       <Td>
-        <TeamMemberBadge teamMember={custody?.custodian} />
+        {custody?.custodian ? (
+          <TeamMemberBadge teamMember={custody?.custodian} />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
     </When>
   );
 }
 
-function Td({ className, ...rest }: React.ComponentProps<typeof BaseTd>) {
+function Td({ className, ...rest }: ComponentProps<typeof BaseTd>) {
   return <BaseTd className={tw("p-[2px]", className)} {...rest} />;
 }
 
@@ -457,7 +484,7 @@ function UpcomingReminderColumn({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
-            {upcomingReminder.displayDate}
+            <DateS date={upcomingReminder.alertDateTime} includeTime />
           </Button>
         </TooltipTrigger>
 
@@ -493,7 +520,11 @@ function BarcodeColumn({
     item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
 
   if (barcodes.length === 0) {
-    return <Td> </Td>;
+    return (
+      <Td>
+        <EmptyTableValue />
+      </Td>
+    );
   }
 
   // If only one barcode, show as a single clickable link
@@ -506,6 +537,7 @@ function BarcodeColumn({
           title: item.title,
           qrId: item.qrId,
           type: "asset",
+          sequentialId: item.sequentialId,
         }}
         selectedBarcodeId={barcode.id}
         trigger={
@@ -526,6 +558,7 @@ function BarcodeColumn({
             item={{
               id: item.id,
               title: item.title,
+              sequentialId: item.sequentialId,
               qrId: item.qrId,
               type: "asset",
             }}
@@ -533,7 +566,7 @@ function BarcodeColumn({
             trigger={<Button variant="link-gray">{barcode.value}</Button>}
           />
           {index < barcodes.length - 1 && (
-            <span className="text-gray-400">, </span>
+            <span className="text-gray-600">, </span>
           )}
         </span>
       ))}

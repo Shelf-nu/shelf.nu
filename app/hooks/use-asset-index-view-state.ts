@@ -1,4 +1,4 @@
-import { useLoaderData, useLocation } from "@remix-run/react";
+import { useLoaderData, useLocation } from "react-router";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
 export function useAssetIndexViewState() {

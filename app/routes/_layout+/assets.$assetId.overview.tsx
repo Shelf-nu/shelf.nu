@@ -4,9 +4,8 @@ import type {
   MetaFunction,
   ActionFunctionArgs,
   LoaderFunctionArgs,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
@@ -17,11 +16,13 @@ import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
+import { LocationBadge } from "~/components/location/location-badge";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { DateS } from "~/components/shared/date";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -41,13 +42,14 @@ import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -115,23 +117,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ? parseScanData({
           scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
           userId,
-          request,
         })
       : null;
-
-    let custody = null;
-    if (asset.custody) {
-      const date = new Date(asset.custody.createdAt);
-      const dateDisplay = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(date);
-
-      custody = {
-        ...asset.custody,
-        dateDisplay,
-      };
-    }
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -142,24 +129,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const reminders = await getRemindersForOverviewPage({
       assetId: id,
       organizationId,
-      request,
     });
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
-    let currentBooking: any = null;
+    const currentBooking: any = null;
 
     if (booking && booking.from) {
-      const bookingFrom = new Date(booking.from);
-      const bookingDateDisplay = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(bookingFrom);
-
-      currentBooking = { ...booking, from: bookingDateDisplay };
-
       asset.bookings = [currentBooking];
     }
     /** We only need customField with same category of asset or without any category */
-    let customFields = asset.categoryId
+    const customFields = asset.categoryId
       ? asset.customFields.filter(
           (cf) =>
             !cf.customField.categories.length ||
@@ -173,30 +151,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${asset.title}'s overview`,
     };
 
-    return json(
-      data({
-        asset: {
-          ...asset,
-          createdAt: getDateTimeFormat(request, {
-            dateStyle: "short",
-            timeStyle: "short",
-          }).format(asset.createdAt),
-          custody,
-          customFields,
-        },
-        currentOrganization,
-        userId,
-        lastScan,
-        header,
-        locale,
-        timeZone,
-        qrObj,
-        reminders,
-      })
-    );
+    return payload({
+      asset: {
+        ...asset,
+        customFields,
+      },
+      currentOrganization,
+      userId,
+      lastScan,
+      header,
+      locale,
+      timeZone,
+      qrObj,
+      reminders,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -247,14 +218,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });
-      return json(data(null));
+      return payload(null);
     } else {
       checkExhaustiveSwitch(intent);
-      return json(data(null));
+      return payload(null);
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -320,7 +291,7 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : null}
-              {asset?.qrCodes.length > 0 ? (
+              {asset?.qrCodes?.[0] ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Shelf QR ID
@@ -335,7 +306,7 @@ export default function AssetOverview() {
                   Created
                 </span>
                 <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-                  {asset && asset.createdAt}
+                  <DateS date={asset.createdAt} includeTime />
                 </div>
               </li>
 
@@ -368,9 +339,18 @@ export default function AssetOverview() {
                     Location
                   </span>
                   <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                    <Tag key={location.id} className="ml-2">
-                      {location.name}
-                    </Tag>
+                    <LocationBadge
+                      location={
+                        location
+                          ? {
+                              id: location.id,
+                              name: location.name,
+                              parentId: location.parentId,
+                              childCount: location._count?.children ?? 0,
+                            }
+                          : null
+                      }
+                    />
                   </div>
                 </li>
               ) : null}
@@ -504,11 +484,11 @@ export default function AssetOverview() {
                             />
                           ) : isLink(customFieldDisplayValue as string) ? (
                             <Button
-                              role="link"
-                              variant="link"
-                              className="text-gray text-start font-normal underline hover:text-gray-600"
+                              variant="link-gray"
                               target="_blank"
-                              to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+                              to={buildCustomFieldLinkHref(
+                                customFieldDisplayValue as string
+                              )}
                             >
                               {customFieldDisplayValue as string}
                             </Button>
@@ -625,6 +605,7 @@ export default function AssetOverview() {
                 name: asset.title,
                 type: "asset",
               }}
+              sequentialId={asset.sequentialId}
             />
           )}
           <When

@@ -1,7 +1,6 @@
-import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { OrganizationRoles, type Prisma } from "@prisma/client";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
@@ -12,16 +11,23 @@ import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  wrapCustodianForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
+
+export const meta = () => [{ title: appendToMetaTitle("Release custody") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -88,16 +94,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    return json(
-      data({
-        showModal: true,
-        custody,
-        asset,
-      })
-    );
+    return payload({
+      showModal: true,
+      custody,
+      asset,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -121,19 +125,36 @@ export const action = async ({
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
-    if (isSelfService) {
-      const custody = await db.custody.findUnique({
-        where: { assetId },
-        select: {
-          custodian: {
-            select: { id: true, userId: true },
+    const custodyRecord = await db.custody.findUnique({
+      where: { assetId },
+      select: {
+        custodian: {
+          select: {
+            id: true,
+            name: true,
+            userId: true,
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
-      });
+      },
+    });
 
-      if (custody?.custodian?.userId !== user.id) {
+    if (isSelfService) {
+      if (custodyRecord?.custodian?.userId !== user.id) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",
@@ -159,18 +180,41 @@ export const action = async ({
         }
       );
 
+      const custodianDisplayName =
+        custodyRecord?.custodian?.name?.trim() || custodianName.trim();
+      const custodianDisplay = custodyRecord?.custodian
+        ? wrapCustodianForNote({
+            teamMember: {
+              name: custodianDisplayName,
+              user: custodyRecord.custodian.user
+                ? {
+                    id: custodyRecord.custodian.user.id,
+                    firstName: custodyRecord.custodian.user.firstName,
+                    lastName: custodyRecord.custodian.user.lastName,
+                  }
+                : null,
+            },
+          })
+        : `**${custodianDisplayName}**`;
+      const actor = wrapUserLinkForNote({
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+      const content = isSelfService
+        ? `${actor} released their custody.`
+        : `${actor} released ${custodianDisplay}'s custody.`;
+
       /** Once the asset is updated, we create the note */
       await createNote({
-        content: `**${user.firstName?.trim()} ${user.lastName}** has released ${
-          isSelfService ? "their" : `**${custodianName?.trim()}'s**`
-        } custody over **${asset.title?.trim()}**`,
+        content,
         type: "UPDATE",
         userId: asset.userId,
         assetId: asset.id,
       });
 
       sendNotification({
-        title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+        title: `‘${asset.title}’ is no longer in custody of ‘${custodianDisplayName}’`,
         message: "This asset is available again.",
         icon: { name: "success", variant: "success" },
         senderId: userId,
@@ -180,7 +224,7 @@ export const action = async ({
     return redirect(`/assets/${assetId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

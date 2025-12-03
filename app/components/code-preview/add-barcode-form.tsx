@@ -1,6 +1,7 @@
+import type { ChangeEvent } from "react";
 import { useState, useEffect, useMemo } from "react";
 import { BarcodeType } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
@@ -38,7 +39,7 @@ export function AddBarcodeForm({
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Validate barcode value when it changes
-  const handleValueChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleValueChange = (e: ChangeEvent<HTMLInputElement>) => {
     // Normalize value based on barcode type (preserves case for URLs)
     const value = normalizeBarcodeValue(barcodeType, e.target.value);
     setBarcodeValue(value);
@@ -52,7 +53,7 @@ export function AddBarcodeForm({
   };
 
   // Validate when barcode type changes
-  const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleTypeChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const type = e.target.value as BarcodeType;
     setBarcodeType(type);
 

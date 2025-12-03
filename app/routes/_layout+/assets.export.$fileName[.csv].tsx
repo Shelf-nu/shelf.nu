@@ -1,5 +1,5 @@
 import { AssetIndexMode } from "@prisma/client";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   exportAssetsBackupToCsv,
@@ -19,7 +19,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations, currentOrganization } =
+    const { organizationId, organizations, currentOrganization, role } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -34,11 +34,15 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       userId,
       organizationId,
       canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+      role,
     });
     const { mode } = settings;
 
     const searchParams = getCurrentSearchParams(request);
     const assetIds = searchParams.get("assetIds");
+    const assetIndexCurrentSearchParams = searchParams.get(
+      "assetIndexCurrentSearchParams"
+    );
     const isBackupRequest = assetIds === null;
 
     /** Join the rows with a new line */
@@ -49,6 +53,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
             assetIds,
             settings,
             currentOrganization,
+            assetIndexCurrentSearchParams,
           })
         : await exportAssetsBackupToCsv({ organizationId });
 
@@ -60,6 +65,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };

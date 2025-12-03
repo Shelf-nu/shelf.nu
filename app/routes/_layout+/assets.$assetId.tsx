@@ -1,13 +1,12 @@
 import { BarcodeType } from "@prisma/client";
+import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { redirect, json } from "@remix-run/node";
-import { useLoaderData, Outlet } from "@remix-run/react";
-import { DateTime } from "luxon";
+} from "react-router";
+import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
 import { setReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -24,7 +23,7 @@ import {
   deleteAsset,
   deleteOtherImages,
   getAsset,
-  relinkQrCode,
+  relinkAssetQrCode,
 } from "~/modules/asset/service.server";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -36,14 +35,14 @@ import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat, getHints } from "~/utils/client-hints";
+import { getHints } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   error,
   getParams,
-  data,
+  payload,
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
@@ -93,21 +92,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
-    return json(
-      data({
-        asset: {
-          ...asset,
-          createdAt: getDateTimeFormat(request, {
-            dateStyle: "short",
-            timeStyle: "short",
-          }).format(asset.createdAt),
-        },
-        header,
-      })
-    );
+    return payload({
+      asset,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -181,7 +172,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           z.object({ newQrId: z.string() })
         );
 
-        await relinkQrCode({
+        await relinkAssetQrCode({
           qrId: newQrId,
           assetId: id,
           organizationId,
@@ -195,7 +186,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ success: true }));
+        return payload({ success: true });
       }
 
       case "set-reminder": {
@@ -251,7 +242,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         if (validationError) {
-          return json(data({ error: validationError }), { status: 400 });
+          return data(payload({ error: validationError }), { status: 400 });
         }
 
         try {
@@ -270,7 +261,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             senderId: authSession.userId,
           });
 
-          return json(data({ success: true }));
+          return payload({ success: true });
         } catch (cause) {
           // Handle constraint violations and other barcode creation errors
           const reason = makeShelfError(cause);
@@ -279,15 +270,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const validationErrors = reason.additionalData
             ?.validationErrors as any;
           if (validationErrors && validationErrors["barcodes[0].value"]) {
-            return json(
-              data({ error: validationErrors["barcodes[0].value"].message }),
+            return data(
+              payload({ error: validationErrors["barcodes[0].value"].message }),
               {
                 status: reason.status,
               }
             );
           }
 
-          return json(data({ error: reason.message }), {
+          return data(payload({ error: reason.message }), {
             status: reason.status,
           });
         }
@@ -295,12 +286,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return payload(null);
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -319,13 +310,9 @@ export const links: LinksFunction = () => [
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
 
-  /**
-   * Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
-   * Source: https://github.com/prisma/prisma/discussions/14371
-   */
   const { roles } = useUserRoleHelper();
 
-  let items = [
+  const items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
     { to: "bookings", content: "Bookings" },
@@ -339,7 +326,7 @@ export default function AssetDetailsPage() {
   ];
 
   return (
-    <>
+    <div className="relative">
       <Header
         slots={{
           "left-of-title": (
@@ -350,7 +337,7 @@ export default function AssetDetailsPage() {
                 thumbnailImage: asset.thumbnailImage,
                 mainImageExpiration: asset.mainImageExpiration,
               }}
-              alt={asset.title}
+              alt={`Image of ${asset.title}`}
               className={tw(
                 "mr-4 size-14 cursor-pointer rounded border object-cover"
               )}
@@ -383,6 +370,6 @@ export default function AssetDetailsPage() {
       <div>
         <Outlet />
       </div>
-    </>
+    </div>
   );
 }

@@ -1,11 +1,11 @@
 import { useMemo } from "react";
+import Cookies from "js-cookie";
 import {
   useLoaderData,
   useLocation,
   // eslint-disable-next-line no-restricted-imports
   useSearchParams as remixUseSearchParams,
-} from "@remix-run/react";
-import Cookies from "js-cookie";
+} from "react-router";
 
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
@@ -45,9 +45,9 @@ export function cleanParamsForCookie(params: URLSearchParams | string): string {
 
 // Allowed pathnames for cookie naming
 export const ALLOWED_FILTER_PATHNAMES = {
-  assets: "assetFilter",
-  bookings: "bookingFilter",
-  kits: "kitFilter",
+  assets: "assetFilter_v2",
+  bookings: "bookingFilter_v2",
+  kits: "kitFilter_v2",
 } as const;
 
 export type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
@@ -56,7 +56,7 @@ type CookieNameSuffix = (typeof ALLOWED_FILTER_PATHNAMES)[AllowedPathname];
 /**
  * Helper function to extract and validate pathname for cookie naming
  * @param pathname - The current pathname (e.g., "/assets", "/bookings")
- * @returns The validated cookie name suffix, or "assetFilter" as fallback
+ * @returns The validated cookie name suffix, or "assetFilter_v2" as fallback
  */
 export function getValidatedPathname(pathname: string): CookieNameSuffix {
   // Strip leading slash and get the first segment
@@ -69,8 +69,8 @@ export function getValidatedPathname(pathname: string): CookieNameSuffix {
     return ALLOWED_FILTER_PATHNAMES[cleanPath];
   }
 
-  // Fallback to "assetFilter" if pathname is not in allowed list
-  return "assetFilter";
+  // Fallback to "assetFilter_v2" if pathname is not in allowed list
+  return "assetFilter_v2";
 }
 
 /**
@@ -86,7 +86,7 @@ export function getCookieName(
   pathname: string
 ): string {
   if (modeIsAdvanced) {
-    return `${organizationId}_advancedAssetFilter`;
+    return `${organizationId}_advancedAssetFilter_v2`;
   }
 
   const validatedPathname = getValidatedPathname(pathname);
@@ -247,11 +247,12 @@ export function deleteKeysInSearchParams(
   keys: string[],
   setSearchParams: SetSearchParams
 ) {
-  keys.forEach((key) => {
-    setSearchParams((prev) => {
+  // Delete all keys in a single setSearchParams call to avoid multiple cookie updates
+  setSearchParams((prev) => {
+    keys.forEach((key) => {
       prev.delete(key);
-      return prev;
     });
+    return prev;
   });
 }
 
@@ -281,24 +282,32 @@ export function destroyCookieValues(
 
   const finalCookieValue = cookieSearchParams.toString();
 
-  // Determine the correct path if not provided
-  let path = cookiePath;
-  if (!path) {
-    // Extract path from current location
-    const currentPath = window.location.pathname
-      .replace(/^\//, "")
-      .split("/")[0];
-    path =
-      currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
-  }
+  // Always use root path to ensure cookies are sent with RR7 single fetch .data requests
+  // Client-side must match server-side cookie path
+  const path = cookiePath || "/";
 
-  // Set the cleaned cookie with the correct path
-  Cookies.set(cookieName, finalCookieValue, {
-    path,
-    sameSite: "lax",
+  // Cookie options must match between set and remove operations
+  const cookieOptions = {
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
-    expires: 365, // 1 year
-  });
+  };
+
+  // If no filters remain, DELETE the cookie entirely
+  // Otherwise, update it with the new value
+  if (!finalCookieValue) {
+    Cookies.remove(cookieName, { path, ...cookieOptions });
+
+    // Also remove any legacy cookies at old paths to ensure complete cleanup
+    Cookies.remove(cookieName, { path: "/assets", ...cookieOptions });
+    Cookies.remove(cookieName, { path: "/bookings", ...cookieOptions });
+    Cookies.remove(cookieName, { path: "/kits", ...cookieOptions });
+  } else {
+    Cookies.set(cookieName, finalCookieValue, {
+      path,
+      ...cookieOptions,
+      expires: 365, // 1 year
+    });
+  }
 }
 
 /**
@@ -329,12 +338,9 @@ export function useClearValueFromParams(...keys: string[]): Function {
         location.pathname
       );
 
-      // Determine the correct cookie path based on the current page
-      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
-      const cookiePath =
-        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
-
-      destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
+      // Always use root path to match server-side cookie path
+      // This ensures cookies work with RR7 single fetch .data requests
+      destroyCookieValues(cookieName, keys, cookieSearchParams, "/");
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -380,10 +386,9 @@ export function useCookieDestroy() {
         location.pathname
       );
 
-      // Determine the correct cookie path based on the current page
-      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
-      const cookiePath =
-        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+      // Always use root path to match server-side cookie path
+      // This ensures cookies work with RR7 single fetch .data requests
+      const cookiePath = "/";
 
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
       destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);

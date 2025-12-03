@@ -1,8 +1,7 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { getBookings } from "~/modules/booking/service.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -23,7 +22,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const { page, search } = getParamsValues(getCurrentSearchParams(request));
-    const bookingsData = await getBookings({
+    const { bookings } = await getBookings({
       organizationId,
       page,
       search,
@@ -33,38 +32,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(isSelfServiceOrBase && { custodianUserId: userId }),
     });
 
-    // Format booking dates
-    const bookings = bookingsData.bookings.map((b) => {
-      if (b.from && b.to) {
-        const from = new Date(b.from);
-        const displayFrom = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(from);
-
-        const to = new Date(b.to);
-        const displayTo = getDateTimeFormat(request, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(to);
-
-        return {
-          ...b,
-          displayFrom: displayFrom.split(","),
-          displayTo: displayTo.split(","),
-          metadata: {
-            ...b,
-            displayFrom: displayFrom.split(","),
-            displayTo: displayTo.split(","),
-          },
-        };
-      }
-      return b;
-    });
-
-    return json(data({ bookings }));
+    return data(payload({ bookings }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }

@@ -1,5 +1,6 @@
+import type { ReactNode } from "react";
 import type { Location } from "@prisma/client";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -16,28 +17,32 @@ import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
-export const DeleteLocation = ({
-  location,
-}: {
+type DeleteLocationProps = {
   location: {
     name: Location["name"];
+    id: Location["id"];
+    childCount?: number;
   };
-}) => {
+  trigger?: ReactNode;
+};
+
+export const DeleteLocation = ({ location, trigger }: DeleteLocationProps) => {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          variant="link"
-          data-test-id="deleteAssetButton"
-          icon="trash"
-          className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
-          width="full"
-          disabled={disabled}
-        >
-          Delete
-        </Button>
+        {trigger ?? (
+          <Button
+            variant="link"
+            data-test-id="deleteAssetButton"
+            icon="trash"
+            className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
+            width="full"
+          >
+            Delete
+          </Button>
+        )}
       </AlertDialogTrigger>
 
       <AlertDialogContent>
@@ -52,6 +57,13 @@ export const DeleteLocation = ({
             Are you sure you want to delete this Location? This action cannot be
             undone.
           </AlertDialogDescription>
+          {location.childCount && location.childCount > 0 ? (
+            <div className="rounded border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">
+              This location has <strong>{location.childCount}</strong> child
+              {location.childCount > 1 ? " locations" : " location"}. They will
+              move to the root level if you delete this location.
+            </div>
+          ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
@@ -59,7 +71,7 @@ export const DeleteLocation = ({
               <Button variant="secondary">Cancel</Button>
             </AlertDialogCancel>
 
-            <Form method="delete">
+            <Form method="delete" action={`/locations/${location.id}`}>
               <Button
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 type="submit"

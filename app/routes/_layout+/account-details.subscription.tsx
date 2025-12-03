@@ -1,11 +1,10 @@
-import type { CustomTierLimit } from "@prisma/client";
+import type { CustomTierLimit, Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
@@ -14,14 +13,13 @@ import { CustomerPortalForm } from "~/components/subscription/customer-portal-fo
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
-import { db } from "~/database/db.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
-import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { makeShelfError } from "~/utils/error";
+import { payload, error, parseData } from "~/utils/http.server";
 
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -45,7 +43,17 @@ export async function loader({ context }: LoaderFunctionArgs) {
      * as its their own account settings.
      */
     const [user, tierLimit] = await Promise.all([
-      getUserByID(userId),
+      getUserByID(userId, {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          customerId: true,
+          tierId: true,
+          usedFreeTrial: true,
+        } satisfies Prisma.UserSelect,
+      }),
       getUserTierLimit(userId),
     ]);
 
@@ -57,23 +65,21 @@ export async function loader({ context }: LoaderFunctionArgs) {
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
 
-    return json(
-      data({
-        title: `Subscriptions`,
-        subTitle:
-          customer?.subscriptions.total_count === 0
-            ? "Pick an account plan that fits your workflow."
-            : "Manage your account plan.",
-        tier: user.tierId,
-        tierLimit,
-        prices,
-        customer,
-        usedFreeTrial: user.usedFreeTrial,
-      })
-    );
+    return payload({
+      title: `Subscriptions`,
+      subTitle:
+        customer?.subscriptions.total_count === 0
+          ? "Pick an account plan that fits your workflow."
+          : "Manage your account plan.",
+      tier: user.tierId,
+      tierLimit,
+      prices,
+      customer,
+      usedFreeTrial: user.usedFreeTrial,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -91,19 +97,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const user = await db.user
-      .findUniqueOrThrow({
-        where: { id: userId },
-        select: { customerId: true, firstName: true, lastName: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "No user found",
-          additionalData: { userId },
-          label: "Subscription",
-        });
-      });
+    const user = await getUserByID(userId, {
+      select: {
+        customerId: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
     const customerId = await getOrCreateCustomerId({
       id: userId,
@@ -124,7 +124,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return redirect(stripeRedirectUrl);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

@@ -1,5 +1,5 @@
-import type { UIMatch } from "@remix-run/react";
-import { useMatches } from "@remix-run/react";
+import type { UIMatch } from "react-router";
+import { useMatches } from "react-router";
 
 /**
  * @description This hook checks if the current page is a user page.

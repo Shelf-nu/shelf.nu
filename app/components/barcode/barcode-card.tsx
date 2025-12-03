@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Barcode } from "@prisma/client";
 import { SearchIcon } from "lucide-react";
 import { tw } from "~/utils/tw";
@@ -47,7 +48,7 @@ export function Ean13LookupLink({
   value: string;
   className?: string;
   /** Replaces default icon */
-  content?: React.ReactNode | string;
+  content?: ReactNode | string;
 }) {
   return (
     <a

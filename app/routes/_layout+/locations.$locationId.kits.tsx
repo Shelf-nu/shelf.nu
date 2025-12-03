@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useParams } from "@remix-run/react";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, useParams } from "react-router";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import KitImage from "~/components/kits/kit-image";
@@ -17,10 +16,11 @@ import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocationKits } from "~/modules/location/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
@@ -34,6 +34,10 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -75,20 +79,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: locationId,
     };
 
-    return json(
-      data({
-        modelName,
-        items: kits,
-        page,
-        totalItems: totalKits,
-        perPage,
-        totalPages,
-        header,
-      })
-    );
+    return payload({
+      modelName,
+      items: kits,
+      page,
+      totalItems: totalKits,
+      perPage,
+      totalPages,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -126,7 +128,7 @@ export default function LocationKits() {
                   width="full"
                   className="whitespace-nowrap"
                 >
-                  Manage kits
+                  Add kits
                 </Button>
               </div>
             </When>

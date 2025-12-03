@@ -1,13 +1,12 @@
 import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
+import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+} from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
@@ -34,11 +33,13 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
+  getRefererPath,
   parseData,
+  safeRedirect,
 } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -112,23 +113,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: asset.id,
     };
 
-    return json(
-      data({
-        asset,
-        header,
-        categories,
-        totalCategories,
-        tags,
-        totalTags: tags.length,
-        locations,
-        totalLocations,
-        currency: currentOrganization?.currency,
-        customFields,
-      })
-    );
+    return payload({
+      asset,
+      header,
+      categories,
+      totalCategories,
+      tags,
+      totalTags: tags.length,
+      locations,
+      totalLocations,
+      currency: currentOrganization?.currency,
+      customFields,
+      referer: getRefererPath(request),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -180,12 +180,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       })),
     });
 
-    const payload = parseData(formData, FormSchema, {
+    const parsedData = parseData(formData, FormSchema, {
       additionalData: { userId, organizationId },
     });
 
     const customFieldsValues = extractCustomFieldValuesFromPayload({
-      payload,
+      payload: parsedData,
       customFieldDef: customFields,
     });
 
@@ -204,10 +204,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       currentLocationId,
       valuation,
       addAnother,
-    } = payload;
+      redirectTo,
+    } = parsedData;
 
     /** This checks if tags are passed and build the  */
-    const tags = buildTagsSet(payload.tags);
+    const tags = buildTagsSet(parsedData.tags);
 
     /** Extract barcode data from form */
     const barcodes = canUseBarcodes
@@ -227,6 +228,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       barcodes,
       valuation,
       organizationId,
+      request,
     });
 
     sendNotification({
@@ -240,16 +242,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(`/assets/new`);
     }
 
-    return json(data({ success: true }));
+    // If redirectTo is provided, redirect back to previous page
+    // Otherwise stay on current page (e.g., when opened in new tab)
+    if (redirectTo) {
+      return redirect(safeRedirect(redirectTo, `/assets/${id}`));
+    }
+
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
 export default function AssetEditPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, referer } = useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
     [asset.tags]
@@ -282,6 +290,7 @@ export default function AssetEditPage() {
           valuation={asset.valuation}
           tags={tags}
           barcodes={asset.barcodes}
+          referer={referer}
         />
       </div>
     </div>

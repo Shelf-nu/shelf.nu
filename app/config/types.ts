@@ -49,8 +49,16 @@ export interface Config {
   /**
    * Show the "How did you find us?" field in the onboarding process
    * This is useful for gathering feedback on how users discover the platform.
+   * @deprecated Use collectBusinessIntel instead. Kept for backwards compatibility.
    */
   showHowDidYouFindUs: boolean;
+
+  /**
+   * Collect business intelligence data during onboarding
+   * When enabled, shows additional fields like role, team size, company name, etc.
+   * If COLLECT_BUSINESS_INTEL is not set, falls back to SHOW_HOW_DID_YOU_FIND_US for backwards compatibility.
+   */
+  collectBusinessIntel: boolean;
 
   /**
    * Geocoding configuration

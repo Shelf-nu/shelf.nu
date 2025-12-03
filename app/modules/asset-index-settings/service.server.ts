@@ -1,4 +1,9 @@
-import type { AssetIndexMode, CustomField, Prisma } from "@prisma/client";
+import {
+  AssetIndexMode,
+  OrganizationRoles,
+  type CustomField,
+  type Prisma,
+} from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
@@ -12,17 +17,38 @@ import {
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
+/**
+ * Derive the default asset index mode for a given organization role.
+ * BASE and SELF_SERVICE should remain in simple mode; elevated roles default to advanced.
+ */
+function getDefaultModeForRole(
+  role?: OrganizationRoles | null
+): AssetIndexMode {
+  if (
+    !role ||
+    role === OrganizationRoles.BASE ||
+    role === OrganizationRoles.SELF_SERVICE
+  ) {
+    return AssetIndexMode.SIMPLE;
+  }
+
+  return AssetIndexMode.ADVANCED;
+}
+
 const label: ErrorLabel = "Asset Index Settings";
 
 export async function createUserAssetIndexSettings({
   userId,
   organizationId,
   canUseBarcodes = false,
+  role,
   tx,
 }: {
   userId: string;
   organizationId: string;
   canUseBarcodes?: boolean;
+  /** User's role to determine default mode */
+  role?: OrganizationRoles;
   /** Optionally receive a transaction when the settingsd need to be created together with other entries */
   tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
@@ -31,7 +57,7 @@ export async function createUserAssetIndexSettings({
   try {
     const org = await getOrganizationById(organizationId, {
       customFields: {
-        where: { active: true },
+        where: { active: true, deletedAt: null },
       },
     });
 
@@ -59,11 +85,14 @@ export async function createUserAssetIndexSettings({
       ...customFieldsColumns,
     ];
 
+    // Align initial mode based on the user's role
+    const defaultMode = getDefaultModeForRole(role);
+
     const settings = await _db.assetIndexSettings.create({
       data: {
         userId,
         organizationId,
-        mode: "SIMPLE",
+        mode: defaultMode,
         columns,
       },
     });
@@ -74,7 +103,7 @@ export async function createUserAssetIndexSettings({
       cause,
       title: "Failed to create asset index settings.",
       message:
-        "We couldn't create the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't create the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId },
       label,
     });
@@ -85,10 +114,12 @@ export async function getAssetIndexSettings({
   userId,
   organizationId,
   canUseBarcodes = false,
+  role,
 }: {
   userId: string;
   organizationId: string;
   canUseBarcodes?: boolean;
+  role?: OrganizationRoles;
 }) {
   try {
     const assetIndexSettings = await db.assetIndexSettings.findFirst({
@@ -101,6 +132,7 @@ export async function getAssetIndexSettings({
         userId,
         organizationId,
         canUseBarcodes,
+        role,
       });
     }
 
@@ -124,6 +156,50 @@ export async function getAssetIndexSettings({
   }
 }
 
+/**
+ * Ensure a user's asset index settings align with the defaults for their role.
+ * Creates settings when missing and promotes to ADVANCED when the role allows.
+ */
+export async function ensureAssetIndexModeForRole({
+  userId,
+  organizationId,
+  role,
+  tx,
+}: {
+  userId: string;
+  organizationId: string;
+  role?: OrganizationRoles | null;
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+}) {
+  const client = tx || db;
+  const desiredMode = getDefaultModeForRole(role);
+
+  let settings = await client.assetIndexSettings.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+  });
+
+  if (!settings) {
+    return createUserAssetIndexSettings({
+      userId,
+      organizationId,
+      role: role ?? undefined,
+      tx: client,
+    });
+  }
+
+  if (
+    desiredMode === AssetIndexMode.ADVANCED &&
+    settings.mode !== AssetIndexMode.ADVANCED
+  ) {
+    settings = await client.assetIndexSettings.update({
+      where: { userId_organizationId: { userId, organizationId } },
+      data: { mode: AssetIndexMode.ADVANCED },
+    });
+  }
+
+  return settings;
+}
+
 export async function changeMode({
   userId,
   organizationId,
@@ -145,7 +221,7 @@ export async function changeMode({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId, mode },
       label,
     });
@@ -174,7 +250,7 @@ export async function updateColumns({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { userId, organizationId, columns },
       label,
     });
@@ -240,8 +316,52 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
       cause,
       title: "Failed to update asset index settings.",
       message:
-        "We couldn't update the asset index settings for the current user and organization. Please refresh to try agian. If the issue persists, please contact support",
+        "We couldn't update the asset index settings for the current user and organization. Please refresh to try again. If the issue persists, please contact support",
       additionalData: { newField, oldField },
+      label,
+    });
+  }
+}
+
+/**
+ * Removes a custom field column from every asset index configuration that belongs to an organization.
+ * Uses a single SQL statement to efficiently filter the JSON columns payload for all matching rows.
+ */
+export async function removeCustomFieldFromAssetIndexSettings({
+  customFieldName,
+  organizationId,
+  prisma,
+}: {
+  customFieldName: string;
+  organizationId: string;
+  prisma?: Pick<Prisma.TransactionClient, "$executeRaw">;
+}) {
+  const client = prisma ?? db;
+
+  try {
+    const columnName = `cf_${customFieldName}`;
+
+    await client.$executeRaw`
+      UPDATE "AssetIndexSettings" AS ais
+      SET "columns" = (
+        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+        FROM jsonb_array_elements(ais."columns") elem
+        WHERE elem->>'name' <> ${columnName}
+      )
+      WHERE ais."organizationId" = ${organizationId}
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(ais."columns") elem
+          WHERE elem->>'name' = ${columnName}
+        );
+    `;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Failed to update asset index settings.",
+      message:
+        "We couldn't update the asset index settings for all users in your organization. This operation affects everyone's column configurations. Please try again. If the issue persists, please contact support.",
+      additionalData: { customFieldName, organizationId },
       label,
     });
   }
@@ -413,6 +533,7 @@ async function validateColumns({
         where: {
           organizationId,
           active: true,
+          deletedAt: null,
         },
         select: {
           name: true,

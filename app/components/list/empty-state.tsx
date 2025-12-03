@@ -1,4 +1,5 @@
-import { useLoaderData } from "@remix-run/react";
+import type { ReactNode } from "react";
+import { useLoaderData } from "react-router";
 
 import type { SearchableIndexResponse } from "~/modules/types";
 import { tw } from "~/utils/tw";
@@ -8,7 +9,7 @@ export interface CustomEmptyState {
   className?: string;
   customContent?: {
     title: string;
-    text: React.ReactNode;
+    text: ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;

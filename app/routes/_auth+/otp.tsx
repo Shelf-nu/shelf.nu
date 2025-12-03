@@ -3,9 +3,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useFetcher } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -14,8 +13,10 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
-import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import {
+  getSelectedOrganisation,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -23,7 +24,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   parseData,
@@ -43,7 +44,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title }));
+  return payload({ title });
 }
 
 const OtpSchema = z.object({
@@ -78,19 +79,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        const personalOrganization = await getOrganizationByUserId({
-          userId: authSession.userId,
-          orgType: "PERSONAL",
-        });
-
         // Setting the auth session and redirecting user to assets page
         context.setSession(authSession);
 
+        const { organizationId } = await getSelectedOrganisation({
+          userId: authSession.userId,
+          request,
+        });
+
         return redirect(safeRedirect("/assets"), {
           headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(personalOrganization.id)
-            ),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],
         });
       }
@@ -99,7 +98,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -132,7 +131,7 @@ export default function OtpPage() {
     formData.append("mode", mode);
 
     try {
-      fetcher.submit(formData, {
+      void fetcher.submit(formData, {
         method: "POST",
         action: "/resend-otp",
       });

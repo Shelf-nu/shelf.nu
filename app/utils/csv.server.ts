@@ -1,17 +1,14 @@
 import type {
   Asset,
   AssetIndexSettings,
+  Note,
   Organization,
   Prisma,
   Tag,
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import {
-  unstable_composeUploadHandlers,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+import { parseFormData } from "@remix-run/form-data-parser";
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
@@ -40,13 +37,15 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
+import { getDateTimeFormat } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
+import { cleanMarkdownFormatting } from "./markdown-cleaner";
+import { sanitizeNoteContent } from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -103,11 +102,8 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   try {
-    // Upload handler to store file in memory
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      memoryUploadHandler
-    );
+    // Files are automatically stored in memory with parseFormData
+    const formData = await parseFormData(request);
 
     const csvFile = formData.get("file") as File;
 
@@ -125,10 +121,6 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
     });
   }
 };
-
-export const memoryUploadHandler = unstable_composeUploadHandlers(
-  unstable_createMemoryUploadHandler()
-);
 
 export const buildCsvBackupDataFromAssets = ({
   assets,
@@ -259,6 +251,7 @@ export async function exportAssetsFromIndexToCsv({
   assetIds,
   settings,
   currentOrganization,
+  assetIndexCurrentSearchParams,
 }: {
   request: Request;
   assetIds: string;
@@ -267,22 +260,31 @@ export async function exportAssetsFromIndexToCsv({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
+  assetIndexCurrentSearchParams: string | null;
 }) {
-  /** Parse filters */
-  const { filters } = await getAdvancedFiltersFromRequest(
-    request,
-    currentOrganization.id,
-    settings
-  );
-
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
   const takeAll = ids.includes(ALL_SELECTED_KEY);
 
+  /**
+   * When taking all with filters (select all button), use the current page's search params
+   * Otherwise, use cookie-based filters from the request
+   */
+  const filtersToUse =
+    takeAll && assetIndexCurrentSearchParams
+      ? assetIndexCurrentSearchParams
+      : (
+          await getAdvancedFiltersFromRequest(
+            request,
+            currentOrganization.id,
+            settings
+          )
+        ).filters;
+
   const { assets } = await getAdvancedPaginatedAndFilterableAssets({
     request,
     organizationId: currentOrganization.id,
-    filters,
+    filters: filtersToUse,
     settings,
     takeAll,
     assetIds: takeAll ? undefined : ids,
@@ -296,6 +298,7 @@ export async function exportAssetsFromIndexToCsv({
       ...(settings.columns as Column[]),
     ],
     currentOrganization,
+    request,
   });
 
   // Join rows with CRLF as per CSV spec
@@ -306,12 +309,14 @@ export async function exportAssetsFromIndexToCsv({
  * Builds CSV export data from assets using the column settings to maintain order
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
   assets,
   columns,
   currentOrganization,
+  request,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -319,6 +324,7 @@ export const buildCsvExportDataFromAssets = ({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
+  request: Request;
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -331,6 +337,13 @@ export const buildCsvExportDataFromAssets = ({
   const headers = visibleColumns.map((col) =>
     formatValueForCsv(parseColumnName(col.name))
   );
+
+  // Create date formatter for reminder dates
+  const formatDate = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
+
   // Create data rows
   const rows = assets.map((asset) =>
     visibleColumns.map((column) => {
@@ -382,6 +395,11 @@ export const buildCsvExportDataFromAssets = ({
               ? new Date(asset.createdAt).toISOString()
               : "";
             break;
+          case "updatedAt":
+            value = asset.updatedAt
+              ? new Date(asset.updatedAt).toISOString()
+              : "";
+            break;
           case "valuation":
             value = asset.valuation
               ? formatCurrency({
@@ -395,7 +413,21 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.availableToBook ? "Yes" : "No";
             break;
           case "upcomingReminder": {
-            value = asset.upcomingReminder?.displayDate;
+            if (asset.upcomingReminder?.alertDateTime) {
+              try {
+                const date = new Date(asset.upcomingReminder.alertDateTime);
+                // Check if date is valid
+                if (!isNaN(date.getTime())) {
+                  value = formatDate(date);
+                } else {
+                  value = "";
+                }
+              } catch {
+                value = "";
+              }
+            } else {
+              value = "";
+            }
             break;
           }
           case "upcomingBookings": {
@@ -450,25 +482,6 @@ export const buildCsvExportDataFromAssets = ({
   // Return headers followed by data rows
   return [headers, ...rows];
 };
-
-/**
- * Cleans markdown formatting from a text string
- * @param text - Text containing markdown to clean
- * @returns Plain text with markdown formatting removed
- */
-const cleanMarkdownFormatting = (text: string): string =>
-  text
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_match, group1, group2) => group1 + ":" + group2
-    ) // Replace markdown links: [text](url) -> text:url
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "") // Remove image references: ![alt](url)
-    .replace(/[*_~`#|]+/g, "") // Remove markdown formatting characters
-    .replace(/\[[^\]]*\]/g, "") // Remove remaining brackets, e.g., [text]
-    .replace(/\r?\n/g, " ") // Replace newlines with spaces
-    .replace(/\s+/g, " ") // Normalize multiple spaces
-    .replace(/^## /, "") // Remove '## ' from the start
-    .trim();
 
 /**
  * Safely formats a value for CSV export by properly escaping and quoting values
@@ -527,9 +540,10 @@ const formatCustomFieldForCsv = (
       }
       return fieldValue.valueBoolean ? "Yes" : "No";
 
-    case CustomFieldType.MULTILINE_TEXT:
+    case CustomFieldType.MULTILINE_TEXT: {
       const rawText = String(fieldValue.raw || "");
       return cleanMarkdownFormatting(rawText);
+    }
 
     case CustomFieldType.DATE:
       if (!fieldValue.valueDate) return "";
@@ -618,11 +632,10 @@ export async function exportBookingsFromIndexToCsv({
       });
     }
 
-    bookings = formatBookingsDates(bookings, request);
-
     // Pass both assets and columns to the build function
     const csvData = buildCsvExportDataFromBookings(
-      bookings as FlexibleBooking[]
+      bookings as FlexibleBooking[],
+      request
     );
 
     // Join rows with CRLF as per CSV spec
@@ -642,6 +655,148 @@ export async function exportBookingsFromIndexToCsv({
   }
 }
 
+const ACTIVITY_HEADER = "Date,Author,Type,Content";
+
+type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+};
+
+const sanitizeCsvValue = (value: string | null | undefined) =>
+  formatValueForCsv((value ?? "").replace(/\r?\n/g, "\\n"));
+
+const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
+  const rows = notes.map((note) => {
+    const author = note.user
+      ? [note.user.firstName, note.user.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim()
+      : "";
+
+    return [
+      sanitizeCsvValue(formatter.format(note.createdAt)),
+      sanitizeCsvValue(author),
+      sanitizeCsvValue(note.type),
+      sanitizeCsvValue(sanitizeNoteContent(note.content ?? "", formatter)),
+    ].join(",");
+  });
+
+  return [ACTIVITY_HEADER, ...rows].join("\n");
+};
+
+type ActivityNoteRecord = {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+  content: string | null;
+  createdAt: Date;
+  type: string;
+};
+
+type NoteFetcher<Where> = (args: {
+  where: Where;
+  include: {
+    user: {
+      select: {
+        firstName: true;
+        lastName: true;
+      };
+    };
+  };
+  orderBy: {
+    createdAt: "desc";
+  };
+}) => Promise<ActivityNoteRecord[]>;
+
+type ExportNotesToCsvArgs<Where> = {
+  request: Request;
+  where: Where;
+  findMany: NoteFetcher<Where>;
+};
+
+async function exportNotesToCsv<Where>({
+  request,
+  where,
+  findMany,
+}: ExportNotesToCsvArgs<Where>) {
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  const notes = await findMany({
+    where,
+    include: {
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  const activityNotes = notes.map<ActivityNote>((note) => ({
+    content: note.content ?? "",
+    createdAt: note.createdAt,
+    type: note.type as ActivityNote["type"],
+    user: note.user
+      ? {
+          firstName: note.user.firstName,
+          lastName: note.user.lastName,
+        }
+      : null,
+  }));
+
+  return notesToCsv(activityNotes, formatter);
+}
+
+export async function exportAssetNotesToCsv({
+  request,
+  assetId,
+  organizationId,
+}: {
+  request: Request;
+  assetId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.NoteWhereInput>({
+    request,
+    where: {
+      assetId,
+      asset: { organizationId },
+    },
+    findMany: (args) => db.note.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
+export async function exportBookingNotesToCsv({
+  request,
+  bookingId,
+  organizationId,
+}: {
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.BookingNoteWhereInput>({
+    request,
+    where: {
+      bookingId,
+      booking: { organizationId },
+    },
+    findMany: (args) =>
+      db.bookingNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
 /** Define some types to use for normalizing bookings across the different fetches */
 type FlexibleAsset = Partial<Asset> & {
   title: string;
@@ -649,22 +804,26 @@ type FlexibleAsset = Partial<Asset> & {
 
 type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   assets: FlexibleAsset[];
-  displayFrom?: string;
-  displayTo?: string;
-  displayOriginalFrom?: string;
-  displayOriginalTo?: string;
   tags: Pick<Tag, "name">[];
 };
 
 /**
  * Builds CSV export data from bookings
  * @param bookings - Array of bookings to export
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromBookings = (
-  bookings: FlexibleBooking[]
+  bookings: FlexibleBooking[],
+  request: Request
 ): string[][] => {
   if (!bookings.length) return [];
+
+  // Create date formatter for CSV export
+  const format = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
 
   // Create headers row using column names
   const headers = {
@@ -673,13 +832,13 @@ export const buildCsvExportDataFromBookings = (
     name: "Name", // string
     status: "Status", // string
     from: "Actual start date", // date
+    originalFrom: "Planned start date",
     to: "Actual end date", // date
+    originalTo: "Planned end date",
     custodian: "Custodian",
     description: "Description", // string
     tags: "Tags",
     asset: "Assets", // New column for assets
-    originalFrom: "Planned start date",
-    originalTo: "Planned end date",
   };
 
   // Create data rows with assets
@@ -714,12 +873,27 @@ export const buildCsvExportDataFromBookings = (
             booking.status.slice(1).toLowerCase();
           break;
         case "from":
-          value = booking.displayFrom;
+          value = booking.from ? format(booking.from).split(",") : "";
           break;
+        case "originalFrom":
+          value = booking.originalFrom
+            ? format(booking.originalFrom).split(",")
+            : booking.from
+            ? format(booking.from).split(",")
+            : "";
+          break;
+
         case "to":
-          value = booking.displayTo;
+          value = booking.to ? format(booking.to).split(",") : "";
           break;
-        case "custodian":
+        case "originalTo":
+          value = booking.originalTo
+            ? format(booking.originalTo).split(",")
+            : booking.to
+            ? format(booking.to).split(",")
+            : "";
+          break;
+        case "custodian": {
           const teamMember = {
             name: booking.custodianTeamMember?.name ?? "",
             user: booking?.custodianUser
@@ -733,23 +907,13 @@ export const buildCsvExportDataFromBookings = (
 
           value = resolveTeamMemberName(teamMember, true);
           break;
+        }
         case "description":
           value = booking.description ?? "";
           break;
         case "asset":
           // Include the first asset title in the main booking row
           value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
-          break;
-        case "originalFrom":
-          value = booking.displayOriginalFrom
-            ? booking.displayOriginalFrom
-            : booking.displayFrom;
-          break;
-
-        case "originalTo":
-          value = booking.displayOriginalTo
-            ? booking.displayOriginalTo
-            : booking.displayTo;
           break;
 
         case "tags":

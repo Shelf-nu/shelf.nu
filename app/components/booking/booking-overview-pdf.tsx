@@ -33,7 +33,7 @@ export const BookingOverviewPDF = ({
 
   useEffect(() => {
     if (isDialogOpen) {
-      fetch(`/api/bookings/${booking.id}/generate-pdf`)
+      void fetch(`/api/bookings/${booking.id}/generate-pdf`)
         .then((response) => response.json())
         .then((data) => {
           setPdfMeta(data.pdfMeta);
@@ -45,7 +45,7 @@ export const BookingOverviewPDF = ({
   }, [booking, isDialogOpen]);
 
   const handlePrint = useReactToPrint({
-    content: () => componentRef.current,
+    contentRef: componentRef,
     documentTitle: `booking-${booking.name}-${timeStamp}`,
   });
 
@@ -135,7 +135,7 @@ const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
 }: {
-  componentRef: RefObject<HTMLDivElement>;
+  componentRef: RefObject<HTMLDivElement | null>;
   pdfMeta: PdfDbResult | null;
 }) => {
   if (!pdfMeta) return null;
@@ -310,7 +310,7 @@ const BookingPDFPreview = ({
                         thumbnailImage: asset.thumbnailImage,
                         mainImageExpiration: asset.mainImageExpiration,
                       }}
-                      alt={asset.title}
+                      alt={`Image of ${asset.title}`}
                       className="!size-14 object-cover"
                     />
                   </td>

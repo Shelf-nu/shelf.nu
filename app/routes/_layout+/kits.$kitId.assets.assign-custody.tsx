@@ -3,16 +3,18 @@ import {
   AssetStatus,
   BookingStatus,
   KitStatus,
+  NoteType,
   OrganizationRoles,
 } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
+  data,
+  redirect,
   Link,
   useActionData,
   useLoaderData,
   useNavigation,
-} from "@remix-run/react";
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -24,25 +26,35 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
+import { createNotes } from "~/modules/note/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   getParams,
   parseData,
 } from "~/utils/http.server";
 import {
+  wrapUserLinkForNote,
+  wrapCustodianForNote,
+  wrapLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
+
+export const meta = () => [{ title: appendToMetaTitle("Assign kit custody") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -135,17 +147,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const totalTeamMembers = await db.teamMember.count({ where });
 
-    return json(
-      data({
-        showModal: true,
-        kit,
-        teamMembers,
-        totalTeamMembers,
-      })
-    );
+    return payload({
+      showModal: true,
+      kit,
+      teamMembers,
+      totalTeamMembers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -160,7 +170,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role } = await requirePermission({
+    const { role, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -179,27 +189,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { id: custodianId, name: custodianName } = custodian;
 
-    const user = await getUserByID(userId);
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
 
-    if (isSelfService) {
-      const custodian = await db.teamMember.findUnique({
-        where: { id: custodianId },
-        select: { id: true, userId: true },
+    // Validate that the custodian belongs to the same organization
+    const custodianTeamMember = await getTeamMember({
+      id: custodianId,
+      organizationId,
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    }).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, kitId, custodianId },
+        label: "Kit",
+        status: 404,
       });
+    });
 
-      if (custodian?.userId !== user.id) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, kitId, custodianId },
-          label: "Kit",
-        });
-      }
+    if (isSelfService && custodianTeamMember.userId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, kitId, custodianId },
+        label: "Kit",
+      });
     }
 
     const kit = await db.kit.update({
-      where: { id: kitId },
+      where: { id: kitId, organizationId },
       data: {
         status: KitStatus.IN_CUSTODY,
         custody: { create: { custodian: { connect: { id: custodianId } } } },
@@ -209,13 +245,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    await Promise.all([
-      /**
-       * Assign custody to all assets of kit
-       */
-      ...kit.assets.map((asset) =>
+    // Update custody for all assets
+    await Promise.all(
+      kit.assets.map((asset) =>
         db.asset.update({
-          where: { id: asset.id },
+          where: { id: asset.id, organizationId },
           data: {
             status: AssetStatus.IN_CUSTODY,
             custody: {
@@ -223,21 +257,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
         })
-      ),
-      /**
-       * Create note for each asset
-       */
-      db.note.createMany({
-        data: kit.assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
-            kit.name
-          }](/kits/${kit.id})**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      }),
-    ]);
+      )
+    );
+
+    // Create notes for all assets using markdoc wrappers
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    const custodianDisplay = wrapCustodianForNote({
+      teamMember: custodianTeamMember,
+    });
+
+    const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
+
+    await createNotes({
+      content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
+      type: NoteType.UPDATE,
+      userId,
+      assetIds: kit.assets.map((asset) => asset.id),
+    });
 
     sendNotification({
       title: `‘${kit.name}’ is now in custody of ${custodianName}`,
@@ -250,7 +291,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

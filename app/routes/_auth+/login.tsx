@@ -2,9 +2,14 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -32,7 +37,7 @@ import {
 } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   parseData,
@@ -49,7 +54,7 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading, disableSignup, disableSSO }));
+  return data(payload({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({
@@ -111,7 +116,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ? cause.shouldBeCaptured
         : !isZodValidationError(cause)
     );
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -156,7 +161,7 @@ export default function IndexLoginForm() {
             autoFocus={true}
             name={zo.fields.email()}
             type="email"
-            autoComplete="email"
+            autoComplete="username"
             disabled={disabled}
             inputClassName="w-full"
             error={zo.errors.email()?.message || data?.error.message}
@@ -167,7 +172,7 @@ export default function IndexLoginForm() {
           placeholder="**********"
           data-test-id="password"
           name={zo.fields.password()}
-          autoComplete="new-password"
+          autoComplete="current-password"
           disabled={disabled}
           inputClassName="w-full"
           error={zo.errors.password()?.message || data?.error.message}

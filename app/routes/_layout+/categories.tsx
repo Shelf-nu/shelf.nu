@@ -3,12 +3,11 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+} from "react-router";
+import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
-import { DeleteCategory } from "~/components/category/delete-category";
+import CategoryQuickActions from "~/components/category/category-quick-actions";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -33,7 +32,7 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -78,8 +77,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "categories",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header,
         items: categories,
         search,
@@ -95,7 +94,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -134,10 +133,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -156,7 +155,6 @@ export default function CategoriesPage() {
           to="new"
           role="link"
           aria-label={`new category`}
-          icon="plus"
           data-test-id="createNewCategory"
         >
           New category
@@ -210,18 +208,7 @@ const CategoryItem = ({
     </Td>
     <Td>{item._count.assets}</Td>
     <Td>
-      <Button
-        to={`${item.id}/edit`}
-        role="link"
-        aria-label={`edit category`}
-        variant="secondary"
-        size="sm"
-        className=" mx-2 text-[12px]"
-        icon={"write"}
-        title={"Edit"}
-        data-test-id="editCategoryButton"
-      />
-      <DeleteCategory category={item} />
+      <CategoryQuickActions category={item} />
     </Td>
   </>
 );

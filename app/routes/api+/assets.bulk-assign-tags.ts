@@ -1,12 +1,13 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { BulkUpdateTagsSchema } from "~/components/assets/bulk-assign-tags-dialog";
 import { bulkAssignAssetTags } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
@@ -28,11 +29,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
     });
 
     // Validate form data using combined schema
@@ -52,6 +61,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams,
       remove,
+      settings,
     });
 
     sendNotification({
@@ -61,9 +71,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true }));
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

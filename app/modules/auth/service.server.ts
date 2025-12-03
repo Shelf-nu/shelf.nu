@@ -1,5 +1,5 @@
 import { AuthError, isAuthApiError } from "@supabase/supabase-js";
-import type { AuthSession } from "server/session";
+import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -343,7 +343,7 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 export async function validateSession(token: string) {
   try {
     // const t0 = performance.now();
-    const result = await db.$queryRaw<{ id: String; revoked: boolean }[]>`
+    const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
       SELECT id, revoked FROM auth.refresh_tokens 
       WHERE token = ${token} 
       AND revoked = false
@@ -366,7 +366,7 @@ export async function validateSession(token: string) {
       );
     }
     return result.length > 0;
-  } catch (err) {
+  } catch (_err) {
     Logger.error(
       new ShelfError({
         cause: null,

@@ -1,6 +1,7 @@
+import type { ReactElement } from "react";
 import { cloneElement } from "react";
 import type { Kit } from "@prisma/client";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
@@ -18,7 +19,7 @@ import {
 
 type DeleteKitProps = {
   kit: Pick<Kit, "id" | "name" | "image">;
-  trigger?: React.ReactElement;
+  trigger?: ReactElement;
 };
 
 export default function DeleteKit({ kit, trigger }: DeleteKitProps) {

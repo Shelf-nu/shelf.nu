@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Popover,
@@ -5,7 +6,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
@@ -19,7 +20,7 @@ import { Button } from "../shared/button";
 import { Th } from "../table";
 
 type ListHeaderProps = {
-  children: React.ReactNode;
+  children: ReactNode;
   hideFirstColumn?: boolean;
   bulkActions?: ListProps["bulkActions"];
   title?: string;
@@ -116,7 +117,7 @@ function AdvancedModeDropdown() {
 
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-      <PopoverTrigger>
+      <PopoverTrigger aria-label="Adjust name column options">
         <ChevronRight className="rotate-90" />
       </PopoverTrigger>
       <PopoverPortal>

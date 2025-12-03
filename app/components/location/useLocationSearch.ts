@@ -1,12 +1,10 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
-import type { Location as RawLocationtype } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import type { Location } from "@prisma/client";
 import { atom, useAtom, useAtomValue } from "jotai";
-import type { WithDateFields } from "~/modules/types";
+import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 
-export type Location = WithDateFields<RawLocationtype, string>;
 const searchAtom = atom("");
 const isSearchingAtom = atom((get) => get(searchAtom) !== "");
 

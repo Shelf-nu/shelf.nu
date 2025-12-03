@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Form, useActionData, useFetcher } from "@remix-run/react";
+import { Form, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -155,6 +155,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                 <Input
                   name={emailZo.fields.email()}
                   type="email"
+                  autoComplete="email"
                   placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
@@ -166,6 +167,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                 <Input
                   name={emailZo.fields.confirmEmail()}
                   type="email"
+                  autoComplete="email"
                   placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
@@ -289,7 +291,7 @@ function ResendCodeForm({
           formData.append("intent", "initiateEmailChange");
           formData.append("email", formState.newEmail || "");
           formData.append("confirmEmail", formState.newEmail || "");
-          fetcher.submit(formData, {
+          void fetcher.submit(formData, {
             method: "POST",
           });
         }}

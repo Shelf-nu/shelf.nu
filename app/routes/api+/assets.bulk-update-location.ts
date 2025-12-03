@@ -1,11 +1,11 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -21,11 +21,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
     });
 
     const { assetIds, newLocationId, currentSearchParams } = parseData(
@@ -39,6 +47,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       newLocationId,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({
@@ -48,9 +57,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(data({ success: true }));
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

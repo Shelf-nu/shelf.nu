@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { generateUnclaimedCodesForPrint } from "~/modules/qr/service.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
@@ -27,6 +27,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

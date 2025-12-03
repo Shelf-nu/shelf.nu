@@ -19,13 +19,16 @@ import {
   releaseCustody,
   createKitsIfNotExists,
   updateKitQrCode,
+  relinkKitQrCode,
   getAvailableKitAssetForBooking,
 } from "./service.server";
+import { getQr } from "../qr/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 // Mock dependencies
+// why: testing kit service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
@@ -47,6 +50,12 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    qr: {
+      update: vitest.fn().mockResolvedValue({}),
+    },
+    teamMember: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
     kitCustody: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -61,19 +70,23 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: ensuring predictable ID generation for consistent test assertions
 vitest.mock("~/utils/id/id.server", () => ({
   id: vitest.fn(() => "mock-id"),
 }));
 
+// why: avoiding QR code generation during kit service tests
 vitest.mock("~/modules/qr/service.server", () => ({
   getQr: vitest.fn(),
 }));
 
+// why: testing kit barcode operations without triggering barcode validation and updates
 vitest.mock("~/modules/barcode/service.server", () => ({
   updateBarcodes: vitest.fn(),
   validateBarcodeUniqueness: vitest.fn(),
 }));
 
+// why: preventing database lookups for user data during kit tests
 vitest.mock("~/modules/user/service.server", () => ({
   getUserByID: vitest.fn().mockResolvedValue({
     id: "user-1",
@@ -82,11 +95,14 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: testing kit custody operations without creating actual notes
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
+  createNotes: vitest.fn().mockResolvedValue({}),
   createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: isolating kit service logic from asset utility dependencies
 vitest.mock("~/modules/asset/utils.server", () => ({
   getKitLocationUpdateNoteContent: vitest
     .fn()
@@ -594,8 +610,19 @@ describe("bulkAssignKitCustody", () => {
     ];
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(availableKits);
+
     //@ts-expect-error missing vitest type
-    db.$transaction.mockResolvedValue(true);
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "custodian-1",
+      name: "John Doe",
+      user: { id: "user-1", firstName: "John", lastName: "Doe" },
+    });
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) =>
+      // Execute the callback with a mock transaction object
+      callback(db)
+    );
 
     await bulkAssignKitCustody({
       kitIds: ["kit-1"],
@@ -647,6 +674,7 @@ describe("bulkReleaseKitCustody", () => {
     const kitsInCustody = [
       {
         id: "kit-1",
+        name: "Kit 1",
         status: KitStatus.IN_CUSTODY,
         custody: { id: "custody-1", custodian: { name: "John Doe" } },
         assets: [
@@ -662,8 +690,12 @@ describe("bulkReleaseKitCustody", () => {
     ];
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(kitsInCustody);
+
     //@ts-expect-error missing vitest type
-    db.$transaction.mockResolvedValue(true);
+    db.$transaction.mockImplementation((callback) =>
+      // Execute the callback with a mock transaction object
+      callback(db)
+    );
 
     await bulkReleaseKitCustody({
       kitIds: ["kit-1"],
@@ -805,6 +837,63 @@ describe("updateKitQrCode", () => {
 
     expect(db.kit.update).toHaveBeenCalledTimes(2); // Once to disconnect, once to connect
     expect(result).toEqual(updatedKit);
+  });
+});
+
+describe("relinkKitQrCode", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should relink qr code to kit", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr-id" }] });
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue({});
+
+    const result = await relinkKitQrCode({
+      qrId: "qr-1",
+      kitId: "kit-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.qr.update).toHaveBeenCalledWith({
+      where: { id: "qr-1" },
+      data: { organizationId: "org-1", userId: "user-1" },
+    });
+    expect(db.kit.update).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ oldQrCodeId: "old-qr-id", newQrId: "qr-1" });
+  });
+
+  it("should throw when qr code belongs to another asset", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    getQr.mockResolvedValue({
+      id: "qr-1",
+      organizationId: "org-1",
+      assetId: "asset-1",
+      kitId: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+
+    await expect(
+      relinkKitQrCode({
+        qrId: "qr-1",
+        kitId: "kit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
   });
 });
 

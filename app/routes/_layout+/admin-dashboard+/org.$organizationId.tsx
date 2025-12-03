@@ -1,16 +1,16 @@
+import { ChevronLeft } from "lucide-react";
 import {
-  json,
+  data,
   type LoaderFunctionArgs,
   type ActionFunctionArgs,
-} from "@remix-run/node";
+} from "react-router";
 import {
   Outlet,
   useActionData,
   useFetcher,
   useLoaderData,
   useNavigation,
-} from "@remix-run/react";
-import { ChevronLeft } from "lucide-react";
+} from "react-router";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Form } from "~/components/custom-form";
@@ -28,14 +28,19 @@ import {
   toggleBarcodeEnabled,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { getParams, data, error, parseData } from "~/utils/http.server";
+import { getParams, payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
 
+export const meta = () => [
+  { title: appendToMetaTitle("Organization details") },
+];
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -77,10 +82,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       await createDefaultWorkingHours(organization.id);
     }
 
-    return json(data({ organization }));
+    return payload({ organization });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -113,7 +118,7 @@ export const action = async ({
     );
 
     switch (intent) {
-      case "toggleSso":
+      case "toggleSso": {
         const { enabledSso } = parseData(
           await request.formData(),
           z.object({
@@ -125,8 +130,9 @@ export const action = async ({
         );
         await toggleOrganizationSso({ organizationId, enabledSso });
 
-        return json(data({ message: "SSO toggled" }));
-      case "disableWorkspace":
+        return payload({ message: "SSO toggled" });
+      }
+      case "disableWorkspace": {
         const { workspaceDisabled } = parseData(
           await request.formData(),
           z.object({
@@ -139,12 +145,11 @@ export const action = async ({
         // console.log("workspaceDisabled", workspaceDisabled);
         await toggleWorkspaceDisabled({ organizationId, workspaceDisabled });
 
-        return json(
-          data({
-            message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
-          })
-        );
-      case "toggleBarcodes":
+        return payload({
+          message: `Workspace ${workspaceDisabled ? "disabled" : "enabled"}`,
+        });
+      }
+      case "toggleBarcodes": {
         const { barcodesEnabled } = parseData(
           await request.formData(),
           z.object({
@@ -156,12 +161,11 @@ export const action = async ({
         );
         await toggleBarcodeEnabled({ organizationId, barcodesEnabled });
 
-        return json(
-          data({
-            message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
-          })
-        );
-      case "updateSsoDetails":
+        return payload({
+          message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
+        });
+      }
+      case "updateSsoDetails": {
         const { adminGroupId, selfServiceGroupId, domain } = parseData(
           await request.formData(),
           z.object({
@@ -207,8 +211,9 @@ export const action = async ({
           },
         });
 
-        return json(data({ message: "SSO details updated" }));
-      case "content":
+        return payload({ message: "SSO details updated" });
+      }
+      case "content": {
         const csvData = await csvDataFromRequest({ request });
         if (csvData.length < 2) {
           throw new ShelfError({
@@ -228,7 +233,8 @@ export const action = async ({
           userId,
           organizationId,
         });
-        return json(data(null));
+        return payload(null);
+      }
       default:
         throw new ShelfError({
           cause: null,
@@ -240,7 +246,7 @@ export const action = async ({
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, organizationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 

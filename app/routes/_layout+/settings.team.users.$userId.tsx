@@ -2,8 +2,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, Outlet, useLoaderData } from "@remix-run/react";
+} from "react-router";
+import { data, Outlet, useLoaderData } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -20,7 +20,7 @@ import { resolveUserAction } from "~/modules/user/utils.server";
 import { getUserContactById } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,21 +79,19 @@ export const loader = async ({
       title: userName,
     };
 
-    return json(
-      data({
-        isPersonalOrg: currentOrganization.type === "PERSONAL",
-        orgName: currentOrganization.name,
-        header,
-        user: {
-          ...user,
-          contact: userContact,
-        },
-        userName,
-      })
-    );
+    return payload({
+      isPersonalOrg: currentOrganization.type === "PERSONAL",
+      orgName: currentOrganization.name,
+      header,
+      user: {
+        ...user,
+        contact: userContact,
+      },
+      userName,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -112,7 +110,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

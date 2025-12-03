@@ -1,5 +1,6 @@
+import type { ReactNode } from "react";
 import type { Tag } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -16,23 +17,33 @@ import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
-export const DeleteTag = ({ tag }: { tag: Pick<Tag, "name" | "id"> }) => {
+export const DeleteTag = ({
+  tag,
+  trigger,
+}: {
+  tag: Pick<Tag, "name" | "id">;
+  trigger?: ReactNode;
+}) => {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
+
+  const defaultTrigger = (
+    <Button
+      disabled={disabled}
+      variant="secondary"
+      size="sm"
+      type="submit"
+      className="text-[12px]"
+      icon={"trash"}
+      title={"Delete"}
+      data-test-id="deleteCategoryButton"
+    />
+  );
 
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          disabled={disabled}
-          variant="secondary"
-          size="sm"
-          type="submit"
-          className="text-[12px]"
-          icon={"trash"}
-          title={"Delete"}
-          data-test-id="deleteCategoryButton"
-        />
+        {trigger ? trigger : defaultTrigger}
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>

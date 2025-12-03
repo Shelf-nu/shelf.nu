@@ -1,6 +1,7 @@
+import type { ReactElement } from "react";
 import { cloneElement, forwardRef } from "react";
 import type { Asset } from "@prisma/client";
-import { useNavigation } from "@remix-run/react";
+import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -23,7 +24,7 @@ type DeleteAssetProps = {
     title: Asset["title"];
     mainImage: Asset["mainImage"];
   };
-  trigger: React.ReactElement;
+  trigger: ReactElement;
 };
 
 export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(

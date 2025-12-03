@@ -1,8 +1,7 @@
 import { TagUseFor } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect, redirectDocument } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data, redirect, redirectDocument, useLoaderData } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
@@ -27,11 +26,12 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
-  data,
+  payload,
   error,
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
+import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -81,23 +81,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Estimate the next sequential ID that will be assigned to the new asset
     const nextSequentialId = await estimateNextSequentialId(organizationId);
 
-    return json(
-      data({
-        header,
-        categories,
-        totalCategories,
-        tags,
-        totalTags: tags.length,
-        locations,
-        totalLocations,
-        currency: currentOrganization?.currency,
-        customFields,
-        nextSequentialId,
-      })
-    );
+    return payload({
+      header,
+      categories,
+      totalCategories,
+      tags,
+      totalTags: tags.length,
+      locations,
+      totalLocations,
+      currency: currentOrganization?.currency,
+      customFields,
+      nextSequentialId,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -207,18 +205,25 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       senderId: authSession.userId,
     });
 
+    const actor = wrapUserLinkForNote({
+      id: authSession.userId,
+      firstName: asset.user.firstName,
+      lastName: asset.user.lastName,
+    });
     await createNote({
-      content: `Asset was created by **${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}**`,
+      content: `Asset was created by ${actor}.`,
       type: "UPDATE",
       userId: authSession.userId,
       assetId: asset.id,
     });
 
     if (asset.location) {
+      const locationLink = wrapLinkForNote(
+        `/locations/${asset.location.id}`,
+        asset.location.name.trim()
+      );
       await createNote({
-        content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to *[${asset.location.name.trim()}](/locations/${
-          asset.location.id
-        })**`,
+        content: `${actor} set the location  to ${locationLink}.`,
         type: "UPDATE",
         userId: authSession.userId,
         assetId: asset.id,
@@ -233,7 +238,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     return redirect(`/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

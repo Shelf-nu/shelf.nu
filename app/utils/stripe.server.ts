@@ -155,9 +155,25 @@ export async function createStripeCheckoutSession({
   }
 }
 
-/** Fetches prices and products from stripe */
+/**
+ * Fetches prices and products from Stripe. Returns empty arrays when premium features are disabled.
+ */
 export async function getStripePricesAndProducts() {
   try {
+    if (!premiumIsEnabled) {
+      return {
+        month: [],
+        year: [],
+      };
+    }
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        label,
+      });
+    }
+
     const pricesResponse = await stripe.prices.list({
       active: true,
       type: "recurring",
@@ -191,10 +207,13 @@ export async function getStripePricesForTrialPlanSelection() {
       active: true,
       type: "recurring",
       expand: ["data.product"],
+      limit: 100, // Increase limit to see more results
     });
+
     const groupedPrices = groupPricesByInterval(
       pricesResponse.data as PriceWithProduct[]
     );
+    // console.log("groupedPrices", groupedPrices.year);
     return [
       ...groupedPrices.month.filter(
         (price) =>
@@ -235,7 +254,7 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
 
   // Sort the prices within each group by unit_amount
   for (const interval in groupedPrices) {
-    if (groupedPrices.hasOwnProperty(interval)) {
+    if (Object.prototype.hasOwnProperty.call(groupedPrices, interval)) {
       // @ts-ignore
       groupedPrices[interval].sort((a, b) => a.unit_amount - b.unit_amount);
     }
@@ -302,6 +321,7 @@ export const createStripeCustomer = async ({
       await db.user.update({
         where: { id: userId },
         data: { customerId },
+        select: { id: true },
       });
 
       return customerId;
@@ -494,7 +514,7 @@ async function generateReturnUrl({
       userId,
       orgType: "TEAM",
     });
-  } catch (cause) {
+  } catch (_cause) {
     userTeamOrg = null;
   }
 
@@ -519,7 +539,7 @@ export async function validateSubscriptionIsActive({
   user,
   subscription,
 }: {
-  user: User;
+  user: Pick<User, "id" | "skipSubscriptionCheck" | "tierId">;
   subscription: Stripe.Subscription | null;
 }) {
   if (user.skipSubscriptionCheck) return;

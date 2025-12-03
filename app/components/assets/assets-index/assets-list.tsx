@@ -1,15 +1,15 @@
-import type { Tag } from "@prisma/client";
-
-import { useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
+import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Package } from "lucide-react";
+import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Spinner } from "~/components/shared/spinner";
-import { Tag as TagBadge } from "~/components/shared/tag";
 import {
   Tooltip,
   TooltipContent,
@@ -32,12 +32,12 @@ import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 import BulkActionsDropdown from "../bulk-actions-dropdown";
-// eslint-disable-next-line import/no-cycle
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { CategoryBadge } from "../category-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
@@ -144,7 +144,7 @@ export const AssetsList = ({
                         mainImageExpiration:
                           resource.extendedProps?.mainImageExpiration,
                       }}
-                      alt={resource.title}
+                      alt={`Image of ${resource.title}`}
                       className="size-14 rounded border object-cover"
                       withPreview
                     />
@@ -200,13 +200,13 @@ export const AssetsList = ({
   );
 };
 
-const ListAssetContent = ({
+export const ListAssetContent = ({
   item,
   bulkActions,
   isUserPage,
 }: {
   item: AssetsFromViewItem;
-  bulkActions?: React.ReactNode;
+  bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;
@@ -229,7 +229,7 @@ const ListAssetContent = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
                 withPreview
               />
@@ -285,12 +285,29 @@ const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={!isUserPage}>
         <Td>
-          <TeamMemberBadge teamMember={custody?.custodian} />
+          {custody?.custodian ? (
+            <TeamMemberBadge teamMember={custody.custodian} />
+          ) : (
+            <EmptyTableValue />
+          )}
         </Td>
       </When>
 
       {/* Location */}
-      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+      <Td>
+        {location ? (
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count?.children ?? 0,
+            }}
+          />
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
 
       {/* Quick Actions */}
       <Td>
@@ -303,32 +320,6 @@ const ListAssetContent = ({
       </Td>
     </>
   );
-};
-
-export const ListItemTagsColumn = ({
-  tags,
-}: {
-  tags: Pick<Tag, "id" | "name">[] | undefined;
-}) => {
-  const visibleTags = tags?.slice(0, 2);
-  const remainingTags = tags?.slice(2);
-  return tags && tags?.length > 0 ? (
-    <div className="">
-      {visibleTags?.map((tag) => (
-        <TagBadge key={tag.id} className="mr-2">
-          {tag.name}
-        </TagBadge>
-      ))}
-      {remainingTags && remainingTags?.length > 0 ? (
-        <TagBadge
-          className="mr-2 w-6 text-center"
-          title={`${remainingTags?.map((t) => t.name).join(", ")}`}
-        >
-          {`+${tags.length - 2}`}
-        </TagBadge>
-      ) : null}
-    </div>
-  ) : null;
 };
 
 function AdvancedModeMobileFallback() {

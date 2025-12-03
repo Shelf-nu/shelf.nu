@@ -184,6 +184,7 @@ export default function renderEventCard({ event }: EventCardProps) {
     (element as any)._cleanup = cleanup;
   };
 
+  const colors = bookingStatusColorMap[booking.status];
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
@@ -192,7 +193,7 @@ export default function renderEventCard({ event }: EventCardProps) {
             "!hover:bg-purple-100 flex items-center gap-1 whitespace-normal bg-transparent lg:truncate",
             event.extendedProps?.className
           )}
-          style={{ color: bookingStatusColorMap[booking.status] }}
+          style={{ color: colors.text }}
         >
           <div
             ref={triggerRefCallback}

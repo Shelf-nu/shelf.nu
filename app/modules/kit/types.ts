@@ -1,4 +1,5 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
+import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 
 export type UpdateKitPayload = Partial<
   Pick<
@@ -20,6 +21,7 @@ export type UpdateKitPayload = Partial<
 
 // Define the static includes
 export const GET_KIT_STATIC_INCLUDES = {
+  location: LOCATION_WITH_HIERARCHY,
   custody: {
     select: {
       id: true,
@@ -85,12 +87,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
       color: true,
     },
   },
-  location: {
-    select: {
-      id: true,
-      name: true,
-    },
-  },
+  location: LOCATION_WITH_HIERARCHY,
   tags: {
     select: {
       id: true,

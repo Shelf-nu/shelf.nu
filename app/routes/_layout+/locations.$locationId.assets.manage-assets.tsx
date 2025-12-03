@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus, type Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { useAtomValue, useSetAtom } from "jotai";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -18,8 +23,8 @@ import {
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/assets-list";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
@@ -29,6 +34,7 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -40,17 +46,23 @@ import {
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
+import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { updateLocationAssets } from "~/modules/location/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -118,35 +130,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       singular: "asset",
       plural: "assets",
     };
+    const header = {
+      title: `Move assets to ‘${location?.name}’ location`,
+      subHeading:
+        "Search your database for assets that you would like to move to this location.",
+    };
 
-    return json(
-      data({
-        header: {
-          title: `Move assets to ‘${location?.name}’ location`,
-          subHeading:
-            "Search your database for assets that you would like to move to this location.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        items: assets,
-        categories,
-        tags,
-        search,
-        page,
-        totalItems: totalAssets,
-        perPage,
-        totalPages,
-        modelName,
-        location,
-        totalCategories,
-        totalTags,
-        locations,
-        totalLocations,
-      })
-    );
+    return payload({
+      header,
+      showSidebar: true,
+      noScroll: true,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      modelName,
+      location,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -169,7 +180,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds, redirectTo } = parseData(
+    const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
@@ -201,7 +212,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -255,7 +266,7 @@ export default function AddAssetsToLocation() {
           return;
         }
 
-        navigate(manageKitsUrl);
+        void navigate(manageKitsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -411,10 +422,10 @@ export default function AddAssetsToLocation() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageKitsUrl);
+          void navigate(manageKitsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some assets to the booking but haven't saved it yet. Do
@@ -429,7 +440,7 @@ const RowComponent = ({
 }: {
   item: Prisma.AssetGetPayload<{
     include: {
-      location: true;
+      location: typeof LOCATION_WITH_HIERARCHY;
       category: true;
       tags: true;
     };
@@ -451,7 +462,7 @@ const RowComponent = ({
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
                 }}
-                alt={item.title}
+                alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
@@ -472,13 +483,14 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {item.location ? (
-          <div
-            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-            title={`Current location: ${item.location.name}`}
-          >
-            <div className="size-2 rounded-full bg-gray-500"></div>
-            <span>{item.location.name}</span>
-          </div>
+          <LocationBadge
+            location={{
+              id: item.location.id,
+              name: item.location.name,
+              parentId: item.location.parentId ?? undefined,
+              childCount: item.location._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
 

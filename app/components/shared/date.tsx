@@ -5,27 +5,29 @@ import { getDateTimeFormatFromHints, useHints } from "~/utils/client-hints";
  * Formats a date using locale-specific formatting without timezone conversion.
  * Used for absolute dates that should display exactly as stored (e.g., working hours overrides).
  */
-function formatAbsoluteDate(
+export function formatAbsoluteDate(
   date: string | Date,
   options?: Intl.DateTimeFormatOptions
 ): string {
   // Extract just the date part and create a local date
-  let dateToFormat: Date;
+  let dateOnly: string;
   if (typeof date === "string") {
-    // Extract date-only part if it's a datetime string
-    const dateOnly = date.includes("T") ? date.split("T")[0] : date;
-    // Parse as local date components to completely avoid timezone interpretation
-    const [year, month, day] = dateOnly.split("-").map(Number);
-    dateToFormat = new Date(year, month - 1, day);
+    dateOnly = date.includes("T") ? date.split("T")[0] : date;
   } else {
-    dateToFormat = date;
+    if (isNaN(date.getTime())) {
+      throw new Error("Invalid Date object");
+    }
+    dateOnly = date.toISOString().split("T")[0];
   }
+
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  const dateToFormat = new Date(year, month - 1, day);
 
   // Convert Intl.DateTimeFormatOptions to date-fns format string
   let formatString: string;
 
   if (options) {
-    let parts = [];
+    const parts = [];
 
     // Build format parts in logical order
     if (options.weekday === "long") parts.push("EEEE");
@@ -72,9 +74,10 @@ export const DateS = ({
   date,
   options,
   includeTime = false,
+  onlyTime = false,
   localeOnly = false,
 }: {
-  date: string | Date;
+  date: string | Date | null;
   /**
    * Options to pass to Intl.DateTimeFormat
    * Default values are { year: 'numeric', month: 'numeric', day: 'numeric' }
@@ -87,6 +90,11 @@ export const DateS = ({
    */
   includeTime?: boolean;
   /**
+   * Whether to show only the time portion (no date)
+   * When true, formats only hours and minutes
+   */
+  onlyTime?: boolean;
+  /**
    * Whether to format the date based on locale only, without timezone conversion.
    * Use this for absolute dates like working hours overrides that represent
    * real-world, location-specific dates that should not change based on user timezone.
@@ -94,6 +102,11 @@ export const DateS = ({
   localeOnly?: boolean;
 }) => {
   const hints = useHints();
+  if (!date) {
+    // eslint-disable-next-line no-console
+    console.warn("DateS component received null date:", date);
+    return null;
+  }
 
   // Handle locale-only formatting (no timezone conversion)
   if (localeOnly) {
@@ -112,15 +125,27 @@ export const DateS = ({
     d = new Date(date);
   }
 
-  // If includeTime is true and no time options have been explicitly provided,
-  // add default time formatting options
-  const timeOptions: Intl.DateTimeFormatOptions = includeTime
-    ? {
-        hour: "numeric",
-        minute: "numeric",
-        ...options,
-      }
-    : options || {};
+  // Determine formatting options based on flags
+  let timeOptions: Intl.DateTimeFormatOptions;
+
+  if (onlyTime) {
+    // Only show time (no date)
+    // Use timeStyle to prevent default date options from being added
+    timeOptions = {
+      timeStyle: "short",
+      ...options,
+    };
+  } else if (includeTime) {
+    // Show both date and time
+    timeOptions = {
+      hour: "numeric",
+      minute: "numeric",
+      ...options,
+    };
+  } else {
+    // Show only date (default)
+    timeOptions = options || {};
+  }
 
   const formattedDate = getDateTimeFormatFromHints(hints, timeOptions).format(
     new Date(d)

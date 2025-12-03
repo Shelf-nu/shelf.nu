@@ -7,9 +7,9 @@ import type {
 } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import type { AppLoadContext, LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
+import type { AppLoadContext, LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
@@ -31,6 +31,12 @@ import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
 const label: ErrorLabel = "Invite";
+
+const INVITE_EMAIL_BATCH_SIZE = 20;
+const INVITE_EMAIL_BATCH_DELAY_MS = 1_000;
+const INVITE_EMAIL_SPACING_MS = Math.ceil(
+  INVITE_EMAIL_BATCH_DELAY_MS / INVITE_EMAIL_BATCH_SIZE
+);
 
 /**
  * Validates invite based on SSO configuration, considering target organization
@@ -140,6 +146,7 @@ export async function createInvite(
           some: { organizationId },
         },
       },
+      select: { id: true },
     });
 
     if (existingUser) {
@@ -267,7 +274,7 @@ export async function createInvite(
       to: inviteeEmail,
       subject: `✉️ You have been invited to ${invite.organization.name}`,
       text: inviteEmailText({ invite, token, extraMessage }),
-      html: invitationTemplateString({ invite, token, extraMessage }),
+      html: await invitationTemplateString({ invite, token, extraMessage }),
     });
 
     return invite;
@@ -303,7 +310,7 @@ export async function updateInviteStatus({
       if (invite?.status === InviteStatuses.ACCEPTED) {
         title = "Invite already accepted";
         message =
-          "Please login to your account to access the organization. \n If you have not set a password yet,\n you must use the <b>OTP login</b> the first time you access your account.";
+          "Please login to your account to access the organization. <br/> If you have not set a password yet, you must use the <b>OTP login</b> the first time you access your account.";
       }
 
       if (invite?.status === InviteStatuses.REJECTED) {
@@ -584,7 +591,7 @@ export async function bulkInviteUsers({
       .map((user) => user.teamMemberId!);
 
     const teamMembers = await db.teamMember.findMany({
-      where: { id: { in: teamMemberIds } },
+      where: { id: { in: teamMemberIds }, organizationId },
       select: { id: true, userId: true },
     });
 
@@ -718,9 +725,47 @@ export async function bulkInviteUsers({
       organization: true,
     } satisfies Prisma.InviteInclude;
 
-    let createdInvites: Array<
-      Prisma.InviteGetPayload<{ include: typeof INVITE_INCLUDE }>
-    > = [];
+    type InviteWithRelations = Prisma.InviteGetPayload<{
+      include: typeof INVITE_INCLUDE;
+    }>;
+
+    let createdInvites: InviteWithRelations[] = [];
+
+    const scheduleInviteEmailSending = (
+      invites: InviteWithRelations[],
+      extraInviteMessage?: string | null
+    ) => {
+      invites.forEach((invite, index) => {
+        const batchIndex = Math.floor(index / INVITE_EMAIL_BATCH_SIZE);
+        const positionInBatch = index % INVITE_EMAIL_BATCH_SIZE;
+        const delay =
+          batchIndex * INVITE_EMAIL_BATCH_DELAY_MS +
+          positionInBatch * INVITE_EMAIL_SPACING_MS;
+
+        setTimeout(async () => {
+          const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
+            expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
+          });
+
+          const html = await invitationTemplateString({
+            invite,
+            token,
+            extraMessage: extraInviteMessage,
+          });
+
+          sendEmail({
+            to: invite.inviteeEmail,
+            subject: `✉️ You have been invited to ${invite.organization.name}`,
+            text: inviteEmailText({
+              invite,
+              token,
+              extraMessage: extraInviteMessage,
+            }),
+            html,
+          });
+        }, delay);
+      });
+    };
 
     await db.$transaction(async (tx) => {
       // Bulk create all required team members
@@ -768,19 +813,9 @@ export async function bulkInviteUsers({
       });
     });
 
-    // Queue emails for sending - no need to await since it's handled by queue
-    createdInvites.forEach((invite) => {
-      const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
-        expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
-      });
-
-      sendEmail({
-        to: invite.inviteeEmail,
-        subject: `✉️ You have been invited to ${invite.organization.name}`,
-        text: inviteEmailText({ invite, token, extraMessage }),
-        html: invitationTemplateString({ invite, token, extraMessage }),
-      });
-    });
+    if (createdInvites.length > 0) {
+      scheduleInviteEmailSending(createdInvites, extraMessage);
+    }
 
     sendNotification({
       title: "Successfully invited users",

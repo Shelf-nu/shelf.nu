@@ -91,6 +91,7 @@ export type FailureReason = {
     // Other kinds of errors
     | "DB"
     | "Request validation"
+    | "Request aborted"
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
     | "Environment" // Related to the environment setup
@@ -144,6 +145,7 @@ export type FailureReason = {
     | 404 // not found
     | 405 // method not allowed
     | 409 // conflict
+    | 499 // client closed request
     | 500; // internal server error
 };
 
@@ -205,6 +207,42 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
   );
 }
 
+function isAbortError(cause: unknown) {
+  if (!cause) {
+    return false;
+  }
+
+  if (cause instanceof Error) {
+    const name = cause.name?.toLowerCase?.() ?? "";
+    const message = cause.message?.toLowerCase?.() ?? "";
+
+    if (name === "aborterror") {
+      return true;
+    }
+
+    if (
+      message.includes("call aborted") ||
+      message.includes("request aborted")
+    ) {
+      return true;
+    }
+
+    if (typeof cause.cause === "string") {
+      return cause.cause.toLowerCase().includes("aborted");
+    }
+
+    if (cause.cause instanceof Error) {
+      return isAbortError(cause.cause);
+    }
+  }
+
+  if (typeof cause === "string") {
+    return cause.toLowerCase().includes("aborted");
+  }
+
+  return false;
+}
+
 /**
  * This helper function is used to check if an error is an instance of `ShelfError` or an object that looks like an `ShelfError`.
  */
@@ -235,6 +273,16 @@ export function makeShelfError(
   additionalData?: AdditionalData,
   shouldBeCaptured: boolean = true
 ) {
+  if (isAbortError(cause)) {
+    return new ShelfError({
+      cause,
+      label: "Request aborted",
+      message: "The request was cancelled before it could complete.",
+      shouldBeCaptured: false,
+      status: 499,
+    });
+  }
+
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
     return new ShelfError({

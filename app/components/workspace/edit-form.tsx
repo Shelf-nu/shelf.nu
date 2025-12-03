@@ -2,9 +2,10 @@ import {
   type Organization,
   type Currency,
   OrganizationType,
+  type QrIdDisplayPreference,
 } from "@prisma/client";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -16,6 +17,7 @@ import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
+import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -29,6 +31,7 @@ import { Spinner } from "../shared/spinner";
 interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
+  qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   className?: string;
 }
 
@@ -42,26 +45,65 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
       : z.string().min(2, "Name is required"),
     logo: z.any().optional(),
     currency: z.custom<Currency>(),
+    qrIdDisplayPreference: z.custom<QrIdDisplayPreference>(),
+    showShelfBranding: z
+      .union([z.literal("on"), z.literal("off"), z.undefined()])
+      .transform((value) => {
+        if (value === undefined) return undefined;
+        return value === "on";
+      })
+      .optional(),
   });
 
-export const WorkspaceEditForms = ({ name, currency, className }: Props) => (
+export const WorkspaceEditForms = ({
+  name,
+  currency,
+  qrIdDisplayPreference,
+  className,
+}: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
-    <WorkspaceGeneralEditForms name={name} currency={currency} />
+    <WorkspaceGeneralEditForms
+      name={name}
+      currency={currency}
+      qrIdDisplayPreference={qrIdDisplayPreference}
+    />
     <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
   </div>
 );
 
-const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
-  const { organization, isPersonalWorkspace } = useLoaderData<typeof loader>();
+const WorkspaceGeneralEditForms = ({
+  name,
+  currency,
+  qrIdDisplayPreference,
+  className,
+}: Props) => {
+  const { organization, isPersonalWorkspace, canHideShelfBranding } =
+    useLoaderData<typeof loader>();
 
-  let schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
+  const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const fetcher = useFetcher({ key: "general" });
   const disabled = useDisabled(fetcher);
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
+
+  const fetcherError = (
+    fetcher.data as
+      | {
+          error?: {
+            message: string;
+            additionalData?: { field?: string };
+          };
+        }
+      | undefined
+  )?.error;
+
+  const imageError =
+    (fetcherError?.additionalData?.field === "image"
+      ? fetcherError.message
+      : undefined) ?? fileError;
 
   return (
     <fetcher.Form
@@ -112,7 +154,7 @@ const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
               onChange={validateFile}
               label={"Main image"}
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
@@ -144,6 +186,85 @@ const WorkspaceGeneralEditForms = ({ name, currency, className }: Props) => {
             />
           </FormRow>
         </div>
+
+        <div>
+          <FormRow
+            rowLabel={"QR Code Display"}
+            className={"border-b-0"}
+            subHeading={
+              <p>
+                Choose which identifier is shown on QR code labels. You can
+                display either the QR code ID or the asset's SAM ID.
+              </p>
+            }
+          >
+            <InnerLabel hideLg>QR Code Display</InnerLabel>
+            <QrIdDisplayPreferenceSelector
+              name={zo.fields.qrIdDisplayPreference()}
+              defaultValue={qrIdDisplayPreference || "QR_ID"}
+            />
+          </FormRow>
+        </div>
+
+        <FormRow
+          rowLabel={"Label branding"}
+          className={"border-b-0"}
+          subHeading={
+            canHideShelfBranding ? (
+              <p>
+                Control whether the "Powered by Shelf.nu" footer appears on QR
+                and barcode labels.
+              </p>
+            ) : (
+              <p>
+                This is a premium feature.{" "}
+                <Button
+                  variant="link"
+                  className="inline text-xs"
+                  to="/account-details/subscription"
+                >
+                  Upgrade your plan
+                </Button>{" "}
+                to hide Shelf branding on labels.
+              </p>
+            )
+          }
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="hidden"
+              name={zo.fields.showShelfBranding()}
+              value="off"
+            />
+            <Switch
+              id="showShelfBranding"
+              name={zo.fields.showShelfBranding()}
+              defaultChecked={organization.showShelfBranding ?? true}
+              disabled={!canHideShelfBranding}
+              aria-labelledby="showShelfBranding-label"
+              aria-describedby="showShelfBranding-desc"
+            />
+            <div>
+              <label
+                id="showShelfBranding-label"
+                htmlFor="showShelfBranding"
+                className={tw(
+                  "cursor-pointer text-[14px] font-medium",
+                  canHideShelfBranding ? "text-gray-700" : "text-gray-400"
+                )}
+              >
+                Display Shelf branding on labels
+              </label>
+              <p
+                id="showShelfBranding-desc"
+                className="text-[14px] text-gray-600"
+              >
+                Toggle Shelf branding on downloadable QR and barcode labels.
+              </p>
+            </div>
+          </div>
+        </FormRow>
+
         <div className="text-right">
           <Button
             type="submit"
@@ -183,7 +304,7 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
 const WorkspacePermissionsEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
   const fetcher = useFetcher({ key: "permissions" });
-  let schema = EditWorkspacePermissionsSettingsFormSchema();
+  const schema = EditWorkspacePermissionsSettingsFormSchema();
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = useDisabled(fetcher);
 
@@ -346,7 +467,7 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
   const fetcher = useFetcher({ key: "sso" });
-  let schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
+  const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = useDisabled(fetcher);
 

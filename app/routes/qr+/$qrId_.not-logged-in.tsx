@@ -1,17 +1,19 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
-import { data, getParams } from "~/utils/http.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { payload, getParams } from "~/utils/http.server";
+
+export const meta = () => [{ title: appendToMetaTitle("QR not logged in") }];
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  return json(data({ qrId }));
+  return data(payload({ qrId }));
 }
 
 export default function QrNotLoggedIn() {

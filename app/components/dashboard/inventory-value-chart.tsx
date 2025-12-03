@@ -1,5 +1,5 @@
-import { useLoaderData } from "@remix-run/react";
-import { Text, Flex, ProgressCircle } from "@tremor/react";
+import { Text, ProgressCircle } from "@tremor/react";
+import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
@@ -33,10 +33,9 @@ export default function InventoryValueChart() {
       <div className="h-full p-8">
         {valueKnownAssets > 0 ? (
           <div className="space-y-3">
-            <Flex
-              className="space-x-5"
-              justifyContent="evenly"
-              alignItems="end"
+            <div
+              data-testid="inventory-value-layout"
+              className="flex flex-col items-center gap-6 md:flex-row md:items-end md:justify-evenly"
             >
               <ClientOnly
                 fallback={<FallbackLoading className="size-[150px]" />}
@@ -60,18 +59,18 @@ export default function InventoryValueChart() {
                   </ProgressCircle>
                 )}
               </ClientOnly>
-              <div>
+              <div className="min-w-0 text-center md:text-right">
                 <Text className="mb-2 !text-[14px] font-medium text-gray-600">
                   Inventory value
                 </Text>
-                <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
+                <Text className="mb-3 break-words !text-[30px] font-semibold text-gray-900">
                   {(totalValuation || 0).toLocaleString(locale, {
                     style: "currency",
                     currency: currency,
                   })}
                 </Text>
               </div>
-            </Flex>
+            </div>
           </div>
         ) : (
           <EmptyState text="No assets with values exists in database" />

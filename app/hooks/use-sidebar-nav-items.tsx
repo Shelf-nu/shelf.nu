@@ -1,5 +1,5 @@
+import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { useLoaderData } from "@remix-run/react";
 import { Crisp } from "crisp-sdk-web";
 import {
   AlarmClockIcon,
@@ -19,6 +19,7 @@ import {
   UsersRoundIcon,
   type LucideIcon,
 } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import When from "~/components/when/when";
 import type { loader } from "~/routes/_layout+/_layout";
@@ -30,7 +31,7 @@ type BaseNavItem = {
   title: string;
   hidden?: boolean;
   Icon: LucideIcon;
-  disabled?: boolean | { reason: React.ReactNode };
+  disabled?: boolean | { reason: ReactNode };
   badge?: {
     show: boolean;
     variant?: "unread";

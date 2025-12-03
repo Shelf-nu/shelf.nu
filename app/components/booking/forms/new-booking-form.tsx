@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
@@ -43,7 +43,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
   const { custodianRef, assetIds } = booking;
 
-  const { teamMembers, userId, currentOrganization, tags } =
+  const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
   const tagsSuggestions = tags.map((tag) => ({
     label: tag.name,
@@ -58,10 +58,15 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const workingHoursData = useWorkingHours(currentOrganization.id);
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
+
+  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
+    useUserRoleHelper();
+
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
       workingHours,
-      bookingSettings.bufferStartTime
+      bookingSettings.bufferStartTime,
+      isAdministratorOrOwner
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
@@ -74,13 +79,15 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       action: "new",
       workingHours: workingHours,
       bookingSettings,
+      isAdminOrOwner: isAdministratorOrOwner,
     })
   );
 
-  const { roles, isBaseOrSelfService } = useUserRoleHelper();
+  /** Use teamMembersForForm when available (from dialog contexts), otherwise fall back to teamMembers */
+  const teamMembersToUse = teamMembersForForm || teamMembers;
 
   /** This is used when we have selfSErvice or Base as we are setting the default */
-  const defaultTeamMember = teamMembers?.find(
+  const defaultTeamMember = teamMembersToUse?.find(
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
@@ -111,7 +118,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
         <div className="-mx-4 mb-4 md:mx-0">
           <div className={tw("mb-8 w-full lg:mb-0 ")}>
             <div className="flex w-full flex-col gap-3">
-              <Card className="m-0">
+              <Card className="field-card m-0">
                 <NameField
                   name={undefined}
                   fieldName={zo.fields.name()}
@@ -122,7 +129,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   onChange={updateName}
                 />
               </Card>
-              <Card className="m-0">
+              <Card className="field-card m-0">
                 <DatesFields
                   startDate={startDate}
                   startDateName={zo.fields.startDate()}
@@ -143,7 +150,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   workingHoursData={workingHoursData}
                 />
               </Card>
-              <Card className="m-0">
+              <Card className="field-card m-0">
                 <CustodianField
                   defaultTeamMember={defaultTeamMember}
                   disabled={disabled || isBaseOrSelfService}
@@ -155,7 +162,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   }
                 />
               </Card>
-              <Card className="m-0 overflow-visible">
+              <Card className="field-card m-0 overflow-visible">
                 <TagsAutocomplete
                   existingTags={[]}
                   suggestions={tagsSuggestions}
@@ -165,7 +172,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   }
                 />
               </Card>
-              <Card className="m-0">
+              <Card className="field-card m-0">
                 <DescriptionField
                   description={undefined}
                   fieldName={zo.fields.description()}
@@ -179,7 +186,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
             </div>
           </div>
         </div>
-        <Card className="sticky bottom-0 -mx-6 mb-0 rounded-none border-0 px-6 py-0 text-right">
+        <Card className="field-card sticky bottom-0 -mx-6 mb-0 rounded-none border-0 px-6 py-0 text-right">
           <div className="-mx-6 mb-3 border-t shadow" />
           {assetIds?.map((item, i) => (
             <input
@@ -189,25 +196,27 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               value={item}
             />
           ))}
-          <div className="flex flex-col">
+          <div className={tw("actions-wrapper flex flex-col gap-2")}>
             {!assetIds ? (
               <Button
                 icon="scan"
-                className="mb-1"
+                className="whitespace-nowrap"
                 type="submit"
                 disabled={disabled}
                 value="scan"
                 name="intent"
+                width={"full"}
               >
                 Scan QR codes
               </Button>
             ) : null}
             <Button
-              className="mb-3 whitespace-nowrap"
+              className="whitespace-nowrap"
               icon={assetIds ? undefined : "rows"}
               value="create"
               name="intent"
               disabled={disabled}
+              width={"full"}
             >
               {assetIds ? "Create Booking" : "View assets list"}
             </Button>
@@ -217,7 +226,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               to=".."
               width="full"
               disabled={disabled}
-              className=" mt-3 whitespace-nowrap"
+              className="cancellation-button whitespace-nowrap"
             >
               Cancel
             </Button>

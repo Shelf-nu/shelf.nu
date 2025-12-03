@@ -1,9 +1,10 @@
+import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "react-router";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
-import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.manage-assets";
-import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.manage-kits";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
 import { SERVER_URL } from "~/utils/env";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
@@ -100,12 +101,20 @@ export function AvailabilityLabel({
     hasAssetBookingConflicts(asset, booking.id) &&
     !["ONGOING", "OVERDUE"].includes(booking.status)
   ) {
-    const conflictingBooking = asset?.bookings?.find(
-      (b) =>
-        b.status === BookingStatus.ONGOING ||
-        b.status === BookingStatus.OVERDUE ||
-        b.status === BookingStatus.RESERVED
-    );
+    const conflictingBooking = asset?.bookings
+      ?.filter(
+        (b) =>
+          b.id !== booking.id &&
+          (b.status === BookingStatus.ONGOING ||
+            b.status === BookingStatus.OVERDUE ||
+            b.status === BookingStatus.RESERVED)
+      )
+      .sort((a, b) => {
+        // Sort by 'from' date descending to get the newest booking first
+        const aDate = a.from ? new Date(a.from).getTime() : 0;
+        const bDate = b.from ? new Date(b.from).getTime() : 0;
+        return bDate - aDate;
+      })[0];
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}
@@ -140,10 +149,19 @@ export function AvailabilityLabel({
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const conflictingBooking = asset?.bookings?.find(
-      (b) =>
-        b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
-    );
+    const conflictingBooking = asset?.bookings
+      ?.filter(
+        (b) =>
+          b.id !== booking.id &&
+          (b.status === BookingStatus.ONGOING ||
+            b.status === BookingStatus.OVERDUE)
+      )
+      .sort((a, b) => {
+        // Sort by 'from' date descending to get the newest booking first
+        const aDate = a.from ? new Date(a.from).getTime() : 0;
+        const bDate = b.from ? new Date(b.from).getTime() : 0;
+        return bDate - aDate;
+      })[0];
 
     return (
       <AvailabilityBadge
@@ -194,7 +212,7 @@ export function AvailabilityBadge({
 }: {
   badgeText: string;
   tooltipTitle: string;
-  tooltipContent: string | React.ReactNode;
+  tooltipContent: string | ReactNode;
   className?: string;
 }) {
   return (

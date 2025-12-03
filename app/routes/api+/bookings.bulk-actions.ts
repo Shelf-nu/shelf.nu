@@ -1,5 +1,4 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
@@ -14,7 +13,7 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -71,7 +70,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       case "bulk-archive": {
@@ -90,7 +89,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       case "bulk-cancel": {
@@ -111,16 +110,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return data(payload(null));
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import _ from "lodash";
 import { tw } from "~/utils/tw";
 import { GrayBadge } from "../shared/gray-badge";
@@ -9,7 +10,7 @@ import {
 } from "../shared/tooltip";
 
 type PropsWithRenderItem<T> = {
-  renderItem: (item: T) => React.ReactNode;
+  renderItem: (item: T) => ReactNode;
 };
 
 type PropsWithoutRenderItem<T> = {
@@ -34,7 +35,7 @@ type ItemsWithViewMoreProps<T> = MergedProps<T> & {
   items: T[];
   showCount?: number;
   className?: string;
-  emptyMessage?: string | React.ReactNode;
+  emptyMessage?: string | ReactNode;
 };
 
 export default function ItemsWithViewMore<T>({

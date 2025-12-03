@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
-import { useParams } from "@remix-run/react";
+import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { List } from "../list";
@@ -11,6 +11,7 @@ import { Filters } from "../list/filters";
 import { SortBy } from "../list/filters/sort-by";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
+import { DateS } from "../shared/date";
 import { Td, Th } from "../table";
 import ActionsDropdown from "./actions-dropdown";
 import When from "../when/when";
@@ -104,7 +105,7 @@ function ListContent({
 }: {
   item: Prisma.AssetReminderGetPayload<{
     include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }> & { displayDate: string };
+  }>;
   extraProps: { isAssetReminderPage: boolean };
 }) {
   const now = new Date();
@@ -127,7 +128,9 @@ function ListContent({
           </Button>
         </Td>
       </When>
-      <Td>{item.displayDate}</Td>
+      <Td>
+        <DateS date={item.alertDateTime} includeTime />
+      </Td>
       <Td>
         <Badge
           color={

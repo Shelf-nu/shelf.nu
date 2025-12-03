@@ -1,0 +1,189 @@
+import { OrganizationRoles } from "@prisma/client";
+import { useSetAtom } from "jotai";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+  LinksFunction,
+} from "react-router";
+import { data, redirect, useNavigation } from "react-router";
+import { z } from "zod";
+import { addScannedItemAtom } from "~/atoms/qr-scanner";
+import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
+import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { CodeScanner } from "~/components/scanner/code-scanner";
+import AddAssetsToBookingDrawer, {
+  addScannedAssetsToBookingSchema,
+} from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
+import {
+  addScannedAssetsToBooking,
+  getBooking,
+} from "~/modules/booking/service.server";
+import scannerCss from "~/styles/scanner.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { canUserManageBookingAssets } from "~/utils/bookings";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import {
+  assertIsPost,
+  payload,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: scannerCss },
+];
+
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      }
+    );
+
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+    const booking = await getBooking({
+      id: bookingId,
+      organizationId,
+      userOrganizations,
+      request,
+    });
+
+    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+
+    if (!canManageAssets) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "You are not allowed to add assets for this booking at the moment.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+    const title = `Scan assets for booking | ${booking.name}`;
+    const header: HeaderData = {
+      title,
+    };
+
+    return payload({ title, header, booking });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    throw data(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }));
+
+  try {
+    assertIsPost(request);
+
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    const formData = await request.formData();
+
+    const { assetIds, kitIds } = parseData(
+      formData,
+      addScannedAssetsToBookingSchema
+    );
+
+    await addScannedAssetsToBooking({
+      bookingId,
+      assetIds,
+      kitIds,
+      organizationId,
+      userId,
+    });
+
+    sendNotification({
+      title: "Assets added",
+      message: "All the scanned assets has been successfully added to booking.",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/bookings/${bookingId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return data(error(reason), { status: reason.status });
+  }
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export const handle = {
+  breadcrumb: () => "Scan QR codes to add to booking",
+  name: "booking.overview.scan-assets",
+};
+
+export default function ScanAssetsForBookings() {
+  const addItem = useSetAtom(addScannedItemAtom);
+  const navigation = useNavigation();
+  const isLoading = isFormProcessing(navigation.state);
+
+  const { vh, isMd } = useViewportHeight();
+  const height = isMd ? vh - 67 : vh - 100;
+  function handleCodeDetectionSuccess({
+    value: qrId,
+    error,
+    type,
+  }: OnCodeDetectionSuccessProps) {
+    /** WE send the error to the item. addItem will automatically handle the data based on its value */
+    addItem(qrId, error, type);
+  }
+
+  return (
+    <>
+      <Header hidePageDescription />
+
+      <AddAssetsToBookingDrawer isLoading={isLoading} />
+
+      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+        <CodeScanner
+          isLoading={isLoading}
+          onCodeDetectionSuccess={handleCodeDetectionSuccess}
+          backButtonText="Booking"
+          allowNonShelfCodes
+          paused={false}
+          setPaused={() => {}}
+          scannerModeClassName={(mode) =>
+            tw(mode === "scanner" && "justify-start pt-[100px]")
+          }
+        />
+      </div>
+    </>
+  );
+}

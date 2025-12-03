@@ -1,5 +1,8 @@
-import { Link, Outlet } from "@remix-run/react";
+import { Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
+export const meta = () => [{ title: appendToMetaTitle("Kits") }];
 
 export function loader() {
   return null;

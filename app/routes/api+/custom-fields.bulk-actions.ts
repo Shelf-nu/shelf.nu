@@ -1,4 +1,4 @@
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkActivateCustomFieldSchema } from "~/components/custom-fields/bulk-activate-dialog";
 import { BulkDeactivateCustomFieldSchema } from "~/components/custom-fields/bulk-deactivate-dialog";
@@ -7,7 +7,7 @@ import { bulkActivateOrDeactivateCustomFields } from "~/modules/custom-field/ser
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
@@ -59,8 +59,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
-            ? { organizationId }
-            : { id: { in: customFieldIds } },
+            ? { organizationId, deletedAt: null }
+            : { id: { in: customFieldIds }, deletedAt: null },
         });
 
         await assertWillExceedCustomFieldLimit({
@@ -83,7 +83,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       case "bulk-deactivate": {
@@ -93,8 +93,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
         const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
-            ? { organizationId }
-            : { id: { in: customFieldIds } },
+            ? { organizationId, deletedAt: null }
+            : { id: { in: customFieldIds }, deletedAt: null },
         });
 
         await bulkActivateOrDeactivateCustomFields({
@@ -111,16 +111,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
           senderId: userId,
         });
 
-        return json(data({ success: true }));
+        return data(payload({ success: true }));
       }
 
       default: {
         checkExhaustiveSwitch(intent);
-        return json(data(null));
+        return data(payload(null));
       }
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

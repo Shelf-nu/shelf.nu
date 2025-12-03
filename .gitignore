@@ -2,6 +2,7 @@ node_modules
 
 /build
 /public/build
+.react-router/
 .env
 .env.local
 .env.staging
@@ -50,3 +51,5 @@ desktop-app/portable
 docs/.vitepress/cache
 docs/.vitepress/dist
 .vercel
+
+.react-router/types

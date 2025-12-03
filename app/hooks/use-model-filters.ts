@@ -1,8 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@prisma/client";
-import type { SerializeFrom } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
 import { transformItemUsingTransformer } from "~/utils/model-filters";
@@ -83,7 +82,7 @@ export function useModelFilters({
     defaultValues ?? []
   );
 
-  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
+  const fetcher = useFetcherWithReset<typeof loader>();
   const totalItems = initialData[countKey];
 
   // Track if all data is loaded
@@ -212,7 +211,7 @@ export function useModelFilters({
 
       // Only fetch from server if we don't have all data
       if (!hasAllData) {
-        fetcher.submit(
+        void fetcher.submit(
           {
             ...model,
             queryValue: e.currentTarget.value,

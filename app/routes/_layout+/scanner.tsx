@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
+import { useAtom, useSetAtom } from "jotai";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Link, useNavigate } from "@remix-run/react";
-import { useAtom, useSetAtom } from "jotai";
+} from "react-router";
+import { data, Link, useNavigate } from "react-router";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -23,15 +22,22 @@ import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.s
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import { error, getCurrentSearchParams, payload } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import {
+  resolveAssetIdFromSamId,
+  type ResolveAssetIdFromSamIdOptions,
+} from "./scanner-sam-id";
 import type { AllowedModelNames } from "../api+/model-filters";
+
+const DEFAULT_ERROR_TITLE = "Unsupported Barcode detected";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -98,14 +104,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
     /** End locations */
 
-    return json({
+    return payload({
       header,
       ...teamMemberData,
       ...locationsData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -124,6 +130,7 @@ const QRScanner = () => {
     "Processing QR code..."
   );
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [errorTitle, setErrorTitle] = useState<string | undefined>(undefined);
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false);
@@ -131,6 +138,8 @@ const QRScanner = () => {
 
   // Get action directly from the atom
   const [action] = useAtom(scannerActionAtom);
+
+  const { canUseBarcodes } = useBarcodePermissions();
 
   // Store the current action in a ref that's always up-to-date
   // This is required in order to handle the action correctly, even tho we use global state
@@ -156,6 +165,7 @@ const QRScanner = () => {
         // Clear error message when unpausing (for "Continue Scanning" button)
         if (!value) {
           setErrorMessage(undefined);
+          setErrorTitle(undefined);
           setScanMessage("Processing QR code...");
         }
       }
@@ -177,6 +187,7 @@ const QRScanner = () => {
         // Handle error case (unsupported barcode type)
         if (error) {
           handleSetPaused(true);
+          setErrorTitle(DEFAULT_ERROR_TITLE);
           setErrorMessage(error);
           setScanMessage(""); // Clear scan message for error state
           return;
@@ -185,14 +196,55 @@ const QRScanner = () => {
         isNavigating.current = true;
         handleSetPaused(true);
         setErrorMessage(undefined); // Clear any previous errors
+        setErrorTitle(undefined);
         setScanMessage("Redirecting to mapped asset...");
 
         // Navigate to appropriate route based on code type
         if (type === "barcode") {
-          navigate(`/barcode/${encodeURIComponent(value)}`);
-        } else {
-          navigate(`/qr/${value}`);
+          if (!canUseBarcodes) {
+            setErrorTitle("Barcode scanning disabled");
+            setErrorMessage(
+              "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code."
+            );
+            setScanMessage("");
+            isNavigating.current = false;
+            return;
+          }
+
+          void navigate(`/barcode/${encodeURIComponent(value)}`);
+          return;
         }
+
+        if (type === "samId") {
+          setScanMessage("Looking up asset...");
+
+          const options: ResolveAssetIdFromSamIdOptions = {
+            samId: value,
+            fetcher: fetch,
+          };
+
+          void resolveAssetIdFromSamId(options)
+            .then((assetId) => {
+              setScanMessage("Redirecting to mapped asset...");
+              void navigate(`/assets/${assetId}`);
+            })
+            .catch((samError) => {
+              const reason = makeShelfError(
+                samError,
+                { samId: value, source: "scanner-samId" },
+                false
+              );
+
+              setErrorTitle(reason.title || "SAM ID lookup failed");
+              setErrorMessage(reason.message);
+              setScanMessage("");
+              isNavigating.current = false;
+            });
+
+          return;
+        }
+
+        void navigate(`/qr/${value}`);
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction
@@ -201,7 +253,7 @@ const QRScanner = () => {
         addItem(value, error, type);
       }
     },
-    [addItem, navigate, handleSetPaused] // action is not a dependency since we use the ref
+    [addItem, navigate, handleSetPaused, canUseBarcodes]
   );
 
   return (
@@ -217,6 +269,7 @@ const QRScanner = () => {
           setPaused={handleSetPaused}
           scanMessage={scanMessage}
           errorMessage={errorMessage}
+          errorTitle={errorTitle}
           actionSwitcher={<ActionSwitcher />}
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")

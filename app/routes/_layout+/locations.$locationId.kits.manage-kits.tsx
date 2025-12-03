@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import type { MetaFunction } from "@remix-run/react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { MapPin } from "lucide-react";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import {
+  data,
+  redirect,
   useLoaderData,
   useNavigate,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
-import { MapPin } from "lucide-react";
+} from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -26,6 +30,7 @@ import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import {
@@ -46,12 +51,13 @@ import {
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { updateLocationKits } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -100,7 +106,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         extraInclude: {
-          location: { select: { id: true, name: true } },
+          location: LOCATION_WITH_HIERARCHY,
         },
       });
 
@@ -109,28 +115,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "kits",
     };
 
-    return json(
-      data({
-        header: {
-          title: `Move kits to '${location?.name}' location`,
-          subHeading:
-            "Search your database for kits that you would like to move to this location.",
-        },
-        showSidebar: true,
-        noScroll: true,
-        items: kits,
-        page,
-        search,
-        totalItems: totalKits,
-        perPage,
-        totalPages,
-        modelName,
-        location,
-      })
-    );
+    return payload({
+      header: {
+        title: `Move kits to '${location?.name}' location`,
+        subHeading:
+          "Search your database for kits that you would like to move to this location.",
+      },
+      showSidebar: true,
+      noScroll: true,
+      items: kits,
+      page,
+      search,
+      totalItems: totalKits,
+      perPage,
+      totalPages,
+      modelName,
+      location,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -150,7 +154,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { kitIds, removedKitIds, redirectTo } = parseData(
+    const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         kitIds: z.array(z.string()).optional().default([]),
@@ -180,7 +184,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/kits`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 
@@ -233,7 +237,7 @@ export default function ManageLocationKits() {
           return;
         }
 
-        navigate(manageAssetsUrl);
+        void navigate(manageAssetsUrl);
       }}
     >
       <div className="border-b px-6 py-2">
@@ -325,7 +329,7 @@ export default function ManageLocationKits() {
                 if (hasUnsavedChanges) {
                   setIsCascadeAlertOpen(true);
                 } else {
-                  submit(formRef.current);
+                  void submit(formRef.current);
                 }
               }}
             >
@@ -339,10 +343,10 @@ export default function ManageLocationKits() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          navigate(manageAssetsUrl);
+          void navigate(manageAssetsUrl);
         }}
         onYes={() => {
-          submit(formRef.current);
+          void submit(formRef.current);
         }}
       >
         You have added some kits to the booking but haven't saved it yet. Do you
@@ -387,7 +391,7 @@ export default function ManageLocationKits() {
               <Button
                 onClick={() => {
                   setIsCascadeAlertOpen(false);
-                  submit(formRef.current);
+                  void submit(formRef.current);
                 }}
                 disabled={isSearching}
               >
@@ -405,7 +409,7 @@ const RowComponent = ({
   item,
 }: {
   item: Prisma.KitGetPayload<{
-    include: { category: true; location: { select: { id: true; name: true } } };
+    include: { category: true; location: typeof LOCATION_WITH_HIERARCHY };
   }>;
 }) => {
   const { category } = item;
@@ -440,13 +444,14 @@ const RowComponent = ({
       {/* Location */}
       <Td>
         {item.location ? (
-          <div
-            className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-            title={`Current location: ${item.location.name}`}
-          >
-            <div className="size-2 rounded-full bg-gray-500"></div>
-            <span>{item.location.name}</span>
-          </div>
+          <LocationBadge
+            location={{
+              id: item.location.id,
+              name: item.location.name,
+              parentId: item.location.parentId ?? undefined,
+              childCount: item.location._count?.children ?? 0,
+            }}
+          />
         ) : null}
       </Td>
 

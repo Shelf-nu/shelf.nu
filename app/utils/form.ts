@@ -1,13 +1,14 @@
-import type { Navigation } from "@remix-run/react";
+import type { ChangeEvent, Dispatch, SetStateAction } from "react";
+import type { Navigation } from "react-router";
 
 export function isFormProcessing(state: "idle" | "submitting" | "loading") {
   return state === "submitting" || state === "loading";
 }
 
 export function handleInputChange(
-  event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-  setState: React.Dispatch<
-    React.SetStateAction<{
+  event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  setState: Dispatch<
+    SetStateAction<{
       [key: string]: any;
     }>
   >,

@@ -1,8 +1,14 @@
-import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
+import {
+  AssetIndexMode,
+  OrganizationRoles,
+  OrganizationType,
+  Roles,
+} from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
@@ -132,7 +138,14 @@ export async function createOrganization({
   image: File | null;
 }) {
   try {
-    const owner = await db.user.findFirstOrThrow({ where: { id: userId } });
+    const owner = await db.user.findFirstOrThrow({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
 
     const data = {
       name,
@@ -166,7 +179,7 @@ export async function createOrganization({
 
       assetIndexSettings: {
         create: {
-          mode: "SIMPLE",
+          mode: AssetIndexMode.ADVANCED,
           columns: defaultFields,
           user: {
             connect: {
@@ -235,6 +248,8 @@ export async function updateOrganization({
   currency,
   ssoDetails,
   hasSequentialIdsMigrated,
+  qrIdDisplayPreference,
+  showShelfBranding,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
   name?: string;
@@ -246,13 +261,19 @@ export async function updateOrganization({
     baseUserGroupId: string;
   };
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
+  qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
+  showShelfBranding?: Organization["showShelfBranding"];
 }) {
   try {
     const data = {
       name,
       ...(currency && { currency }),
+      ...(qrIdDisplayPreference && { qrIdDisplayPreference }),
       ...(hasSequentialIdsMigrated !== undefined && {
         hasSequentialIdsMigrated,
+      }),
+      ...(typeof showShelfBranding === "boolean" && {
+        showShelfBranding,
       }),
       ...(ssoDetails && {
         ssoDetails: {
@@ -262,6 +283,19 @@ export async function updateOrganization({
     };
 
     if (image?.size && image?.size > 0) {
+      if (image.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
+        throw new ShelfError({
+          cause: null,
+          message: `Image size exceeds maximum allowed size of ${
+            DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          }MB`,
+          additionalData: { id, userId, field: "image" },
+          label,
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
       const imageData = {
         blob: Buffer.from(await image.arrayBuffer()),
         contentType: image.type,
@@ -294,8 +328,9 @@ export async function updateOrganization({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while updating the organization. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating the organization. Please try again or contact support.",
       additionalData: { id, userId, name },
       label,
     });
@@ -325,6 +360,8 @@ const ORGANIZATION_SELECT_FIELDS = {
   baseUserCanSeeBookings: true,
   barcodesEnabled: true,
   hasSequentialIdsMigrated: true,
+  qrIdDisplayPreference: true,
+  showShelfBranding: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
@@ -731,6 +768,35 @@ export async function transferOwnership({
         ? cause.message
         : "Something went wrong while transferring ownership. Please try again or contact support.",
       additionalData: { currentOrganization, newOwnerId },
+      label,
+    });
+  }
+}
+
+/**
+ * Resets showShelfBranding to true for all personal workspaces owned by a user.
+ * Called when Plus user downgrades to free tier.
+ *
+ * @param userId - The ID of the user whose personal workspaces should be reset
+ * @returns Promise resolving to the update result
+ */
+export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
+  try {
+    return await db.organization.updateMany({
+      where: {
+        userId,
+        type: OrganizationType.PERSONAL,
+      },
+      data: {
+        showShelfBranding: true,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while resetting personal workspace branding.",
+      additionalData: { userId },
       label,
     });
   }

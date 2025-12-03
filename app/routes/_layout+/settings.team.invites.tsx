@@ -4,8 +4,8 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-} from "@remix-run/node";
-import { json, Link, Outlet, redirect, useMatches } from "@remix-run/react";
+} from "react-router";
+import { data, redirect, Link, Outlet, useMatches } from "react-router";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -24,7 +24,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { error, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,7 +79,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       plural: "pending invites",
     };
 
-    return {
+    return payload({
       header,
       items,
       totalItems,
@@ -89,10 +89,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       totalPages,
       modelName,
       organization,
-    };
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -115,7 +115,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return await resolveUserAction(request, organizationId, userId);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

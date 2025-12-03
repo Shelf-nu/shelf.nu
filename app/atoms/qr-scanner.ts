@@ -13,7 +13,7 @@ export type ScanListItem =
       data?: KitFromQr | AssetFromQr;
       error?: string;
       type?: "asset" | "kit";
-      codeType?: "qr" | "barcode"; // Track whether this came from QR or barcode
+      codeType?: "qr" | "barcode" | "samId"; // Track whether this came from QR, barcode, or SAM ID
     }
   | undefined;
 
@@ -53,7 +53,13 @@ export const scannedItemIdsAtom = atom((get) => {
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(
   null,
-  (get, set, qrId: string, error?: string, codeType?: "qr" | "barcode") => {
+  (
+    get,
+    set,
+    qrId: string,
+    error?: string,
+    codeType?: "qr" | "barcode" | "samId"
+  ) => {
     const currentItems = get(scannedItemsAtom);
     if (!currentItems[qrId]) {
       /** Set can optionally receive error. If it does, add it to the item.

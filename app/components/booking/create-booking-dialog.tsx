@@ -1,7 +1,8 @@
+import type { ReactElement } from "react";
 import { cloneElement, useState } from "react";
 import type { TeamMember } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
 import { CalendarRangeIcon } from "lucide-react";
+import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserData } from "~/hooks/use-user-data";
 import { tw } from "~/utils/tw";
@@ -10,22 +11,22 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 
 type CreateBookingDialogProps = {
   className?: string;
-  trigger: React.ReactElement<{ onClick: () => void }>;
+  trigger: ReactElement<{ onClick: () => void }>;
 };
 
 export default function CreateBookingDialog({
   className,
   trigger,
 }: CreateBookingDialogProps) {
-  const { teamMembers, isSelfServiceOrBase } = useLoaderData<{
-    teamMembers: TeamMember[];
+  const { teamMembersForForm, isSelfServiceOrBase } = useLoaderData<{
+    teamMembersForForm: TeamMember[];
     isSelfServiceOrBase: boolean;
   }>();
   const user = useUserData();
 
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
   const custodianRef = isSelfServiceOrBase
-    ? teamMembers.find((tm) => tm.userId === user!.id)?.id
+    ? teamMembersForForm.find((tm) => tm.userId === user!.id)?.id
     : undefined;
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);

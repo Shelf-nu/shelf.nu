@@ -1,13 +1,15 @@
 import { useRef } from "react";
 import type { Barcode, Kit } from "@prisma/client";
-import { Link, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
+import { useDisabled } from "~/hooks/use-disabled";
+import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
+import type { action as createKitAction } from "~/routes/_layout+/kits.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
-import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
@@ -17,8 +19,9 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
-import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import When from "../when/when";
@@ -35,43 +38,52 @@ export const NewKitFormSchema = z.object({
   category: z.string().optional(),
   qrId: z.string().optional(),
   locationId: z.string().optional(),
+  redirectTo: z.string().optional(),
 });
 
 type KitFormProps = Partial<
   Pick<Kit, "name" | "description" | "categoryId" | "locationId">
 > & {
   className?: string;
-  saveButtonLabel?: string;
   qrId?: string | null;
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
+  referer?: string | null;
 };
 
 export default function KitsForm({
   className,
   name,
   description,
-  saveButtonLabel = "Add",
   qrId,
   categoryId,
   barcodes,
   locationId,
+  referer,
 }: KitFormProps) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
+  const actionData = useActionData<
+    typeof createKitAction | typeof editKitAction
+  >();
+
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
+  const [, validateFile] = useAtom(assetImageValidateFileAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
-
-  const actionData = useActionData<{ error?: any }>();
 
   const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
     serverValidationErrors?.name?.message ?? zo.errors.name()?.message;
+
+  const imageError =
+    serverValidationErrors?.image?.message ??
+    (actionData?.error?.additionalData?.field === "image"
+      ? actionData?.error?.message
+      : undefined) ??
+    fileError;
 
   return (
     <Card className={tw("w-full md:w-min", className)}>
@@ -96,14 +108,13 @@ export default function KitsForm({
           }
         }}
       >
-        <AbsolutePositionedHeaderActions className="hidden md:mr-4 md:flex">
-          <Button type="submit" disabled={disabled || nameErrorMessage}>
-            {saveButtonLabel}
-          </Button>
-        </AbsolutePositionedHeaderActions>
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
+        <RefererRedirectInput
+          fieldName={zo.fields.redirectTo()}
+          referer={referer}
+        />
 
         <FormRow rowLabel="Name" className="border-b-0 pb-[10px]" required>
           <Input
@@ -150,7 +161,15 @@ export default function KitsForm({
           subHeading={
             <p>
               Make it unique. Each kit can have 1 category. It will show on your
-              index.
+              index.{" "}
+              <Button
+                to="/categories/new"
+                variant="link-gray"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create categories
+              </Button>
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -169,17 +188,24 @@ export default function KitsForm({
             closeOnSelect
             selectionMode="none"
             allowClear={true}
-            extraContent={
-              <Button
-                to="/categories/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new category
-              </Button>
-            }
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                type="category"
+                title="Create new category"
+                buttonLabel="Create new category"
+                onCreated={(created) => {
+                  if (created?.type !== "category") return;
+                  const category = created.entity;
+                  onItemCreated({
+                    id: category.id,
+                    name: category.name,
+                    color: category.color,
+                    metadata: { ...category },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
           />
         </FormRow>
 
@@ -189,13 +215,14 @@ export default function KitsForm({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Link
+              <Button
                 to="/locations/new"
                 className="text-gray-600 underline"
                 target="_blank"
+                variant="link-gray"
               >
                 Create locations
-              </Link>
+              </Button>
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -214,17 +241,23 @@ export default function KitsForm({
             countKey="totalLocations"
             closeOnSelect
             allowClear
-            extraContent={
-              <Button
-                to="/locations/new"
-                variant="link"
-                icon="plus"
-                className="w-full justify-start pt-4"
-                target="_blank"
-              >
-                Create new location
-              </Button>
-            }
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                type="location"
+                title="Create new location"
+                buttonLabel="Create new location"
+                onCreated={(created) => {
+                  if (created?.type !== "location") return;
+                  const location = created.entity;
+                  onItemCreated({
+                    id: location.id,
+                    name: location.name,
+                    metadata: { ...location },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
                 {metadata?.thumbnailUrl ? (
@@ -253,12 +286,12 @@ export default function KitsForm({
               onChange={validateFile}
               label="Image"
               hideLabel
-              error={fileError}
+              error={imageError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG or JPEG (max.8 MB)
             </p>
           </div>
         </FormRow>
@@ -281,9 +314,12 @@ export default function KitsForm({
         </When>
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
-          <div className="ml-auto">
+          <div className="ml-auto flex gap-2">
+            <Button to={referer} variant="secondary" disabled={disabled}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={disabled}>
-              Save
+              {disabled ? "Saving..." : "Save"}
             </Button>
           </div>
         </FormRow>

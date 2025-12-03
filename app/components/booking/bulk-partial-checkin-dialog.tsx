@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AssetStatus } from "@prisma/client";
-import { useActionData, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
 import {
   selectedBulkItemsAtom,
@@ -12,7 +12,7 @@ import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import type {
   BookingPageLoaderData,
   BookingPageActionData,
-} from "~/routes/_layout+/bookings.$bookingId";
+} from "~/routes/_layout+/bookings.$bookingId.overview";
 import { getBookingContextAssetStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import CheckinDialog from "./checkin-dialog";
@@ -306,14 +306,15 @@ export default function BulkPartialCheckinDialog({
                 booking={{
                   id: booking.id,
                   name: booking.name,
-                  to: booking.to!,
-                  from: booking.from!,
+                  to: booking.to,
+                  from: booking.from,
                 }}
                 label={`Check in  item${totalSelectedItems !== 1 ? "s" : ""}`}
                 variant="primary"
                 disabled={disabled}
                 portalContainer={formRef.current || undefined}
                 onClose={handleCloseDialog}
+                specificAssetIds={selectedItems.map((item: any) => item.id)}
               />
             ) : (
               <Button

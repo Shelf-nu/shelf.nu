@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
 import { useZorm } from "react-zorm";
@@ -56,7 +57,7 @@ export default function UpdateLocationDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

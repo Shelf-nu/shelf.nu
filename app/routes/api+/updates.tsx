@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
 import {
   getUpdatesForUser,
   markUpdateAsRead,
@@ -8,6 +8,7 @@ import {
   trackUpdateView,
 } from "~/modules/update/service.server";
 import { makeShelfError } from "~/utils/error";
+import { payload } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
@@ -33,15 +34,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userRole: role,
     });
 
-    return json(
-      updates.map((update) => ({
-        ...update,
-        content: parseMarkdownToReact(update.content),
-      }))
+    return data(
+      payload({
+        updates: updates.map((update) => ({
+          ...update,
+          content: parseMarkdownToReact(update.content),
+        })),
+      })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(reason, { status: reason.status });
+    throw data(reason, { status: reason.status });
   }
 }
 
@@ -67,12 +70,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Update ID is required");
         }
         await markUpdateAsRead({ updateId, userId });
-        return json({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "markAllAsRead": {
         await markAllUpdatesAsRead({ userId, userRole: role });
-        return json({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "trackClick": {
@@ -81,7 +84,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Update ID is required");
         }
         await trackUpdateClick({ updateId });
-        return json({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "clickUpdate": {
@@ -92,7 +95,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Mark as read (creates read record, increments view count) AND track click (increments click count)
         await markUpdateAsRead({ updateId, userId });
         await trackUpdateClick({ updateId });
-        return json({ success: true });
+        return data(payload({ success: true }));
       }
 
       case "trackViews": {
@@ -106,7 +109,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await Promise.all(
           updateIds.map((updateId) => trackUpdateView({ updateId }))
         );
-        return json({ success: true });
+        return data(payload({ success: true }));
       }
 
       default:
@@ -114,6 +117,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    throw json(reason, { status: reason.status });
+    throw data(reason, { status: reason.status });
   }
 }

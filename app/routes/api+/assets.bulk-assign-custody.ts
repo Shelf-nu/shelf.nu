@@ -1,12 +1,13 @@
 import { OrganizationRoles } from "@prisma/client";
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { db } from "~/database/db.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -20,11 +21,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, role, canUseBarcodes } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
       action: PermissionAction.custody,
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
     });
 
     const formData = await request.formData();
@@ -34,21 +43,33 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      const teamMember = await db.teamMember.findUnique({
-        where: { id: custodian.id },
-        select: { id: true, userId: true },
+    // Validate that the custodian belongs to the same organization
+    const teamMember = await getTeamMember({
+      id: custodian.id,
+      organizationId,
+      select: { id: true, userId: true },
+    }).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        title: "Team member not found",
+        message: "The selected team member could not be found.",
+        additionalData: { userId, assetIds, custodian },
+        label: "Assets",
+        status: 404,
       });
+    });
 
-      if (teamMember?.userId !== userId) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message: "Self user can only assign custody to themselves only.",
-          additionalData: { userId, assetIds, custodian },
-          label: "Assets",
-        });
-      }
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      teamMember.userId !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetIds, custodian },
+        label: "Assets",
+      });
     }
 
     await bulkCheckOutAssets({
@@ -58,6 +79,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       custodianName: custodian.name,
       organizationId,
       currentSearchParams,
+      settings,
     });
 
     sendNotification({
@@ -68,9 +90,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return json(data({ success: true }));
+    return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

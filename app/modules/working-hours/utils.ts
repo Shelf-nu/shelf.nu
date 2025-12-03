@@ -1,10 +1,4 @@
-import {
-  addHours,
-  addDays,
-  format,
-  parseISO,
-  differenceInHours,
-} from "date-fns";
+import { addHours, addDays, format, differenceInHours } from "date-fns";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type {
   DaySchedule,
@@ -90,7 +84,7 @@ export function normalizeWorkingHoursForValidation(
     }
 
     return undefined;
-  } catch (error) {
+  } catch (_error) {
     return undefined;
   }
 }
@@ -245,19 +239,27 @@ interface DefaultTimesResult {
  * If working hours are disabled or not provided, it falls back to the original logic.
  * If working hours are enabled, it checks today's schedule and overrides to determine the next available booking time.
  * Buffer time is applied from current time - the start time will be whichever is later: buffer expiry or next available working time.
+ *
+ * For ADMIN/OWNER users, buffer time restrictions are automatically bypassed (effective buffer = 0).
+ *
  * @param workingHoursData - The working hours data containing weekly schedules and overrides.
- * @param bufferStartTime - Buffer time in hours from current time. If 0, uses 10-minute default.
+ * @param bufferStartTime - Buffer time in hours from current time. Bypassed for admin/owner users.
+ * @param isAdminOrOwner - Whether the user is an ADMIN or OWNER (bypasses buffer time restrictions).
  * @returns An object containing the start and end dates formatted for date input values.
  */
 export function getBookingDefaultStartEndTimes(
   workingHoursData: WorkingHoursData | null | undefined,
-  bufferStartTime: number
+  bufferStartTime: number,
+  isAdminOrOwner: boolean
 ): DefaultTimesResult {
   const now = new Date();
 
+  // Admin/Owner users bypass buffer time restrictions
+  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
+
   // If no working hours data or working hours are disabled, use the original logic
   if (!workingHoursData || !workingHoursData.enabled) {
-    return getOriginalDefaultTimes(now, bufferStartTime);
+    return getOriginalDefaultTimes(now, effectiveBufferStartTime);
   }
 
   // Get today's date and schedule
@@ -302,9 +304,9 @@ export function getBookingDefaultStartEndTimes(
     // We're in working hours - use whichever is later: buffer expiry or 10 minutes from now
     let earliestStartTime: Date;
 
-    if (bufferStartTime > 0) {
+    if (effectiveBufferStartTime > 0) {
       // Use buffer time from current time
-      earliestStartTime = addHours(now, bufferStartTime);
+      earliestStartTime = addHours(now, effectiveBufferStartTime);
     } else {
       // Use original 10-minute logic when buffer is 0
       earliestStartTime = new Date(now);
@@ -317,7 +319,7 @@ export function getBookingDefaultStartEndTimes(
     const [closeHours, closeMinutes] = todaySchedule.closeTime
       .split(":")
       .map(Number);
-    let endDateTime = new Date(now);
+    const endDateTime = new Date(now);
     endDateTime.setHours(closeHours, closeMinutes, 0, 0);
 
     // If start time is beyond today's close time, find next working day
@@ -342,7 +344,7 @@ export function getBookingDefaultStartEndTimes(
     const nextWorkingDay = findNextWorkingDay(
       now,
       workingHoursData,
-      bufferStartTime
+      effectiveBufferStartTime
     );
 
     return {
@@ -429,7 +431,7 @@ export function calculateEffectiveEndDate(
 
     // Check for date-specific override first
     const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+      const overrideDate = format(override.date, "yyyy-MM-dd");
       return overrideDate === dateString;
     });
 
@@ -494,7 +496,7 @@ export function calculateBusinessHoursDuration(
 
     // Check for date-specific override first
     const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(parseISO(override.date), "yyyy-MM-dd");
+      const overrideDate = format(override.date, "yyyy-MM-dd");
       return overrideDate === dateString;
     });
 

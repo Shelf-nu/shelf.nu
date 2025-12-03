@@ -1,7 +1,7 @@
+import type { KeyboardEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
-import { Link } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
   ArrowRight,
@@ -10,13 +10,20 @@ import {
   QrCode,
   ScanQrCode,
 } from "lucide-react";
+import { Link } from "react-router";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
 import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
 import SuccessAnimation from "./success-animation";
-import { handleDetection, processFrame, updateCanvasSize } from "./utils";
+import {
+  getBestBackCamera,
+  handleDetection,
+  processFrame,
+  updateCanvasSize,
+} from "./utils";
 import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/helpers";
 import { ErrorIcon } from "../errors";
 import Input from "../forms/input";
@@ -27,7 +34,7 @@ import type { ActionType } from "./drawer/action-switcher";
 
 export type OnCodeDetectionSuccessProps = {
   value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
-  type?: "qr" | "barcode"; // Code type - optional for backward compatibility
+  type?: "qr" | "barcode" | "samId"; // Code type - optional for backward compatibility
   error?: string;
   barcodeType?: BarcodeType; // Specific barcode type when type is "barcode"
 };
@@ -38,6 +45,58 @@ export type OnCodeDetectionSuccess = ({
   error,
   barcodeType,
 }: OnCodeDetectionSuccessProps) => void | Promise<void>;
+
+type HandleScannerInputValueArgs = {
+  rawValue: string;
+  paused: boolean;
+  onCodeDetectionSuccess?: OnCodeDetectionSuccess;
+  allowNonShelfCodes: boolean;
+};
+
+/**
+ * Handles the input value from the scanner mode.
+ * If the value is a sequential ID, it triggers the onCodeDetectionSuccess callback directly.
+ * If it's a QR code or barcode, it uses handleDetection to process it.
+ * @param rawValue - The raw input value from the scanner
+ * @param paused - Whether the scanner is currently paused
+ * @param onCodeDetectionSuccess - Callback to trigger on successful code detection
+ * @param allowNonShelfCodes - Whether to allow non-shelf codes (barcodes not in the Shelf system)
+ * @returns true if a value was processed, false otherwise
+ */
+export async function handleScannerInputValue({
+  rawValue,
+  paused,
+  onCodeDetectionSuccess,
+  allowNonShelfCodes,
+}: HandleScannerInputValueArgs) {
+  if (!rawValue) {
+    return false;
+  }
+
+  if (paused) {
+    return false;
+  }
+
+  const sequentialId = parseSequentialId(rawValue);
+
+  if (sequentialId) {
+    await onCodeDetectionSuccess?.({
+      value: sequentialId,
+      type: "samId",
+    });
+    return true;
+  }
+
+  const result = extractQrIdFromValue(rawValue);
+  await handleDetection({
+    result,
+    onCodeDetectionSuccess,
+    allowNonShelfCodes,
+    paused,
+  });
+
+  return true;
+}
 
 // Legacy type aliases for backward compatibility
 export type OnQrDetectionSuccessProps = OnCodeDetectionSuccessProps;
@@ -55,10 +114,13 @@ type CodeScannerProps = {
   paused: boolean;
   setPaused: (paused: boolean) => void;
   /** Custom message to show when scanner is paused after detecting a code */
-  scanMessage?: string | React.ReactNode;
+  scanMessage?: string | ReactNode;
 
   /** Error message to show when scanner encounters an unsupported barcode */
   errorMessage?: string;
+
+  /** Custom title for the error overlay */
+  errorTitle?: string;
 
   /** Custom class for the scanner mode.
    * Can be a string or a function that receives the mode and returns a string
@@ -68,7 +130,7 @@ type CodeScannerProps = {
   /** Custom callback for the scanner mode */
   scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
 
-  actionSwitcher?: React.ReactNode;
+  actionSwitcher?: ReactNode;
 
   /** Force a specific mode and hide mode switching tabs */
   forceMode?: Mode;
@@ -91,6 +153,7 @@ export const CodeScanner = ({
   setPaused,
   scanMessage,
   errorMessage,
+  errorTitle,
 
   scannerModeClassName,
   scannerModeCallback,
@@ -239,7 +302,9 @@ export const CodeScanner = ({
                   <span className="mb-5 size-14 text-primary">
                     <ErrorIcon />
                   </span>
-                  <h5 className="mb-2">Unsupported Barcode detected</h5>
+                  <h5 className="mb-2">
+                    {errorTitle || "Unsupported Barcode detected"}
+                  </h5>
                   <p className="mb-4 max-w-[300px] text-red-600">
                     {errorMessage}
                   </p>
@@ -301,14 +366,14 @@ function ScannerMode({
 
   const handleInputSubmit = useCallback(
     async (input: HTMLInputElement) => {
-      if (!input.value.trim()) return;
+      const rawValue = input.value.trim();
+      if (!rawValue) return;
 
-      const result = extractQrIdFromValue(input.value);
-      await handleDetection({
-        result,
+      await handleScannerInputValue({
+        rawValue,
+        paused,
         onCodeDetectionSuccess,
         allowNonShelfCodes,
-        paused,
       });
 
       // Run the callback if passed
@@ -323,7 +388,7 @@ function ScannerMode({
     [onCodeDetectionSuccess, allowNonShelfCodes, paused, callback]
   );
 
-  const handleEnterPress = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleEnterPress = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
       const input = e.target as HTMLInputElement;
@@ -412,6 +477,69 @@ function CameraMode({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrame = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [videoConstraints, setVideoConstraints] =
+    useState<MediaTrackConstraints>({ facingMode: "environment" });
+  const [hasRetriedConstraints, setHasRetriedConstraints] = useState(false);
+
+  const handleUserMediaError = useCallback(
+    async (cameraError: unknown) => {
+      const errorName =
+        typeof cameraError === "object" && cameraError !== null
+          ? (cameraError as { name?: string }).name
+          : undefined;
+      const shouldAttemptFallback =
+        !hasRetriedConstraints &&
+        (errorName === "OverconstrainedError" ||
+          errorName === "NotAllowedError" ||
+          errorName === "NotFoundError");
+
+      if (shouldAttemptFallback) {
+        setHasRetriedConstraints(true);
+        setError(null);
+
+        const enumerateDevices =
+          typeof navigator !== "undefined" && navigator.mediaDevices
+            ? navigator.mediaDevices.enumerateDevices.bind(
+                navigator.mediaDevices
+              )
+            : undefined;
+
+        if (enumerateDevices) {
+          try {
+            const devices = await enumerateDevices();
+            const bestBackCamera = getBestBackCamera(devices);
+            const fallbackDevice =
+              bestBackCamera ??
+              devices.find((device) => device.kind === "videoinput") ??
+              null;
+
+            if (fallbackDevice) {
+              setIsLoading(true);
+              setVideoConstraints({ deviceId: fallbackDevice.deviceId });
+              return;
+            }
+          } catch {
+            // Ignore enumeration errors and fall back to a generic constraint.
+          }
+        }
+
+        setIsLoading(true);
+        setVideoConstraints({});
+        return;
+      }
+
+      const errorMessage =
+        cameraError instanceof Error
+          ? cameraError.message
+          : typeof cameraError === "object" && cameraError !== null
+          ? (cameraError as { message?: string }).message ?? String(cameraError)
+          : String(cameraError);
+
+      setError(`Camera error: ${errorMessage}`);
+      setIsLoading(false);
+    },
+    [hasRetriedConstraints, setIsLoading]
+  );
 
   // Start the animation loop when the video starts playing
   useEffect(() => {
@@ -497,12 +625,10 @@ function CameraMode({
       <Webcam
         ref={videoRef}
         audio={false}
-        videoConstraints={{ facingMode: "environment" }}
-        onUserMediaError={(e) => {
-          setError(`Camera error: ${e instanceof Error ? e.message : e}`);
-          setIsLoading(false);
-        }}
+        videoConstraints={videoConstraints}
+        onUserMediaError={handleUserMediaError}
         onUserMedia={() => {
+          setError(null);
           const video = videoRef.current?.video;
           const canvas = canvasRef.current;
 
@@ -537,7 +663,7 @@ function CameraMode({
   );
 }
 
-function InfoOverlay({ children }: { children: React.ReactNode }) {
+function InfoOverlay({ children }: { children: ReactNode }) {
   return (
     <div className="info-overlay absolute inset-0 z-20 flex items-center justify-center bg-slate-800 px-5">
       <RadialBg />

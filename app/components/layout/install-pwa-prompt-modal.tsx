@@ -1,6 +1,6 @@
 import { useRef } from "react";
-import { useLoaderData, useFetcher } from "@remix-run/react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useLoaderData, useFetcher } from "react-router";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import { usePwaManager } from "~/utils/pwa-manager";
 import { Button } from "../shared/button";
@@ -90,10 +90,11 @@ export function InstallPwaPromptModal() {
                   variant="primary"
                   className="mb-3"
                   onClick={async () => {
-                    await promptInstall().then(() =>
-                      fetcher.submit(hidePwaPromptForm.current, {
-                        method: "POST",
-                      })
+                    await promptInstall().then(
+                      () =>
+                        void fetcher.submit(hidePwaPromptForm.current, {
+                          method: "POST",
+                        })
                     );
                   }}
                 >

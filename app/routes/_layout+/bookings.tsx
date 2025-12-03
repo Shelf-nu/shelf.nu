@@ -1,6 +1,9 @@
-import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { Link, Outlet } from "@remix-run/react";
+import type { ShouldRevalidateFunctionArgs } from "react-router";
+import { Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
+export const meta = () => [{ title: appendToMetaTitle("Bookings") }];
 
 export function loader() {
   return null;

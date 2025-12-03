@@ -1,4 +1,5 @@
 import React from "react";
+import type { ComponentProps } from "react";
 import IconHug from "./iconHug";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
@@ -7,7 +8,7 @@ export interface IconProps {
   className?: string;
   icon: IconType;
   disableWrap?: true;
-  size?: React.ComponentProps<typeof IconHug>["size"];
+  size?: ComponentProps<typeof IconHug>["size"];
 }
 const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon(
   { className, icon, disableWrap, size = "sm" }: IconProps,

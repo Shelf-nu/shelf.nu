@@ -1,5 +1,6 @@
+import type { FormEvent } from "react";
 import { useState } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   DAY_NAMES,
@@ -145,11 +146,11 @@ export const WeeklyScheduleForm = ({
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (validateForm()) {
-      fetcher.submit(event.currentTarget);
+      void fetcher.submit(event.currentTarget);
     }
   };
 

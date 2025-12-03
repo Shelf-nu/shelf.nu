@@ -1,11 +1,10 @@
 import { TagUseFor } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { payload, error, parseData } from "~/utils/http.server";
 
 const BasicModelFilters = z.object({
   /** key of field for which we have to filter values */
@@ -141,8 +140,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : undefined,
     })) as Array<Record<string, string>>;
 
-    return json(
-      data({
+    return data(
+      payload({
         filters: queryData.map((item) => ({
           id: item.id,
           name: item[queryKey],
@@ -154,6 +153,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

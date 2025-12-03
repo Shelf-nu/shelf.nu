@@ -1,3 +1,5 @@
+import type { Asset } from "@prisma/client";
+
 // Helper type for when you only need thumbnail data
 export type AssetForThumbnail = Pick<Asset, "id" | "thumbnailImage">;
 

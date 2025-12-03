@@ -1,12 +1,17 @@
 import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
-} from "@remix-run/node";
-import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
+} from "react-router";
+import {
+  data,
+  redirect,
+  useFetcher,
+  useLoaderData,
+  useParams,
+} from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -45,7 +50,7 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -88,7 +93,7 @@ export const loader = async ({
       action: PermissionAction.update,
     });
 
-    let {
+    const {
       search,
       totalAssets,
       perPage,
@@ -126,8 +131,8 @@ export const loader = async ({
       plural: "assets",
     };
 
-    return json(
-      data({
+    return data(
+      payload({
         header: {
           title: "Link with existing asset",
           subHeading: "Choose an asset to link with this QR tag.",
@@ -158,7 +163,7 @@ export const loader = async ({
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
-    throw json(error(reason));
+    throw data(error(reason), { status: reason.status });
   }
 };
 
@@ -194,7 +199,7 @@ export const action = async ({
     return redirect(`/qr/${qrId}/successful-link?type=asset`);
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 };
 
@@ -219,7 +224,7 @@ export default function QrLinkExisting() {
     setSelectedAssetId(assetId);
   }
 
-  let isHydrated = useHydrated();
+  const isHydrated = useHydrated();
   const { vh } = useViewportHeight();
   const maxHeight = isHydrated ? vh - 12 - 45 + "px" : "100%"; // We need to handle SSR and we are also substracting 12px to properly handle spacing on the bottom and 45px to handle the horizontal tabs
 
@@ -343,7 +348,7 @@ const RowComponent = ({ item }: { item: Asset }) => (
                 thumbnailImage: item.thumbnailImage,
                 mainImageExpiration: item.mainImageExpiration,
               }}
-              alt={item.title}
+              alt={`Image of ${item.title}`}
               className="size-full rounded-[4px] border object-cover"
             />
           </div>

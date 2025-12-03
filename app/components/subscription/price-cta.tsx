@@ -1,11 +1,11 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
 import { config } from "~/config/shelf.config";
 import type { loader } from "~/routes/_layout+/account-details.subscription";
-import type { Price } from "./prices";
+import type { PriceType } from "./prices";
 import { Form } from "../custom-form";
 import { Button } from "../shared/button";
 
-export const PriceCta = ({ price }: { price: Price }) => {
+export const PriceCta = ({ price }: { price: PriceType }) => {
   const { usedFreeTrial } = useLoaderData<typeof loader>();
 
   if (price.id === "free") return null;
