@@ -45,9 +45,9 @@ export function cleanParamsForCookie(params: URLSearchParams | string): string {
 
 // Allowed pathnames for cookie naming
 export const ALLOWED_FILTER_PATHNAMES = {
-  assets: "assetFilter",
-  bookings: "bookingFilter",
-  kits: "kitFilter",
+  assets: "assetFilter_v2",
+  bookings: "bookingFilter_v2",
+  kits: "kitFilter_v2",
 } as const;
 
 export type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
@@ -56,7 +56,7 @@ type CookieNameSuffix = (typeof ALLOWED_FILTER_PATHNAMES)[AllowedPathname];
 /**
  * Helper function to extract and validate pathname for cookie naming
  * @param pathname - The current pathname (e.g., "/assets", "/bookings")
- * @returns The validated cookie name suffix, or "assetFilter" as fallback
+ * @returns The validated cookie name suffix, or "assetFilter_v2" as fallback
  */
 export function getValidatedPathname(pathname: string): CookieNameSuffix {
   // Strip leading slash and get the first segment
@@ -69,8 +69,8 @@ export function getValidatedPathname(pathname: string): CookieNameSuffix {
     return ALLOWED_FILTER_PATHNAMES[cleanPath];
   }
 
-  // Fallback to "assetFilter" if pathname is not in allowed list
-  return "assetFilter";
+  // Fallback to "assetFilter_v2" if pathname is not in allowed list
+  return "assetFilter_v2";
 }
 
 /**
@@ -86,7 +86,7 @@ export function getCookieName(
   pathname: string
 ): string {
   if (modeIsAdvanced) {
-    return `${organizationId}_advancedAssetFilter`;
+    return `${organizationId}_advancedAssetFilter_v2`;
   }
 
   const validatedPathname = getValidatedPathname(pathname);

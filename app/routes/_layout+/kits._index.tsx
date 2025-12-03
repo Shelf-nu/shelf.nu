@@ -84,8 +84,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       redirectNeeded,
       serializedCookie: filtersCookie,
     } = await getFiltersFromRequest(request, organizationId, {
-      name: "kitFilter",
-      path: "/kits",
+      name: "kitFilter_v2",
+      path: "/", // Use root path so cookie is sent with RR7 single fetch .data requests
     });
 
     /** We only do that when we are on the index page */
