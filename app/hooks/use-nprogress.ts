@@ -16,7 +16,7 @@ export function useNprogress() {
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(
-    (fetcher) => 
+    (fetcher) =>
       !excludeFetchers.includes(fetcher.key) &&
       !fetcher.key.startsWith("toggle-star-")
   );
