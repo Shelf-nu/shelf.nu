@@ -141,206 +141,220 @@ function AdvancedFilter() {
   const validation = getValidationState();
 
   return (
-    <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen} modal={false}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="secondary"
-          className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
-          icon="filter"
-        >
-          {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
-          {initialFilters.length > 0
-            ? `Filtered by ${initialFilters.length}`
-            : "Filter"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverPortal>
-        <PopoverContent
-          align="start"
-          className={tw(
-            "z-[9999]  mt-2 min-w-[580px] rounded-md border border-gray-200 bg-white"
-          )}
-        >
-          <div className="border-b p-4 pb-5">
-            {filters.length === 0 ? (
-              <div>
-                <h5>No filters applied to this view</h5>
-                <p>Add a column below to filter the view</p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <form
-                  ref={zo.ref}
-                  onKeyDown={(e) => {
-                    /**
-                     * Prevent default behavior of the Enter key on input fields.
-                     * The form element is only needed for validations, so we don't want it to submit on Enter.
-                     * However, we allow Enter on buttons to support proper keyboard navigation for popovers.
-                     */
-                    if (
-                      e.key === "Enter" &&
-                      e.target instanceof HTMLElement &&
-                      e.target.tagName !== "BUTTON"
-                    ) {
-                      e.preventDefault();
-                    }
-                  }}
-                  className="flex flex-col gap-2"
-                >
-                  {filters.map((filter, index) => (
-                    <div
-                      className="flex w-full items-start gap-1"
-                      key={filter.name + index}
-                    >
-                      <div className="w-[150px] shrink-0">
-                        <FieldSelector
-                          filter={filter}
-                          filters={filters}
-                          setFilter={(name) => {
-                            setFilters((prev) => {
-                              const column = availableColumns.find(
-                                (c) => c.name === name
-                              ) as Column;
+    <>
+      {/* 
+      [IMPORTANT] The `modal={false}` prop is set on this Popover to allow interaction with elements outside the popover while it is open.
+      This is necessary for SaveFilterButton dialogs to work properly (e.g., for dialogs that open from within the popover).
+      However, this can affect user experience: users can interact with background elements while the filter popover is open,
+      and may open multiple popovers (such as SavedFilterPresetsControls) simultaneously, leading to confusing or inconsistent UI states.
+      If you modify this component or add new popovers/dialogs, ensure that simultaneous popover interactions are handled gracefully.
+      Consider restricting popover opening logic or adding UI safeguards if needed.
+      */}
+      <Popover
+        open={isPopoverOpen}
+        onOpenChange={setIsPopoverOpen}
+        modal={false}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            variant="secondary"
+            className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
+            icon="filter"
+          >
+            {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
+            {initialFilters.length > 0
+              ? `Filtered by ${initialFilters.length}`
+              : "Filter"}
+          </Button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className={tw(
+              "z-[9999]  mt-2 min-w-[580px] rounded-md border border-gray-200 bg-white"
+            )}
+          >
+            <div className="border-b p-4 pb-5">
+              {filters.length === 0 ? (
+                <div>
+                  <h5>No filters applied to this view</h5>
+                  <p>Add a column below to filter the view</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <form
+                    ref={zo.ref}
+                    onKeyDown={(e) => {
+                      /**
+                       * Prevent default behavior of the Enter key on input fields.
+                       * The form element is only needed for validations, so we don't want it to submit on Enter.
+                       * However, we allow Enter on buttons to support proper keyboard navigation for popovers.
+                       */
+                      if (
+                        e.key === "Enter" &&
+                        e.target instanceof HTMLElement &&
+                        e.target.tagName !== "BUTTON"
+                      ) {
+                        e.preventDefault();
+                      }
+                    }}
+                    className="flex flex-col gap-2"
+                  >
+                    {filters.map((filter, index) => (
+                      <div
+                        className="flex w-full items-start gap-1"
+                        key={filter.name + index}
+                      >
+                        <div className="w-[150px] shrink-0">
+                          <FieldSelector
+                            filter={filter}
+                            filters={filters}
+                            setFilter={(name) => {
+                              setFilters((prev) => {
+                                const column = availableColumns.find(
+                                  (c) => c.name === name
+                                ) as Column;
 
-                              // Only proceed with type/operator/value setup if a valid column is selected
-                              if (column) {
-                                const fieldType = getUIFieldType({
-                                  column,
-                                }) as FilterFieldType;
-
-                                const newFilters = [...prev];
-                                newFilters[index] = {
-                                  ...newFilters[index],
-                                  name,
-                                  type: fieldType,
-                                  operator: operatorsPerType[fieldType][0],
-                                  value: getDefaultValueForFieldType(
+                                // Only proceed with type/operator/value setup if a valid column is selected
+                                if (column) {
+                                  const fieldType = getUIFieldType({
                                     column,
-                                    customFields
-                                  ),
-                                  isNew: false,
-                                };
-                                return newFilters;
-                              }
-                              return prev;
-                            });
+                                  }) as FilterFieldType;
+
+                                  const newFilters = [...prev];
+                                  newFilters[index] = {
+                                    ...newFilters[index],
+                                    name,
+                                    type: fieldType,
+                                    operator: operatorsPerType[fieldType][0],
+                                    value: getDefaultValueForFieldType(
+                                      column,
+                                      customFields
+                                    ),
+                                    isNew: false,
+                                  };
+                                  return newFilters;
+                                }
+                                return prev;
+                              });
+                            }}
+                          />
+                        </div>
+
+                        {filter.name && (
+                          <>
+                            <div className="w-[50px] shrink-0">
+                              <OperatorSelector
+                                filter={filter}
+                                setFilter={(operator) => {
+                                  setFilters((prev) => {
+                                    const newFilters = [...prev];
+                                    newFilters[index].operator = operator;
+                                    return newFilters;
+                                  });
+                                }}
+                                disabled={
+                                  filter.isNew
+                                    ? { reason: "Please select a column" }
+                                    : false
+                                }
+                              />
+                            </div>
+                            <div className="min-w-0 grow">
+                              <ValueField
+                                filter={filter}
+                                setFilter={(value) => {
+                                  setFilters((prev) => {
+                                    const newFilters = [...prev];
+                                    newFilters[index].value = value;
+                                    return newFilters;
+                                  });
+                                }}
+                                applyFilters={applyFilters}
+                                fieldName={getFieldName(index)}
+                                zormError={getError(index)}
+                                disabled={filter.isNew}
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        <Button
+                          variant="block-link-gray"
+                          className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
+                          icon="x"
+                          onClick={() => {
+                            setFilters((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            );
                           }}
                         />
                       </div>
-
-                      {filter.name && (
-                        <>
-                          <div className="w-[50px] shrink-0">
-                            <OperatorSelector
-                              filter={filter}
-                              setFilter={(operator) => {
-                                setFilters((prev) => {
-                                  const newFilters = [...prev];
-                                  newFilters[index].operator = operator;
-                                  return newFilters;
-                                });
-                              }}
-                              disabled={
-                                filter.isNew
-                                  ? { reason: "Please select a column" }
-                                  : false
-                              }
-                            />
-                          </div>
-                          <div className="min-w-0 grow">
-                            <ValueField
-                              filter={filter}
-                              setFilter={(value) => {
-                                setFilters((prev) => {
-                                  const newFilters = [...prev];
-                                  newFilters[index].value = value;
-                                  return newFilters;
-                                });
-                              }}
-                              applyFilters={applyFilters}
-                              fieldName={getFieldName(index)}
-                              zormError={getError(index)}
-                              disabled={filter.isNew}
-                            />
-                          </div>
-                        </>
-                      )}
-
-                      <Button
-                        variant="block-link-gray"
-                        className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
-                        icon="x"
-                        onClick={() => {
-                          setFilters((prev) =>
-                            prev.filter((_, i) => i !== index)
-                          );
-                        }}
-                      />
-                    </div>
-                  ))}
-                </form>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between px-4 py-3">
-            <div>
-              <Button
-                variant="secondary"
-                className="text-[14px] font-medium"
-                size="xs"
-                disabled={
-                  disabled || availableColumns.length === 0
-                    ? {
-                        reason:
-                          "You are not able to add more filters because all columns are already used. If you want to filter by more columns, please enable them on your column settings.",
-                      }
-                    : false
-                }
-                onClick={addFilter}
-              >
-                <div className="mr-1 inline-block size-[14px] align-middle">
-                  <PlusIcon />
+                    ))}
+                  </form>
                 </div>
-                <span className="inline-block align-middle">Add filter</span>
-              </Button>
-              <Button
-                variant="block-link-gray"
-                size="xs"
-                className="ml-1"
-                to="mailto:nikolay@shelf.nu?subject=Advanced filtering suggestions"
-              >
-                Need more filtering options?
-              </Button>
-            </div>
-            <div className="ml-8 flex items-center justify-between gap-2">
-              {filters.length > 0 && (
-                <Button
-                  variant="block-link"
-                  size="xs"
-                  className="mt-0 whitespace-nowrap text-[14px]"
-                  onClick={clearAllFilters}
-                >
-                  Clear all
-                </Button>
               )}
-
-              <SaveFilterButton />
-
-              <Button
-                variant="secondary"
-                className="whitespace-nowrap text-[14px] font-medium"
-                size="xs"
-                disabled={!validation.canApplyFilters || disabled}
-                onClick={applyFilters}
-              >
-                Apply filters
-              </Button>
             </div>
-          </div>
-        </PopoverContent>
-      </PopoverPortal>
-    </Popover>
+
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <Button
+                  variant="secondary"
+                  className="text-[14px] font-medium"
+                  size="xs"
+                  disabled={
+                    disabled || availableColumns.length === 0
+                      ? {
+                          reason:
+                            "You are not able to add more filters because all columns are already used. If you want to filter by more columns, please enable them on your column settings.",
+                        }
+                      : false
+                  }
+                  onClick={addFilter}
+                >
+                  <div className="mr-1 inline-block size-[14px] align-middle">
+                    <PlusIcon />
+                  </div>
+                  <span className="inline-block align-middle">Add filter</span>
+                </Button>
+                <Button
+                  variant="block-link-gray"
+                  size="xs"
+                  className="ml-1"
+                  to="mailto:nikolay@shelf.nu?subject=Advanced filtering suggestions"
+                >
+                  Need more filtering options?
+                </Button>
+              </div>
+              <div className="ml-8 flex items-center justify-between gap-2">
+                {filters.length > 0 && (
+                  <Button
+                    variant="block-link"
+                    size="xs"
+                    className="mt-0 whitespace-nowrap text-[14px]"
+                    onClick={clearAllFilters}
+                  >
+                    Clear all
+                  </Button>
+                )}
+
+                <SaveFilterButton />
+
+                <Button
+                  variant="secondary"
+                  className="whitespace-nowrap text-[14px] font-medium"
+                  size="xs"
+                  disabled={!validation.canApplyFilters || disabled}
+                  onClick={applyFilters}
+                >
+                  Apply filters
+                </Button>
+              </div>
+            </div>
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+    </>
   );
 }
 

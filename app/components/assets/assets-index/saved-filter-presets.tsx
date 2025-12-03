@@ -284,12 +284,11 @@ export function SavedFilterPresetsControls() {
     if (
       actionData &&
       "savedFilterPresets" in actionData &&
-      actionData?.savedFilterPresets &&
-      isRenaming
+      actionData?.savedFilterPresets
     ) {
       closeRenameDialog();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isRenaming is omitted because it is derived from navigation state, which updates in sync with actionData; including isRenaming would cause unnecessary re-renders
   }, [actionData]);
 
   /**

@@ -81,6 +81,7 @@ export function ConfigureColumnsDropdown() {
           className="mt-2 font-normal text-gray-500 md:mt-0"
           width="full"
           title="Columns configuration"
+          aria-label={"Columns configuration"}
         />
       </PopoverTrigger>
       <PopoverPortal>

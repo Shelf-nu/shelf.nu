@@ -17,6 +17,7 @@ const mockPreset = {
   ownerId: "user-1",
   name: "My preset",
   query: "status=AVAILABLE",
+  starred: false,
   createdAt: new Date(),
   updatedAt: new Date(),
 };

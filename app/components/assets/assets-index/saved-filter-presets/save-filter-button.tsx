@@ -60,13 +60,12 @@ export function SaveFilterButton() {
     if (
       actionData &&
       "savedFilterPresets" in actionData &&
-      actionData?.savedFilterPresets &&
-      isCreating
+      actionData?.savedFilterPresets
     ) {
       setIsSaveDialogOpen(false);
       setPresetName("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isCreating is derived from navigation state which updates with actionData, so [actionData] is sufficient
   }, [actionData]);
 
   const handleOpenDialog = () => setIsSaveDialogOpen(true);

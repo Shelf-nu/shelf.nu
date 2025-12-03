@@ -13,11 +13,12 @@ export function useNprogress() {
     "asset-index-settings-freeze-column",
     "updates-change",
     "add-note",
-    "toggle-star",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(
-    (fetcher) => !excludeFetchers.includes(fetcher.key)
+    (fetcher) => 
+      !excludeFetchers.includes(fetcher.key) &&
+      !fetcher.key.startsWith("toggle-star-")
   );
 
   const state = useMemo<"idle" | "loading">(

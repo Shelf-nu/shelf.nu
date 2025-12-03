@@ -44,7 +44,7 @@ export function RenamePresetDialog({
   return (
     <DialogPortal>
       <Dialog
-        wrapperClassName="!z-[9999999]"
+        wrapperClassName="!z-[9999]"
         open={open}
         onClose={() => onOpenChange(false)}
         title={
