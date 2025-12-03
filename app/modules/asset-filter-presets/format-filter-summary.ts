@@ -13,10 +13,7 @@ import type { Column } from "~/modules/asset-index-settings/helpers";
  * @param columns - Column definitions for parsing filters
  * @returns Formatted filter summary string
  */
-export function formatFilterSummary(
-  query: string,
-  columns: Column[]
-): string {
+export function formatFilterSummary(query: string, columns: Column[]): string {
   if (!query) return "No filters";
 
   try {
@@ -73,15 +70,14 @@ function formatOperator(operator: string): string {
 /**
  * Formats a filter value to be human-readable.
  */
-function formatValue(
-  value: unknown,
-  type: string,
-  operator: string
-): string {
+function formatValue(value: unknown, type: string, operator: string): string {
   // Handle array values
   if (Array.isArray(value)) {
     if (operator === "between" && value.length === 2) {
-      return `${formatSingleValue(value[0], type)} and ${formatSingleValue(value[1], type)}`;
+      return `${formatSingleValue(value[0], type)} and ${formatSingleValue(
+        value[1],
+        type
+      )}`;
     }
     // For multiple values, show count if more than 3
     if (value.length > 3) {

@@ -1,9 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
 
-import type {
-  Filter,
-} from "~/components/assets/assets-index/advanced-filters/schema";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";

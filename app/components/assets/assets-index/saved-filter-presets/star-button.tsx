@@ -11,11 +11,7 @@ import type { NormalizedPreset } from "./preset-list-item";
  *
  * @param preset - The preset to star/unstar
  */
-export function StarButton({
-  preset,
-}: {
-  preset: NormalizedPreset;
-}) {
+export function StarButton({ preset }: { preset: NormalizedPreset }) {
   // Use unique fetcher key per preset to allow concurrent star requests
   const starFetcher = useFetcher({ key: `toggle-star-${preset.id}` });
 

@@ -159,7 +159,11 @@ export function SavedFilterPresetsControls() {
 
   // Merge loader presets with optimistic action data (if present)
   const basePresets = mapToNormalizedPresets(
-    actionData && 'data' in actionData && typeof actionData.data === 'object' && actionData.data && 'savedFilterPresets' in actionData.data
+    actionData &&
+      "data" in actionData &&
+      typeof actionData.data === "object" &&
+      actionData.data &&
+      "savedFilterPresets" in actionData.data
       ? actionData.data.savedFilterPresets
       : loaderPresets
   );
@@ -171,23 +175,23 @@ export function SavedFilterPresetsControls() {
     const starFetchers = fetchers.filter(
       (f) => f.formData?.get("intent") === "toggle-star-preset"
     );
-    
+
     if (starFetchers.length === 0) {
       return basePresets;
     }
-    
+
     // Apply all pending star changes
     return basePresets.map((preset) => {
       const pendingStarChange = starFetchers.find(
         (f) => f.formData?.get("presetId") === preset.id
       );
-      
+
       if (pendingStarChange?.formData) {
         const newStarredValue =
           pendingStarChange.formData.get("starred") === "true";
         return { ...preset, starred: newStarredValue };
       }
-      
+
       return preset;
     });
   }, [basePresets, fetchers]);
@@ -276,15 +280,15 @@ export function SavedFilterPresetsControls() {
   }, [isPopoverOpen]);
 
   // Close rename dialog when submission completes successfully
- useEffect(() => {
+  useEffect(() => {
     if (
       actionData &&
       "savedFilterPresets" in actionData &&
       actionData?.savedFilterPresets &&
       isRenaming
     ) {
-     closeRenameDialog();
-   }
+      closeRenameDialog();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionData]);
 
@@ -429,7 +433,8 @@ export function SavedFilterPresetsControls() {
                       )}
                       <div className="space-y-1">
                         {filteredRegularPresets.map((preset, index) => {
-                          const globalIndex = filteredStarredPresets.length + index;
+                          const globalIndex =
+                            filteredStarredPresets.length + index;
                           return (
                             <PresetListItem
                               key={`regular-${preset.id}`}
