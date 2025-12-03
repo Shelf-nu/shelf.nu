@@ -88,8 +88,8 @@ export function SaveFilterButton() {
   const title = atLimit
     ? `Maximum ${savedFilterPresetLimit} presets allowed`
     : !hasFilters
-      ? "No filters to save"
-      : "Save current filters";
+    ? "No filters to save"
+    : "Save current filters";
 
   return (
     <>

@@ -322,8 +322,8 @@ function AdvancedFilter() {
                   onClick={clearAllFilters}
                 >
                   Clear all
-              </Button>
-            )}
+                </Button>
+              )}
 
               <SaveFilterButton />
 
