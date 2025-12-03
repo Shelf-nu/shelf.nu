@@ -1,13 +1,12 @@
 import { useEffect, useMemo } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import type {
-  LoaderFunctionArgs,
-  MetaFunction,
-  LinksFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
 import { useSetAtom } from "jotai";
+ import type {
+   LoaderFunctionArgs,
+   MetaFunction,
+   LinksFunction,
+ } from "react-router";
+ import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import {
@@ -21,7 +20,7 @@ import Header from "~/components/layout/header";
 import { getAuditSessionDetails } from "~/modules/audit/service.server";
 import auditStyles from "~/styles/assets.css?url";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+ import { error, getParams, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -84,10 +83,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
-    return json(data({ session, expectedAssets }));
+    return data(payload({ session, expectedAssets }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, auditId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 

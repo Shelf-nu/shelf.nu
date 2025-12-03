@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useNavigate } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+ import { useNavigate } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 
@@ -53,7 +53,7 @@ function StartAuditDialogContent({
     }
 
     handleCloseDialog();
-    navigate(fetcherData.redirectTo);
+    void navigate(fetcherData.redirectTo);
   }, [fetcherData, handleCloseDialog, navigate]);
 
   return (

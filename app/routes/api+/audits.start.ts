@@ -1,10 +1,10 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import { data } from "react-router";
 
 import { BulkStartAuditSchema } from "~/components/assets/bulk-start-audit-dialog";
 import { createAuditSession } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -45,14 +45,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assigneeIds,
     });
 
-    return json(
-      data({
+    return data(
+      payload({
         success: true,
         redirectTo: `/audits/${session.id}`,
       })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }

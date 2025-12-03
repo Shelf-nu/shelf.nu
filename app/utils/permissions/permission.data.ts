@@ -239,6 +239,12 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.delete,
     ],
+     [PermissionEntity.audit]: [
+       PermissionAction.create,
+       PermissionAction.read,
+       PermissionAction.update,
+       PermissionAction.delete,
+     ],
     [PermissionEntity.userData]: [
       PermissionAction.read,
       PermissionAction.update,
@@ -347,6 +353,12 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [PermissionAction.read],
     [PermissionEntity.custody]: [PermissionAction.read],
     [PermissionEntity.assetReminders]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.audit]: [
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
