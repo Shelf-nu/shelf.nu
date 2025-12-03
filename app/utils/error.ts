@@ -99,6 +99,7 @@ export type FailureReason = {
     | "Image Cache"
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import
+    | "Audit"
     | "Update";
   /**
    * The message intended for the user.
