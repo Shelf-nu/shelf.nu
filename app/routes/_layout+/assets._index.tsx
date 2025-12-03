@@ -30,6 +30,7 @@ import {
 import {
   createPreset,
   deletePreset,
+  togglePresetStar,
   listPresetsForUser,
   renamePreset,
 } from "~/modules/asset-filter-presets/service.server";
@@ -164,6 +165,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "create-preset",
       "rename-preset",
       "delete-preset",
+      "toggle-star-preset",
     ]);
 
     const { intent } = parseData(formData, z.object({ intent: IntentSchema }));
@@ -176,6 +178,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "create-preset": PermissionAction.read,
       "rename-preset": PermissionAction.read,
       "delete-preset": PermissionAction.read,
+      "toggle-star-preset": PermissionAction.read,
     };
 
     const { organizationId, canUseBarcodes, role } = await requirePermission({
@@ -261,6 +264,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         await deletePreset({
           id: presetId,
+          organizationId,
+          ownerId: userId,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return payload({ savedFilterPresets });
+      }
+
+      case "toggle-star-preset": {
+        const { presetId, starred } = parseData(
+          formData,
+          z.object({
+            presetId: z.string().min(1),
+            starred: z.string().transform((val) => val === "true"),
+          })
+        );
+
+        await togglePresetStar({
+          id: presetId,
+          starred,
           organizationId,
           ownerId: userId,
         });

@@ -47,9 +47,16 @@ export function RenamePresetDialog({
         wrapperClassName="!z-[9999999]"
         open={open}
         onClose={() => onOpenChange(false)}
-        title={<h4>Rename preset</h4>}
+        title={
+          <div className="-mb-3 w-full pb-6">
+            <h3>Rename filter preset</h3>
+            <p className="text-gray-500">
+              Update the name of your saved filter preset.
+            </p>
+          </div>
+        }
       >
-        <div className="px-6 py-5">
+        <div className="px-6 pb-5">
           <Form method="post" ref={zo.ref}>
             <input type="hidden" name="intent" value="rename-preset" />
             <input type="hidden" name="presetId" value={presetId} />

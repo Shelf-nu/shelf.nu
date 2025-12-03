@@ -13,6 +13,7 @@ export function useNprogress() {
     "asset-index-settings-freeze-column",
     "updates-change",
     "add-note",
+    "toggle-star",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(

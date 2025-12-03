@@ -80,9 +80,8 @@ export function ConfigureColumnsDropdown() {
           icon="columns"
           className="mt-2 font-normal text-gray-500 md:mt-0"
           width="full"
-        >
-          Columns
-        </Button>
+          title="Columns configuration"
+        />
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent

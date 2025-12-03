@@ -56,7 +56,7 @@ export function listPresetsForUser({
 }) {
   return db.assetFilterPreset.findMany({
     where: { organizationId, ownerId },
-    orderBy: { name: "asc" },
+    orderBy: [{ starred: "desc" }, { name: "asc" }],
   });
 }
 
@@ -206,3 +206,26 @@ export async function deletePreset({
   return db.assetFilterPreset.delete({ where: { id } });
 }
 /** End of deletePreset function */
+
+/**
+ * Toggle the starred state of a filter preset
+ */
+export async function togglePresetStar({
+  id,
+  starred,
+  organizationId,
+  ownerId,
+}: {
+  id: string;
+  starred: boolean;
+  organizationId: string;
+  ownerId: string;
+}) {
+  await assertPresetOwnership({ id, organizationId, ownerId });
+
+  return db.assetFilterPreset.update({
+    where: { id },
+    data: { starred },
+  });
+}
+/** End of togglePresetStar function */

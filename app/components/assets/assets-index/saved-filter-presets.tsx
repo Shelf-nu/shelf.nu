@@ -1,15 +1,24 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
 import {
   Popover,
   PopoverContent,
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { Search } from "lucide-react";
 import {
   useActionData,
   useLoaderData,
   useLocation,
   useNavigation,
+  useFetchers,
 } from "react-router";
 
 import { Button } from "~/components/shared/button";
@@ -19,6 +28,7 @@ import type {
   CreatePresetFormSchema,
   RenamePresetFormSchema,
 } from "~/modules/asset-filter-presets/schemas";
+import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -39,6 +49,7 @@ type SavedPresetResponse = {
   id: string;
   name: string;
   query: string;
+  starred: boolean;
 };
 
 /** Action response data from preset mutation operations. */
@@ -71,6 +82,8 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
         const id = typeof record.id === "string" ? record.id : null;
         const name = typeof record.name === "string" ? record.name : null;
         const query = typeof record.query === "string" ? record.query : null;
+        const starred =
+          typeof record.starred === "boolean" ? record.starred : false;
 
         // Reject presets missing any required field
         if (!id || !name || !query) {
@@ -81,6 +94,7 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
           id,
           name,
           query,
+          starred,
         } satisfies NormalizedPreset;
       })
       // Filter out null entries from validation failures
@@ -104,11 +118,13 @@ export function SavedFilterPresetsControls() {
   const {
     savedFilterPresets: loaderPresets = [],
     savedFilterPresetLimit: _savedFilterPresetLimit = MAX_SAVED_FILTER_PRESETS,
+    settings,
   } = loaderData;
 
   const location = useLocation();
   const actionData = useActionData<PresetActionData>();
   const navigation = useNavigation();
+  const fetchers = useFetchers();
   const [, setSearchParams] = useSearchParams();
 
   // Extract validation errors from action data
@@ -121,86 +137,176 @@ export function SavedFilterPresetsControls() {
 
   // Track which form is currently submitting based on navigation state
   const isCreating =
-    navigation.state !== "idle" &&
-    navigation.formData?.get("intent") === "create-preset";
+    navigation.formData?.get("intent") === "create-preset" &&
+    (navigation.state === "submitting" || navigation.state === "loading");
   const isRenaming =
-    navigation.state !== "idle" &&
-    navigation.formData?.get("intent") === "rename-preset";
+    navigation.formData?.get("intent") === "rename-preset" &&
+    (navigation.state === "submitting" || navigation.state === "loading");
 
-  // Dialog visibility state
+  // State for save/rename dialogs
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
+  const [presetName, setPresetName] = useState<string>("");
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-
-  // Form state for save dialog
-  const [presetName, setPresetName] = useState("");
-
-  // Form state for rename dialog
   const [presetBeingRenamed, setPresetBeingRenamed] =
     useState<NormalizedPreset | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  /** Closes save dialog and resets form. */
+  // Derive the current query string from the URL params
+  const queryString = location.search.slice(1); // Remove '?' prefix
+
+  // Merge loader presets with optimistic action data (if present)
+  const basePresets = mapToNormalizedPresets(
+    actionData && 'data' in actionData && typeof actionData.data === 'object' && actionData.data && 'savedFilterPresets' in actionData.data
+      ? actionData.data.savedFilterPresets
+      : loaderPresets
+  );
+
+  // Build optimistic presets list that includes pending star toggles
+  const presets = useMemo(() => {
+    // Apply optimistic updates for all pending star toggles
+    // Find all fetchers submitting star toggles
+    const starFetchers = fetchers.filter(
+      (f) => f.formData?.get("intent") === "toggle-star-preset"
+    );
+    
+    if (starFetchers.length === 0) {
+      return basePresets;
+    }
+    
+    // Apply all pending star changes
+    return basePresets.map((preset) => {
+      const pendingStarChange = starFetchers.find(
+        (f) => f.formData?.get("presetId") === preset.id
+      );
+      
+      if (pendingStarChange?.formData) {
+        const newStarredValue =
+          pendingStarChange.formData.get("starred") === "true";
+        return { ...preset, starred: newStarredValue };
+      }
+      
+      return preset;
+    });
+  }, [basePresets, fetchers]);
+
+  // Separate starred and regular presets
+  const starredPresets = presets.filter((p) => p.starred);
+  const regularPresets = presets.filter((p) => !p.starred);
+
+  // Filter presets based on search query
+  const filteredStarredPresets = useMemo(
+    () =>
+      starredPresets.filter((preset) =>
+        preset.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ),
+    [starredPresets, searchQuery]
+  );
+
+  const filteredRegularPresets = useMemo(
+    () =>
+      regularPresets.filter((preset) =>
+        preset.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ),
+    [regularPresets, searchQuery]
+  );
+
+  // All filtered presets for keyboard navigation
+  const allFilteredPresets = useMemo(
+    () => [...filteredStarredPresets, ...filteredRegularPresets],
+    [filteredStarredPresets, filteredRegularPresets]
+  );
+
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
+    setSelectedIndex(0);
+  };
+
+  // Scroll to selected item
+  const scrollToIndex = (index: number) => {
+    setTimeout(() => {
+      const selectedElement = document.getElementById(`preset-option-${index}`);
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: "nearest" });
+      }
+    }, 0);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) => {
+          const newIndex =
+            prev < allFilteredPresets.length - 1 ? prev + 1 : prev;
+          scrollToIndex(newIndex);
+          return newIndex;
+        });
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => {
+          const newIndex = prev > 0 ? prev - 1 : prev;
+          scrollToIndex(newIndex);
+          return newIndex;
+        });
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (allFilteredPresets[selectedIndex]) {
+          handleApplyPreset(allFilteredPresets[selectedIndex]);
+          setIsPopoverOpen(false);
+        }
+        break;
+    }
+  };
+
+  // Reset search when popover opens/closes
+  useEffect(() => {
+    if (isPopoverOpen) {
+      setSearchQuery("");
+      setSelectedIndex(0);
+      // Focus search input when popover opens
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 0);
+    }
+  }, [isPopoverOpen]);
+
+  // Close rename dialog when submission completes successfully
+ useEffect(() => {
+    if (
+      actionData &&
+      "savedFilterPresets" in actionData &&
+      actionData?.savedFilterPresets &&
+      isRenaming
+    ) {
+     closeRenameDialog();
+   }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionData]);
+
+  /**
+   * Closes the save dialog and resets form state.
+   */
   const closeSaveDialog = () => {
     setIsSaveDialogOpen(false);
     setPresetName("");
   };
 
-  /** Closes rename dialog and resets form. */
+  /**
+   * Closes the rename dialog and clears the preset being renamed.
+   */
   const closeRenameDialog = () => {
     setPresetBeingRenamed(null);
     setRenameValue("");
   };
 
-  // Extract current URL search params (contains all active filters)
-  const searchParams = new URLSearchParams(location.search);
-
-  const queryString = searchParams.toString();
-
-  // Normalize and validate presets from loader
-  const presets = useMemo(
-    () => mapToNormalizedPresets(loaderPresets),
-    [loaderPresets]
-  );
-
   /**
-   * Auto-close save dialog when create operation succeeds.
-   * Watches navigation state and closes dialog on successful response.
-   */
-  useEffect(() => {
-    if (
-      isSaveDialogOpen &&
-      navigation.state === "idle" &&
-      actionData &&
-      !actionData.error &&
-      actionData.savedFilterPresets
-    ) {
-      // Success: close dialog and reset form
-      setIsSaveDialogOpen(false);
-      setPresetName("");
-    }
-  }, [actionData, navigation.state, isSaveDialogOpen]);
-
-  /**
-   * Auto-close rename dialog when rename operation succeeds.
-   * Watches navigation state and closes dialog on successful response.
-   */
-  useEffect(() => {
-    if (
-      presetBeingRenamed &&
-      navigation.state === "idle" &&
-      actionData &&
-      !actionData.error &&
-      actionData.savedFilterPresets
-    ) {
-      // Success: close dialog and reset form
-      setPresetBeingRenamed(null);
-      setRenameValue("");
-    }
-  }, [actionData, navigation.state, presetBeingRenamed]);
-
-  /**
-   * Opens rename dialog for a specific preset.
-   * Initializes the form with the preset's current name.
+   * Opens the rename dialog for a specific preset.
+   * Does NOT close the popover so the dialog appears above it.
    */
   const openRenameDialog = (preset: NormalizedPreset) => {
     setPresetBeingRenamed(preset);
@@ -228,44 +334,120 @@ export function SavedFilterPresetsControls() {
       {presets.length > 0 && (
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger asChild>
-            <Button variant="secondary" size="sm">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
-                <path d="M8 11h8" />
-                <path d="M8 7h6" />
-              </svg>
-              <span className="hidden md:inline">
-                Saved Filters ({presets.length})
-              </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              className={"font-normal text-gray-500"}
+            >
+              <div className="flex items-center gap-2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+                  <path d="M8 11h8" />
+                  <path d="M8 7h6" />
+                </svg>
+                <span className="hidden whitespace-nowrap md:inline">
+                  Saved Filters ({presets.length})
+                </span>
+              </div>
             </Button>
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent
-              className="z-[9999] w-64 rounded-md border bg-white p-3 shadow-lg"
+              className="z-[9999] max-h-[500px] w-80 rounded-md border bg-white shadow-lg"
               sideOffset={5}
               align="end"
             >
-              <div className="space-y-1">
-                {presets.map((preset) => (
-                  <PresetListItem
-                    key={preset.id}
-                    preset={preset}
-                    isActive={activePreset?.id === preset.id}
-                    onApply={handleApplyPreset}
-                    onRename={openRenameDialog}
-                  />
-                ))}
+              {/* Search bar */}
+              <div className="flex items-center border-b">
+                <Search className="ml-4 size-4 text-gray-500" />
+                <input
+                  ref={searchInputRef}
+                  placeholder="Search presets..."
+                  className="w-full border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
+                  value={searchQuery}
+                  onChange={handleSearch}
+                  onKeyDown={handleKeyDown}
+                />
               </div>
+
+              {presets.length === 0 ? (
+                <div className="px-3 py-6 text-center text-sm text-gray-500">
+                  No saved presets
+                </div>
+              ) : allFilteredPresets.length === 0 ? (
+                <div className="px-3 py-6 text-center text-sm text-gray-500">
+                  No presets found
+                </div>
+              ) : (
+                <div className="max-h-[400px] space-y-3 overflow-y-auto p-3">
+                  {/* Starred section */}
+                  {filteredStarredPresets.length > 0 && (
+                    <div>
+                      <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Starred
+                      </div>
+                      <div className="space-y-1">
+                        {filteredStarredPresets.map((preset, index) => (
+                          <PresetListItem
+                            key={`starred-${preset.id}`}
+                            id={`preset-option-${index}`}
+                            preset={preset}
+                            isActive={activePreset?.id === preset.id}
+                            isSelected={selectedIndex === index}
+                            columns={settings.columns as Column[]}
+                            onApply={handleApplyPreset}
+                            onRename={openRenameDialog}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Divider between sections */}
+                  {filteredStarredPresets.length > 0 &&
+                    filteredRegularPresets.length > 0 && (
+                      <div className="border-t border-gray-200" />
+                    )}
+
+                  {/* Regular presets section */}
+                  {filteredRegularPresets.length > 0 && (
+                    <div>
+                      {filteredStarredPresets.length > 0 && (
+                        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          All presets
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        {filteredRegularPresets.map((preset, index) => {
+                          const globalIndex = filteredStarredPresets.length + index;
+                          return (
+                            <PresetListItem
+                              key={`regular-${preset.id}`}
+                              id={`preset-option-${globalIndex}`}
+                              preset={preset}
+                              isActive={activePreset?.id === preset.id}
+                              isSelected={selectedIndex === globalIndex}
+                              columns={settings.columns as Column[]}
+                              onApply={handleApplyPreset}
+                              onRename={openRenameDialog}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </PopoverContent>
           </PopoverPortal>
         </Popover>

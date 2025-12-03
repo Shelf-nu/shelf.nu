@@ -50,9 +50,16 @@ export function CreatePresetDialog({
         wrapperClassName="!z-[9999999]"
         open={open}
         onClose={() => onOpenChange(false)}
-        title={<h4>Save filter preset</h4>}
+        title={
+          <div className="-mb-3 w-full pb-6">
+            <h3>Save filter preset</h3>
+            <p className="text-gray-500">
+              Give your filter a name and save it for quick access later.
+            </p>
+          </div>
+        }
       >
-        <div className="px-6 py-5">
+        <div className="px-6 pb-5">
           <Form method="post" ref={zo.ref}>
             <input type="hidden" name="intent" value="create-preset" />
             <input type="hidden" name="query" value={query} />

@@ -76,7 +76,7 @@ describe("asset-filter-presets service", () => {
 
       expect(dbMock.assetFilterPreset.findMany).toHaveBeenCalledWith({
         where: { organizationId: "org-1", ownerId: "user-1" },
-        orderBy: { name: "asc" },
+        orderBy: [{ starred: "desc" }, { name: "asc" }],
       });
       expect(presets).toEqual([mockPreset]);
     });
