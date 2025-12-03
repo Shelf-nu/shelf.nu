@@ -4,6 +4,7 @@ import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
+import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
 import MultiSelect from "~/components/multi-select/multi-select";
 
@@ -27,6 +28,7 @@ import { zodFieldIsRequired } from "~/utils/zod";
 export const UpdateTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
+  color: z.string().regex(/^#/).min(7),
   useFor: z
     .string()
     .optional()
@@ -60,6 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       header,
       tag,
+      colorFromServer: tag.color,
       tagUseFor: Object.values(TagUseFor).map((useFor) => ({
         label: formatEnum(useFor),
         value: useFor,
@@ -116,7 +119,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
 
 export default function EditTag() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
-  const { tag, tagUseFor } = useLoaderData<typeof loader>();
+  const { tag, tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const disabled = useDisabled();
 
@@ -153,6 +156,16 @@ export default function EditTag() {
               )}
               defaultValue={tag.description || undefined}
             />
+            <div className="mb-6 lg:mb-0">
+              <ColorInput
+                name={zo.fields.color()}
+                disabled={disabled}
+                error={zo.errors.color()?.message}
+                hideErrorText
+                colorFromServer={colorFromServer}
+                required={zodFieldIsRequired(UpdateTagFormSchema.shape.color)}
+              />
+            </div>
 
             <MultiSelect
               defaultSelected={tag.useFor.map((useFor) => ({

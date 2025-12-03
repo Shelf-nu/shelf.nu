@@ -1,10 +1,11 @@
-import type { Tag, User } from "@prisma/client";
+import type { Tag as PrismaTag, User } from "@prisma/client";
 import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Progress } from "../shared/progress";
 import { Separator } from "../shared/separator";
+import { Tag as TagBadge } from "../shared/tag";
 import { UserBadge } from "../shared/user-badge";
 
 export function BookingStatistics({
@@ -24,7 +25,7 @@ export function BookingStatistics({
   assetsCount: number;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
-  tags: Pick<Tag, "id" | "name">[];
+  tags: (Pick<PrismaTag, "id" | "name"> & { color?: string | null })[];
   creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
   partialCheckinProgress?: ReturnType<typeof calculatePartialCheckinProgress>;
 }) {
@@ -105,9 +106,12 @@ export function BookingStatistics({
           <div className="text-right">
             <ItemsWithViewMore
               items={tags}
-              labelKey="name"
-              idKey="id"
               emptyMessage="No tags"
+              renderItem={(tag) => (
+                <TagBadge key={tag.id} color={tag.color} withDot>
+                  {tag.name}
+                </TagBadge>
+              )}
             />
           </div>
         </div>

@@ -57,7 +57,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         }),
         tags: filterTags,
         extraInclude: {
-          tags: { select: { id: true, name: true } },
+          tags: { select: { id: true, name: true, color: true } },
         },
       }),
       getTagsForBookingTagsFilter({

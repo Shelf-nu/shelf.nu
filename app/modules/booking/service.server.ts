@@ -3326,7 +3326,7 @@ export async function getBookingsForCalendar(params: {
             profilePicture: true,
           },
         },
-        tags: { select: { id: true, name: true } },
+        tags: { select: { id: true, name: true, color: true } },
       },
       takeAll: true,
     });

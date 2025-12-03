@@ -162,6 +162,14 @@ vitest.mock("~/utils/scheduler.server", () => ({
   },
 }));
 
+const HOURS_BETWEEN_FROM_AND_TO = 8;
+const futureFromDate = new Date();
+futureFromDate.setDate(futureFromDate.getDate() + 30);
+const futureToDate = new Date(
+  futureFromDate.getTime() + HOURS_BETWEEN_FROM_AND_TO * 60 * 60 * 1000
+);
+const futureCreatedAt = new Date(futureFromDate.getTime() - 60 * 60 * 1000);
+
 const mockBookingData = {
   id: "booking-1",
   name: "Test Booking",
@@ -171,16 +179,16 @@ const mockBookingData = {
   organizationId: "org-1",
   custodianUserId: "user-1",
   custodianTeamMemberId: null,
-  from: new Date("2025-01-01T09:00:00Z"),
-  to: new Date("2025-01-01T17:00:00Z"),
-  createdAt: new Date("2025-01-01T08:00:00Z"),
-  updatedAt: new Date("2025-01-01T08:00:00Z"),
+  from: futureFromDate,
+  to: futureToDate,
+  createdAt: futureCreatedAt,
+  updatedAt: futureCreatedAt,
   assets: [
     { id: "asset-1", kitId: null },
     { id: "asset-2", kitId: null },
     { id: "asset-3", kitId: "kit-1" },
   ],
-  tags: [{ id: "tag-1", name: "Tag 1" }],
+  tags: [{ id: "tag-1", name: "Tag 1", color: "#123456" }],
 };
 
 const mockClientHints = {
@@ -196,8 +204,8 @@ const mockCreateBookingParams = {
     custodianTeamMemberId: "team-member-1",
     organizationId: "org-1",
     creatorId: "user-1",
-    from: new Date("2024-01-01T09:00:00Z"),
-    to: new Date("2024-01-01T17:00:00Z"),
+    from: futureFromDate,
+    to: futureToDate,
     tags: [],
   },
   assetIds: ["asset-1", "asset-2"],
@@ -224,10 +232,10 @@ describe("createBooking", () => {
         custodianTeamMember: { connect: { id: "team-member-1" } },
         organization: { connect: { id: "org-1" } },
         creator: { connect: { id: "user-1" } },
-        from: new Date("2024-01-01T09:00:00Z"),
-        to: new Date("2024-01-01T17:00:00Z"),
-        originalFrom: new Date("2024-01-01T09:00:00Z"),
-        originalTo: new Date("2024-01-01T17:00:00Z"),
+        from: futureFromDate,
+        to: futureToDate,
+        originalFrom: futureFromDate,
+        originalTo: futureToDate,
         status: "DRAFT",
         assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
       },
@@ -239,6 +247,7 @@ describe("createBooking", () => {
           select: {
             id: true,
             name: true,
+            color: true,
           },
         },
       },
@@ -269,10 +278,10 @@ describe("createBooking", () => {
         organization: { connect: { id: "org-1" } },
         creator: { connect: { id: "user-1" } },
         custodianTeamMember: { connect: { id: "team-member-1" } },
-        from: new Date("2024-01-01T09:00:00Z"),
-        to: new Date("2024-01-01T17:00:00Z"),
-        originalFrom: new Date("2024-01-01T09:00:00Z"),
-        originalTo: new Date("2024-01-01T17:00:00Z"),
+        from: futureFromDate,
+        to: futureToDate,
+        originalFrom: futureFromDate,
+        originalTo: futureToDate,
         status: "DRAFT",
         assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
       },
@@ -284,6 +293,7 @@ describe("createBooking", () => {
           select: {
             id: true,
             name: true,
+            color: true,
           },
         },
       },
@@ -1032,8 +1042,8 @@ describe("reserveBooking", () => {
     organizationId: "org-1",
     custodianUserId: "user-1",
     custodianTeamMemberId: "team-1",
-    from: new Date("2025-12-01T09:00:00Z"), // Future date
-    to: new Date("2025-12-01T17:00:00Z"),
+    from: futureFromDate,
+    to: futureToDate,
     description: "Reserved booking description",
     hints: mockClientHints,
     isSelfServiceOrBase: false,
@@ -1078,8 +1088,8 @@ describe("reserveBooking", () => {
           name: "Reserved Booking",
           custodianUser: { connect: { id: "user-1" } },
           custodianTeamMember: { connect: { id: "team-1" } },
-          from: new Date("2025-12-01T09:00:00Z"),
-          to: new Date("2025-12-01T17:00:00Z"),
+          from: futureFromDate,
+          to: futureToDate,
           description: "Reserved booking description",
         }),
       })
@@ -1146,8 +1156,8 @@ describe("checkoutBooking", () => {
     id: "booking-1",
     organizationId: "org-1",
     hints: mockClientHints,
-    from: new Date("2025-12-01T09:00:00Z"),
-    to: new Date("2025-12-01T17:00:00Z"),
+    from: futureFromDate,
+    to: futureToDate,
   };
 
   it("should checkout booking successfully with no conflicts", async () => {
@@ -1187,11 +1197,25 @@ describe("checkoutBooking", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
-    expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
-      data: { status: "OVERDUE" }, // Based on test output
-      include: expect.any(Object),
-    });
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1" },
+        data: { status: BookingStatus.ONGOING },
+        include: expect.objectContaining({
+          _count: { select: { assets: true } },
+          assets: true,
+          custodianTeamMember: true,
+          custodianUser: true,
+          organization: expect.objectContaining({
+            include: expect.objectContaining({
+              owner: expect.objectContaining({
+                select: { email: true },
+              }),
+            }),
+          }),
+        }),
+      })
+    );
 
     expect(result).toEqual(checkedOutBooking);
   });
