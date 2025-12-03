@@ -247,11 +247,12 @@ export function deleteKeysInSearchParams(
   keys: string[],
   setSearchParams: SetSearchParams
 ) {
-  keys.forEach((key) => {
-    setSearchParams((prev) => {
+  // Delete all keys in a single setSearchParams call to avoid multiple cookie updates
+  setSearchParams((prev) => {
+    keys.forEach((key) => {
       prev.delete(key);
-      return prev;
     });
+    return prev;
   });
 }
 
@@ -281,24 +282,32 @@ export function destroyCookieValues(
 
   const finalCookieValue = cookieSearchParams.toString();
 
-  // Determine the correct path if not provided
-  let path = cookiePath;
-  if (!path) {
-    // Extract path from current location
-    const currentPath = window.location.pathname
-      .replace(/^\//, "")
-      .split("/")[0];
-    path =
-      currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
-  }
+  // Always use root path to ensure cookies are sent with RR7 single fetch .data requests
+  // Client-side must match server-side cookie path
+  const path = cookiePath || "/";
 
-  // Set the cleaned cookie with the correct path
-  Cookies.set(cookieName, finalCookieValue, {
-    path,
-    sameSite: "lax",
+  // Cookie options must match between set and remove operations
+  const cookieOptions = {
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
-    expires: 365, // 1 year
-  });
+  };
+
+  // If no filters remain, DELETE the cookie entirely
+  // Otherwise, update it with the new value
+  if (!finalCookieValue) {
+    Cookies.remove(cookieName, { path, ...cookieOptions });
+
+    // Also remove any legacy cookies at old paths to ensure complete cleanup
+    Cookies.remove(cookieName, { path: "/assets", ...cookieOptions });
+    Cookies.remove(cookieName, { path: "/bookings", ...cookieOptions });
+    Cookies.remove(cookieName, { path: "/kits", ...cookieOptions });
+  } else {
+    Cookies.set(cookieName, finalCookieValue, {
+      path,
+      ...cookieOptions,
+      expires: 365, // 1 year
+    });
+  }
 }
 
 /**
@@ -329,12 +338,9 @@ export function useClearValueFromParams(...keys: string[]): Function {
         location.pathname
       );
 
-      // Determine the correct cookie path based on the current page
-      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
-      const cookiePath =
-        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
-
-      destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
+      // Always use root path to match server-side cookie path
+      // This ensures cookies work with RR7 single fetch .data requests
+      destroyCookieValues(cookieName, keys, cookieSearchParams, "/");
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -380,10 +386,9 @@ export function useCookieDestroy() {
         location.pathname
       );
 
-      // Determine the correct cookie path based on the current page
-      const currentPath = location.pathname.replace(/^\//, "").split("/")[0];
-      const cookiePath =
-        currentPath in ALLOWED_FILTER_PATHNAMES ? `/${currentPath}` : "/assets";
+      // Always use root path to match server-side cookie path
+      // This ensures cookies work with RR7 single fetch .data requests
+      const cookiePath = "/";
 
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
       destroyCookieValues(cookieName, keys, cookieSearchParams, cookiePath);
