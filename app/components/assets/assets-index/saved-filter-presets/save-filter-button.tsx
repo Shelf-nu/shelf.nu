@@ -1,9 +1,8 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { Save } from "lucide-react";
-import { useActionData, useLocation, useNavigation } from "react-router";
-import { useLoaderData } from "react-router";
+import { useActionData, useNavigation, useLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
-import { cleanParamsForCookie } from "~/hooks/search-params";
+import { cleanParamsForCookie, useSearchParams } from "~/hooks/search-params";
 import { MAX_SAVED_FILTER_PRESETS } from "~/modules/asset-filter-presets/constants";
 import type { CreatePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
 import type { Column } from "~/modules/asset-index-settings/helpers";
@@ -27,14 +26,18 @@ type PresetActionData = DataOrErrorResponse<{
  * - Validation errors display
  * - Auto-closing on successful save
  */
-export function SaveFilterButton() {
+export function SaveFilterButton({
+  hasUnappliedFilters = false,
+}: {
+  hasUnappliedFilters?: boolean;
+}) {
   const {
     savedFilterPresets: loaderPresets = [],
     savedFilterPresetLimit = MAX_SAVED_FILTER_PRESETS,
     settings,
   } = useLoaderData<AssetIndexLoaderData>();
 
-  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const actionData = useActionData<PresetActionData>();
   const navigation = useNavigation();
 
@@ -53,9 +56,7 @@ export function SaveFilterButton() {
     navigation.formData?.get("intent") === "create-preset";
 
   // Get current query string for saving preset
-  const queryString = cleanParamsForCookie(
-    new URLSearchParams(location.search)
-  ).toString();
+  const queryString = cleanParamsForCookie(searchParams).toString();
 
   // Auto-close save dialog on successful save
   useEffect(() => {
@@ -84,10 +85,12 @@ export function SaveFilterButton() {
   // Disable if at limit or if no filters are applied
   const hasFilters = queryString.length > 0;
   const atLimit = loaderPresets.length >= savedFilterPresetLimit;
-  const isDisabled = atLimit || !hasFilters;
+  const isDisabled = atLimit || !hasFilters || hasUnappliedFilters;
 
   const title = atLimit
     ? `Maximum ${savedFilterPresetLimit} presets allowed`
+    : hasUnappliedFilters
+    ? "Apply filters first before saving"
     : !hasFilters
     ? "No filters to save"
     : "Save current filters";
