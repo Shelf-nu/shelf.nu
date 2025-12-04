@@ -155,6 +155,25 @@ export async function getLocation(
                   name: true,
                 },
               },
+              custody: {
+                select: {
+                  custodian: {
+                    select: {
+                      id: true,
+                      name: true,
+                      user: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          profilePicture: true,
+                          email: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             },
             skip,
             take,
@@ -1015,12 +1034,47 @@ export async function getLocationKits(
       locationId: id,
     };
 
-    if (teamMemberIds && teamMemberIds?.length) {
-      kitWhere.custody = {
-        custodianId: {
-          in: teamMemberIds,
+    if (teamMemberIds && teamMemberIds.length) {
+      kitWhere.OR = [
+        ...(kitWhere.OR ?? []),
+        {
+          custody: { custodianId: { in: teamMemberIds } },
         },
-      };
+        {
+          custody: { custodian: { userId: { in: teamMemberIds } } },
+        },
+        {
+          assets: {
+            some: {
+              bookings: {
+                some: {
+                  custodianTeamMemberId: { in: teamMemberIds },
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          assets: {
+            some: {
+              bookings: {
+                some: {
+                  custodianUserId: { in: teamMemberIds },
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
+            },
+          },
+        },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
+      ];
     }
 
     if (search) {
@@ -1033,7 +1087,28 @@ export async function getLocationKits(
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         where: kitWhere,
-        include: { category: true },
+        include: {
+          category: true,
+          custody: {
+            select: {
+              custodian: {
+                select: {
+                  id: true,
+                  name: true,
+                  user: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         skip,
         take,
         orderBy: { [orderBy]: orderDirection },

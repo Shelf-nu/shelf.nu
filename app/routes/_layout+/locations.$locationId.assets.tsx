@@ -16,8 +16,12 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
+import { GrayBadge } from "~/components/shared/gray-badge";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -160,10 +164,36 @@ export default function LocationAssets() {
           className="responsive-filters mb-2 lg:mb-0"
           slots={{
             "right-of-search": (
-              <SortBy
-                sortingOptions={ASSET_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-              />
+              <div className="flex items-center gap-2">
+                <SortBy
+                  sortingOptions={ASSET_SORTING_OPTIONS}
+                  defaultSortingBy="createdAt"
+                />
+                <When truthy={canReadCustody}>
+                  <DynamicDropdown
+                    trigger={
+                      <div className="flex cursor-pointer items-center gap-2">
+                        Custodian
+                        <ChevronRight className="hidden rotate-90 md:inline" />
+                      </div>
+                    }
+                    model={{
+                      name: "teamMember",
+                      queryKey: "name",
+                      deletedAt: null,
+                    }}
+                    label="Filter by custodian"
+                    placeholder="Search team members"
+                    initialDataKey="teamMembers"
+                    countKey="totalTeamMembers"
+                    withoutValueItem={{
+                      id: "without-custody",
+                      name: "Without custody",
+                    }}
+                    renderItem={(item) => resolveTeamMemberName(item, true)}
+                  />
+                </When>
+              </div>
             ),
           }}
         >
@@ -186,39 +216,34 @@ export default function LocationAssets() {
                 Add assets
               </Button>
             </When>
-            <When truthy={canReadCustody}>
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Custodian
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{
-                  name: "teamMember",
-                  queryKey: "name",
-                  deletedAt: null,
-                }}
-                label="Filter by custodian"
-                placeholder="Search team members"
-                initialDataKey="teamMembers"
-                countKey="totalTeamMembers"
-                withoutValueItem={{
-                  id: "without-custody",
-                  name: "Without custody",
-                }}
-                renderItem={(item) => resolveTeamMemberName(item, true)}
-              />
-            </When>
           </div>
         </Filters>
         <List
           className=""
           ItemComponent={ListAssetContent}
+          extraItemComponentProps={{ canReadCustody }}
           headerChildren={
             <>
               <Th>Category</Th>
               <Th>Tags</Th>
+              <Th className="flex items-center gap-1 whitespace-nowrap">
+                Custodian{" "}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <>
+                      <h6>Asset custody</h6>
+                      <p>
+                        This column shows if a user has custody of the asset
+                        either via direct assignment or via a booking. If you
+                        see <GrayBadge>private</GrayBadge> that means you don't
+                        have the permissions to see who has custody of the
+                        asset.
+                      </p>
+                    </>
+                  }
+                />
+              </Th>
             </>
           }
           customEmptyStateContent={{
@@ -235,14 +260,29 @@ export default function LocationAssets() {
 
 const ListAssetContent = ({
   item,
+  extraProps,
 }: {
   item: Asset & {
     category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
+    custody: {
+      custodian: {
+        id: string;
+        name: string;
+        user: {
+          id: string;
+          firstName: string;
+          lastName: string;
+          profilePicture: string;
+          email: string;
+        };
+      };
+    };
   };
+  extraProps: { canReadCustody: boolean };
 }) => {
-  const { category, tags } = item;
+  const { category, tags, custody } = item;
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -289,6 +329,16 @@ const ListAssetContent = ({
       <Td className="text-left">
         <ListItemTagsColumn tags={tags} />
       </Td>
+      {/* Custodian */}
+      <When truthy={extraProps.canReadCustody}>
+        <Td>
+          {custody?.custodian ? (
+            <TeamMemberBadge teamMember={custody.custodian} />
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      </When>
     </>
   );
 };
