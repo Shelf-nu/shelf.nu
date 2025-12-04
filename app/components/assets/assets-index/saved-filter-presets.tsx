@@ -130,6 +130,18 @@ export function SavedFilterPresetsControls() {
   const fetchers = useFetchers();
   const [, setSearchParams] = useSearchParams();
 
+  // Track delete fetchers for optimistic UI - filter out presets being deleted
+  const deletingPresetIds = useMemo(
+    () =>
+      new Set(
+        fetchers
+          .filter((f) => f.formData?.get("intent") === "delete-preset")
+          .map((f) => f.formData?.get("presetId"))
+          .filter((id): id is string => typeof id === "string")
+      ),
+    [fetchers]
+  );
+
   // Extract validation errors from action data
   const createValidationErrors = getValidationErrors<
     typeof CreatePresetFormSchema
@@ -180,24 +192,28 @@ export function SavedFilterPresetsControls() {
     );
 
     if (starFetchers.length === 0) {
-      return basePresets;
+      // Filter out presets being deleted even when no star changes
+      return basePresets.filter((preset) => !deletingPresetIds.has(preset.id));
     }
 
     // Apply all pending star changes
-    return basePresets.map((preset) => {
-      const pendingStarChange = starFetchers.find(
-        (f) => f.formData?.get("presetId") === preset.id
-      );
+    // Also filter out presets being deleted while applying star changes
+    return basePresets
+      .filter((preset) => !deletingPresetIds.has(preset.id))
+      .map((preset) => {
+        const pendingStarChange = starFetchers.find(
+          (f) => f.formData?.get("presetId") === preset.id
+        );
 
-      if (pendingStarChange?.formData) {
-        const newStarredValue =
-          pendingStarChange.formData.get("starred") === "true";
-        return { ...preset, starred: newStarredValue };
-      }
+        if (pendingStarChange?.formData) {
+          const newStarredValue =
+            pendingStarChange.formData.get("starred") === "true";
+          return { ...preset, starred: newStarredValue };
+        }
 
-      return preset;
-    });
-  }, [basePresets, fetchers]);
+        return preset;
+      });
+  }, [basePresets, fetchers, deletingPresetIds]);
 
   // Separate starred and regular presets
   const starredPresets = presets.filter((p) => p.starred);

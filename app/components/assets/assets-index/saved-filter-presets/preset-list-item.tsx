@@ -1,7 +1,8 @@
 import type { ReactElement } from "react";
 import { Pencil, Trash2 } from "lucide-react";
-import { Form } from "react-router";
+import { useFetcher } from "react-router";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { StarButton } from "./star-button";
 
@@ -44,6 +45,19 @@ export function PresetListItem({
   onApply: (preset: NormalizedPreset) => void;
   onRename: (preset: NormalizedPreset) => void;
 }) {
+  // Use unique fetcher key per preset to allow concurrent delete requests
+  const deleteFetcher = useFetcher({ key: `delete-preset-${preset.id}` });
+
+  // Check if this preset is being deleted
+  const isDeleting =
+    isFormProcessing(deleteFetcher.state) &&
+    deleteFetcher.formData?.get("presetId") === preset.id;
+
+  // Hide the preset optimistically when being deleted
+  if (isDeleting) {
+    return null;
+  }
+
   return (
     <div
       id={id}
@@ -88,7 +102,7 @@ export function PresetListItem({
         >
           <Pencil className="size-3.5" />
         </button>
-        <Form method="post" className="inline">
+        <deleteFetcher.Form method="post" className="inline">
           <input type="hidden" name="intent" value="delete-preset" />
           <input type="hidden" name="presetId" value={preset.id} />
           <button
@@ -104,7 +118,7 @@ export function PresetListItem({
           >
             <Trash2 className="size-3.5" />
           </button>
-        </Form>
+        </deleteFetcher.Form>
       </div>
     </div>
   );

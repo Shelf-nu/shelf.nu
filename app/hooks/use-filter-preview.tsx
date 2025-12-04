@@ -59,32 +59,28 @@ export function useFilterPreview(options?: {
 
       return (
         <div className={className}>
-          {summary
-            .split(", ")
-            .map((part, index, array) => {
-              const colonIndex = part.lastIndexOf(": ");
-              if (colonIndex === -1) {
-                return (
-                  <span key={index}>
-                    {part}
-                    {index < array.length - 1 && ", "}
-                  </span>
-                );
-              }
-
-              const prefix = part.substring(0, colonIndex + 1);
-              const value = part.substring(colonIndex + 2);
-
+          {summary.split(", ").map((part, index, array) => {
+            const colonIndex = part.lastIndexOf(": ");
+            if (colonIndex === -1) {
               return (
                 <span key={index}>
-                  {prefix}{" "}
-                  <strong className="font-semibold text-gray-700">
-                    {value}
-                  </strong>
+                  {part}
                   {index < array.length - 1 && ", "}
                 </span>
               );
-            })}
+            }
+
+            const prefix = part.substring(0, colonIndex + 1);
+            const value = part.substring(colonIndex + 2);
+
+            return (
+              <span key={index}>
+                {prefix}{" "}
+                <strong className="font-semibold text-gray-700">{value}</strong>
+                {index < array.length - 1 && ", "}
+              </span>
+            );
+          })}
         </div>
       );
     }
@@ -114,11 +110,7 @@ export function useFilterPreview(options?: {
    */
   const formatPreview = useMemo(
     () => (query: string, columns: Column[]) =>
-      formatSummaryComponent(
-        query,
-        columns,
-        "truncate text-xs text-gray-500"
-      ),
+      formatSummaryComponent(query, columns, "truncate text-xs text-gray-500"),
     [formatSummaryComponent]
   );
 
