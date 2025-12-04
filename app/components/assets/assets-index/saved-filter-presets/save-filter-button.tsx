@@ -6,6 +6,7 @@ import { Button } from "~/components/shared/button";
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import { MAX_SAVED_FILTER_PRESETS } from "~/modules/asset-filter-presets/constants";
 import type { CreatePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
+import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -30,6 +31,7 @@ export function SaveFilterButton() {
   const {
     savedFilterPresets: loaderPresets = [],
     savedFilterPresetLimit = MAX_SAVED_FILTER_PRESETS,
+    settings,
   } = useLoaderData<AssetIndexLoaderData>();
 
   const location = useLocation();
@@ -113,6 +115,7 @@ export function SaveFilterButton() {
         onOpenChange={(open) => {
           if (!open) handleCloseDialog();
         }}
+        columns={settings.columns as Column[]}
         name={presetName}
         onNameChange={handleNameChange}
         query={queryString}

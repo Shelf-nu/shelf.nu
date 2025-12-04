@@ -1,7 +1,19 @@
+import { AssetStatus } from "@prisma/client";
+import { userFriendlyAssetStatus } from "~/components/assets/asset-status-badge";
 import { operatorsMap } from "~/components/assets/assets-index/advanced-filters/operator-selector";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { parseFilters } from "~/modules/asset/filter-parsing";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+
+/**
+ * Lookup data for resolving IDs to user-friendly names.
+ */
+export interface FilterLookupData {
+  locations?: Array<{ id: string; name: string }>;
+  categories?: Array<{ id: string; name: string }>;
+  tags?: Array<{ id: string; name: string }>;
+  teamMembers?: Array<{ id: string; name: string }>;
+}
 
 /**
  * Formats a query string into a human-readable filter summary.
@@ -11,9 +23,14 @@ import type { Column } from "~/modules/asset-index-settings/helpers";
  *
  * @param query - URL query string with filter parameters
  * @param columns - Column definitions for parsing filters
+ * @param lookupData - Optional lookup data for resolving IDs to names
  * @returns Formatted filter summary string
  */
-export function formatFilterSummary(query: string, columns: Column[]): string {
+export function formatFilterSummary(
+  query: string,
+  columns: Column[],
+  lookupData?: FilterLookupData
+): string {
   if (!query) return "No filters";
 
   try {
@@ -24,9 +41,16 @@ export function formatFilterSummary(query: string, columns: Column[]): string {
     const summaries = filters.map((filter: Filter) => {
       const fieldName = formatFieldName(filter.name);
       const operatorText = formatOperator(filter.operator);
-      const valueText = formatValue(filter.value, filter.type, filter.operator);
+      const valueText = formatValue(
+        filter.value,
+        filter.type,
+        filter.operator,
+        filter.name,
+        lookupData
+      );
 
-      return `${fieldName} ${operatorText} ${valueText}`;
+      // Format: "Field operator: value" with colon after operator
+      return `${fieldName} ${operatorText}: ${valueText}`;
     });
 
     return summaries.join(", ");
@@ -70,30 +94,83 @@ function formatOperator(operator: string): string {
 /**
  * Formats a filter value to be human-readable.
  */
-function formatValue(value: unknown, type: string, operator: string): string {
+function formatValue(
+  value: unknown,
+  type: string,
+  operator: string,
+  fieldName: string,
+  lookupData?: FilterLookupData
+): string {
   // Handle array values
   if (Array.isArray(value)) {
     if (operator === "between" && value.length === 2) {
-      return `${formatSingleValue(value[0], type)} and ${formatSingleValue(
-        value[1],
-        type
-      )}`;
+      return `${formatSingleValue(
+        value[0],
+        type,
+        fieldName,
+        lookupData
+      )} and ${formatSingleValue(value[1], type, fieldName, lookupData)}`;
     }
     // For multiple values, show count if more than 3
     if (value.length > 3) {
       return `${value.length} items`;
     }
-    return value.map((v) => formatSingleValue(v, type)).join(", ");
+    return value
+      .map((v) => formatSingleValue(v, type, fieldName, lookupData))
+      .join(", ");
   }
 
-  return formatSingleValue(value, type);
+  return formatSingleValue(value, type, fieldName, lookupData);
 }
 
 /**
  * Formats a single value based on its type.
  */
-function formatSingleValue(value: unknown, type: string): string {
+function formatSingleValue(
+  value: unknown,
+  type: string,
+  fieldName: string,
+  lookupData?: FilterLookupData
+): string {
   if (value === null || value === undefined) return "empty";
+
+  // Handle field-specific formatting with lookups
+  const valueStr = String(value);
+
+  // Location lookup
+  if (fieldName === "location" && lookupData?.locations) {
+    const location = lookupData.locations.find((loc) => loc.id === valueStr);
+    if (location) return location.name;
+  }
+
+  // Category lookup
+  if (fieldName === "category" && lookupData?.categories) {
+    const category = lookupData.categories.find((cat) => cat.id === valueStr);
+    if (category) return category.name;
+  }
+
+  // Tag lookup
+  if (fieldName === "tag" && lookupData?.tags) {
+    const tag = lookupData.tags.find((t) => t.id === valueStr);
+    if (tag) return tag.name;
+  }
+
+  // Team member/custody lookup
+  if (
+    (fieldName === "custody" || fieldName === "teamMember") &&
+    lookupData?.teamMembers
+  ) {
+    const member = lookupData.teamMembers.find((m) => m.id === valueStr);
+    if (member) return member.name;
+  }
+
+  // Status enum - use userFriendlyAssetStatus
+  if (
+    fieldName === "status" &&
+    Object.values(AssetStatus).includes(valueStr as AssetStatus)
+  ) {
+    return userFriendlyAssetStatus(valueStr as AssetStatus);
+  }
 
   // Boolean values
   if (typeof value === "boolean") {
@@ -120,6 +197,5 @@ function formatSingleValue(value: unknown, type: string): string {
   }
 
   // String values - truncate if too long
-  const str = String(value);
-  return str.length > 30 ? `${str.slice(0, 30)}...` : str;
+  return valueStr.length > 30 ? `${valueStr.slice(0, 30)}...` : valueStr;
 }

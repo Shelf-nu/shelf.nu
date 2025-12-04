@@ -5,7 +5,9 @@ import { useZorm } from "react-zorm";
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { useFilterPreview } from "~/hooks/use-filter-preview";
 import { CreatePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
+import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { getValidationErrors } from "~/utils/http";
 
 /**
@@ -23,6 +25,7 @@ export function CreatePresetDialog({
   open,
   onOpenChange,
   query,
+  columns,
   name,
   onNameChange,
   isSubmitting,
@@ -31,6 +34,7 @@ export function CreatePresetDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   query: string;
+  columns: Column[];
   name: string;
   onNameChange: (e: ChangeEvent<HTMLInputElement>) => void;
   isSubmitting: boolean;
@@ -39,6 +43,9 @@ export function CreatePresetDialog({
   >;
 }) {
   const zo = useZorm("create-preset", CreatePresetFormSchema);
+
+  // Get formatted preview component from hook
+  const { preview } = useFilterPreview({ query, columns });
 
   // Combine client-side and server-side validation errors
   const nameError =
@@ -73,6 +80,13 @@ export function CreatePresetDialog({
               autoFocus
               error={nameError}
             />
+
+            {/* Filter preview */}
+            <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+              <p className="mb-1 text-xs font-medium text-gray-600">Preview</p>
+              {preview}
+            </div>
+
             <div className="mt-4 flex justify-end gap-2">
               <Button
                 type="button"

@@ -23,6 +23,7 @@ import {
 
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import { useFilterPreview } from "~/hooks/use-filter-preview";
 import { MAX_SAVED_FILTER_PRESETS } from "~/modules/asset-filter-presets/constants";
 import type {
   CreatePresetFormSchema,
@@ -120,6 +121,8 @@ export function SavedFilterPresetsControls() {
     savedFilterPresetLimit: _savedFilterPresetLimit = MAX_SAVED_FILTER_PRESETS,
     settings,
   } = loaderData;
+
+  const { formatPreview } = useFilterPreview();
 
   const location = useLocation();
   const actionData = useActionData<PresetActionData>();
@@ -409,6 +412,7 @@ export function SavedFilterPresetsControls() {
                               isActive={activePreset?.id === preset.id}
                               isSelected={selectedIndex === index}
                               columns={settings.columns as Column[]}
+                              formatPreview={formatPreview}
                               onApply={handleApplyPreset}
                               onRename={openRenameDialog}
                             />
@@ -443,6 +447,7 @@ export function SavedFilterPresetsControls() {
                                 isActive={activePreset?.id === preset.id}
                                 isSelected={selectedIndex === globalIndex}
                                 columns={settings.columns as Column[]}
+                                formatPreview={formatPreview}
                                 onApply={handleApplyPreset}
                                 onRename={openRenameDialog}
                               />
@@ -469,6 +474,7 @@ export function SavedFilterPresetsControls() {
           setPresetName(e.target.value)
         }
         query={queryString}
+        columns={settings.columns as Column[]}
         isSubmitting={isCreating}
         validationErrors={createValidationErrors}
       />

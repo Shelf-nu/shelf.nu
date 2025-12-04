@@ -1,6 +1,6 @@
+import type { ReactElement } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { Form } from "react-router";
-import { formatFilterSummary } from "~/modules/asset-filter-presets/format-filter-summary";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { tw } from "~/utils/tw";
 import { StarButton } from "./star-button";
@@ -21,6 +21,7 @@ export type NormalizedPreset = {
  * @param isActive - Whether this preset is currently active
  * @param isSelected - Whether this preset is selected via keyboard navigation
  * @param columns - Column definitions for formatting filter summary
+ * @param formatPreview - Function to format and render filter preview
  * @param onApply - Callback when preset should be applied
  * @param onRename - Callback when rename button is clicked
  */
@@ -30,6 +31,7 @@ export function PresetListItem({
   isActive,
   isSelected = false,
   columns,
+  formatPreview,
   onApply,
   onRename,
 }: {
@@ -38,11 +40,10 @@ export function PresetListItem({
   isActive: boolean;
   isSelected?: boolean;
   columns: Column[];
+  formatPreview: (query: string, columns: Column[]) => ReactElement;
   onApply: (preset: NormalizedPreset) => void;
   onRename: (preset: NormalizedPreset) => void;
 }) {
-  const filterSummary = formatFilterSummary(preset.query, columns);
-
   return (
     <div
       id={id}
@@ -71,7 +72,7 @@ export function PresetListItem({
         >
           {preset.name}
         </div>
-        <div className="truncate text-xs text-gray-500">{filterSummary}</div>
+        {formatPreview(preset.query, columns)}
       </button>
 
       {/* Rename and delete action buttons */}
