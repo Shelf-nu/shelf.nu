@@ -173,7 +173,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
 
     // Get asset details with organization scoping to prevent cross-tenant access
-    const asset = await db.asset.findUniqueOrThrow({
+    // Use findUnique instead of findUniqueOrThrow to handle deleted assets gracefully
+    const asset = await db.asset.findUnique({
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -181,6 +182,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         thumbnailImage: true,
       },
     });
+
+    // If asset doesn't exist (was deleted), return gracefully without error
+    // This is an expected scenario when asset is deleted while page is still open
+    if (!asset) {
+      return data(payload({ asset: null }));
+    }
 
     // Extract the path from the URL using the consistent function
     const mainImagePath = extractStoragePath(mainImage, "assets");
