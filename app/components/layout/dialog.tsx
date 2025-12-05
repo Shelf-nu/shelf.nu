@@ -79,7 +79,7 @@ export const Dialog = ({
       onKeyDown={handleActivationKeyPress(() => onClose())}
     >
       <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
-        <div className="flex h-full flex-col bg-white">
+        <div className="flex h-full cursor-default flex-col bg-white">
           <div
             className={tw(
               "dialog-header flex items-start justify-between bg-white px-6 py-3",

@@ -16,7 +16,10 @@ export function useNprogress() {
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(
-    (fetcher) => !excludeFetchers.includes(fetcher.key)
+    (fetcher) =>
+      !excludeFetchers.includes(fetcher.key) &&
+      !fetcher.key.startsWith("toggle-star-") &&
+      !fetcher.key.startsWith("delete-preset-")
   );
 
   const state = useMemo<"idle" | "loading">(
