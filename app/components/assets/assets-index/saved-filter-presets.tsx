@@ -168,9 +168,9 @@ export function SavedFilterPresetsControls() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [applyingPresetId, setApplyingPresetId] = useState<string | null>(null);
- const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
- // Derive the current query string from the URL params
+  // Derive the current query string from the URL params
   const queryString = location.search.slice(1); // Remove '?' prefix
 
   // Merge loader presets with optimistic action data (if present)
@@ -314,23 +314,23 @@ export function SavedFilterPresetsControls() {
   }, [isPopoverOpen, activePreset, allFilteredPresets]);
 
   // Clear applying state when navigation completes
- useEffect(() => {
-   // Clear applying state when the URL query matches what we just applied
-   if (applyingPresetId) {
-     const applyingPreset = presets.find((p) => p.id === applyingPresetId);
-     if (applyingPreset && queryString === applyingPreset.query) {
-       // URL has been updated to match the preset we applied
-       setApplyingPresetId(null);
-     }
-   }
- }, [queryString, applyingPresetId, presets]);
+  useEffect(() => {
+    // Clear applying state when the URL query matches what we just applied
+    if (applyingPresetId) {
+      const applyingPreset = presets.find((p) => p.id === applyingPresetId);
+      if (applyingPreset && queryString === applyingPreset.query) {
+        // URL has been updated to match the preset we applied
+        setApplyingPresetId(null);
+      }
+    }
+  }, [queryString, applyingPresetId, presets]);
 
- // Also clear on navigation complete (backup)
- useEffect(() => {
-   if (navigation.state === "idle") {
-     setApplyingPresetId(null);
-   }
- }, [navigation.state]);
+  // Also clear on navigation complete (backup)
+  useEffect(() => {
+    if (navigation.state === "idle") {
+      setApplyingPresetId(null);
+    }
+  }, [navigation.state]);
 
   // Close rename dialog when submission completes successfully
   useEffect(() => {
@@ -378,11 +378,11 @@ export function SavedFilterPresetsControls() {
    * Uses setSearchParams to maintain client-side navigation.
    */
   const handleApplyPreset = (preset: NormalizedPreset) => {
-   const presetParams = new URLSearchParams(preset.query);
-   setSearchParams(presetParams);
-   // Track which preset is being applied for loading state
-   setApplyingPresetId(preset.id);
- };
+    const presetParams = new URLSearchParams(preset.query);
+    setSearchParams(presetParams);
+    // Track which preset is being applied for loading state
+    setApplyingPresetId(preset.id);
+  };
   return (
     <div className="flex items-center gap-2">
       {/* Saved presets dropdown */}
