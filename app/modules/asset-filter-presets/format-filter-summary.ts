@@ -16,8 +16,42 @@ export interface FilterLookupData {
 }
 
 /**
+ * Parses sortBy parameters from query string.
+ * Format: sortBy=name:asc&sortBy=category:desc
+ */
+function parseSorting(query: string): Array<{ name: string; direction: string }> {
+  const params = new URLSearchParams(query);
+  const sortByParams = params.getAll("sortBy");
+  
+  return sortByParams
+    .map((sort) => {
+      const [name, direction] = sort.split(":");
+      if (name && direction) {
+        return { name, direction };
+      }
+      return null;
+    })
+    .filter((s): s is { name: string; direction: string } => s !== null);
+}
+
+/**
+ * Formats sorting options to human-readable text.
+ */
+function formatSorting(sorts: Array<{ name: string; direction: string }>): string {
+  if (sorts.length === 0) return "";
+
+  const sortTexts = sorts.map((sort) => {
+    const fieldName = formatFieldName(sort.name);
+    const direction = sort.direction === "asc" ? "ascending" : "descending";
+    return `${fieldName} (${direction})`;
+  });
+
+  return sortTexts.join(", ");
+}
+
+/**
  * Formats a query string into a human-readable filter summary.
- * Example: "Status is Available, Category is Laptops"
+ * Example: "Status is: Available, Category is: Laptops | Sort: Name (ascending)"
  *
  * Uses the shared parseFilters function for consistency with server parsing.
  *
@@ -31,14 +65,21 @@ export function formatFilterSummary(
   columns: Column[],
   lookupData?: FilterLookupData
 ): string {
-  if (!query) return "No filters";
+  if (!query) return "No filters or sorting";
 
   try {
+    // Parse filters
     const filters = parseFilters(query, columns);
+    
+    // Parse sorting
+    const sorts = parseSorting(query);
 
-    if (filters.length === 0) return "No filters";
+    if (filters.length === 0 && sorts.length === 0) {
+      return "No filters or sorting";
+    }
 
-    const summaries = filters.map((filter: Filter) => {
+    // Format filters
+    const filterSummaries = filters.map((filter: Filter) => {
       const fieldName = formatFieldName(filter.name);
       const operatorText = formatOperator(filter.operator);
       const valueText = formatValue(
@@ -53,10 +94,22 @@ export function formatFilterSummary(
       return `${fieldName} ${operatorText}: ${valueText}`;
     });
 
-    return summaries.join(", ");
+    // Combine filters and sorting
+    const parts: string[] = [];
+    
+    if (filterSummaries.length > 0) {
+      parts.push(filterSummaries.join(", "));
+    }
+    
+    if (sorts.length > 0) {
+      const sortText = formatSorting(sorts);
+      parts.push(`Sort: ${sortText}`);
+    }
+    
+    return parts.join(" | ");
   } catch {
     // If parsing fails, return a generic message
-    return "Custom filters";
+    return "Custom filters and sorting";
   }
 }
 
