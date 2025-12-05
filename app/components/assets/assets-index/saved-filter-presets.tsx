@@ -12,17 +12,16 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { Search, BookMarked, BookOpen } from "lucide-react";
+import { Search, BookMarked, BookOpen, Save } from "lucide-react";
 import {
   useActionData,
   useLoaderData,
-  useLocation,
   useNavigation,
   useFetchers,
 } from "react-router";
 
 import { Button } from "~/components/shared/button";
-import { useSearchParams } from "~/hooks/search-params";
+import { cleanParamsForCookie, useSearchParams } from "~/hooks/search-params";
 import { useFilterPreview } from "~/hooks/use-filter-preview";
 import { MAX_SAVED_FILTER_PRESETS } from "~/modules/asset-filter-presets/constants";
 import type {
@@ -124,11 +123,12 @@ export function SavedFilterPresetsControls() {
 
   const { formatPreview } = useFilterPreview();
 
-  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryString = cleanParamsForCookie(searchParams).toString();
+  const hasActiveFilters = queryString.length > 0;
   const actionData = useActionData<PresetActionData>();
   const navigation = useNavigation();
   const fetchers = useFetchers();
-  const [, setSearchParams] = useSearchParams();
 
   // Track delete fetchers for optimistic UI - filter out presets being deleted
   const deletingPresetIds = useMemo(
@@ -169,9 +169,6 @@ export function SavedFilterPresetsControls() {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [applyingPresetId, setApplyingPresetId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Derive the current query string from the URL params
-  const queryString = location.search.slice(1); // Remove '?' prefix
 
   // Merge loader presets with optimistic action data (if present)
   const basePresets = mapToNormalizedPresets(
@@ -423,6 +420,19 @@ export function SavedFilterPresetsControls() {
                     later. Apply filters, then click Save in the filters menu to
                     create your first preset.
                   </p>
+                  {hasActiveFilters && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setIsSaveDialogOpen(true)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Save className="size-4" />
+                        Save Filter
+                      </div>
+                    </Button>
+                  )}
                 </div>
               </div>
             ) : (

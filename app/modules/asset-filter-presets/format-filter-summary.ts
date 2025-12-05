@@ -75,10 +75,14 @@ export function formatFilterSummary(
     // Parse filters
     const filters = parseFilters(query, columns);
 
+    // Parse search query
+    const params = new URLSearchParams(query);
+    const searchQuery = params.get("s");
+
     // Parse sorting
     const sorts = parseSorting(query);
 
-    if (filters.length === 0 && sorts.length === 0) {
+    if (filters.length === 0 && sorts.length === 0 && !searchQuery) {
       return "No filters or sorting";
     }
 
@@ -100,6 +104,11 @@ export function formatFilterSummary(
 
     // Combine filters and sorting
     const parts: string[] = [];
+
+    // Add search query first if present
+    if (searchQuery) {
+      parts.push(`Search: ${searchQuery}`);
+    }
 
     if (filterSummaries.length > 0) {
       parts.push(filterSummaries.join(", "));
