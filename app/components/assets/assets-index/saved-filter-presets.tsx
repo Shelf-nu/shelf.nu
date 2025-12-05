@@ -329,13 +329,14 @@ export function SavedFilterPresetsControls() {
     }
   }, [navigation.state]);
 
-  // Close rename dialog when submission completes successfully
+  // Close save and rename dialogs when submission completes successfully
   useEffect(() => {
     if (
       actionData &&
       "savedFilterPresets" in actionData &&
       actionData?.savedFilterPresets
     ) {
+      closeSaveDialog();
       closeRenameDialog();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- isRenaming is omitted because it is derived from navigation state, which updates in sync with actionData; including isRenaming would cause unnecessary re-renders
