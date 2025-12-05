@@ -77,26 +77,39 @@ function AdvancedFilter() {
 
   const columns = settings.columns as Column[];
   const disabled = useDisabled();
-  const [_searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [filters, setFilters] = useState<Filter[]>([]);
   const initialFilters = useInitialFilters(columns);
+  const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
+
+  // Track if we're applying filters internally to avoid resetting state
+  const isApplyingInternally = useRef(false);
+
   const availableColumns = getAvailableColumns(columns, filters, "filter");
 
   // Set the intial filters
   useEffect(() => {
+    // Only sync from URL if we're not applying internally
+    if (isApplyingInternally.current) {
+      isApplyingInternally.current = false;
+      return;
+    }
     setFilters(initialFilters);
+    setHasUnappliedChanges(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   function clearAllFilters() {
     setFilters([]);
+    setHasUnappliedChanges(true);
   }
 
   function applyFilters() {
     // Dont do anything if there are validation errors
     if (!validation.canApplyFilters) return;
 
+    isApplyingInternally.current = true;
     setSearchParams((prev) => {
       // Clear existing filter params
       columns.forEach((column) => {
@@ -114,6 +127,9 @@ function AdvancedFilter() {
       prev.delete("page");
       return prev;
     });
+
+    // Mark changes as applied
+    setHasUnappliedChanges(false);
   }
 
   function addFilter() {
@@ -133,6 +149,7 @@ function AdvancedFilter() {
       });
       return newCols;
     });
+    setHasUnappliedChanges(true);
   }
 
   const { zo, getValidationState, getFieldName, getError } =
@@ -237,6 +254,7 @@ function AdvancedFilter() {
                                 }
                                 return prev;
                               });
+                              setHasUnappliedChanges(true);
                             }}
                           />
                         </div>
@@ -252,6 +270,7 @@ function AdvancedFilter() {
                                     newFilters[index].operator = operator;
                                     return newFilters;
                                   });
+                                  setHasUnappliedChanges(true);
                                 }}
                                 disabled={
                                   filter.isNew
@@ -269,6 +288,7 @@ function AdvancedFilter() {
                                     newFilters[index].value = value;
                                     return newFilters;
                                   });
+                                  setHasUnappliedChanges(true);
                                 }}
                                 applyFilters={applyFilters}
                                 fieldName={getFieldName(index)}
@@ -287,6 +307,7 @@ function AdvancedFilter() {
                             setFilters((prev) =>
                               prev.filter((_, i) => i !== index)
                             );
+                            setHasUnappliedChanges(true);
                           }}
                         />
                       </div>
@@ -338,7 +359,7 @@ function AdvancedFilter() {
                   </Button>
                 )}
 
-                <SaveFilterButton />
+                <SaveFilterButton hasUnappliedFilters={hasUnappliedChanges} />
 
                 <Button
                   variant="secondary"
@@ -362,16 +383,44 @@ function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const disabled = useDisabled();
+
+  // Track if we're applying sorts internally to avoid resetting state
+  const isApplyingInternally = useRef(false);
+
+  // Track the last URL sort string we synced from to detect external changes
+  const lastSyncedUrlSorts = useRef<string>("");
+
+  useEffect(() => {
+    // Get current URL sorts as string
+    const currentUrlSorts = searchParams.getAll("sortBy").join(",");
+
+    // Skip if URL hasn't changed or we're applying internally
+    if (currentUrlSorts === lastSyncedUrlSorts.current) {
+      return;
+    }
+
+    // Only sync from URL if we're not applying internally
+    if (isApplyingInternally.current) {
+      isApplyingInternally.current = false;
+      lastSyncedUrlSorts.current = currentUrlSorts;
+      return;
+    }
+
+    const parsedSorts = searchParams.getAll("sortBy").map((s) => {
+      const [name, direction, cfType] = s.split(":");
+      return { name, direction, cfType } as Sort;
+    });
+    setSorts(parsedSorts);
+    lastSyncedUrlSorts.current = currentUrlSorts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const initialSorts = searchParams.getAll("sortBy").map((s) => {
     const [name, direction, cfType] = s.split(":");
     return { name, direction, cfType } as Sort;
   });
-  const disabled = useDisabled();
-
-  useEffect(() => {
-    setSorts(initialSorts);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const haveSortsChanged =
     JSON.stringify(initialSorts) !== JSON.stringify(sorts);
@@ -381,6 +430,7 @@ function AdvancedSorting() {
   }
 
   function applySorting() {
+    isApplyingInternally.current = true;
     setSearchParams((prev) => {
       prev.delete("sortBy");
 
@@ -407,6 +457,7 @@ function AdvancedSorting() {
     setSorts([]);
     /** If there are already sorts, clear them from the search params */
     if (searchParams.has("sortBy")) {
+      isApplyingInternally.current = true;
       setSearchParams((prev) => {
         prev.delete("sortBy");
         return prev;
@@ -470,9 +521,17 @@ function AdvancedSorting() {
                             checked={s.direction === "asc"}
                             onCheckedChange={() => {
                               setSorts((prev) => {
-                                const newSorts = [...prev];
-                                newSorts[index].direction =
-                                  s.direction === "asc" ? "desc" : "asc";
+                                const newSorts = prev.map((sort, i) => {
+                                  if (i === index) {
+                                    return {
+                                      ...sort,
+                                      direction: (sort.direction === "asc"
+                                        ? "desc"
+                                        : "asc") as "asc" | "desc",
+                                    };
+                                  }
+                                  return sort;
+                                });
                                 return newSorts;
                               });
                             }}
