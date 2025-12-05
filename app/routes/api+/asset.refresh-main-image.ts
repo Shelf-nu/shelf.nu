@@ -203,12 +203,22 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         });
       } catch (error) {
         // If it fails, log the error and keep the existing URL
+        // Preserve shouldBeCaptured flag if it's already a ShelfError
+        const shouldCapture =
+          error &&
+          typeof error === "object" &&
+          "shouldBeCaptured" in error &&
+          typeof error.shouldBeCaptured === "boolean"
+            ? error.shouldBeCaptured
+            : true;
+
         Logger.error(
           new ShelfError({
             cause: error,
             message: `Failed to refresh main image URL for asset ${assetId}`,
             additionalData: { assetId, mainImagePath, userId },
             label: "Assets",
+            shouldBeCaptured: shouldCapture,
           })
         );
       }
@@ -227,12 +237,22 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             bucketName: "assets",
           });
         } catch (error) {
+          // Preserve shouldBeCaptured flag if it's already a ShelfError
+          const shouldCapture =
+            error &&
+            typeof error === "object" &&
+            "shouldBeCaptured" in error &&
+            typeof error.shouldBeCaptured === "boolean"
+              ? error.shouldBeCaptured
+              : true;
+
           Logger.error(
             new ShelfError({
               cause: error,
               message: `Failed to refresh thumbnail URL for asset ${assetId}`,
               additionalData: { assetId, thumbnailPath, userId },
               label: "Assets",
+              shouldBeCaptured: shouldCapture,
             })
           );
         }
