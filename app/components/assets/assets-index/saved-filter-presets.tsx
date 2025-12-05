@@ -167,9 +167,10 @@ export function SavedFilterPresetsControls() {
   const [renameValue, setRenameValue] = useState("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [applyingPresetId, setApplyingPresetId] = useState<string | null>(null);
+ const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Derive the current query string from the URL params
+ // Derive the current query string from the URL params
   const queryString = location.search.slice(1); // Remove '?' prefix
 
   // Merge loader presets with optimistic action data (if present)
@@ -242,6 +243,12 @@ export function SavedFilterPresetsControls() {
     [filteredStarredPresets, filteredRegularPresets]
   );
 
+  // Determine which preset is currently active (matches current URL query)
+  const activePreset = useMemo(
+    () => allFilteredPresets.find((p) => p.query === queryString),
+    [allFilteredPresets, queryString]
+  );
+
   const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0);
@@ -290,13 +297,40 @@ export function SavedFilterPresetsControls() {
   useEffect(() => {
     if (isPopoverOpen) {
       setSearchQuery("");
-      setSelectedIndex(0);
+      // If there's an active preset, select it by default
+      if (activePreset) {
+        const activeIndex = allFilteredPresets.findIndex(
+          (p) => p.id === activePreset.id
+        );
+        setSelectedIndex(activeIndex >= 0 ? activeIndex : 0);
+      } else {
+        setSelectedIndex(0);
+      }
       // Focus search input when popover opens
       setTimeout(() => {
         searchInputRef.current?.focus();
       }, 0);
     }
-  }, [isPopoverOpen]);
+  }, [isPopoverOpen, activePreset, allFilteredPresets]);
+
+  // Clear applying state when navigation completes
+ useEffect(() => {
+   // Clear applying state when the URL query matches what we just applied
+   if (applyingPresetId) {
+     const applyingPreset = presets.find((p) => p.id === applyingPresetId);
+     if (applyingPreset && queryString === applyingPreset.query) {
+       // URL has been updated to match the preset we applied
+       setApplyingPresetId(null);
+     }
+   }
+ }, [queryString, applyingPresetId, presets]);
+
+ // Also clear on navigation complete (backup)
+ useEffect(() => {
+   if (navigation.state === "idle") {
+     setApplyingPresetId(null);
+   }
+ }, [navigation.state]);
 
   // Close rename dialog when submission completes successfully
   useEffect(() => {
@@ -339,17 +373,16 @@ export function SavedFilterPresetsControls() {
    * Identifies which preset (if any) matches the current query string.
    * Used to highlight the active preset in the list.
    */
-  const activePreset = presets.find((p) => p.query === queryString);
-
   /**
    * Applies a saved preset by updating search params with the preset's query.
    * Uses setSearchParams to maintain client-side navigation.
    */
   const handleApplyPreset = (preset: NormalizedPreset) => {
-    const presetParams = new URLSearchParams(preset.query);
-    setSearchParams(presetParams);
-  };
-
+   const presetParams = new URLSearchParams(preset.query);
+   setSearchParams(presetParams);
+   // Track which preset is being applied for loading state
+   setApplyingPresetId(preset.id);
+ };
   return (
     <div className="flex items-center gap-2">
       {/* Saved presets dropdown */}
@@ -372,7 +405,7 @@ export function SavedFilterPresetsControls() {
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent
-            className="z-[9999] max-h-[500px] w-80 rounded-md border bg-white shadow-lg"
+            className="z-[9999] max-h-[500px] w-[480px] rounded-md border bg-white shadow-lg"
             sideOffset={5}
             align="end"
           >
@@ -426,6 +459,7 @@ export function SavedFilterPresetsControls() {
                               id={`preset-option-${index}`}
                               preset={preset}
                               isActive={activePreset?.id === preset.id}
+                              isApplying={applyingPresetId === preset.id}
                               isSelected={selectedIndex === index}
                               columns={settings.columns as Column[]}
                               formatPreview={formatPreview}
@@ -461,6 +495,7 @@ export function SavedFilterPresetsControls() {
                                 id={`preset-option-${globalIndex}`}
                                 preset={preset}
                                 isActive={activePreset?.id === preset.id}
+                                isApplying={applyingPresetId === preset.id}
                                 isSelected={selectedIndex === globalIndex}
                                 columns={settings.columns as Column[]}
                                 formatPreview={formatPreview}

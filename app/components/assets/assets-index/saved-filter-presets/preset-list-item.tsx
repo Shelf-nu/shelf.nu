@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, Check } from "lucide-react";
 import { useFetcher } from "react-router";
+import { Spinner } from "~/components/shared/spinner";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -31,6 +32,7 @@ export function PresetListItem({
   preset,
   isActive,
   isSelected = false,
+  isApplying = false,
   columns,
   formatPreview,
   onApply,
@@ -40,6 +42,7 @@ export function PresetListItem({
   preset: NormalizedPreset;
   isActive: boolean;
   isSelected?: boolean;
+  isApplying?: boolean;
   columns: Column[];
   formatPreview: (query: string, columns: Column[]) => ReactElement;
   onApply: (preset: NormalizedPreset) => void;
@@ -70,27 +73,41 @@ export function PresetListItem({
       <StarButton preset={preset} />
 
       {/* Preset info - name and filter summary */}
-      <button
-        type="button"
-        onClick={() => onApply(preset)}
-        className="flex-1 overflow-hidden text-left"
-        title={preset.name}
-      >
-        <div
-          className={
-            "truncate text-sm " +
-            (isActive
-              ? "font-semibold text-primary"
-              : "font-medium text-gray-900")
-          }
-        >
-          {preset.name}
-        </div>
-        {formatPreview(preset.query, columns)}
-      </button>
+     <button
+       type="button"
+       onClick={() => onApply(preset)}
+       className="flex-1 overflow-hidden text-left"
+       title={preset.name}
+     >
+       <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+         <span className="truncate">
+           {preset.name}
+         </span>
+         {/* Active indicator - checkmark */}
+         {isActive && (
+           <div
+             className="flex size-4 shrink-0 items-center justify-center rounded-full bg-gray-100"
+             title="Currently active"
+           >
+             <Check className="size-3 text-gray-600" />
+           </div>
+         )}
+         {/* Loading indicator when applying preset */}
+         {isApplying && !isActive && (
+           <div className="shrink-0" title="Applying preset...">
+             <Spinner className="size-4" />
+           </div>
+         )}
+       </div>
+       {formatPreview(preset.query, columns)}
+     </button>
 
-      {/* Rename and delete action buttons */}
-      <div className="mt-0.5 flex gap-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
+     {/* Rename and delete action buttons */}
+     <div
+       className={tw(
+         "mt-0.5 flex gap-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100"
+       )}
+     >
         <button
           type="button"
           onClick={(e) => {
