@@ -98,12 +98,24 @@ function AdvancedFilter() {
     setFilters(initialFilters);
     setHasUnappliedChanges(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+ }, [searchParams]);
 
-  function clearAllFilters() {
-    setFilters([]);
-    setHasUnappliedChanges(true);
-  }
+ function clearAllFilters() {
+   setFilters([]);
+   /** If there are already filters, clear them from the search params */
+   if (filters.length > 0) {
+     isApplyingInternally.current = true;
+     setSearchParams((prev) => {
+       // Clear existing filter params
+       columns.forEach((column) => {
+         if (prev.has(column.name)) {
+           prev.delete(column.name);
+         }
+       });
+       return prev;
+     });
+   }
+ }
 
   function applyFilters() {
     // Dont do anything if there are validation errors
