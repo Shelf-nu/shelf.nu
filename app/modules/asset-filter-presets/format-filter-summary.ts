@@ -19,10 +19,12 @@ export interface FilterLookupData {
  * Parses sortBy parameters from query string.
  * Format: sortBy=name:asc&sortBy=category:desc
  */
-function parseSorting(query: string): Array<{ name: string; direction: string }> {
+function parseSorting(
+  query: string
+): Array<{ name: string; direction: string }> {
   const params = new URLSearchParams(query);
   const sortByParams = params.getAll("sortBy");
-  
+
   return sortByParams
     .map((sort) => {
       const [name, direction] = sort.split(":");
@@ -37,7 +39,9 @@ function parseSorting(query: string): Array<{ name: string; direction: string }>
 /**
  * Formats sorting options to human-readable text.
  */
-function formatSorting(sorts: Array<{ name: string; direction: string }>): string {
+function formatSorting(
+  sorts: Array<{ name: string; direction: string }>
+): string {
   if (sorts.length === 0) return "";
 
   const sortTexts = sorts.map((sort) => {
@@ -70,7 +74,7 @@ export function formatFilterSummary(
   try {
     // Parse filters
     const filters = parseFilters(query, columns);
-    
+
     // Parse sorting
     const sorts = parseSorting(query);
 
@@ -96,16 +100,16 @@ export function formatFilterSummary(
 
     // Combine filters and sorting
     const parts: string[] = [];
-    
+
     if (filterSummaries.length > 0) {
       parts.push(filterSummaries.join(", "));
     }
-    
+
     if (sorts.length > 0) {
       const sortText = formatSorting(sorts);
       parts.push(`Sort: ${sortText}`);
     }
-    
+
     return parts.join(" | ");
   } catch {
     // If parsing fails, return a generic message

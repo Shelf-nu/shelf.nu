@@ -59,43 +59,41 @@ export function useFilterPreview(options?: {
 
       return (
         <div className={className}>
-          {summary.split(" | ").map((section, sectionIndex, sections) => 
+          {summary.split(" | ").map((section, sectionIndex, sections) => (
             // Each section is either filters or sorting
             // Filters: "Field operator: value, Field operator: value"
             // Sorting: "Sort: Name (ascending), Category (descending)"
-            
-             (
-              <span key={sectionIndex}>
-                {section.split(", ").map((part, index, array) => {
-                  const colonIndex = part.lastIndexOf(": ");
-                  if (colonIndex === -1) {
-                    return (
-                      <span key={`${sectionIndex}-${index}`}>
-                        {part}
-                        {index < array.length - 1 && ", "}
-                      </span>
-                    );
-                  }
 
-                  const prefix = part.substring(0, colonIndex + 1);
-                  const value = part.substring(colonIndex + 2);
-
+            <span key={sectionIndex}>
+              {section.split(", ").map((part, index, array) => {
+                const colonIndex = part.lastIndexOf(": ");
+                if (colonIndex === -1) {
                   return (
                     <span key={`${sectionIndex}-${index}`}>
-                      {prefix}{" "}
-                      <strong className="font-semibold text-gray-700">
-                        {value}
-                      </strong>
+                      {part}
                       {index < array.length - 1 && ", "}
                     </span>
                   );
-                })}
-                {sectionIndex < sections.length - 1 && (
-                  <span className="mx-1">|</span>
-                )}
-              </span>
-            )
-          )}
+                }
+
+                const prefix = part.substring(0, colonIndex + 1);
+                const value = part.substring(colonIndex + 2);
+
+                return (
+                  <span key={`${sectionIndex}-${index}`}>
+                    {prefix}{" "}
+                    <strong className="font-semibold text-gray-700">
+                      {value}
+                    </strong>
+                    {index < array.length - 1 && ", "}
+                  </span>
+                );
+              })}
+              {sectionIndex < sections.length - 1 && (
+                <span className="mx-1">|</span>
+              )}
+            </span>
+          ))}
         </div>
       );
     }
