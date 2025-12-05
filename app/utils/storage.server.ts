@@ -85,23 +85,41 @@ export async function createSignedUrl({
       // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
       // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
       // transient CDN hiccups from bubbling up as user-facing ShelfErrors.
-      if (isSupabaseHtmlError(error) && attempt < maxAttempts) {
-        Logger.warn(
-          new ShelfError({
-            cause: error,
-            message:
-              "Supabase returned a non-JSON response while creating a signed URL. Retrying.",
-            additionalData: {
-              filename: normalizedFilename,
-              bucketName,
-              attempt,
-            },
-            label,
-            shouldBeCaptured: false,
-          })
-        );
-        await delay(1000);
-        continue;
+      if (isSupabaseHtmlError(error)) {
+        if (attempt < maxAttempts) {
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message:
+                "Supabase returned a non-JSON response while creating a signed URL. Retrying.",
+              additionalData: {
+                filename: normalizedFilename,
+                bucketName,
+                attempt,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+          await delay(1000);
+          continue;
+        }
+
+        // All retry attempts exhausted with HTML errors - this is a transient
+        // infrastructure issue that shouldn't spam Sentry
+        throw new ShelfError({
+          cause: error,
+          message:
+            "Supabase is experiencing temporary issues. Using existing URL.",
+          additionalData: {
+            filename: normalizedFilename,
+            bucketName,
+            attempts: maxAttempts,
+            errorType: "persistent_html_error",
+          },
+          label,
+          shouldBeCaptured: false,
+        });
       }
 
       throw error;
@@ -115,6 +133,11 @@ export async function createSignedUrl({
       label,
     });
   } catch (cause) {
+    // If it's already a ShelfError, preserve it (including shouldBeCaptured flag)
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:
