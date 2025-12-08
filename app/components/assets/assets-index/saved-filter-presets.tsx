@@ -312,15 +312,24 @@ export function SavedFilterPresetsControls() {
 
   // Clear applying state when navigation completes
   useEffect(() => {
-    // Clear applying state when the URL query matches what we just applied
-    if (applyingPresetId) {
-      const applyingPreset = presets.find((p) => p.id === applyingPresetId);
-      if (applyingPreset && queryString === applyingPreset.query) {
-        // URL has been updated to match the preset we applied
-        setApplyingPresetId(null);
-      }
+    if (!applyingPresetId) return;
+
+    const applyingPreset = presets.find((p) => p.id === applyingPresetId);
+    if (!applyingPreset) return;
+
+    // Check if we're toggling off (clearing filters)
+    const isTogglingOff = activePreset?.id === applyingPresetId;
+
+    // For toggle-off, wait for navigation to complete (URL becomes empty)
+    // For toggle-on/apply, check if URL matches the preset query
+    if (isTogglingOff && queryString === "") {
+      // Navigation complete - filters cleared
+      setApplyingPresetId(null);
+    } else if (!isTogglingOff && queryString === applyingPreset.query) {
+      // Navigation complete - preset applied
+      setApplyingPresetId(null);
     }
-  }, [queryString, applyingPresetId, presets]);
+  }, [queryString, applyingPresetId, presets, activePreset]);
 
   // Also clear on navigation complete (backup)
   useEffect(() => {
@@ -376,10 +385,16 @@ export function SavedFilterPresetsControls() {
    * Uses setSearchParams to maintain client-side navigation.
    */
   const handleApplyPreset = (preset: NormalizedPreset) => {
-    const presetParams = new URLSearchParams(preset.query);
-    setSearchParams(presetParams);
-    // Track which preset is being applied for loading state
-    setApplyingPresetId(preset.id);
+    // If clicking the currently active preset, clear all filters (toggle off)
+    if (activePreset?.id === preset.id) {
+      setSearchParams(new URLSearchParams());
+      setApplyingPresetId(preset.id);
+    } else {
+      // Apply the preset filters
+      const presetParams = new URLSearchParams(preset.query);
+      setSearchParams(presetParams);
+      setApplyingPresetId(preset.id);
+    }
   };
   return (
     <div className="flex items-center gap-2">

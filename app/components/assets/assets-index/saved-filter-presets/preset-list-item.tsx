@@ -57,11 +57,11 @@ export function PresetListItem({
     deleteFetcher.formData?.get("presetId") === preset.id;
 
   // Hide the preset optimistically when being deleted
-  if (isDeleting) {
-    return null;
-  }
+ if (isDeleting) {
+   return null;
+ }
 
-  return (
+ return (
     <div
       id={id}
       className={tw(
@@ -81,19 +81,19 @@ export function PresetListItem({
       >
         <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
           <span className="truncate">{preset.name}</span>
-          {/* Active indicator - checkmark */}
-          {isActive && (
+          {/* Loading indicator when applying preset */}
+          {isApplying && (
+            <div className="shrink-0" title="Applying preset...">
+              <Spinner className="size-4" />
+            </div>
+          )}
+          {/* Active indicator - checkmark (only show if not currently applying) */}
+          {isActive && !isApplying && (
             <div
               className="flex size-4 shrink-0 items-center justify-center rounded-full bg-gray-100"
               title="Currently active"
             >
               <Check className="size-3 text-gray-600" />
-            </div>
-          )}
-          {/* Loading indicator when applying preset */}
-          {isApplying && !isActive && (
-            <div className="shrink-0" title="Applying preset...">
-              <Spinner className="size-4" />
             </div>
           )}
         </div>
