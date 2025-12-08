@@ -216,7 +216,7 @@ function formatSingleValue(
   }
 
   // Tag lookup
-  if (fieldName === "tag" && lookupData?.tags) {
+  if ((fieldName === "tag" || fieldName === "tags") && lookupData?.tags) {
     const tag = lookupData.tags.find((t) => t.id === valueStr);
     if (tag) return tag.name;
   }
