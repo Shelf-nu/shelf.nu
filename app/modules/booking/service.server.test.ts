@@ -1056,6 +1056,8 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
       assets: [
         {
           id: "asset-1",
@@ -1133,6 +1135,8 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
       assets: [], // No assets to conflict
     };
     const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };

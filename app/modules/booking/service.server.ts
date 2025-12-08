@@ -2526,8 +2526,8 @@ export async function getBookingsFilterData({
     redirectNeeded,
     serializedCookie: filtersCookie,
   } = await getFiltersFromRequest(request, organizationId, {
-    name: "bookingFilter",
-    path: "/bookings",
+    name: "bookingFilter_v2",
+    path: "/", // Use root path so cookie is sent with RR7 single fetch .data requests
   });
 
   const searchParams = getCurrentSearchParams(request);

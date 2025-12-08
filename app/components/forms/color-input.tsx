@@ -32,6 +32,13 @@ export const ColorInput = ({
 
   return (
     <div className="flex items-end gap-1">
+      <Input
+        label="Hex Color"
+        value={color}
+        onChange={handleColorChange}
+        className="w-full min-w-[120px] lg:max-w-[120px]"
+        {...rest}
+      />
       <Button
         icon="refresh"
         variant="secondary"
@@ -45,13 +52,6 @@ export const ColorInput = ({
         }}
         title="Generate random color (preview shows how badge will look)"
         data-test-id="generateRandomColor"
-      />
-      <Input
-        label="Hex Color"
-        value={color}
-        onChange={handleColorChange}
-        className="w-full min-w-[120px] lg:max-w-[120px]"
-        {...rest}
       />
     </div>
   );

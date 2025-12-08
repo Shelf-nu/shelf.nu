@@ -926,13 +926,26 @@ type CurrentBookingType = {
   from: Booking["from"];
 };
 
+/**
+ * Determines if a kit has a current booking by checking its assets.
+ * A kit is considered to have a current booking when at least one of its assets is:
+ * 1. Currently checked out (status === CHECKED_OUT)
+ * 2. Has an ongoing or overdue booking
+ *
+ * This ensures the custody card only shows when assets are actually in custody,
+ * not just when they have ongoing bookings but have been checked back in.
+ *
+ * @returns The first ongoing/overdue booking found, or undefined if none exist
+ */
 export function getKitCurrentBooking(kit: {
   id: string;
   assets: {
+    status: AssetStatus;
     bookings: CurrentBookingType[];
   }[];
 }) {
   const ongoingBookingAsset = kit.assets
+    // Filter each asset's bookings to only ongoing or overdue ones
     .map((a) => ({
       ...a,
       bookings: a.bookings.filter(
@@ -941,7 +954,11 @@ export function getKitCurrentBooking(kit: {
           b.status === BookingStatus.OVERDUE
       ),
     }))
+    // Only consider assets that are actually checked out
+    .filter((a) => a.status === AssetStatus.CHECKED_OUT)
+    // Find the first asset that has any ongoing/overdue bookings
     .find((a) => a.bookings.length > 0);
+
   const ongoingBooking = ongoingBookingAsset
     ? ongoingBookingAsset.bookings[0]
     : undefined;
