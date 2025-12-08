@@ -378,7 +378,7 @@ function DescriptionColumn({ value }: { value: string }) {
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
 
   return (
-    <Td className="max-w-62 whitespace-pre-wrap">
+    <Td className="max-w-62 min-w-60 whitespace-pre-wrap">
       {!hasContent ? (
         <EmptyTableValue />
       ) : (plainPreview || value).length > 60 ? (

@@ -31,6 +31,8 @@ import {
   updateAssetsWithBookingCustodians,
 } from "./service.server";
 import { getAllSelectedValuesFromFilters } from "./utils.server";
+import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
+import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
@@ -219,6 +221,12 @@ export async function simpleModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
+  // Load saved filter presets
+  const savedFilterPresets = await listPresetsForUser({
+    organizationId,
+    ownerId: userId,
+  });
+
   return data(
     payload({
       header,
@@ -266,6 +274,9 @@ export async function simpleModeLoader({
       kits: [] as Kit[],
       // Those tags are used for the tags autocomplete on the booking form
       tagsData,
+      // Saved filter presets
+      savedFilterPresets,
+      savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {
       headers,
@@ -422,6 +433,12 @@ export async function advancedModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
+  // Load saved filter presets
+  const savedFilterPresets = await listPresetsForUser({
+    organizationId,
+    ownerId: userId,
+  });
+
   return data(
     payload({
       header,
@@ -466,6 +483,9 @@ export async function advancedModeLoader({
       tags,
       totalTags,
       tagsData,
+      // Saved filter presets
+      savedFilterPresets,
+      savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {
       headers,
