@@ -241,10 +241,7 @@ export async function getAuditSessionDetails({
     };
   } catch (cause) {
     // Re-throw special 404 errors without modification
-    if (
-      isLikeShelfError(cause) &&
-      cause.additionalData?.model === "audit"
-    ) {
+    if (isLikeShelfError(cause) && cause.additionalData?.model === "audit") {
       throw cause;
     }
 

@@ -26,11 +26,15 @@ export function ExpectedAssetsList({
   const scannedItems = useAtomValue(scannedItemsAtom);
 
   // Create a set of scanned asset IDs for quick lookup
-  const scannedAssetIds = useMemo(() => new Set(
-      Object.values(scannedItems)
-        .filter((item) => !!item && item.data && item.type === "asset")
-        .map((item) => item!.data!.id)
-    ), [scannedItems]);
+  const scannedAssetIds = useMemo(
+    () =>
+      new Set(
+        Object.values(scannedItems)
+          .filter((item) => !!item && item.data && item.type === "asset")
+          .map((item) => item!.data!.id)
+      ),
+    [scannedItems]
+  );
 
   // Categorize expected assets into found and missing
   const { foundAssets, missingAssets } = useMemo(() => {
@@ -72,7 +76,9 @@ export function ExpectedAssetsList({
         <p className="text-sm text-gray-600">
           {stats.foundCount === 0
             ? `Start scanning assets to begin auditing this ${contextLabel.toLowerCase()}.`
-            : `Keep scanning! ${stats.missingCount} asset${stats.missingCount === 1 ? "" : "s"} remaining.`}
+            : `Keep scanning! ${stats.missingCount} asset${
+                stats.missingCount === 1 ? "" : "s"
+              } remaining.`}
         </p>
       </div>
 
