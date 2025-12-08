@@ -88,6 +88,14 @@ function AdvancedFilter() {
 
   const availableColumns = getAvailableColumns(columns, filters, "filter");
 
+  // Create a stable string from search params excluding getAll parameter
+  // This prevents filter resets when dropdown "show all" actions modify the URL
+  const relevantSearchParamsString = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("getAll"); // Remove getAll parameter as it's for dropdown pagination, not filtering
+    return params.toString();
+  }, [searchParams]);
+
   // Set the intial filters
   useEffect(() => {
     // Only sync from URL if we're not applying internally
@@ -98,7 +106,7 @@ function AdvancedFilter() {
     setFilters(initialFilters);
     setHasUnappliedChanges(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [relevantSearchParamsString]);
 
   function clearAllFilters() {
     setFilters([]);
@@ -404,6 +412,14 @@ function AdvancedSorting() {
   // Track the last URL sort string we synced from to detect external changes
   const lastSyncedUrlSorts = useRef<string>("");
 
+  // Create a stable string from search params excluding getAll parameter
+  // This prevents sort resets when dropdown "show all" actions modify the URL
+  const relevantSearchParamsString = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("getAll");
+    return params.toString();
+  }, [searchParams]);
+
   useEffect(() => {
     // Get current URL sorts as string
     const currentUrlSorts = searchParams.getAll("sortBy").join(",");
@@ -427,7 +443,7 @@ function AdvancedSorting() {
     setSorts(parsedSorts);
     lastSyncedUrlSorts.current = currentUrlSorts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [relevantSearchParamsString]);
 
   const initialSorts = searchParams.getAll("sortBy").map((s) => {
     const [name, direction, cfType] = s.split(":");
