@@ -100,6 +100,8 @@ model User {
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
 
+  assetFilterPresets AssetFilterPreset[]
+
   @@unique([email, username])
   @@index([firstName, lastName])
   // Index for foreign key
@@ -222,6 +224,24 @@ enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
   CHECKED_OUT
+}
+
+
+model AssetFilterPreset {
+  id             String                @id @default(cuid())
+  organizationId String
+  ownerId        String
+  name           String
+  query          String
+  starred        Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, ownerId, name], map: "asset_filter_presets_owner_name_unique")
+  @@index([organizationId, ownerId], map: "asset_filter_presets_owner_lookup_idx")
 }
 
 model AssetIndexSettings {
@@ -677,6 +697,7 @@ model Organization {
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
   auditSessions      AuditSession[]
+  assetFilterPresets AssetFilterPreset[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
