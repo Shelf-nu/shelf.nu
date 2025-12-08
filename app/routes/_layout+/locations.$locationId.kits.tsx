@@ -160,10 +160,10 @@ export default function LocationKits() {
                     trigger={
                       <div className="flex items-center gap-2">
                         Custodian
-                        <ChevronRight className="hidden rotate-90 md:inline" />
+                        <ChevronRight className="rotate-90" />
                       </div>
                     }
-                    triggerWrapperClassName="h-[42px] whitespace-nowrap rounded border border-gray-300 px-[14px] text-[14px] text-gray-500 hover:cursor-pointer"
+                    triggerWrapperClassName="h-[42px] w-full whitespace-nowrap rounded border border-gray-300 px-[14px] text-[14px] text-gray-500 hover:cursor-pointer md:w-auto"
                     model={{
                       name: "teamMember",
                       queryKey: "name",

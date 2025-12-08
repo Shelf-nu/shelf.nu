@@ -164,7 +164,7 @@ export default function LocationAssets() {
           className="responsive-filters mb-2 lg:mb-0"
           slots={{
             "right-of-search": (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
                 <SortBy
                   sortingOptions={ASSET_SORTING_OPTIONS}
                   defaultSortingBy="createdAt"
@@ -174,10 +174,10 @@ export default function LocationAssets() {
                     trigger={
                       <div className="flex items-center gap-2">
                         Custodian
-                        <ChevronRight className="hidden rotate-90 md:inline" />
+                        <ChevronRight className="rotate-90" />
                       </div>
                     }
-                    triggerWrapperClassName="h-[42px] whitespace-nowrap rounded border border-gray-300 px-[14px] text-[14px] text-gray-500 hover:cursor-pointer"
+                    triggerWrapperClassName="h-[42px] w-full whitespace-nowrap rounded border border-gray-300 px-[14px] text-[14px] text-gray-500 hover:cursor-pointer md:w-auto"
                     model={{
                       name: "teamMember",
                       queryKey: "name",
