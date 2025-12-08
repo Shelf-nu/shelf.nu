@@ -158,11 +158,12 @@ export default function LocationKits() {
                 <div className="flex flex-col gap-2">
                   <DynamicDropdown
                     trigger={
-                      <div className="flex cursor-pointer items-center gap-2">
+                      <div className="flex items-center gap-2">
                         Custodian
                         <ChevronRight className="hidden rotate-90 md:inline" />
                       </div>
                     }
+                    triggerWrapperClassName="h-[42px] whitespace-nowrap rounded border border-gray-300 px-[14px] text-[14px] text-gray-500 hover:cursor-pointer"
                     model={{
                       name: "teamMember",
                       queryKey: "name",
