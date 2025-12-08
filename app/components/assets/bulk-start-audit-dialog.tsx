@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
- import { useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 

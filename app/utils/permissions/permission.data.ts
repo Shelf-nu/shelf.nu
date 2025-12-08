@@ -239,12 +239,12 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.delete,
     ],
-     [PermissionEntity.audit]: [
-       PermissionAction.create,
-       PermissionAction.read,
-       PermissionAction.update,
-       PermissionAction.delete,
-     ],
+    [PermissionEntity.audit]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
     [PermissionEntity.userData]: [
       PermissionAction.read,
       PermissionAction.update,

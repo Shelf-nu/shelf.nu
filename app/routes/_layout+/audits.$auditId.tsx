@@ -1,31 +1,39 @@
 import { useEffect, useMemo } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import { useSetAtom } from "jotai";
- import type {
-   LoaderFunctionArgs,
-   MetaFunction,
-   LinksFunction,
- } from "react-router";
- import { data, useLoaderData } from "react-router";
+import { useSetAtom, useAtomValue } from "jotai";
+import type {
+  LoaderFunctionArgs,
+  MetaFunction,
+  LinksFunction,
+} from "react-router";
+import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import {
   setAuditExpectedAssetsAtom,
   startAuditSessionAtom,
   endAuditSessionAtom,
+  addScannedItemAtom,
+  auditSessionAtom,
   type AuditScannedItem,
 } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
+import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
+import { CodeScanner } from "~/components/scanner/code-scanner";
+import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getAuditSessionDetails } from "~/modules/audit/service.server";
 import auditStyles from "~/styles/assets.css?url";
 import { makeShelfError, ShelfError } from "~/utils/error";
- import { error, getParams, payload } from "~/utils/http.server";
+import { error, getParams, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: auditStyles },
@@ -56,6 +64,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { session, expectedAssets } = await getAuditSessionDetails({
       id: auditId,
       organizationId,
+      userOrganizations,
+      request,
     });
 
     const rolesForOrg = userOrganizations.find(
@@ -85,18 +95,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return data(payload({ session, expectedAssets }));
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId, auditId });
+    const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
   }
 }
 
 const label = "Audit" as const;
 
+export const ErrorBoundary = () => <ErrorContent />;
+
 export default function AuditSessionRoute() {
   const { session, expectedAssets } = useLoaderData<typeof loader>();
   const startAuditSession = useSetAtom(startAuditSessionAtom);
   const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
   const endAuditSession = useSetAtom(endAuditSessionAtom);
+  const addItem = useSetAtom(addScannedItemAtom);
+  const auditSession = useAtomValue(auditSessionAtom);
+
+  const { vh, isMd } = useViewportHeight();
+  const height = isMd ? vh - 67 : vh - 100;
 
   const expectedItems: AuditScannedItem[] = useMemo(
     () =>
@@ -167,8 +184,28 @@ export default function AuditSessionRoute() {
       ? (scopeMeta.contextName as string)
       : session.name;
 
+  /**
+   * Handles successful QR code/barcode detection from the scanner.
+   * 
+   * Note: This currently only adds items to local state via atoms.
+   * TODO: In the future, this should call an API endpoint to persist
+   * the scan to the audit session, allowing audits to be resumed
+   * across sessions (e.g., start today, continue tomorrow).
+   * 
+   * @param {string} qrId - The scanned QR code, barcode, or SAM ID
+   * @param {string} [error] - Optional error message if the code couldn't be processed
+   * @param {"qr" | "barcode" | "samId"} [type] - The type of code that was scanned
+   */
+  function handleCodeDetectionSuccess({
+    value: qrId,
+    error,
+    type,
+  }: OnCodeDetectionSuccessProps) {
+    addItem(qrId, error, type);
+  }
+
   return (
-    <div className="relative">
+    <>
       <Header hidePageDescription>
         <h1 className="text-lg font-semibold text-gray-900">{session.name}</h1>
       </Header>
@@ -178,7 +215,36 @@ export default function AuditSessionRoute() {
         contextName={contextName}
         expectedAssets={expectedItems}
         defaultExpanded
+        emptyStateContent={({ expanded, stats }) =>
+          expanded ? (
+            <ExpectedAssetsList
+              expectedAssets={expectedItems}
+              stats={stats}
+              contextLabel={contextLabel}
+              contextName={contextName}
+            />
+          ) : (
+            <div className="py-4 text-center">
+              <p className="text-sm text-gray-500">
+                Scan assets to audit this {contextLabel.toLowerCase()}...
+              </p>
+            </div>
+          )
+        }
       />
-    </div>
+
+      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+        <CodeScanner
+          onCodeDetectionSuccess={handleCodeDetectionSuccess}
+          backButtonText="Audit"
+          allowNonShelfCodes
+          paused={!auditSession}
+          setPaused={() => {}}
+          scannerModeClassName={(mode) =>
+            tw(mode === "scanner" && "justify-start pt-[100px]")
+          }
+        />
+      </div>
+    </>
   );
 }

@@ -32,7 +32,7 @@ type ConfigurableDrawerProps<T> = {
   // Loading state
   isLoading?: boolean;
   // Item rendering function
-  renderItem: (qrId: string, item: T) => ReactNode;
+  renderItem?: (qrId: string, item: T) => ReactNode;
   // Blockers component (from createBlockers)
   Blockers?: ComponentType;
   // Whether form submission should be disabled
@@ -59,6 +59,8 @@ type ConfigurableDrawerProps<T> = {
 
   // Optional header content to render above the item list
   headerContent?: ReactNode;
+  // Optional custom render function for all items (if you need full control over rendering)
+  customRenderAllItems?: () => ReactNode;
 };
 
 /**
@@ -86,6 +88,7 @@ export default function ConfigurableDrawer<T>({
   formName = "ConfigurableDrawerForm",
   form,
   headerContent,
+  customRenderAllItems,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
   const itemsLength = Object.keys(items).length;
@@ -137,9 +140,13 @@ export default function ConfigurableDrawer<T>({
 
           <tbody>
             <AnimatePresence>
-              {Object.entries(items).map(([qrId, item]) =>
-                renderItem(qrId, item)
-              )}
+              {customRenderAllItems
+                ? customRenderAllItems()
+                : renderItem
+                  ? Object.entries(items).map(([qrId, item]) =>
+                      renderItem(qrId, item)
+                    )
+                  : null}
             </AnimatePresence>
           </tbody>
         </Table>

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 
@@ -13,6 +13,7 @@ import {
   type AuditSessionInfo,
   type ScanListItems,
 } from "~/atoms/qr-scanner";
+import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
 import {
   createBlockers,
@@ -22,7 +23,9 @@ import ConfigurableDrawer from "~/components/scanner/drawer/configurable-drawer"
 import {
   DefaultLoadingState,
   GenericItemRow,
+  Tr,
 } from "~/components/scanner/drawer/generic-item-row";
+import { Badge } from "~/components/shared/badge";
 import { Progress } from "~/components/shared/progress";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
@@ -111,6 +114,17 @@ export function AuditDrawer({
     [items, expectedAssetIds]
   );
 
+  // Get IDs of scanned assets for quick lookup
+  const scannedAssetIds = useMemo(
+    () =>
+      new Set(
+        Object.values(items)
+          .filter((item) => !!item && item.data && item.type === "asset")
+          .map((item) => (item!.data as AssetFromQr).id)
+      ),
+    [items]
+  );
+
   const foundAssets = scannedAssets.filter(
     (asset) => asset.auditStatus === "found"
   );
@@ -121,87 +135,149 @@ export function AuditDrawer({
     (asset) => !foundAssets.some((found) => found.id === asset.id)
   );
 
-  const stats: AuditDrawerStats = {
-    totalExpected: expectedAssets.length,
-    foundCount: foundAssets.length,
-    missingCount: missingAssets.length,
-    unexpectedCount: unexpectedAssets.length,
-  };
-
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-  const errorIds = errors.map(([qrId]) => qrId);
-  const baseBlockers: BlockerConfig[] = [
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count) => (
-        <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-          {count > 1 ? "are" : "is"} invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errorIds),
-    },
-  ];
-
-  const additionalBlockers = getAdditionalBlockers
-    ? getAdditionalBlockers({
-        items,
-        removeItems: removeItemsFromList,
-        removeItem,
-        expectedAssetIds,
-      })
-    : [];
-
-  const blockerConfigs = [...baseBlockers, ...additionalBlockers];
-
-  const [hasBlockers, Blockers] = createBlockers({
-    blockerConfigs,
-    onResolveAll: () => {
-      blockerConfigs
-        .filter((blocker) => blocker.condition)
-        .forEach((blocker) => blocker.onResolve());
-    },
-  });
-
-  const auditTitle = (
-    <div className="text-right">
-      <span className="block text-gray-600">
-        Audit: {contextName} • {stats.foundCount}/{stats.totalExpected} found
-        {stats.unexpectedCount > 0 && ` • ${stats.unexpectedCount} unexpected`}
-      </span>
-      <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
-        <Progress
-          value={
-            stats.totalExpected > 0
-              ? (stats.foundCount / stats.totalExpected) * 100
-              : 0
-          }
-        />
-      </span>
-    </div>
+  const stats: AuditDrawerStats = useMemo(
+    () => ({
+      totalExpected: expectedAssets.length,
+      foundCount: foundAssets.length,
+      missingCount: missingAssets.length,
+      unexpectedCount: unexpectedAssets.length,
+    }),
+    [
+      expectedAssets.length,
+      foundAssets.length,
+      missingAssets.length,
+      unexpectedAssets.length,
+    ]
   );
 
-  const formData = auditSession
-    ? {
-        intent: "complete-audit",
-        auditSessionId: auditSession.id,
-        foundAssetCount: stats.foundCount.toString(),
-        missingAssetCount: stats.missingCount.toString(),
-        unexpectedAssetCount: stats.unexpectedCount.toString(),
-      }
-    : undefined;
+  const formData = useMemo(() => {
+    if (!auditSession) return {};
+    return {
+      intent: "complete-audit",
+      auditSessionId: auditSession.id,
+      foundAssetCount: String(stats.foundCount),
+      missingAssetCount: String(stats.missingCount),
+      unexpectedAssetCount: String(stats.unexpectedCount),
+    };
+  }, [auditSession, stats]);
 
+  const auditTitle = useMemo(() => {
+    if (!auditSession) {
+      return contextLabel;
+    }
+    return (
+      <div className="text-right">
+        <span className="block text-gray-600">
+          Audit: {contextName} • {stats.foundCount}/{stats.totalExpected} found
+          {stats.unexpectedCount > 0 &&
+            ` • ${stats.unexpectedCount} unexpected`}
+        </span>
+        <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+          <Progress
+            value={
+              stats.totalExpected > 0
+                ? (stats.foundCount / stats.totalExpected) * 100
+                : 0
+            }
+          />
+        </span>
+      </div>
+    );
+  }, [
+    contextLabel,
+    contextName,
+    auditSession,
+    stats.foundCount,
+    stats.totalExpected,
+    stats.unexpectedCount,
+  ]);
+
+  const { Blockers, hasBlockers } = useMemo(() => {
+    const baseBlockers: BlockerConfig[] = [
+      {
+        condition: unexpectedAssets.length > 0,
+        count: unexpectedAssets.length,
+        message: (count) => `${count} unexpected asset(s) detected`,
+        description: (
+          <span>
+            Some scanned assets were not expected in this audit. Review them
+            before completing.
+          </span>
+        ),
+        onResolve: () => {
+          const unexpectedIds = unexpectedAssets
+            .map((asset) => {
+              const entry = Object.entries(items).find(
+                ([_, item]) =>
+                  item?.data && "id" in item.data && item.data.id === asset.id
+              );
+              return entry?.[0];
+            })
+            .filter((id): id is string => !!id);
+          if (unexpectedIds.length > 0) {
+            removeItemsFromList(unexpectedIds);
+          }
+        },
+      },
+    ];
+
+    const additionalBlockers = getAdditionalBlockers
+      ? getAdditionalBlockers({
+          items,
+          removeItems: removeItemsFromList,
+          removeItem,
+          expectedAssetIds,
+        })
+      : [];
+
+    const allBlockers = [...baseBlockers, ...additionalBlockers];
+    const [hasActiveBlockers, BlockersComponent] = createBlockers({
+      blockerConfigs: allBlockers,
+      onResolveAll: () => {
+        const allUnexpectedIds = unexpectedAssets
+          .map((asset) => {
+            const entry = Object.entries(items).find(
+              ([_, item]) =>
+                item?.data && "id" in item.data && item.data.id === asset.id
+            );
+            return entry?.[0];
+          })
+          .filter((id): id is string => !!id);
+        if (allUnexpectedIds.length > 0) {
+          removeItemsFromList(allUnexpectedIds);
+        }
+      },
+    });
+    return {
+      Blockers: BlockersComponent,
+      hasBlockers: hasActiveBlockers,
+    };
+  }, [
+    unexpectedAssets,
+    getAdditionalBlockers,
+    items,
+    removeItemsFromList,
+    removeItem,
+    expectedAssetIds,
+  ]);
+
+  /**
+   * Render a scanned item using GenericItemRow
+   */
   const renderItem = (qrId: string, item: any) => (
     <GenericItemRow
       key={qrId}
       qrId={qrId}
       item={item}
       onRemove={removeItem}
+      renderLoading={(pendingQrId: string, error?: string) => (
+        <DefaultLoadingState qrId={pendingQrId} error={error} />
+      )}
       renderItem={(data: any) => {
-        const isAsset = item.type === "asset";
-        const isExpected = isAsset && expectedAssetIds.has(data.id);
-        const isUnexpected = isAsset && !expectedAssetIds.has(data.id);
+        const isAsset = item?.type === "asset";
+        const isExpected = isAsset && data?.id && expectedAssetIds.has(data.id);
+        const isUnexpected =
+          isAsset && data?.id && !expectedAssetIds.has(data.id);
 
         const availabilityConfigs = [
           {
@@ -246,11 +322,56 @@ export function AuditDrawer({
           </div>
         );
       }}
-      renderLoading={(pendingQrId: string, error?: string) => (
-        <DefaultLoadingState qrId={pendingQrId} error={error} />
-      )}
     />
   );
+
+  /**
+   * Render a pending (expected but not yet scanned) asset
+   */
+  const renderPendingAsset = (asset: AuditScannedItem) => (
+    <Tr key={`pending-${asset.id}`}>
+      <td className="w-full p-0 md:p-0">
+        <div className="flex items-center justify-between gap-3 p-4 opacity-60 md:px-6">
+          <div className="flex flex-col gap-1">
+            <p className="word-break whitespace-break-spaces font-medium text-gray-600">
+              {asset.name}
+            </p>
+            <div className="flex flex-wrap items-center gap-1">
+              <Badge color="#6B7280">asset</Badge>
+              <AvailabilityBadge
+                badgeText="Pending"
+                tooltipTitle="Pending scan"
+                tooltipContent="This asset is expected but has not been scanned yet."
+                className="border-gray-200 bg-gray-50 text-gray-600"
+              />
+            </div>
+          </div>
+        </div>
+      </td>
+      <td>
+        {/* No remove button for pending items */}
+        <div className="w-[52px]" />
+      </td>
+    </Tr>
+  );
+
+  /**
+   * Custom renderer that shows scanned items at the top, followed by pending assets
+   */
+  const customRenderAllItems = (): ReactNode => {
+    // Get pending (expected but not scanned) assets
+    const pendingAssets = expectedAssets.filter(
+      (asset) => !scannedAssetIds.has(asset.id)
+    );
+
+    // Render scanned items first, then pending assets at the bottom
+    return (
+      <>
+        {Object.entries(items).map(([qrId, item]) => renderItem(qrId, item))}
+        {pendingAssets.map((asset) => renderPendingAsset(asset))}
+      </>
+    );
+  };
 
   const resolvedEmptyState = emptyStateContent
     ? (expanded: boolean) =>
@@ -295,7 +416,7 @@ export function AuditDrawer({
       onClearItems={clearList}
       title={auditTitle}
       isLoading={isLoading}
-      renderItem={renderItem}
+      customRenderAllItems={customRenderAllItems}
       Blockers={Blockers}
       disableSubmit={shouldDisableSubmit}
       submitButtonText="Complete Audit"

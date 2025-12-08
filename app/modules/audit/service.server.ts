@@ -1,9 +1,11 @@
-import type { AuditAssignment, AuditSession } from "@prisma/client";
 import { AuditAssignmentRole } from "@prisma/client";
+import type { AuditAssignment, AuditSession } from "@prisma/client";
+import type { UserOrganization } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Audit";
 
@@ -150,15 +152,27 @@ export async function createAuditSession(
 export async function getAuditSessionDetails({
   id,
   organizationId,
+  userOrganizations,
+  request,
 }: {
   id: AuditSession["id"];
   organizationId: string;
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
 }): Promise<GetAuditSessionResult> {
   try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
     const session = await db.auditSession.findFirst({
       where: {
-        id,
-        organizationId,
+        OR: [
+          { id, organizationId },
+          ...(userOrganizations?.length
+            ? [{ id, organizationId: { in: otherOrganizationIds } }]
+            : []),
+        ],
       },
       include: {
         assignments: true,
@@ -185,6 +199,35 @@ export async function getAuditSessionDetails({
       });
     }
 
+    /* User is accessing the audit in the wrong organization. In that case we need special 404 handling. */
+    if (
+      userOrganizations?.length &&
+      session.organizationId !== organizationId &&
+      otherOrganizationIds?.includes(session.organizationId)
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "Audit not found",
+        message: "",
+        additionalData: {
+          id,
+          model: "audit",
+          organization: userOrganizations.find(
+            (org) => org.organizationId === session.organizationId
+          ),
+          redirectTo,
+        },
+        label,
+        status: 404,
+        shouldBeCaptured: false, // In this case we shouldn't be capturing the error
+      });
+    }
+
     const expectedAssets: AuditExpectedAsset[] = session.assets
       .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
       .map((auditAsset) => ({
@@ -197,6 +240,14 @@ export async function getAuditSessionDetails({
       expectedAssets,
     };
   } catch (cause) {
+    // Re-throw special 404 errors without modification
+    if (
+      isLikeShelfError(cause) &&
+      cause.additionalData?.model === "audit"
+    ) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to load audit session",
