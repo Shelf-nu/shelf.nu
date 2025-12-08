@@ -57,11 +57,11 @@ export function PresetListItem({
     deleteFetcher.formData?.get("presetId") === preset.id;
 
   // Hide the preset optimistically when being deleted
- if (isDeleting) {
-   return null;
- }
+  if (isDeleting) {
+    return null;
+  }
 
- return (
+  return (
     <div
       id={id}
       className={tw(
