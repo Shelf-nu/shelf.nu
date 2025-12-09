@@ -190,6 +190,13 @@ export function GenericItemRow<T>({
           variant="ghost"
           icon="trash"
           onClick={() => onRemove(qrId)}
+          aria-label={
+            item?.data && "title" in item.data
+              ? `Remove scanned item: ${item.data.title}`
+              : item?.data && "name" in item.data
+                ? `Remove scanned item: ${item.data.name}`
+                : "Remove scanned item"
+          }
         />
       </Td>
     </Tr>

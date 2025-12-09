@@ -174,6 +174,7 @@ export function AuditDrawer({
         </span>
         <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
           <Progress
+            aria-label={`Audit progress: ${stats.foundCount} of ${stats.totalExpected} assets found`}
             value={
               stats.totalExpected > 0
                 ? (stats.foundCount / stats.totalExpected) * 100
@@ -189,37 +190,12 @@ export function AuditDrawer({
     auditSession,
     stats.foundCount,
     stats.totalExpected,
-    stats.unexpectedCount,
-  ]);
+  stats.unexpectedCount,
+]);
 
   const { Blockers, hasBlockers } = useMemo(() => {
-    const baseBlockers: BlockerConfig[] = [
-      {
-        condition: unexpectedAssets.length > 0,
-        count: unexpectedAssets.length,
-        message: (count) => `${count} unexpected asset(s) detected`,
-        description: (
-          <span>
-            Some scanned assets were not expected in this audit. Review them
-            before completing.
-          </span>
-        ),
-        onResolve: () => {
-          const unexpectedIds = unexpectedAssets
-            .map((asset) => {
-              const entry = Object.entries(items).find(
-                ([_, item]) =>
-                  item?.data && "id" in item.data && item.data.id === asset.id
-              );
-              return entry?.[0];
-            })
-            .filter((id): id is string => !!id);
-          if (unexpectedIds.length > 0) {
-            removeItemsFromList(unexpectedIds);
-          }
-        },
-      },
-    ];
+    // No base blockers - unexpected assets are allowed and tracked
+    const baseBlockers: BlockerConfig[] = [];
 
     const additionalBlockers = getAdditionalBlockers
       ? getAdditionalBlockers({
@@ -234,18 +210,7 @@ export function AuditDrawer({
     const [hasActiveBlockers, BlockersComponent] = createBlockers({
       blockerConfigs: allBlockers,
       onResolveAll: () => {
-        const allUnexpectedIds = unexpectedAssets
-          .map((asset) => {
-            const entry = Object.entries(items).find(
-              ([_, item]) =>
-                item?.data && "id" in item.data && item.data.id === asset.id
-            );
-            return entry?.[0];
-          })
-          .filter((id): id is string => !!id);
-        if (allUnexpectedIds.length > 0) {
-          removeItemsFromList(allUnexpectedIds);
-        }
+        // No automatic cleanup of unexpected assets
       },
     });
     return {
@@ -253,7 +218,6 @@ export function AuditDrawer({
       hasBlockers: hasActiveBlockers,
     };
   }, [
-    unexpectedAssets,
     getAdditionalBlockers,
     items,
     removeItemsFromList,
