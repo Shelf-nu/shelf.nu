@@ -1,4 +1,4 @@
-import type React from "react";
+import type { ChangeEvent } from "react";
 import { atom } from "jotai";
 
 /** Controls the state for the selected tags for tag dropdown.
@@ -27,7 +27,7 @@ export const addInitialSelectedTagsAtom = atom(
 /** Updates the selected tags by merging the state */
 export const addOrRemoveSelectedTagIdAtom = atom(
   null,
-  (_get, set, event: React.ChangeEvent<HTMLInputElement>) => {
+  (_get, set, event: ChangeEvent<HTMLInputElement>) => {
     set(selectedTagsAtom, (prev) => {
       const node = event.target as HTMLInputElement;
       const id = node.value satisfies string;

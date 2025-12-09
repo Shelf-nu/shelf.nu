@@ -24,6 +24,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -37,6 +38,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
+
+export const meta = () => [{ title: appendToMetaTitle("Add kit to booking") }];
 
 const updateBookingSchema = z.object({
   bookingId: z.string().transform((val, ctx) => {

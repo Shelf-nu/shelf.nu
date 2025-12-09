@@ -1,5 +1,9 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import {
   data,
   redirect,
@@ -28,6 +32,7 @@ import {
   getPaginatedAndFilterableQrCodes,
   markBatchAsPrinted,
 } from "~/modules/qr/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -77,6 +82,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: appendToMetaTitle(loaderData?.header.title) },
+];
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

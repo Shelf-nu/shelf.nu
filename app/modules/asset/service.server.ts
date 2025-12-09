@@ -3731,7 +3731,7 @@ export async function getUserAssetsTabLoaderData({
     const { filters, redirectNeeded } = await getFiltersFromRequest(
       request,
       organizationId,
-      { name: "assetFilter", path: "/assets" }
+      { name: "assetFilter_v2", path: "/" } // Use root path for RR7 single fetch
     );
 
     if (filters && redirectNeeded) {

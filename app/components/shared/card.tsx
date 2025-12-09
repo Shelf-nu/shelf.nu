@@ -1,10 +1,11 @@
+import type { ReactNode } from "react";
 import { tw } from "~/utils/tw";
 
 export const Card = ({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) => (
   <div

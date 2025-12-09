@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { tw } from "~/utils/tw";
 
 /** Use this component within a module show view to place buttons in the header visually outside the form */
@@ -5,7 +6,7 @@ export const AbsolutePositionedHeaderActions = ({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) => (
   <div

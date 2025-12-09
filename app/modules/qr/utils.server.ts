@@ -1,5 +1,8 @@
 import type { Organization, Qr, User } from "@prisma/client";
-import QRCode from "qrcode-generator";
+import QRCode, {
+  type TypeNumber,
+  type ErrorCorrectionLevel,
+} from "qrcode-generator";
 import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";

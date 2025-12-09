@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CrossCircledIcon } from "@radix-ui/react-icons";
 
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import Input from "./input";
 
 interface Props {
@@ -48,7 +49,13 @@ function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
             key={`${i}${op}`}
           >
             <span>{op}</span>
-            <div className="cursor-pointer" onClick={() => onRemove(i)}>
+            <div
+              className="cursor-pointer"
+              role="button"
+              tabIndex={0}
+              onClick={() => onRemove(i)}
+              onKeyDown={handleActivationKeyPress(() => onRemove(i))}
+            >
               <CrossCircledIcon className="size-6" />{" "}
             </div>
           </div>

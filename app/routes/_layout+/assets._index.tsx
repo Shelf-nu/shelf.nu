@@ -23,6 +23,18 @@ import {
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
+  CreatePresetFormSchema,
+  RenamePresetFormSchema,
+  DeletePresetFormSchema,
+} from "~/modules/asset-filter-presets/schemas";
+import {
+  createPreset,
+  deletePreset,
+  togglePresetStar,
+  listPresetsForUser,
+  renamePreset,
+} from "~/modules/asset-filter-presets/service.server";
+import {
   changeMode,
   getAssetIndexSettings,
 } from "~/modules/asset-index-settings/service.server";
@@ -93,6 +105,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
     const mode = settings.mode;
 
@@ -147,16 +160,28 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     const formData = await request.formData();
 
-    const { intent } = parseData(
-      formData,
-      z.object({ intent: z.enum(["bulk-delete"]) })
-    );
+    const IntentSchema = z.enum([
+      "bulk-delete",
+      "create-preset",
+      "rename-preset",
+      "delete-preset",
+      "toggle-star-preset",
+    ]);
 
-    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+    const { intent } = parseData(formData, z.object({ intent: IntentSchema }));
+
+    const intent2ActionMap: Record<
+      z.infer<typeof IntentSchema>,
+      PermissionAction
+    > = {
       "bulk-delete": PermissionAction.delete,
+      "create-preset": PermissionAction.read,
+      "rename-preset": PermissionAction.read,
+      "delete-preset": PermissionAction.read,
+      "toggle-star-preset": PermissionAction.read,
     };
 
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -168,6 +193,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
 
     switch (intent) {
@@ -195,6 +221,83 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return payload({ success: true });
+      }
+
+      case "create-preset": {
+        const { name, query } = parseData(formData, CreatePresetFormSchema);
+
+        await createPreset({
+          organizationId,
+          ownerId: userId,
+          name,
+          query,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return payload({ savedFilterPresets });
+      }
+
+      case "rename-preset": {
+        const { presetId, name } = parseData(formData, RenamePresetFormSchema);
+
+        await renamePreset({
+          id: presetId,
+          organizationId,
+          ownerId: userId,
+          name,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return payload({ savedFilterPresets });
+      }
+
+      case "delete-preset": {
+        const { presetId } = parseData(formData, DeletePresetFormSchema);
+
+        await deletePreset({
+          id: presetId,
+          organizationId,
+          ownerId: userId,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return payload({ savedFilterPresets });
+      }
+
+      case "toggle-star-preset": {
+        const { presetId, starred } = parseData(
+          formData,
+          z.object({
+            presetId: z.string().min(1),
+            starred: z.string().transform((val) => val === "true"),
+          })
+        );
+
+        await togglePresetStar({
+          id: presetId,
+          starred,
+          organizationId,
+          ownerId: userId,
+        });
+
+        const savedFilterPresets = await listPresetsForUser({
+          organizationId,
+          ownerId: userId,
+        });
+
+        return payload({ savedFilterPresets });
       }
 
       default: {

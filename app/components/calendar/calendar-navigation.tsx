@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import type FullCalendar from "@fullcalendar/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Button } from "../shared/button";
@@ -7,7 +8,7 @@ export function CalendarNavigation({
   calendarRef,
   updateTitle,
 }: {
-  calendarRef: React.RefObject<FullCalendar | null>;
+  calendarRef: RefObject<FullCalendar | null>;
   updateTitle: () => void;
 }) {
   function handleCalendarNavigation(navigateTo: "prev" | "today" | "next") {

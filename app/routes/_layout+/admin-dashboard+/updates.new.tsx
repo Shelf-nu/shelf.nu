@@ -5,9 +5,12 @@ import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";
 import { createUpdate } from "~/modules/update/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("New update") }];
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

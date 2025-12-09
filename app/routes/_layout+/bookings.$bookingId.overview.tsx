@@ -7,11 +7,11 @@ import {
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
-  MetaFunction,
-  LoaderFunctionArgs,
   LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
 } from "react-router";
-import { data, redirect, Outlet, useMatches } from "react-router";
+import { Outlet, useMatches, data, redirect } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -497,8 +497,6 @@ export const handle = {
   name: "bookings.$bookingId.overview",
 };
 
-
-
 export type BookingPageActionData = typeof action;
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -569,6 +567,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         action: intent2ActionMap[intent],
       });
 
+    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
+    const isAdminOrOwner = !isSelfServiceOrBase;
+
     const user = await getUserByID(userId, {
       select: {
         id: true,
@@ -599,6 +600,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             hints,
             workingHours,
             bookingSettings,
+            isAdminOrOwner,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -657,6 +659,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: basicBookingInfo.status,
             workingHours,
             bookingSettings,
+            isAdminOrOwner,
           }),
           {
             additionalData: { userId, id, organizationId, role },
@@ -1003,6 +1006,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             workingHours,
             timeZone: hints.timeZone,
             bookingSettings,
+            isAdminOrOwner,
           }),
           {
             additionalData: { userId, organizationId },

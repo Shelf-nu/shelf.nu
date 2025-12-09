@@ -136,7 +136,9 @@ export const CustomFieldForm = ({
         </FormRow>
 
         <div>
-          <label className="lg:hidden">Type</label>
+          <label className="lg:hidden" htmlFor="custom-field-type">
+            Type
+          </label>
           <FormRow
             rowLabel={"Type"}
             className="border-b-0 pb-[10px] pt-[6px]"
@@ -148,7 +150,11 @@ export const CustomFieldForm = ({
               disabled={disabled}
               onValueChange={(val: CustomFieldType) => setSelectedType(val)}
             >
-              <SelectTrigger disabled={isEdit} className="px-3.5 py-3">
+              <SelectTrigger
+                disabled={isEdit}
+                className="px-3.5 py-3"
+                id="custom-field-type"
+              >
                 <SelectValue placeholder="Choose a field type" />
               </SelectTrigger>
               <SelectContent
@@ -197,11 +203,15 @@ export const CustomFieldForm = ({
         <FormRow rowLabel="" className="border-b-0 pt-2">
           <div className="flex items-center gap-3">
             <Switch
+              id="custom-field-required"
               name={zo.fields.required()}
               disabled={disabled}
               defaultChecked={required}
             />
-            <label className="text-base font-medium text-gray-700">
+            <label
+              htmlFor="custom-field-required"
+              className="text-base font-medium text-gray-700"
+            >
               Required
             </label>
           </div>
@@ -210,19 +220,18 @@ export const CustomFieldForm = ({
         <FormRow rowLabel="" className="border-b-0 pt-2">
           <div className="flex items-center gap-3">
             <Switch
+              id="custom-field-active"
               name={zo.fields.active()}
               disabled={disabled}
               defaultChecked={active === undefined || active}
             />
-            <div>
-              <label className="text-base font-medium text-gray-700">
-                Active
-              </label>
+            <label htmlFor="custom-field-active">
+              <div className="text-base font-medium text-gray-700">Active</div>
               <p className="text-[14px] text-gray-600">
                 Deactivating a field will no longer show it on the asset form
                 and page
               </p>
-            </div>
+            </label>
           </div>
           {validationErrors?.active ? (
             <div className="text-sm text-error-500">
@@ -249,19 +258,20 @@ export const CustomFieldForm = ({
           >
             <div className="mb-3 flex gap-3">
               <Switch
+                id="custom-field-use-categories"
                 disabled={disabled}
                 checked={useCategories}
                 onCheckedChange={setUseCategories}
               />
-              <div>
-                <label className="text-base font-medium text-gray-700">
+              <label htmlFor="custom-field-use-categories">
+                <div className="text-base font-medium text-gray-700">
                   Use for select categories
-                </label>
+                </div>
                 <p className="text-[14px] text-gray-600">
                   In case you only want to use this custom field for asset with
                   certain categories.
                 </p>
-              </div>
+              </label>
             </div>
 
             {useCategories && (

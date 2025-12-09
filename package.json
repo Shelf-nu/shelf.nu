@@ -17,7 +17,7 @@
     "production:dev": "dotenv -e .env.production -- vite --host",
     "staging:dev": "dotenv -e .env.staging -- vite --host",
     "format": "prettier --write .",
-    "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
+    "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint --ext .js,.jsx,.ts,.tsx .",
     "setup": "prisma generate && prisma migrate deploy",
     "reset:db": "prisma migrate reset",
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
@@ -42,12 +42,12 @@
   },
   "overrides": {
     "@docsearch/react": {
-      "react": "19.2.0",
-      "react-dom": "19.2.0"
+      "react": "19.2.1",
+      "react-dom": "19.2.1"
     },
     "@tremor/react": {
-      "react": "19.2.0",
-      "react-dom": "19.2.0"
+      "react": "19.2.1",
+      "react-dom": "19.2.1"
     },
     "cross-spawn": "~7.0.6",
     "p-map": "4.0.0"
@@ -132,8 +132,8 @@
     "prosemirror-transform": "^1.10.4",
     "prosemirror-view": "^1.41.2",
     "qrcode-generator": "^1.4.4",
-    "react": "19.2.0",
-    "react-dom": "19.2.0",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
     "react-dropzone": "^14.3.8",
     "react-microsoft-clarity": "^1.2.0",
     "react-router": "^7.9.5",

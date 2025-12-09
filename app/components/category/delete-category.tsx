@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Category } from "@prisma/client";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
@@ -21,7 +22,7 @@ export const DeleteCategory = ({
   trigger,
 }: {
   category: Pick<Category, "name" | "id">;
-  trigger?: React.ReactNode;
+  trigger?: ReactNode;
 }) => {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Package } from "lucide-react";
 import { useFetcher, useFetchers, useLoaderData } from "react-router";
@@ -205,7 +206,7 @@ export const ListAssetContent = ({
   isUserPage,
 }: {
   item: AssetsFromViewItem;
-  bulkActions?: React.ReactNode;
+  bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;

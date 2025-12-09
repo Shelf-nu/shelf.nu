@@ -1,3 +1,9 @@
+import type {
+  ChangeEvent,
+  KeyboardEvent,
+  Dispatch,
+  SetStateAction,
+} from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Popover,
@@ -18,6 +24,7 @@ import {
   type Column,
 } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { FieldSelector } from "./advanced-filters/field-selector";
 import {
@@ -33,6 +40,7 @@ import {
 import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
 import { useFilterFormValidation } from "./advanced-filters/value.client.validator";
+import { SaveFilterButton } from "./saved-filter-presets";
 
 export interface Sort {
   name: string;
@@ -66,28 +74,62 @@ const getTriggerClasses = (
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
+
   const columns = settings.columns as Column[];
   const disabled = useDisabled();
-  const [_searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [filters, setFilters] = useState<Filter[]>([]);
   const initialFilters = useInitialFilters(columns);
+  const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
+
+  // Track if we're applying filters internally to avoid resetting state
+  const isApplyingInternally = useRef(false);
+
   const availableColumns = getAvailableColumns(columns, filters, "filter");
+
+  // Create a stable string from search params excluding getAll parameter
+  // This prevents filter resets when dropdown "show all" actions modify the URL
+  const relevantSearchParamsString = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("getAll"); // Remove getAll parameter as it's for dropdown pagination, not filtering
+    return params.toString();
+  }, [searchParams]);
 
   // Set the intial filters
   useEffect(() => {
+    // Only sync from URL if we're not applying internally
+    if (isApplyingInternally.current) {
+      isApplyingInternally.current = false;
+      return;
+    }
     setFilters(initialFilters);
+    setHasUnappliedChanges(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [relevantSearchParamsString]);
 
   function clearAllFilters() {
     setFilters([]);
+    /** If there are already filters, clear them from the search params */
+    if (filters.length > 0) {
+      isApplyingInternally.current = true;
+      setSearchParams((prev) => {
+        // Clear existing filter params
+        columns.forEach((column) => {
+          if (prev.has(column.name)) {
+            prev.delete(column.name);
+          }
+        });
+        return prev;
+      });
+    }
   }
 
   function applyFilters() {
     // Dont do anything if there are validation errors
     if (!validation.canApplyFilters) return;
 
+    isApplyingInternally.current = true;
     setSearchParams((prev) => {
       // Clear existing filter params
       columns.forEach((column) => {
@@ -105,6 +147,9 @@ function AdvancedFilter() {
       prev.delete("page");
       return prev;
     });
+
+    // Mark changes as applied
+    setHasUnappliedChanges(false);
   }
 
   function addFilter() {
@@ -124,6 +169,7 @@ function AdvancedFilter() {
       });
       return newCols;
     });
+    setHasUnappliedChanges(true);
   }
 
   const { zo, getValidationState, getFieldName, getError } =
@@ -132,204 +178,224 @@ function AdvancedFilter() {
   const validation = getValidationState();
 
   return (
-    <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="secondary"
-          className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
-          icon="filter"
-        >
-          {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
-          {initialFilters.length > 0
-            ? `Filtered by ${initialFilters.length}`
-            : "Filter"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverPortal>
-        <PopoverContent
-          align="start"
-          className={tw(
-            "z-[999999]  mt-2 w-[580px] rounded-md border border-gray-200 bg-white"
-          )}
-        >
-          <div className="border-b p-4 pb-5">
-            {filters.length === 0 ? (
-              <div>
-                <h5>No filters applied to this view</h5>
-                <p>Add a column below to filter the view</p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <form
-                  ref={zo.ref}
-                  onKeyDown={(e) => {
-                    /**
-                     * Prevent default behavior of the Enter key on input fields.
-                     * The form element is only needed for validations, so we don't want it to submit on Enter.
-                     * However, we allow Enter on buttons to support proper keyboard navigation for popovers.
-                     */
-                    if (
-                      e.key === "Enter" &&
-                      e.target instanceof HTMLElement &&
-                      e.target.tagName !== "BUTTON"
-                    ) {
-                      e.preventDefault();
-                    }
-                  }}
-                  className="flex flex-col gap-2"
-                >
-                  {filters.map((filter, index) => (
-                    <div
-                      className="flex w-full items-start gap-1"
-                      key={filter.name + index}
-                    >
-                      <div className="w-[150px] shrink-0">
-                        <FieldSelector
-                          filter={filter}
-                          filters={filters}
-                          setFilter={(name) => {
-                            setFilters((prev) => {
-                              const column = availableColumns.find(
-                                (c) => c.name === name
-                              ) as Column;
+    <>
+      {/* 
+      [IMPORTANT] The `modal={false}` prop is set on this Popover to allow interaction with elements outside the popover while it is open.
+      This is necessary for SaveFilterButton dialogs to work properly (e.g., for dialogs that open from within the popover).
+      However, this can affect user experience: users can interact with background elements while the filter popover is open,
+      and may open multiple popovers (such as SavedFilterPresetsControls) simultaneously, leading to confusing or inconsistent UI states.
+      If you modify this component or add new popovers/dialogs, ensure that simultaneous popover interactions are handled gracefully.
+      Consider restricting popover opening logic or adding UI safeguards if needed.
+      */}
+      <Popover
+        open={isPopoverOpen}
+        onOpenChange={setIsPopoverOpen}
+        modal={false}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            variant="secondary"
+            className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
+            icon="filter"
+          >
+            {/* We use the initial sorts, as we only count the ones returned from the server as those are already active filters */}
+            {initialFilters.length > 0
+              ? `Filtered by ${initialFilters.length}`
+              : "Filter"}
+          </Button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className={tw(
+              "z-[9999]  mt-2 min-w-[580px] rounded-md border border-gray-200 bg-white"
+            )}
+          >
+            <div className="border-b p-4 pb-5">
+              {filters.length === 0 ? (
+                <div>
+                  <h5>No filters applied to this view</h5>
+                  <p>Add a column below to filter the view</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <form
+                    ref={zo.ref}
+                    onKeyDown={(e) => {
+                      /**
+                       * Prevent default behavior of the Enter key on input fields.
+                       * The form element is only needed for validations, so we don't want it to submit on Enter.
+                       * However, we allow Enter on buttons to support proper keyboard navigation for popovers.
+                       */
+                      if (
+                        e.key === "Enter" &&
+                        e.target instanceof HTMLElement &&
+                        e.target.tagName !== "BUTTON"
+                      ) {
+                        e.preventDefault();
+                      }
+                    }}
+                    className="flex flex-col gap-2"
+                  >
+                    {filters.map((filter, index) => (
+                      <div
+                        className="flex w-full items-start gap-1"
+                        key={filter.name + index}
+                      >
+                        <div className="w-[150px] shrink-0">
+                          <FieldSelector
+                            filter={filter}
+                            filters={filters}
+                            setFilter={(name) => {
+                              setFilters((prev) => {
+                                const column = availableColumns.find(
+                                  (c) => c.name === name
+                                ) as Column;
 
-                              // Only proceed with type/operator/value setup if a valid column is selected
-                              if (column) {
-                                const fieldType = getUIFieldType({
-                                  column,
-                                }) as FilterFieldType;
-
-                                const newFilters = [...prev];
-                                newFilters[index] = {
-                                  ...newFilters[index],
-                                  name,
-                                  type: fieldType,
-                                  operator: operatorsPerType[fieldType][0],
-                                  value: getDefaultValueForFieldType(
+                                // Only proceed with type/operator/value setup if a valid column is selected
+                                if (column) {
+                                  const fieldType = getUIFieldType({
                                     column,
-                                    customFields
-                                  ),
-                                  isNew: false,
-                                };
-                                return newFilters;
-                              }
-                              return prev;
-                            });
+                                  }) as FilterFieldType;
+
+                                  const newFilters = [...prev];
+                                  newFilters[index] = {
+                                    ...newFilters[index],
+                                    name,
+                                    type: fieldType,
+                                    operator: operatorsPerType[fieldType][0],
+                                    value: getDefaultValueForFieldType(
+                                      column,
+                                      customFields
+                                    ),
+                                    isNew: false,
+                                  };
+                                  return newFilters;
+                                }
+                                return prev;
+                              });
+                              setHasUnappliedChanges(true);
+                            }}
+                          />
+                        </div>
+
+                        {filter.name && (
+                          <>
+                            <div className="w-[50px] shrink-0">
+                              <OperatorSelector
+                                filter={filter}
+                                setFilter={(operator) => {
+                                  setFilters((prev) => {
+                                    const newFilters = [...prev];
+                                    newFilters[index].operator = operator;
+                                    return newFilters;
+                                  });
+                                  setHasUnappliedChanges(true);
+                                }}
+                                disabled={
+                                  filter.isNew
+                                    ? { reason: "Please select a column" }
+                                    : false
+                                }
+                              />
+                            </div>
+                            <div className="min-w-0 grow">
+                              <ValueField
+                                filter={filter}
+                                setFilter={(value) => {
+                                  setFilters((prev) => {
+                                    const newFilters = [...prev];
+                                    newFilters[index].value = value;
+                                    return newFilters;
+                                  });
+                                  setHasUnappliedChanges(true);
+                                }}
+                                applyFilters={applyFilters}
+                                fieldName={getFieldName(index)}
+                                zormError={getError(index)}
+                                disabled={filter.isNew}
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        <Button
+                          variant="block-link-gray"
+                          className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
+                          icon="x"
+                          onClick={() => {
+                            setFilters((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            );
+                            setHasUnappliedChanges(true);
                           }}
                         />
                       </div>
-
-                      {filter.name && (
-                        <>
-                          <div className="w-[50px] shrink-0">
-                            <OperatorSelector
-                              filter={filter}
-                              setFilter={(operator) => {
-                                setFilters((prev) => {
-                                  const newFilters = [...prev];
-                                  newFilters[index].operator = operator;
-                                  return newFilters;
-                                });
-                              }}
-                              disabled={
-                                filter.isNew
-                                  ? { reason: "Please select a column" }
-                                  : false
-                              }
-                            />
-                          </div>
-                          <div className="min-w-0 grow">
-                            <ValueField
-                              filter={filter}
-                              setFilter={(value) => {
-                                setFilters((prev) => {
-                                  const newFilters = [...prev];
-                                  newFilters[index].value = value;
-                                  return newFilters;
-                                });
-                              }}
-                              applyFilters={applyFilters}
-                              fieldName={getFieldName(index)}
-                              zormError={getError(index)}
-                              disabled={filter.isNew}
-                            />
-                          </div>
-                        </>
-                      )}
-
-                      <Button
-                        variant="block-link-gray"
-                        className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
-                        icon="x"
-                        onClick={() => {
-                          setFilters((prev) =>
-                            prev.filter((_, i) => i !== index)
-                          );
-                        }}
-                      />
-                    </div>
-                  ))}
-                </form>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between px-4 py-3">
-            <div>
-              <Button
-                variant="secondary"
-                className="text-[14px] font-medium"
-                size="xs"
-                disabled={
-                  disabled || availableColumns.length === 0
-                    ? {
-                        reason:
-                          "You are not able to add more filters because all columns are already used. If you want to filter by more columns, please enable them on your column settings.",
-                      }
-                    : false
-                }
-                onClick={addFilter}
-              >
-                <div className="mr-1 inline-block size-[14px] align-middle">
-                  <PlusIcon />
+                    ))}
+                  </form>
                 </div>
-                <span className="inline-block align-middle">Add filter</span>
-              </Button>
-              <Button
-                variant="block-link-gray"
-                size="xs"
-                className="ml-1"
-                to="mailto:nikolay@shelf.nu?subject=Advanced filtering suggestions"
-              >
-                Need more filtering options?
-              </Button>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              {filters.length > 0 && (
-                <Button
-                  variant="block-link"
-                  size="xs"
-                  className="mt-0 text-[14px]"
-                  onClick={clearAllFilters}
-                >
-                  Clear all
-                </Button>
               )}
-
-              <Button
-                variant="secondary"
-                className="text-[14px] font-medium"
-                size="xs"
-                disabled={!validation.canApplyFilters || disabled}
-                onClick={applyFilters}
-              >
-                Apply filters
-              </Button>
             </div>
-          </div>
-        </PopoverContent>
-      </PopoverPortal>
-    </Popover>
+
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <Button
+                  variant="secondary"
+                  className="text-[14px] font-medium"
+                  size="xs"
+                  disabled={
+                    disabled || availableColumns.length === 0
+                      ? {
+                          reason:
+                            "You are not able to add more filters because all columns are already used. If you want to filter by more columns, please enable them on your column settings.",
+                        }
+                      : false
+                  }
+                  onClick={addFilter}
+                >
+                  <div className="mr-1 inline-block size-[14px] align-middle">
+                    <PlusIcon />
+                  </div>
+                  <span className="inline-block align-middle">Add filter</span>
+                </Button>
+                <Button
+                  variant="block-link-gray"
+                  size="xs"
+                  className="ml-1"
+                  to="mailto:nikolay@shelf.nu?subject=Advanced filtering suggestions"
+                >
+                  Need more filtering options?
+                </Button>
+              </div>
+              <div className="ml-8 flex items-center justify-between gap-2">
+                {filters.length > 0 && (
+                  <Button
+                    variant="block-link"
+                    size="xs"
+                    className="mt-0 whitespace-nowrap text-[14px]"
+                    onClick={clearAllFilters}
+                  >
+                    Clear all
+                  </Button>
+                )}
+
+                <SaveFilterButton hasUnappliedFilters={hasUnappliedChanges} />
+
+                <Button
+                  variant="secondary"
+                  className="whitespace-nowrap text-[14px] font-medium"
+                  size="xs"
+                  disabled={!validation.canApplyFilters || disabled}
+                  onClick={applyFilters}
+                >
+                  Apply filters
+                </Button>
+              </div>
+            </div>
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+    </>
   );
 }
 
@@ -337,16 +403,52 @@ function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const disabled = useDisabled();
+
+  // Track if we're applying sorts internally to avoid resetting state
+  const isApplyingInternally = useRef(false);
+
+  // Track the last URL sort string we synced from to detect external changes
+  const lastSyncedUrlSorts = useRef<string>("");
+
+  // Create a stable string from search params excluding getAll parameter
+  // This prevents sort resets when dropdown "show all" actions modify the URL
+  const relevantSearchParamsString = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("getAll");
+    return params.toString();
+  }, [searchParams]);
+
+  useEffect(() => {
+    // Get current URL sorts as string
+    const currentUrlSorts = searchParams.getAll("sortBy").join(",");
+
+    // Skip if URL hasn't changed or we're applying internally
+    if (currentUrlSorts === lastSyncedUrlSorts.current) {
+      return;
+    }
+
+    // Only sync from URL if we're not applying internally
+    if (isApplyingInternally.current) {
+      isApplyingInternally.current = false;
+      lastSyncedUrlSorts.current = currentUrlSorts;
+      return;
+    }
+
+    const parsedSorts = searchParams.getAll("sortBy").map((s) => {
+      const [name, direction, cfType] = s.split(":");
+      return { name, direction, cfType } as Sort;
+    });
+    setSorts(parsedSorts);
+    lastSyncedUrlSorts.current = currentUrlSorts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relevantSearchParamsString]);
+
   const initialSorts = searchParams.getAll("sortBy").map((s) => {
     const [name, direction, cfType] = s.split(":");
     return { name, direction, cfType } as Sort;
   });
-  const disabled = useDisabled();
-
-  useEffect(() => {
-    setSorts(initialSorts);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const haveSortsChanged =
     JSON.stringify(initialSorts) !== JSON.stringify(sorts);
@@ -356,6 +458,7 @@ function AdvancedSorting() {
   }
 
   function applySorting() {
+    isApplyingInternally.current = true;
     setSearchParams((prev) => {
       prev.delete("sortBy");
 
@@ -382,6 +485,7 @@ function AdvancedSorting() {
     setSorts([]);
     /** If there are already sorts, clear them from the search params */
     if (searchParams.has("sortBy")) {
+      isApplyingInternally.current = true;
       setSearchParams((prev) => {
         prev.delete("sortBy");
         return prev;
@@ -407,7 +511,7 @@ function AdvancedSorting() {
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
+            "z-[9999]  mt-2 w-[480px] rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="border-b p-4 pb-5">
@@ -445,9 +549,17 @@ function AdvancedSorting() {
                             checked={s.direction === "asc"}
                             onCheckedChange={() => {
                               setSorts((prev) => {
-                                const newSorts = [...prev];
-                                newSorts[index].direction =
-                                  s.direction === "asc" ? "desc" : "asc";
+                                const newSorts = prev.map((sort, i) => {
+                                  if (i === index) {
+                                    return {
+                                      ...sort,
+                                      direction: (sort.direction === "asc"
+                                        ? "desc"
+                                        : "asc") as "asc" | "desc",
+                                    };
+                                  }
+                                  return sort;
+                                });
                                 return newSorts;
                               });
                             }}
@@ -506,7 +618,7 @@ function PickAColumnToSortBy({
   setSorts,
 }: {
   sorts: Sort[];
-  setSorts: React.Dispatch<React.SetStateAction<Sort[]>>;
+  setSorts: Dispatch<SetStateAction<Sort[]>>;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -553,12 +665,12 @@ function PickAColumnToSortBy({
     );
   }, [baseOptions, searchQuery]);
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     setSelectedIndex(0);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -622,7 +734,7 @@ function PickAColumnToSortBy({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            "z-[9999] mt-2 max-h-[400px] w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
           )}
         >
           <div className="flex items-center border-b">
@@ -652,7 +764,11 @@ function PickAColumnToSortBy({
                       "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
                   ]
                 )}
+                role="option"
+                aria-selected={selectedIndex === index}
+                tabIndex={0}
                 onClick={() => addSort(option)}
+                onKeyDown={handleActivationKeyPress(() => addSort(option))}
               >
                 {parseColumnName(option.name)}
               </div>

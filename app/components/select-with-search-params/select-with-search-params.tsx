@@ -4,7 +4,7 @@ import { tw } from "~/utils/tw";
 import {
   Select,
   SelectContent,
-  SelectItem,
+  SelectItem as SelectItemComponent,
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
@@ -78,13 +78,13 @@ export default function SelectWithSearchParams({
         className={tw("w-full min-w-72 overflow-auto p-0", className)}
       >
         {items.map((item) => (
-          <SelectItem
+          <SelectItemComponent
             key={item.value}
             value={item.value}
             className="rounded-none border-b border-gray-200 px-6 py-4 pr-1.5 text-gray-700 hover:bg-gray-50"
           >
             <span className="mr-4 text-sm">{item.label}</span>
-          </SelectItem>
+          </SelectItemComponent>
         ))}
       </SelectContent>
     </Select>

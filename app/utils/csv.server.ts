@@ -44,10 +44,8 @@ import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
-import {
-  cleanMarkdownFormatting,
-  sanitizeNoteContent,
-} from "./note-sanitizer.server";
+import { cleanMarkdownFormatting } from "./markdown-cleaner";
+import { sanitizeNoteContent } from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -542,9 +540,10 @@ const formatCustomFieldForCsv = (
       }
       return fieldValue.valueBoolean ? "Yes" : "No";
 
-    case CustomFieldType.MULTILINE_TEXT:
+    case CustomFieldType.MULTILINE_TEXT: {
       const rawText = String(fieldValue.raw || "");
       return cleanMarkdownFormatting(rawText);
+    }
 
     case CustomFieldType.DATE:
       if (!fieldValue.valueDate) return "";
@@ -894,7 +893,7 @@ export const buildCsvExportDataFromBookings = (
             ? format(booking.to).split(",")
             : "";
           break;
-        case "custodian":
+        case "custodian": {
           const teamMember = {
             name: booking.custodianTeamMember?.name ?? "",
             user: booking?.custodianUser
@@ -908,6 +907,7 @@ export const buildCsvExportDataFromBookings = (
 
           value = resolveTeamMemberName(teamMember, true);
           break;
+        }
         case "description":
           value = booking.description ?? "";
           break;

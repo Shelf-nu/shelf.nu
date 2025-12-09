@@ -29,7 +29,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -41,6 +41,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
 
     // Validate form data using combined schema

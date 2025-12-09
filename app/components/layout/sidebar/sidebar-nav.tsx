@@ -1,4 +1,5 @@
 import { Fragment, useCallback } from "react";
+import type { CSSProperties } from "react";
 import type { NavItem } from "~/hooks/use-sidebar-nav-items";
 import ChildNavItem from "./child-nav-item";
 import ParentNavItem from "./parent-nav-item";
@@ -14,7 +15,7 @@ import UpdatesNavItem from "./updates-nav-item";
 
 type SidebarNavProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   items: NavItem[];
 };
 

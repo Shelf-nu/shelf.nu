@@ -1,3 +1,4 @@
+import type { FC } from "react";
 import SubHeading from "~/components/shared/sub-heading";
 
 export type OtpVerifyMode = "login" | "signup" | "confirm_signup";
@@ -6,7 +7,7 @@ export type OtpPageData = Record<
   OtpVerifyMode,
   {
     title: string;
-    SubHeading: React.FC<{ email: string }>;
+    SubHeading: FC<{ email: string }>;
     buttonTitle: string;
   }
 >;

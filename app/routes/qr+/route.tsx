@@ -2,6 +2,9 @@ import { Link, Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import { ShelfFullLogo } from "~/components/marketing/logos";
 import { usePosition } from "~/hooks/use-position";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
+export const meta = () => [{ title: appendToMetaTitle("QR codes") }];
 
 export default function QR() {
   usePosition();

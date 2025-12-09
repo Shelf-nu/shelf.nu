@@ -19,6 +19,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
 export const ASSET_SORTING_OPTIONS = {
@@ -181,19 +182,16 @@ function AdvancedAssetIndexFilters() {
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
-        "right-of-search": <AvailabilityViewToggle modeIsSimple={false} />,
+        "right-of-search": (
+          <div className="flex items-center gap-2">
+            <AvailabilityViewToggle modeIsSimple={false} />
+          </div>
+        ),
       }}
       searchClassName="leading-5"
     >
-      <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-        <Button
-          variant="link"
-          target="_blank"
-          to="https://www.shelf.nu/knowledge-base/advanced-asset-index"
-          className="whitespace-nowrap"
-        >
-          Advanced Index - Explained
-        </Button>
+      <div className="flex w-full items-center justify-around gap-2 md:w-auto md:justify-end">
+        <SavedFilterPresetsControls />
         <ConfigureColumnsDropdown />
       </div>
     </Filters>

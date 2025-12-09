@@ -28,7 +28,10 @@ export function CustodianField({
       rowLabel="Description"
       className="mobile-styling-only border-b-0 p-0"
     >
-      <label className="mb-2.5 block font-medium text-gray-700">
+      <label
+        className="mb-2.5 block font-medium text-gray-700"
+        htmlFor="custodian"
+      >
         <span className="required-input-label">Custodian</span>
       </label>
       <DynamicSelect

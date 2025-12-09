@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { ComponentPropsWithoutRef, ComponentRef } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { tw } from "~/utils/tw";
@@ -7,9 +8,7 @@ const TooltipProvider = TooltipPrimitive.Provider;
 
 // const Tooltip = TooltipPrimitive.Root;
 
-type TooltipProps = React.ComponentPropsWithoutRef<
-  typeof TooltipPrimitive.Root
->;
+type TooltipProps = ComponentPropsWithoutRef<typeof TooltipPrimitive.Root>;
 
 const Tooltip = ({ delayDuration = 100, ...props }: TooltipProps) => (
   <TooltipPrimitive.Root delayDuration={delayDuration} {...props} />
@@ -17,10 +16,8 @@ const Tooltip = ({ delayDuration = 100, ...props }: TooltipProps) => (
 
 const TooltipTrigger = TooltipPrimitive.Trigger;
 
-type TooltipContentElement = React.ComponentRef<
-  typeof TooltipPrimitive.Content
->;
-type TooltipContentProps = React.ComponentPropsWithoutRef<
+type TooltipContentElement = ComponentRef<typeof TooltipPrimitive.Content>;
+type TooltipContentProps = ComponentPropsWithoutRef<
   typeof TooltipPrimitive.Content
 >;
 

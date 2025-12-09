@@ -1,3 +1,4 @@
+import type { ThHTMLAttributes } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import {
@@ -16,7 +17,7 @@ import type { ListItemData } from "../list-item";
 
 export type LoaderData = Record<string, ListItemData[]>;
 
-type BulkListHeaderProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
+type BulkListHeaderProps = ThHTMLAttributes<HTMLTableCellElement> & {
   /**
    *
    * This function is used to retrieve the items to be added in bulk-items when "Select All" is clicked.

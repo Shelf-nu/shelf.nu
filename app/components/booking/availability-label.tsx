@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "react-router";
@@ -211,7 +212,7 @@ export function AvailabilityBadge({
 }: {
   badgeText: string;
   tooltipTitle: string;
-  tooltipContent: string | React.ReactNode;
+  tooltipContent: string | ReactNode;
   className?: string;
 }) {
   return (

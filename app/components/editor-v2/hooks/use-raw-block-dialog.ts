@@ -1,9 +1,10 @@
+import type { RefObject } from "react";
 import { useCallback, useState } from "react";
 import type { EditorView } from "prosemirror-view";
 
 import type { RawBlockDialogState } from "../types";
 
-export function useRawBlockDialog(viewRef: React.RefObject<EditorView | null>) {
+export function useRawBlockDialog(viewRef: RefObject<EditorView | null>) {
   const [rawBlockDialog, setRawBlockDialog] = useState<RawBlockDialogState>({
     open: false,
     raw: "",

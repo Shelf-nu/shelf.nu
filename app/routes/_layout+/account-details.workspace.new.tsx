@@ -5,7 +5,11 @@ import {
 } from "@remix-run/form-data-parser";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, redirect } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
@@ -21,6 +25,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -54,6 +59,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

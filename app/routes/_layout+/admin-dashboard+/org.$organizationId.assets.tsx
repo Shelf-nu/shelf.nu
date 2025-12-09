@@ -9,6 +9,7 @@ import {
 } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -18,6 +19,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requireAdmin, requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Organization assets") }];
 
 export const loader = async ({
   request,
@@ -105,7 +108,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "bulk-delete": PermissionAction.delete,
     };
 
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -117,6 +120,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       canUseBarcodes,
+      role,
     });
 
     switch (intent) {

@@ -1,4 +1,6 @@
-export const scrollToError = (event: React.FormEvent<HTMLFormElement>) => {
+import type { FormEvent } from "react";
+
+export const scrollToError = (event: FormEvent<HTMLFormElement>) => {
   const form = event.currentTarget;
   const errorElements = form.querySelectorAll(".text-error-500");
   const yOffset = -100; // negative value will move the scroll up

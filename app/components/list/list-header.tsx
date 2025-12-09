@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Popover,
@@ -19,7 +20,7 @@ import { Button } from "../shared/button";
 import { Th } from "../table";
 
 type ListHeaderProps = {
-  children: React.ReactNode;
+  children: ReactNode;
   hideFirstColumn?: boolean;
   bulkActions?: ListProps["bulkActions"];
   title?: string;

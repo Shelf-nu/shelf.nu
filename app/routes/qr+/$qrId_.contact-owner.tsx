@@ -12,6 +12,7 @@ import {
   createReport,
   sendReportEmails,
 } from "~/modules/report-found/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -22,6 +23,8 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
+
+export const meta = () => [{ title: appendToMetaTitle("Contact owner") }];
 
 export const NewReportSchema = z.object({
   email: z
@@ -111,7 +114,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
      * 2. To the person who reported the asset as found
      */
     if (ownerEmail) {
-      await sendReportEmails({
+      sendReportEmails({
         ownerEmail,
         qr,
         message: report.content,

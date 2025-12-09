@@ -35,7 +35,7 @@ export function TagsRequiredSettings({
         <fetcher.Form
           ref={zo.ref}
           method="post"
-          onChange={(e) => fetcher.submit(e.currentTarget)}
+          onChange={(e) => void fetcher.submit(e.currentTarget)}
         >
           <FormRow
             rowLabel="Require tags for bookings"

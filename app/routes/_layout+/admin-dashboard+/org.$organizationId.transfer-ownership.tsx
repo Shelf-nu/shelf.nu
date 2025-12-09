@@ -2,9 +2,14 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import z from "zod";
 import TransferOwnershipCard from "~/components/settings/transfer-ownership-card";
 import { getOrganizationAdmins } from "~/modules/organization/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [
+  { title: appendToMetaTitle("Transfer organization ownership") },
+];
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
