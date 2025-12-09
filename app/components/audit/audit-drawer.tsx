@@ -190,8 +190,8 @@ export function AuditDrawer({
     auditSession,
     stats.foundCount,
     stats.totalExpected,
-  stats.unexpectedCount,
-]);
+    stats.unexpectedCount,
+  ]);
 
   const { Blockers, hasBlockers } = useMemo(() => {
     // No base blockers - unexpected assets are allowed and tracked

@@ -194,8 +194,8 @@ export function GenericItemRow<T>({
             item?.data && "title" in item.data
               ? `Remove scanned item: ${item.data.title}`
               : item?.data && "name" in item.data
-                ? `Remove scanned item: ${item.data.name}`
-                : "Remove scanned item"
+              ? `Remove scanned item: ${item.data.name}`
+              : "Remove scanned item"
           }
         />
       </Td>

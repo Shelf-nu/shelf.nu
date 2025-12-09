@@ -13,7 +13,12 @@ import {
 import { Link } from "react-router";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/shared/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
@@ -227,25 +232,25 @@ export const CodeScanner = ({
 
             {/* We only show option to switch to scanner on big screens and when not forced to a specific mode */}
             {isMd && !forceMode && (
-             <div>
-              <Tabs
-                 value={mode}
-                onValueChange={(mode) => handleModeChange(mode as Mode)}
-              >
-                 <TabsList>
-                   <TabsTrigger value="scanner" disabled={isLoading || paused}>
-                     <ScanQrCode className="mr-2 size-5" /> Scanner
-                   </TabsTrigger>
-                   <TabsTrigger value="camera" disabled={isLoading || paused}>
-                     <CameraIcon className="mr-2 size-5" /> Camera
+              <div>
+                <Tabs
+                  value={mode}
+                  onValueChange={(mode) => handleModeChange(mode as Mode)}
+                >
+                  <TabsList>
+                    <TabsTrigger value="scanner" disabled={isLoading || paused}>
+                      <ScanQrCode className="mr-2 size-5" /> Scanner
+                    </TabsTrigger>
+                    <TabsTrigger value="camera" disabled={isLoading || paused}>
+                      <CameraIcon className="mr-2 size-5" /> Camera
                     </TabsTrigger>
                   </TabsList>
                   {/* Empty TabsContent elements required for ARIA compliance.
                       The aria-controls attribute on tab triggers must reference valid DOM IDs.
                       Actual scanner/camera UI is rendered separately below based on mode state. */}
-                 <TabsContent value="scanner" className="hidden" />
-                 <TabsContent value="camera" className="hidden" />
-               </Tabs>
+                  <TabsContent value="scanner" className="hidden" />
+                  <TabsContent value="camera" className="hidden" />
+                </Tabs>
               </div>
             )}
           </div>
