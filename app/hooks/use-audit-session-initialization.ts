@@ -94,10 +94,10 @@ export function useAuditSessionInitialization({
     setExpectedAssets(expectedItems);
 
     // Restore existing scans by directly setting scanned items atom
-   // We bypass the addItem validation by directly setting the atom
-   if (existingScans.length > 0) {
+    // We bypass the addItem validation by directly setting the atom
+    if (existingScans.length > 0) {
       const restoredItems: any = {};
-     existingScans.forEach((scan) => {
+      existingScans.forEach((scan) => {
         // Add QR codes to the atom with minimal data - GenericItemRow will fetch full details
         restoredItems[scan.code] = {
           codeType: "qr",

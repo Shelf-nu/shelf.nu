@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { type FetcherWithComponents } from "react-router";
-import type { AuditSessionInfo, AuditScannedItem, ScanListItems } from "~/atoms/qr-scanner";
+import type {
+  AuditSessionInfo,
+  AuditScannedItem,
+  ScanListItems,
+} from "~/atoms/qr-scanner";
 
 /**
  * Props for the audit scan persistence hook.
@@ -93,7 +97,15 @@ export function useAuditScanPersistence({
         action: "/api/audits/record-scan",
       });
     });
-  }, [scannedItems, auditSession, expectedAssets, scanPersistFetcher, persistedItemsRef, pendingPersistsRef, isRestoringRef]);
+  }, [
+    scannedItems,
+    auditSession,
+    expectedAssets,
+    scanPersistFetcher,
+    persistedItemsRef,
+    pendingPersistsRef,
+    isRestoringRef,
+  ]);
 
   /**
    * Track fetcher state to mark scans as successfully persisted.
@@ -118,5 +130,10 @@ export function useAuditScanPersistence({
         pendingPersistsRef.current.clear();
       }
     }
-  }, [scanPersistFetcher.state, scanPersistFetcher.data, persistedItemsRef, pendingPersistsRef]);
+  }, [
+    scanPersistFetcher.state,
+    scanPersistFetcher.data,
+    persistedItemsRef,
+    pendingPersistsRef,
+  ]);
 }

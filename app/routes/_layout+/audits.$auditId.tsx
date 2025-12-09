@@ -11,9 +11,9 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import {
- addScannedItemAtom,
- auditSessionAtom,
- type AuditScannedItem,
+  addScannedItemAtom,
+  auditSessionAtom,
+  type AuditScannedItem,
 } from "~/atoms/qr-scanner";
 import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
@@ -136,14 +136,14 @@ export default function AuditSessionRoute() {
     useLoaderData<typeof loader>();
   const scanPersistFetcher = useFetcher({ key: "audit-scan-persist" });
 
- const addItem = useSetAtom(addScannedItemAtom);
- const auditSession = useAtomValue(auditSessionAtom);
+  const addItem = useSetAtom(addScannedItemAtom);
+  const auditSession = useAtomValue(auditSessionAtom);
   const scannedItems = useAtomValue(scannedItemsAtom);
 
   // Track which items have been persisted to avoid duplicate API calls
- const persistedItemsRef = useRef<Set<string>>(new Set());
+  const persistedItemsRef = useRef<Set<string>>(new Set());
   const isRestoringRef = useRef(true); // Start true, set false after initialization
- const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
+  const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
@@ -184,15 +184,15 @@ export default function AuditSessionRoute() {
   }, [existingScans.length]);
 
   // Persist scans to database as they are resolved
- useAuditScanPersistence({
-   auditSession,
-   scannedItems,
+  useAuditScanPersistence({
+    auditSession,
+    scannedItems,
     expectedAssets: expectedItems,
-   scanPersistFetcher,
-   persistedItemsRef,
-   pendingPersistsRef,
-   isRestoringRef,
- });
+    scanPersistFetcher,
+    persistedItemsRef,
+    pendingPersistsRef,
+    isRestoringRef,
+  });
 
   const scopeMeta =
     typeof session.scopeMeta === "object" && session.scopeMeta

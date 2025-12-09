@@ -1,6 +1,4 @@
-import type {
-  ActionFunctionArgs,
-} from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 
