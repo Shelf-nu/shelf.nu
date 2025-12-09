@@ -1,30 +1,34 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { useSetAtom, useAtomValue } from "jotai";
 import type {
   LoaderFunctionArgs,
   MetaFunction,
   LinksFunction,
+  ShouldRevalidateFunctionArgs,
 } from "react-router";
-import { data, useLoaderData } from "react-router";
+import { data, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import {
-  setAuditExpectedAssetsAtom,
-  startAuditSessionAtom,
-  endAuditSessionAtom,
-  addScannedItemAtom,
-  auditSessionAtom,
-  type AuditScannedItem,
+ addScannedItemAtom,
+ auditSessionAtom,
+ type AuditScannedItem,
 } from "~/atoms/qr-scanner";
+import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
 import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
+import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { getAuditSessionDetails } from "~/modules/audit/service.server";
+import {
+  getAuditSessionDetails,
+  getAuditScans,
+} from "~/modules/audit/service.server";
 import auditStyles from "~/styles/assets.css?url";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -93,7 +97,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
-    return data(payload({ session, expectedAssets }));
+    // Fetch existing scans to restore state
+    const existingScans = await getAuditScans({
+      auditSessionId: auditId,
+      organizationId,
+    });
+
+    return data(payload({ session, expectedAssets, existingScans }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
@@ -104,13 +114,36 @@ const label = "Audit" as const;
 
 export const ErrorBoundary = () => <ErrorContent />;
 
+/**
+ * Prevent revalidation when recording audit scans.
+ * The scan persistence API calls don't affect the loader data,
+ * so we don't need to reload the audit session details.
+ */
+export function shouldRevalidate({
+  formAction,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  // Don't revalidate if a scan is being recorded
+  if (formAction === "/api/audits/record-scan") {
+    return false;
+  }
+
+  return defaultShouldRevalidate;
+}
+
 export default function AuditSessionRoute() {
-  const { session, expectedAssets } = useLoaderData<typeof loader>();
-  const startAuditSession = useSetAtom(startAuditSessionAtom);
-  const setExpectedAssets = useSetAtom(setAuditExpectedAssetsAtom);
-  const endAuditSession = useSetAtom(endAuditSessionAtom);
-  const addItem = useSetAtom(addScannedItemAtom);
-  const auditSession = useAtomValue(auditSessionAtom);
+  const { session, expectedAssets, existingScans } =
+    useLoaderData<typeof loader>();
+  const scanPersistFetcher = useFetcher({ key: "audit-scan-persist" });
+
+ const addItem = useSetAtom(addScannedItemAtom);
+ const auditSession = useAtomValue(auditSessionAtom);
+  const scannedItems = useAtomValue(scannedItemsAtom);
+
+  // Track which items have been persisted to avoid duplicate API calls
+ const persistedItemsRef = useRef<Set<string>>(new Set());
+  const isRestoringRef = useRef(true); // Start true, set false after initialization
+ const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
@@ -129,45 +162,37 @@ export default function AuditSessionRoute() {
     [expectedAssets]
   );
 
-  useEffect(() => {
-    const scopeMeta =
-      typeof session.scopeMeta === "object" && session.scopeMeta
-        ? (session.scopeMeta as Record<string, unknown>)
-        : null;
-
-    startAuditSession({
-      id: session.id,
-      name: session.name,
-      targetId: session.targetId,
-      contextType:
-        (scopeMeta?.contextType as string | undefined) ?? "SELECTION",
-      contextName:
-        (scopeMeta?.contextName as string | undefined) ?? session.name,
-      expectedAssetCount: session.expectedAssetCount,
-      foundAssetCount: session.foundAssetCount,
-      missingAssetCount: session.missingAssetCount,
-      unexpectedAssetCount: session.unexpectedAssetCount,
-    });
-
-    setExpectedAssets(expectedItems);
-
-    return () => {
-      endAuditSession();
-    };
-  }, [
-    endAuditSession,
+  // Initialize audit session and restore existing scans
+  useAuditSessionInitialization({
+    session,
     expectedItems,
-    session.expectedAssetCount,
-    session.foundAssetCount,
-    session.id,
-    session.missingAssetCount,
-    session.name,
-    session.targetId,
-    session.unexpectedAssetCount,
-    session.scopeMeta,
-    setExpectedAssets,
-    startAuditSession,
-  ]);
+    existingScans,
+    persistedItemsRef,
+  });
+
+  // Set flag after initial restoration completes
+  useEffect(() => {
+    if (existingScans.length > 0) {
+      // Give atoms time to settle after restoration
+      const timer = setTimeout(() => {
+        isRestoringRef.current = false;
+      }, 100);
+      return () => clearTimeout(timer);
+    } else {
+      isRestoringRef.current = false;
+    }
+  }, [existingScans.length]);
+
+  // Persist scans to database as they are resolved
+ useAuditScanPersistence({
+   auditSession,
+   scannedItems,
+    expectedAssets: expectedItems,
+   scanPersistFetcher,
+   persistedItemsRef,
+   pendingPersistsRef,
+   isRestoringRef,
+ });
 
   const scopeMeta =
     typeof session.scopeMeta === "object" && session.scopeMeta

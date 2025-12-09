@@ -1,4 +1,5 @@
 import { AuditAssignmentRole } from "@prisma/client";
+import { AuditAssetStatus } from "@prisma/client";
 import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 
@@ -37,6 +38,57 @@ export type CreateAuditSessionResult = {
 export type GetAuditSessionResult = {
   session: AuditSession & { assignments: AuditAssignment[] };
   expectedAssets: AuditExpectedAsset[];
+};
+
+/**
+ * Input parameters for recording an audit scan.
+ * Contains all necessary information to persist a scan event to the database.
+ */
+export type RecordAuditScanInput = {
+  /** The ID of the audit session this scan belongs to */
+  auditSessionId: string;
+  /** The scanned QR code or barcode value */
+  qrId: string;
+  /** The ID of the asset that was scanned */
+  assetId: string;
+  /** Whether this asset was expected in the audit (true) or unexpected (false) */
+  isExpected: boolean;
+  /** The ID of the user who performed the scan */
+  userId: string;
+  /** The organization ID for security validation */
+  organizationId: string;
+};
+
+/**
+ * Result returned after successfully recording an audit scan.
+ * Contains the scan ID and updated audit statistics.
+ */
+export type RecordAuditScanResult = {
+  /** The ID of the newly created scan record */
+  scanId: string;
+  /** The ID of the associated audit asset record, if one exists */
+  auditAssetId: string | null;
+  /** Updated count of found assets in the audit */
+  foundAssetCount: number;
+  /** Updated count of unexpected assets in the audit */
+  unexpectedAssetCount: number;
+};
+
+/**
+ * Represents a single scan in an audit session.
+ * Used when fetching existing scans to restore audit state.
+ */
+export type AuditScanData = {
+  /** The QR code or barcode that was scanned */
+  code: string;
+  /** The ID of the asset that was scanned */
+  assetId: string;
+  /** The type of item scanned (currently only 'asset' is supported) */
+  type: "asset" | "kit";
+  /** When the scan occurred */
+  scannedAt: Date;
+  /** Whether this asset was expected in the audit */
+  isExpected: boolean;
 };
 
 export async function createAuditSession(
@@ -249,6 +301,211 @@ export async function getAuditSessionDetails({
       cause,
       message: "Failed to load audit session",
       additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Records a scan in the audit session and updates the audit asset status.
+ * This allows audits to be persisted and resumed across sessions.
+ *
+ * @param input - Contains audit session ID, QR code, asset ID, and whether asset was expected
+ * @returns Scan ID and updated counts for the audit session
+ */
+export async function recordAuditScan(
+  input: RecordAuditScanInput
+): Promise<RecordAuditScanResult> {
+  const { auditSessionId, qrId, assetId, isExpected, userId, organizationId } =
+    input;
+
+  try {
+    // Verify the audit session exists and belongs to the organization
+    const session = await db.auditSession.findFirst({
+      where: {
+        id: auditSessionId,
+        organizationId,
+      },
+    });
+
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session not found",
+        additionalData: { auditSessionId, organizationId },
+        status: 404,
+        label,
+      });
+    }
+
+    // Check if this asset was already scanned in this audit
+    const existingScan = await db.auditScan.findFirst({
+      where: {
+        auditSessionId,
+        assetId,
+      },
+    });
+
+    if (existingScan) {
+      // Already scanned, just return current counts
+      return {
+        scanId: existingScan.id,
+        auditAssetId: null,
+        foundAssetCount: session.foundAssetCount,
+        unexpectedAssetCount: session.unexpectedAssetCount,
+      };
+    }
+
+    // Record the scan in a transaction
+    const result = await db.$transaction(async (tx) => {
+      // Create the scan record
+      const scan = await tx.auditScan.create({
+        data: {
+          auditSessionId,
+          code: qrId,
+          assetId,
+          scannedById: userId,
+          scannedAt: new Date(),
+        },
+      });
+
+      let auditAssetId: string | null = null;
+
+      // Update or create the audit asset record
+      if (isExpected) {
+        // Expected asset - update its status to FOUND
+        await tx.auditAsset.updateMany({
+          where: {
+            auditSessionId,
+            assetId,
+            expected: true,
+          },
+          data: {
+            status: AuditAssetStatus.FOUND,
+            scannedAt: new Date(),
+            scannedById: userId,
+          },
+        });
+
+        // Get the audit asset ID for return
+        const updatedAsset = await tx.auditAsset.findFirst({
+          where: {
+            auditSessionId,
+            assetId,
+            expected: true,
+          },
+          select: { id: true },
+        });
+
+        auditAssetId = updatedAsset?.id ?? null;
+      } else {
+        // Unexpected asset - create a new audit asset record
+        const auditAsset = await tx.auditAsset.create({
+          data: {
+            auditSessionId,
+            assetId,
+            expected: false,
+            status: AuditAssetStatus.UNEXPECTED,
+            scannedAt: new Date(),
+            scannedById: userId,
+          },
+        });
+        auditAssetId = auditAsset.id;
+      }
+
+      // Update the audit session counts
+      const updatedSession = await tx.auditSession.update({
+        where: { id: auditSessionId },
+        data: {
+          foundAssetCount: isExpected
+            ? { increment: 1 }
+            : session.foundAssetCount,
+          missingAssetCount: isExpected
+            ? { decrement: 1 }
+            : session.missingAssetCount,
+          unexpectedAssetCount: !isExpected
+            ? { increment: 1 }
+            : session.unexpectedAssetCount,
+        },
+      });
+
+      return {
+        scanId: scan.id,
+        auditAssetId,
+        foundAssetCount: updatedSession.foundAssetCount,
+        unexpectedAssetCount: updatedSession.unexpectedAssetCount,
+      };
+    });
+
+    return result;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to record audit scan",
+      additionalData: { auditSessionId, assetId, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Retrieves all scans for a given audit session.
+ * Used to restore the audit state when resuming an audit.
+ *
+ * @param auditSessionId - The ID of the audit session
+ * @param organizationId - The organization ID for security check
+ * @returns Array of scan data with QR codes and asset IDs
+ */
+export async function getAuditScans({
+  auditSessionId,
+  organizationId,
+}: {
+  auditSessionId: string;
+  organizationId: string;
+}): Promise<AuditScanData[]> {
+  try {
+    // Verify the audit session exists and belongs to the organization
+    const session = await db.auditSession.findFirst({
+      where: {
+        id: auditSessionId,
+        organizationId,
+      },
+    });
+
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session not found",
+        additionalData: { auditSessionId, organizationId },
+        status: 404,
+        label,
+      });
+    }
+
+    const scans = await db.auditScan.findMany({
+      where: { auditSessionId },
+      include: {
+        auditAsset: {
+          select: {
+            expected: true,
+          },
+        },
+      },
+      orderBy: { scannedAt: "asc" },
+    });
+
+    return scans.map((scan) => ({
+      code: scan.code ?? "",
+      assetId: scan.assetId ?? "",
+      type: "asset" as const,
+      scannedAt: scan.scannedAt,
+      isExpected: scan.auditAsset?.expected ?? false,
+    }));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch audit scans",
+      additionalData: { auditSessionId, organizationId },
       label,
     });
   }
