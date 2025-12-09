@@ -1,5 +1,6 @@
 import { AuditAssignmentRole } from "@prisma/client";
 import { AuditAssetStatus } from "@prisma/client";
+import { AuditStatus } from "@prisma/client";
 import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 
@@ -36,7 +37,14 @@ export type CreateAuditSessionResult = {
 };
 
 export type GetAuditSessionResult = {
-  session: AuditSession & { assignments: AuditAssignment[] };
+  session: AuditSession & {
+    assignments: AuditAssignment[];
+    createdBy: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+    };
+  };
   expectedAssets: AuditExpectedAsset[];
 };
 
@@ -226,9 +234,16 @@ export async function getAuditSessionDetails({
             : []),
         ],
       },
-      include: {
-        assignments: true,
-        assets: {
+     include: {
+       assignments: true,
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+       assets: {
           include: {
             asset: {
               select: {
@@ -506,6 +521,90 @@ export async function getAuditScans({
       cause,
       message: "Failed to fetch audit scans",
       additionalData: { auditSessionId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Completes an audit session by finalizing all asset statuses.
+ * Expected assets that were not scanned are marked as MISSING.
+ * Updates the session status to COMPLETED and sets completedAt timestamp.
+ *
+ * @param input - Session ID, organization ID, and user ID
+ */
+export async function completeAuditSession({
+  sessionId,
+  organizationId,
+  userId,
+}: {
+  sessionId: string;
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    await db.$transaction(async (tx) => {
+      // Verify session exists and belongs to organization
+      const session = await tx.auditSession.findUnique({
+        where: { id: sessionId, organizationId },
+        select: { id: true, status: true },
+      });
+
+      if (!session) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit session not found",
+          additionalData: { sessionId, organizationId },
+          status: 404,
+          label,
+      });
+    }
+
+    if (session.status === AuditStatus.COMPLETED) {
+      throw new ShelfError({
+        cause: null,
+          message: "Audit session is already completed",
+          additionalData: { sessionId },
+          status: 400,
+          label,
+        });
+      }
+
+      // Mark all expected assets that weren't scanned as MISSING
+      await tx.auditAsset.updateMany({
+        where: {
+          auditSessionId: sessionId,
+          expected: true,
+          status: "PENDING",
+        },
+        data: {
+          status: "MISSING",
+        },
+      });
+
+      // Count missing assets
+      const missingCount = await tx.auditAsset.count({
+        where: {
+          auditSessionId: sessionId,
+          status: "MISSING",
+        },
+      });
+
+      // Update session to completed
+      await tx.auditSession.update({
+      where: { id: sessionId },
+      data: {
+        status: AuditStatus.COMPLETED,
+        completedAt: new Date(),
+        missingAssetCount: missingCount,
+      },
+      });
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to complete audit session",
+      additionalData: { sessionId, organizationId, userId },
       label,
     });
   }

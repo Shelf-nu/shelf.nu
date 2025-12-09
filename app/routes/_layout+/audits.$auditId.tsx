@@ -1,35 +1,22 @@
-import { useEffect, useMemo, useRef } from "react";
-import { OrganizationRoles } from "@prisma/client";
-import { useSetAtom, useAtomValue } from "jotai";
+import { AuditStatus, OrganizationRoles } from "@prisma/client";
 import type {
+  ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
-  LinksFunction,
-  ShouldRevalidateFunctionArgs,
 } from "react-router";
-import { data, useFetcher, useLoaderData } from "react-router";
+import { data, Form, Link, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
-import {
-  addScannedItemAtom,
-  auditSessionAtom,
-  type AuditScannedItem,
-} from "~/atoms/qr-scanner";
-import { scannedItemsAtom } from "~/atoms/qr-scanner";
-import AuditDrawer from "~/components/audit/audit-drawer";
-import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
-import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
-import { CodeScanner } from "~/components/scanner/code-scanner";
-import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
-import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
-import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
+import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
+import { DateS } from "~/components/shared/date";
 import {
   getAuditSessionDetails,
-  getAuditScans,
+  completeAuditSession,
 } from "~/modules/audit/service.server";
-import auditStyles from "~/styles/assets.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -37,17 +24,18 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: auditStyles },
-];
+const label = "Audit";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   {
-    title: data ? `Audit · ${data.session.name}` : "Audit",
+    title: data ? appendToMetaTitle(data.header.title) : "Audit",
   },
 ];
+
+export const handle = {
+  breadcrumb: () => "Overview",
+};
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -60,7 +48,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.audit,
-      action: PermissionAction.update,
+      action: PermissionAction.read,
     });
 
     const { organizationId, userOrganizations } = permissionResult;
@@ -71,6 +59,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    const header: HeaderData = {
+      title: `${session.name}'s overview`,
+    };
 
     const rolesForOrg = userOrganizations.find(
       (org) => org.organization.id === organizationId
@@ -97,179 +89,209 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
-    // Fetch existing scans to restore state
-    const existingScans = await getAuditScans({
-      auditSessionId: auditId,
-      organizationId,
-    });
-
-    return data(payload({ session, expectedAssets, existingScans }));
+    return data(
+      payload({
+        session,
+        expectedAssets,
+        isAdminOrOwner,
+        header,
+      })
+    );
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(cause, { userId, auditId });
     throw data(error(reason), { status: reason.status });
   }
 }
 
-const label = "Audit" as const;
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { auditId } = getParams(params, z.object({ auditId: z.string() }), {
+    additionalData: { userId },
+  });
 
-export const ErrorBoundary = () => <ErrorContent />;
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.update,
+    });
 
-/**
- * Prevent revalidation when recording audit scans.
- * The scan persistence API calls don't affect the loader data,
- * so we don't need to reload the audit session details.
- */
-export function shouldRevalidate({
-  formAction,
-  defaultShouldRevalidate,
-}: ShouldRevalidateFunctionArgs) {
-  // Don't revalidate if a scan is being recorded
-  if (formAction === "/api/audits/record-scan") {
-    return false;
+    const formData = await request.formData();
+    const intent = formData.get("intent");
+
+    if (intent === "complete-audit") {
+      await completeAuditSession({
+        sessionId: auditId,
+        organizationId,
+        userId,
+      });
+
+      return redirect(`/audits/${auditId}/results`);
+    }
+
+    throw new ShelfError({
+      cause: null,
+      message: "Invalid action intent",
+      additionalData: { intent },
+      label,
+      status: 400,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, auditId });
+    return data(error(reason), { status: reason.status });
   }
-
-  return defaultShouldRevalidate;
 }
 
-export default function AuditSessionRoute() {
-  const { session, expectedAssets, existingScans } =
+export default function AuditOverview() {
+  const { session, expectedAssets, isAdminOrOwner, header } =
     useLoaderData<typeof loader>();
-  const scanPersistFetcher = useFetcher({ key: "audit-scan-persist" });
 
-  const addItem = useSetAtom(addScannedItemAtom);
-  const auditSession = useAtomValue(auditSessionAtom);
-  const scannedItems = useAtomValue(scannedItemsAtom);
+  const totalExpected = expectedAssets.length;
+  const foundCount = session.foundAssetCount || 0;
+  const missingCount = session.missingAssetCount || 0;
+  const unexpectedCount = session.unexpectedAssetCount || 0;
 
-  // Track which items have been persisted to avoid duplicate API calls
-  const persistedItemsRef = useRef<Set<string>>(new Set());
-  const isRestoringRef = useRef(true); // Start true, set false after initialization
-  const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
-
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
-
-  const expectedItems: AuditScannedItem[] = useMemo(
-    () =>
-      expectedAssets.map(
-        (asset) =>
-          ({
-            id: asset.id,
-            name: asset.name,
-            type: "asset",
-            auditStatus: "missing",
-          }) as AuditScannedItem
-      ),
-    [expectedAssets]
-  );
-
-  // Initialize audit session and restore existing scans
-  useAuditSessionInitialization({
-    session,
-    expectedItems,
-    existingScans,
-    persistedItemsRef,
-  });
-
-  // Set flag after initial restoration completes
-  useEffect(() => {
-    if (existingScans.length > 0) {
-      // Give atoms time to settle after restoration
-      const timer = setTimeout(() => {
-        isRestoringRef.current = false;
-      }, 100);
-      return () => clearTimeout(timer);
-    } else {
-      isRestoringRef.current = false;
-    }
-  }, [existingScans.length]);
-
-  // Persist scans to database as they are resolved
-  useAuditScanPersistence({
-    auditSession,
-    scannedItems,
-    expectedAssets: expectedItems,
-    scanPersistFetcher,
-    persistedItemsRef,
-    pendingPersistsRef,
-    isRestoringRef,
-  });
-
-  const scopeMeta =
-    typeof session.scopeMeta === "object" && session.scopeMeta
-      ? (session.scopeMeta as Record<string, unknown>)
-      : null;
-
-  const contextLabel =
-    typeof scopeMeta?.contextType === "string"
-      ? (scopeMeta.contextType as string)
-      : "Selection";
-
-  const contextName =
-    typeof scopeMeta?.contextName === "string"
-      ? (scopeMeta.contextName as string)
-      : session.name;
-
-  /**
-   * Handles successful QR code/barcode detection from the scanner.
-   *
-   * Note: This currently only adds items to local state via atoms.
-   * TODO: In the future, this should call an API endpoint to persist
-   * the scan to the audit session, allowing audits to be resumed
-   * across sessions (e.g., start today, continue tomorrow).
-   *
-   * @param {string} qrId - The scanned QR code, barcode, or SAM ID
-   * @param {string} [error] - Optional error message if the code couldn't be processed
-   * @param {"qr" | "barcode" | "samId"} [type] - The type of code that was scanned
-   */
-  function handleCodeDetectionSuccess({
-    value: qrId,
-    error,
-    type,
-  }: OnCodeDetectionSuccessProps) {
-    addItem(qrId, error, type);
-  }
+  const isCompleted = session.status === AuditStatus.COMPLETED;
+  const isActive = session.status === AuditStatus.ACTIVE;
 
   return (
     <>
-      <Header hidePageDescription>
-        <h1 className="text-lg font-semibold text-gray-900">{session.name}</h1>
-      </Header>
+      <Header title={header.title} subHeading={session.description || undefined} />
 
-      <AuditDrawer
-        contextLabel={contextLabel}
-        contextName={contextName}
-        expectedAssets={expectedItems}
-        defaultExpanded
-        emptyStateContent={({ expanded, stats }) =>
-          expanded ? (
-            <ExpectedAssetsList
-              expectedAssets={expectedItems}
-              stats={stats}
-              contextLabel={contextLabel}
-              contextName={contextName}
-            />
-          ) : (
-            <div className="py-4 text-center">
-              <p className="text-sm text-gray-500">
-                Scan assets to audit this {contextLabel.toLowerCase()}...
-              </p>
-            </div>
-          )
-        }
-      />
+      <div className="mt-8 flex flex-col gap-6">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <StatCard label="Expected" value={totalExpected} color="blue" />
+          <StatCard label="Found" value={foundCount} color="green" />
+          <StatCard label="Missing" value={missingCount} color="yellow" />
+          <StatCard label="Unexpected" value={unexpectedCount} color="red" />
+        </div>
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
-        <CodeScanner
-          onCodeDetectionSuccess={handleCodeDetectionSuccess}
-          backButtonText="Audit"
-          allowNonShelfCodes
-          paused={!auditSession}
-          setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
-        />
+        {/* Action Buttons */}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          {!isCompleted && (
+            <Button asChild>
+              <Link to="scan">
+                {isActive ? "Continue scanning" : "Start scanning"}
+              </Link>
+            </Button>
+          )}
+
+          {isCompleted && (
+            <Button asChild>
+              <Link to="results">View results</Link>
+            </Button>
+          )}
+
+          {!isCompleted && isAdminOrOwner && (
+            <Form method="post">
+              <input type="hidden" name="intent" value="complete-audit" />
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={foundCount === 0}
+              >
+                Complete audit
+              </Button>
+            </Form>
+          )}
+        </div>
+
+        {/* Audit Details */}
+        <Card className="mt-0 px-[-4] py-[-5] md:border">
+          <h2 className="mb-4 border-b p-4 text-lg font-semibold">
+            Audit Information
+          </h2>
+          <ul className="item-information">
+            <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+              <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                Status
+              </span>
+              <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                {session.status}
+              </div>
+            </li>
+            <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+              <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                Created
+              </span>
+              <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                <DateS
+                  date={session.createdAt}
+                  options={{ dateStyle: "short", timeStyle: "short" }}
+                />
+              </div>
+            </li>
+            {session.completedAt && (
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  Completed
+                </span>
+                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                  <DateS
+                    date={session.completedAt}
+                    options={{ dateStyle: "short", timeStyle: "short" }}
+                  />
+                </div>
+              </li>
+            )}
+            <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+              <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                Created by
+              </span>
+              <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                {session.createdBy.firstName} {session.createdBy.lastName}
+              </div>
+            </li>
+          </ul>
+        </Card>
+
+        {/* Expected Assets List */}
+        {expectedAssets.length > 0 && (
+          <Card className="mt-0 px-[-4] py-[-5] md:border">
+            <h2 className="mb-4 border-b p-4 text-lg font-semibold">
+              Expected Assets ({expectedAssets.length})
+            </h2>
+            <ul className="item-information">
+              {expectedAssets.map((expectedAsset) => (
+                <li
+                  key={expectedAsset.id}
+                  className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0"
+                >
+                  <span className="text-[14px] font-medium text-gray-900">
+                    {expectedAsset.name}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
       </div>
     </>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: "blue" | "green" | "yellow" | "red";
+}) {
+  const colorClasses = {
+    blue: "bg-blue-50 text-blue-700",
+    green: "bg-green-50 text-green-700",
+    yellow: "bg-yellow-50 text-yellow-700",
+    red: "bg-red-50 text-red-700",
+  };
+
+  return (
+    <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
+      <div className="text-sm font-medium">{label}</div>
+      <div className="mt-1 text-3xl font-bold">{value}</div>
+    </div>
   );
 }
