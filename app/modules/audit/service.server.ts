@@ -498,6 +498,17 @@ export async function recordAuditScan(
 
     // Record the scan in a transaction
     const result = await db.$transaction(async (tx) => {
+      // If this is the first scan and audit is still PENDING, activate it
+      if (session.status === AuditStatus.PENDING) {
+        await tx.auditSession.update({
+          where: { id: auditSessionId },
+          data: {
+            status: AuditStatus.ACTIVE,
+            startedAt: new Date(),
+          },
+        });
+      }
+
       // Create the scan record
       const scan = await tx.auditScan.create({
         data: {

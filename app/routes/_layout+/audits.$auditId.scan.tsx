@@ -19,7 +19,6 @@ import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
 import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
 import { ErrorContent } from "~/components/errors";
-import Header from "~/components/layout/header";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
@@ -48,6 +47,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
     title: data ? `Audit · ${data.session.name}` : "Audit",
   },
 ];
+
+export const handle = {
+  name: "audit.scan",
+};
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -231,10 +234,6 @@ export default function AuditSessionRoute() {
 
   return (
     <>
-      <Header hidePageDescription>
-        <h1 className="text-lg font-semibold text-gray-900">{session.name}</h1>
-      </Header>
-
       <AuditDrawer
         contextLabel={contextLabel}
         contextName={contextName}
