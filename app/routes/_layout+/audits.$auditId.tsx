@@ -234,50 +234,50 @@ export default function AuditOverview() {
           {/* Right Column: Audit Information */}
           <div className="flex-1">
             <h2 className="mb-4 text-lg font-semibold">Audit Information</h2>
-          <Card className="mt-0 px-[-4] py-[-5] md:border">
-            <ul className="item-information">
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Status
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <AuditStatusBadge status={session.status} />
-                </div>
-              </li>
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Created
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <DateS
-                    date={session.createdAt}
-                    options={{ dateStyle: "short", timeStyle: "short" }}
-                  />
-                </div>
-              </li>
-              {session.completedAt && (
+            <Card className="mt-0 px-[-4] py-[-5] md:border">
+              <ul className="item-information">
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                    Completed
+                    Status
+                  </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    <AuditStatusBadge status={session.status} />
+                  </div>
+                </li>
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Created
                   </span>
                   <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
                     <DateS
-                      date={session.completedAt}
+                      date={session.createdAt}
                       options={{ dateStyle: "short", timeStyle: "short" }}
                     />
                   </div>
                 </li>
-              )}
-              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                  Created by
-                </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  {session.createdBy.firstName} {session.createdBy.lastName}
-                </div>
-              </li>
-            </ul>
-          </Card>
+                {session.completedAt && (
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                      Completed
+                    </span>
+                    <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                      <DateS
+                        date={session.completedAt}
+                        options={{ dateStyle: "short", timeStyle: "short" }}
+                      />
+                    </div>
+                  </li>
+                )}
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Created by
+                  </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    {session.createdBy.firstName} {session.createdBy.lastName}
+                  </div>
+                </li>
+              </ul>
+            </Card>
           </div>
         </div>
 
@@ -310,11 +310,9 @@ export default function AuditOverview() {
 }
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
-type AuditAssetItem = LoaderData['data']['items'][number];
+type AuditAssetItem = LoaderData["data"]["items"][number];
 
-function AssetListItem({
-  item,
-}: { item: AuditAssetItem }) {
+function AssetListItem({ item }: { item: AuditAssetItem }) {
   const { category, location } = item;
 
   return (
@@ -371,7 +369,9 @@ function AssetListItem({
               childCount: location._count.children,
             }}
           />
-        ) : <EmptyTableValue />}
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
     </>
   );
