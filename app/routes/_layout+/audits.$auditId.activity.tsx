@@ -67,7 +67,8 @@ export default function AuditActivity() {
         </h3>
         <p className="mt-2 text-sm text-gray-600">
           Audit activity tracking and history will be available here. This will
-          include scan logs, status changes, and completion records for audit "<span className="font-medium">{session.name}</span>".
+          include scan logs, status changes, and completion records for audit "
+          <span className="font-medium">{session.name}</span>".
         </p>
       </div>
     </div>

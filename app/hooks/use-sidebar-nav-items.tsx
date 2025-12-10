@@ -8,6 +8,7 @@ import {
   CalendarRangeIcon,
   ChartLineIcon,
   ChartNoAxesCombinedIcon,
+  ClipboardCheckIcon,
   MapPinIcon,
   MessageCircleIcon,
   Package,
@@ -143,6 +144,13 @@ export function useSidebarNavItems() {
       title: "Locations",
       to: "/locations",
       Icon: MapPinIcon,
+      hidden: isBaseOrSelfService,
+    },
+    {
+      type: "child",
+      title: "Audits",
+      to: "/audits",
+      Icon: ClipboardCheckIcon,
       hidden: isBaseOrSelfService,
     },
     {

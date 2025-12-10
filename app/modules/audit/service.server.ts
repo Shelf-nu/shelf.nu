@@ -12,6 +12,24 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 
 const label: ErrorLabel = "Audit";
 
+export const AUDIT_LIST_INCLUDE = {
+  createdBy: {
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+      profilePicture: true,
+    },
+  },
+  _count: {
+    select: {
+      assets: true,
+      scans: true,
+      assignments: true,
+    },
+  },
+} satisfies Prisma.AuditSessionInclude;
+
 export type AuditScopeMeta = {
   contextType?: string | null;
   contextName?: string | null;
@@ -741,6 +759,63 @@ export async function completeAuditSession({
       cause,
       message: "Failed to complete audit session",
       additionalData: { sessionId, organizationId, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Get all audits for an organization with pagination and search
+ */
+export async function getAuditsForOrganization(params: {
+  organizationId: AuditSession["organizationId"];
+  /** Page number. Starts at 1 */
+  page?: number;
+  /** Items to be loaded per page */
+  perPage?: number;
+  search?: string | null;
+  /** Filter by status */
+  status?: AuditStatus | null;
+}) {
+  const { organizationId, page = 1, perPage = 8, search, status } = params;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 ? perPage : 8;
+
+    const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+    // Add search filter
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    // Add status filter
+    if (status) {
+      where.status = status;
+    }
+
+    const [audits, totalAudits] = await Promise.all([
+      db.auditSession.findMany({
+        skip,
+        take,
+        where,
+        orderBy: { createdAt: "desc" },
+        include: AUDIT_LIST_INCLUDE,
+      }),
+      db.auditSession.count({ where }),
+    ]);
+
+    return { audits, totalAudits };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching audits. Please try again or contact support.",
+      additionalData: { organizationId },
       label,
     });
   }
