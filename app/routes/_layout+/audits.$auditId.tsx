@@ -7,14 +7,24 @@ import type {
 import { data, Form, Link, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
+import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { CategoryBadge } from "~/components/assets/category-badge";
+import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
+import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
+import { Td, Th } from "~/components/table";
 import {
   getAuditSessionDetails,
   completeAuditSession,
+  getAssetsForAuditSession,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -34,7 +44,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Overview",
+  breadcrumb: () => "single",
 };
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -53,12 +63,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { organizationId, userOrganizations } = permissionResult;
 
-    const { session, expectedAssets } = await getAuditSessionDetails({
-      id: auditId,
-      organizationId,
-      userOrganizations,
-      request,
-    });
+    const [{ session }, assetsData] = await Promise.all([
+      getAuditSessionDetails({
+        id: auditId,
+        organizationId,
+        userOrganizations,
+        request,
+      }),
+      getAssetsForAuditSession({
+        request,
+        organizationId,
+        auditSessionId: auditId,
+      }),
+    ]);
 
     const header: HeaderData = {
       title: `${session.name}'s overview`,
@@ -92,9 +109,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return data(
       payload({
         session,
-        expectedAssets,
         isAdminOrOwner,
         header,
+        ...assetsData,
+        modelName: {
+          singular: "asset",
+          plural: "assets",
+        },
       })
     );
   } catch (cause) {
@@ -144,10 +165,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AuditOverview() {
-  const { session, expectedAssets, isAdminOrOwner, header } =
+  const { session, isAdminOrOwner, header, totalItems } =
     useLoaderData<typeof loader>();
 
-  const totalExpected = expectedAssets.length;
+  const totalExpected = totalItems;
   const foundCount = session.foundAssetCount || 0;
   const missingCount = session.missingAssetCount || 0;
   const unexpectedCount = session.unexpectedAssetCount || 0;
@@ -157,117 +178,201 @@ export default function AuditOverview() {
 
   return (
     <>
-      <Header title={header.title} subHeading={session.description || undefined} />
+      <Header
+        title={header.title}
+        subHeading={session.description || undefined}
+      />
 
       <div className="mt-8 flex flex-col gap-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <StatCard label="Expected" value={totalExpected} color="blue" />
-          <StatCard label="Found" value={foundCount} color="green" />
-          <StatCard label="Missing" value={missingCount} color="yellow" />
-          <StatCard label="Unexpected" value={unexpectedCount} color="red" />
-        </div>
+        {/* Two Column Layout with Flex: Stats & Audit Info */}
+        <div className="flex flex-col gap-6 lg:flex-row">
+          {/* Left Column: Stats Cards */}
+          <div className="flex-1">
+            <h2 className="mb-4 text-lg font-semibold">Statistics</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <StatCard label="Expected" value={totalExpected} color="blue" />
+              <StatCard label="Found" value={foundCount} color="green" />
+              <StatCard label="Missing" value={missingCount} color="yellow" />
+              <StatCard
+                label="Unexpected"
+                value={unexpectedCount}
+                color="red"
+              />
+            </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col gap-3 sm:flex-row">
-          {!isCompleted && (
-            <Button asChild>
-              <Link to="scan">
-                {isActive ? "Continue scanning" : "Start scanning"}
-              </Link>
-            </Button>
-          )}
+            {/* Action Buttons */}
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              {!isCompleted && (
+                <Button asChild>
+                  <Link to="scan">
+                    {isActive ? "Continue scanning" : "Start scanning"}
+                  </Link>
+                </Button>
+              )}
 
-          {isCompleted && (
-            <Button asChild>
-              <Link to="results">View results</Link>
-            </Button>
-          )}
+              {isCompleted && (
+                <Button asChild>
+                  <Link to="results">View results</Link>
+                </Button>
+              )}
 
-          {!isCompleted && isAdminOrOwner && (
-            <Form method="post">
-              <input type="hidden" name="intent" value="complete-audit" />
-              <Button
-                type="submit"
-                variant="secondary"
-                disabled={foundCount === 0}
-              >
-                Complete audit
-              </Button>
-            </Form>
-          )}
-        </div>
+              {!isCompleted && isAdminOrOwner && (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="complete-audit" />
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    disabled={foundCount === 0}
+                  >
+                    Complete audit
+                  </Button>
+                </Form>
+              )}
+            </div>
+          </div>
 
-        {/* Audit Details */}
-        <Card className="mt-0 px-[-4] py-[-5] md:border">
-          <h2 className="mb-4 border-b p-4 text-lg font-semibold">
-            Audit Information
-          </h2>
-          <ul className="item-information">
-            <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-              <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                Status
-              </span>
-              <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-                {session.status}
-              </div>
-            </li>
-            <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-              <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                Created
-              </span>
-              <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-                <DateS
-                  date={session.createdAt}
-                  options={{ dateStyle: "short", timeStyle: "short" }}
-                />
-              </div>
-            </li>
-            {session.completedAt && (
+          {/* Right Column: Audit Information */}
+          <div className="flex-1">
+            <h2 className="mb-4 text-lg font-semibold">Audit Information</h2>
+          <Card className="mt-0 px-[-4] py-[-5] md:border">
+            <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                  Completed
+                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  Status
                 </span>
-                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                  <AuditStatusBadge status={session.status} />
+                </div>
+              </li>
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  Created
+                </span>
+                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
                   <DateS
-                    date={session.completedAt}
+                    date={session.createdAt}
                     options={{ dateStyle: "short", timeStyle: "short" }}
                   />
                 </div>
               </li>
-            )}
-            <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-              <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                Created by
-              </span>
-              <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
-                {session.createdBy.firstName} {session.createdBy.lastName}
-              </div>
-            </li>
-          </ul>
-        </Card>
-
-        {/* Expected Assets List */}
-        {expectedAssets.length > 0 && (
-          <Card className="mt-0 px-[-4] py-[-5] md:border">
-            <h2 className="mb-4 border-b p-4 text-lg font-semibold">
-              Expected Assets ({expectedAssets.length})
-            </h2>
-            <ul className="item-information">
-              {expectedAssets.map((expectedAsset) => (
-                <li
-                  key={expectedAsset.id}
-                  className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0"
-                >
-                  <span className="text-[14px] font-medium text-gray-900">
-                    {expectedAsset.name}
+              {session.completedAt && (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Completed
                   </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    <DateS
+                      date={session.completedAt}
+                      options={{ dateStyle: "short", timeStyle: "short" }}
+                    />
+                  </div>
                 </li>
-              ))}
+              )}
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  Created by
+                </span>
+                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                  {session.createdBy.firstName} {session.createdBy.lastName}
+                </div>
+              </li>
             </ul>
           </Card>
+          </div>
+        </div>
+
+        {/* Expected Assets List */}
+        {totalExpected > 0 && (
+          <div>
+            <h2 className="mb-4 text-lg font-semibold">
+              Expected Assets ({totalExpected})
+            </h2>
+            <Filters className="responsive-filters mb-2 lg:mb-0" />
+            <List
+              ItemComponent={AssetListItem}
+              customEmptyStateContent={{
+                title: "No expected assets",
+                text: "This audit has no assets assigned to it.",
+              }}
+              headerChildren={
+                <>
+                  <Th>Category</Th>
+                  <Th>Location</Th>
+                </>
+              }
+              className="overflow-x-visible md:overflow-x-auto"
+            />
+          </div>
         )}
       </div>
+    </>
+  );
+}
+
+type LoaderData = Awaited<ReturnType<typeof loader>>;
+type AuditAssetItem = LoaderData['data']['items'][number];
+
+function AssetListItem({
+  item,
+}: { item: AuditAssetItem }) {
+  const { category, location } = item;
+
+  return (
+    <>
+      <Td className="w-full whitespace-normal p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="relative flex size-14 shrink-0 items-center justify-center">
+              <AssetImage
+                asset={{
+                  id: item.id,
+                  mainImage: item.mainImage,
+                  thumbnailImage: item.thumbnailImage,
+                  mainImageExpiration: item.mainImageExpiration,
+                }}
+                alt={`Image of ${item.title}`}
+                className="size-full rounded-[4px] border object-cover"
+                withPreview
+              />
+            </div>
+            <div className="min-w-[180px]">
+              <span className="word-break mb-1 block">
+                <Button
+                  to={`/assets/${item.id}`}
+                  variant="link"
+                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  target="_blank"
+                  onlyNewTabIconOnHover
+                >
+                  {item.title}
+                </Button>
+              </span>
+              <AssetStatusBadge
+                id={item.id}
+                status={item.status}
+                availableToBook={item.availableToBook}
+              />
+            </div>
+          </div>
+        </div>
+      </Td>
+
+      <Td>
+        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
+      </Td>
+
+      <Td>
+        {location ? (
+          <LocationBadge
+            location={{
+              id: location.id,
+              name: location.name,
+              parentId: location.parentId ?? undefined,
+              childCount: location._count.children,
+            }}
+          />
+        ) : <EmptyTableValue />}
+      </Td>
     </>
   );
 }

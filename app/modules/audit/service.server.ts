@@ -1,6 +1,7 @@
 import { AuditAssignmentRole } from "@prisma/client";
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 
@@ -234,8 +235,8 @@ export async function getAuditSessionDetails({
             : []),
         ],
       },
-     include: {
-       assignments: true,
+      include: {
+        assignments: true,
         createdBy: {
           select: {
             id: true,
@@ -243,7 +244,7 @@ export async function getAuditSessionDetails({
             lastName: true,
           },
         },
-       assets: {
+        assets: {
           include: {
             asset: {
               select: {
@@ -316,6 +317,130 @@ export async function getAuditSessionDetails({
       cause,
       message: "Failed to load audit session",
       additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Get paginated and filterable assets for an audit session.
+ * Similar to getAssetsForKits but for audit expected assets.
+ *
+ * @param input - Contains audit session ID, organization ID, and request for search/pagination
+ * @returns Paginated list of expected assets with full details
+ */
+export async function getAssetsForAuditSession({
+  request,
+  organizationId,
+  auditSessionId,
+}: {
+  request: Request;
+  organizationId: string;
+  auditSessionId: string;
+}) {
+  const searchParams = new URL(request.url).searchParams;
+  const search = searchParams.get("s") || null;
+
+  try {
+    // First get the expected asset IDs from the audit
+    const auditAssets = await db.auditAsset.findMany({
+      where: {
+        auditSessionId,
+        expected: true,
+      },
+      select: {
+        assetId: true,
+      },
+    });
+
+    const assetIds = auditAssets.map((aa) => aa.assetId);
+
+    if (assetIds.length === 0) {
+      return {
+        page: 1,
+        perPage: 0,
+        items: [],
+        totalItems: 0,
+        totalPages: 0,
+        search,
+      };
+    }
+
+    // Build where clause
+    const where: Prisma.AssetWhereInput = {
+      organizationId,
+      id: { in: assetIds },
+    };
+
+    // Apply search filter if provided
+    if (search) {
+      const searchTerm = search.toLowerCase().trim();
+      where.OR = [
+        { title: { contains: searchTerm, mode: "insensitive" } },
+        {
+          category: {
+            name: { contains: searchTerm, mode: "insensitive" },
+          },
+        },
+        {
+          location: {
+            name: { contains: searchTerm, mode: "insensitive" },
+          },
+        },
+      ];
+    }
+
+    // Fetch assets with full details
+    const assets = await db.asset.findMany({
+      where,
+      select: {
+        id: true,
+        title: true,
+        mainImage: true,
+        thumbnailImage: true,
+        mainImageExpiration: true,
+        status: true,
+        availableToBook: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
+        location: {
+          select: {
+            id: true,
+            name: true,
+            parentId: true,
+            _count: {
+              select: {
+                children: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        title: "asc",
+      },
+    });
+
+    const totalItems = assets.length;
+
+    return {
+      page: 1,
+      perPage: totalItems,
+      items: assets,
+      totalItems,
+      totalPages: 1,
+      search,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to load assets for audit session",
+      additionalData: { auditSessionId, organizationId },
       label,
     });
   }
@@ -557,12 +682,12 @@ export async function completeAuditSession({
           additionalData: { sessionId, organizationId },
           status: 404,
           label,
-      });
-    }
+        });
+      }
 
-    if (session.status === AuditStatus.COMPLETED) {
-      throw new ShelfError({
-        cause: null,
+      if (session.status === AuditStatus.COMPLETED) {
+        throw new ShelfError({
+          cause: null,
           message: "Audit session is already completed",
           additionalData: { sessionId },
           status: 400,
@@ -592,12 +717,12 @@ export async function completeAuditSession({
 
       // Update session to completed
       await tx.auditSession.update({
-      where: { id: sessionId },
-      data: {
-        status: AuditStatus.COMPLETED,
-        completedAt: new Date(),
-        missingAssetCount: missingCount,
-      },
+        where: { id: sessionId },
+        data: {
+          status: AuditStatus.COMPLETED,
+          completedAt: new Date(),
+          missingAssetCount: missingCount,
+        },
       });
     });
   } catch (cause) {

@@ -45,12 +45,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assigneeIds,
     });
 
-   return data(
-     payload({
-       success: true,
+    return data(
+      payload({
+        success: true,
         redirectTo: `/audits/${session.id}/scan`,
-     })
-   );
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
