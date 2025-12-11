@@ -691,10 +691,12 @@ export async function completeAuditSession({
   sessionId,
   organizationId,
   userId,
+  completionNote,
 }: {
   sessionId: string;
   organizationId: string;
   userId: string;
+  completionNote?: string;
 }): Promise<void> {
   try {
     await db.$transaction(async (tx) => {
@@ -753,6 +755,18 @@ export async function completeAuditSession({
           missingAssetCount: missingCount,
         },
       });
+
+      // Create completion note if provided
+      if (completionNote && completionNote.trim()) {
+        await tx.auditNote.create({
+          data: {
+            content: completionNote,
+            type: "COMMENT",
+            userId,
+            auditSessionId: sessionId,
+          },
+        });
+      }
     });
   } catch (cause) {
     throw new ShelfError({

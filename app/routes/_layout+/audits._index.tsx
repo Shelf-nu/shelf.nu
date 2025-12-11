@@ -24,11 +24,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
-import {
-  payload,
-  error,
-  getCurrentSearchParams,
-} from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -217,9 +213,7 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
         )}
       </Td>
 
-      <Td className="text-right">
-        {item.expectedAssetCount}
-      </Td>
+      <Td className="text-right">{item.expectedAssetCount}</Td>
 
       <Td className="text-right">
         {item.foundAssetCount ?? <EmptyTableValue />}

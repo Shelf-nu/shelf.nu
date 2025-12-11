@@ -59,6 +59,7 @@ model User {
   categories         Category[]
   notes              Note[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
+  auditNotes        AuditNote[]        @relation("AuditNoteUser")
   qrCodes            Qr[]
   scans              Scan[]
   tags               Tag[]
@@ -1286,6 +1287,26 @@ enum AuditAssignmentRole {
   PARTICIPANT
 }
 
+model AuditNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user           User?        @relation("AuditNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId         String?
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  // Indexes for foreign keys
+  @@index([auditSessionId])
+  @@index([userId])
+}
+
 model AuditSession {
   id String @id @default(cuid())
 
@@ -1313,6 +1334,7 @@ model AuditSession {
   assignments AuditAssignment[]
   assets      AuditAsset[]
   scans       AuditScan[]
+  notes       AuditNote[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

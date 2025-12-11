@@ -3,11 +3,12 @@ import { OrganizationRoles } from "@prisma/client";
 import { useSetAtom, useAtomValue } from "jotai";
 import type {
   LoaderFunctionArgs,
+  ActionFunctionArgs,
   MetaFunction,
   LinksFunction,
   ShouldRevalidateFunctionArgs,
 } from "react-router";
-import { data, useFetcher, useLoaderData } from "react-router";
+import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import {
@@ -27,6 +28,7 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getAuditSessionDetails,
   getAuditScans,
+  completeAuditSession,
 } from "~/modules/audit/service.server";
 import auditStyles from "~/styles/assets.css?url";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -51,6 +53,48 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   name: "audit.scan",
 };
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { auditId } = getParams(params, z.object({ auditId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.update,
+    });
+
+    const formData = await request.formData();
+    const intent = formData.get("intent");
+    const note = formData.get("note");
+
+    if (intent === "complete-audit") {
+      await completeAuditSession({
+        sessionId: auditId,
+        organizationId,
+        userId,
+        completionNote: typeof note === "string" ? note : undefined,
+      });
+
+      return redirect(`/audits/${auditId}/overview`);
+    }
+
+    throw new ShelfError({
+      cause: null,
+      message: "Invalid action intent",
+      additionalData: { intent },
+      label: "Audit",
+      status: 400,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, auditId });
+    return data(error(reason), { status: reason.status });
+  }
+}
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -238,6 +282,7 @@ export default function AuditSessionRoute() {
         contextLabel={contextLabel}
         contextName={contextName}
         expectedAssets={expectedItems}
+        portalContainer={typeof document !== "undefined" ? document.body : undefined}
         defaultExpanded
         emptyStateContent={({ expanded, stats }) =>
           expanded ? (

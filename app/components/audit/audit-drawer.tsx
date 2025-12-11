@@ -13,6 +13,7 @@ import {
   type AuditSessionInfo,
   type ScanListItems,
 } from "~/atoms/qr-scanner";
+import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
 import {
@@ -61,6 +62,7 @@ type AuditDrawerProps = {
   className?: string;
   style?: React.CSSProperties;
   headerContent?: React.ReactNode;
+  portalContainer?: HTMLElement;
   getAdditionalBlockers?: (
     args: AdditionalBlockerFactoryArgs
   ) => BlockerConfig[];
@@ -82,6 +84,7 @@ export function AuditDrawer({
   className,
   style,
   headerContent,
+  portalContainer,
   getAdditionalBlockers,
   emptyStateContent,
 }: AuditDrawerProps) {
@@ -373,23 +376,39 @@ export function AuditDrawer({
     stats.foundCount + stats.unexpectedCount === 0;
 
   return (
-    <ConfigurableDrawer
-      schema={AuditSchema}
-      formData={formData}
-      items={items}
-      onClearItems={clearList}
-      title={auditTitle}
-      isLoading={isLoading}
-      customRenderAllItems={customRenderAllItems}
-      Blockers={Blockers}
-      disableSubmit={shouldDisableSubmit}
-      submitButtonText="Complete Audit"
-      defaultExpanded={defaultExpanded}
-      className={className}
-      style={style}
-      emptyStateContent={resolvedEmptyState}
-      headerContent={headerContent}
-    />
+    <>
+      <ConfigurableDrawer
+        schema={AuditSchema}
+        formData={formData}
+        items={items}
+        onClearItems={clearList}
+        title={auditTitle}
+        isLoading={isLoading}
+        customRenderAllItems={customRenderAllItems}
+        Blockers={Blockers}
+        disableSubmit={shouldDisableSubmit}
+        submitButtonText=""
+        submitButtonClassName="hidden"
+        defaultExpanded={defaultExpanded}
+        className={className}
+        style={style}
+        emptyStateContent={resolvedEmptyState}
+        headerContent={headerContent}
+      />
+      <div className="fixed bottom-4 right-4 z-50">
+        <CompleteAuditDialog
+          disabled={shouldDisableSubmit}
+          auditName={auditSession?.name || ""}
+          portalContainer={portalContainer}
+          stats={{
+            expectedCount: stats.totalExpected,
+            foundCount: stats.foundCount,
+            missingCount: stats.missingCount,
+            unexpectedCount: stats.unexpectedCount,
+          }}
+        />
+      </div>
+    </>
   );
 }
 
