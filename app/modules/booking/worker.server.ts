@@ -182,6 +182,86 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   }
 };
 
+const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
+  try {
+    // Fetch the booking to check if it's still in COMPLETE status
+    const booking = await db.booking.findUnique({
+      where: { id: data.id },
+      select: {
+        id: true,
+        status: true,
+        custodianUserId: true,
+        organizationId: true,
+      },
+    });
+
+    if (!booking) {
+      Logger.warn(
+        `Auto-archive: Booking ${data.id} not found, skipping archive`
+      );
+      return;
+    }
+
+    // Only archive if the booking is still COMPLETE
+    // (user might have manually archived it or reopened it)
+    if (booking.status !== BookingStatus.COMPLETE) {
+      Logger.info(
+        `Auto-archive: Booking ${data.id} is no longer COMPLETE (status: ${booking.status}), skipping archive`
+      );
+      return;
+    }
+
+    // Check if auto-archive is still enabled for this organization
+    const bookingSettings = await db.bookingSettings.findUnique({
+      where: { organizationId: booking.organizationId },
+      select: { autoArchiveBookings: true },
+    });
+
+    if (!bookingSettings?.autoArchiveBookings) {
+      Logger.info(
+        `Auto-archive: Auto-archive is disabled for organization ${booking.organizationId}, skipping booking ${data.id}`
+      );
+      return;
+    }
+
+    // Archive the booking
+    const now = new Date();
+    await db.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        autoArchivedAt: now,
+      },
+    });
+
+    // Create system note for the status transition
+    const fromStatusBadge = wrapBookingStatusForNote(
+      "COMPLETE",
+      booking.custodianUserId || undefined
+    );
+    const toStatusBadge = wrapBookingStatusForNote(
+      "ARCHIVED",
+      booking.custodianUserId || undefined
+    );
+
+    await createSystemBookingNote({
+      bookingId: booking.id,
+      content: `Booking was automatically archived. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+    });
+
+    Logger.info(`Auto-archived booking ${booking.id}`);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to auto-archive booking",
+        additionalData: { bookingId: data.id },
+        label: "Booking",
+      })
+    );
+  }
+};
+
 const event2HandlerMap: Record<
   BOOKING_SCHEDULER_EVENTS_ENUM,
   (job: PgBoss.Job<SchedulerData>) => Promise<void>
@@ -189,6 +269,7 @@ const event2HandlerMap: Record<
   [BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder]: checkoutReminder,
   [BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder]: checkinReminder,
   [BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler]: overdueHandler,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveHandler]: autoArchiveHandler,
 };
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */

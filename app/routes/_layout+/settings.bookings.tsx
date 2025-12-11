@@ -6,6 +6,10 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import {
+  AutoArchiveSettings,
+  AutoArchiveSettingsSchema,
+} from "~/components/booking/auto-archive-settings";
+import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
 } from "~/components/booking/tags-required/tags-required-settings";
@@ -122,6 +126,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
+        "updateAutoArchive",
         "toggle",
         "updateSchedule",
         "createOverride",
@@ -187,6 +192,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Tags requirement setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateAutoArchive": {
+        const { autoArchiveBookings, autoArchiveDays } = parseData(
+          formData,
+          AutoArchiveSettingsSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          autoArchiveBookings,
+          autoArchiveDays,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Auto-archive setting has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -335,6 +368,17 @@ export default function GeneralPage() {
             "Control whether users must add tags to their bookings. This helps with categorization and organization of bookings.",
         }}
         defaultValue={bookingSettings.tagsRequired}
+      />
+
+      {/* Auto-archive settings form */}
+      <AutoArchiveSettings
+        header={{
+          title: "Automation",
+          subHeading:
+            "Configure automatic actions for completed bookings to keep your workspace clean.",
+        }}
+        defaultAutoArchiveBookings={bookingSettings.autoArchiveBookings}
+        defaultAutoArchiveDays={bookingSettings.autoArchiveDays}
       />
 
       {/* Time settings form */}
