@@ -34,13 +34,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.audit,
-        action: PermissionAction.read,
-      });
+    const { organizationId, userOrganizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.read,
+    });
 
     const { session } = await getAuditSessionDetails({
       id: auditId,

@@ -9,10 +9,7 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
-import {
-  createAssetScanNote,
-  createAuditCreationNote,
-} from "./helpers.server";
+import { createAssetScanNote, createAuditCreationNote } from "./helpers.server";
 
 const label: ErrorLabel = "Audit";
 

@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createAssetScanNote,
-  createAuditCreationNote,
-} from "./helpers.server";
+import { createAssetScanNote, createAuditCreationNote } from "./helpers.server";
 
 // Mock the markdoc wrappers
 vi.mock("~/utils/markdoc-wrappers", () => ({
   // why: We need to mock the markdoc wrapper functions to avoid complex template rendering in tests
   wrapUserLinkForNote: vi.fn(
-    (user: { id: string; firstName?: string | null; lastName?: string | null }) =>
+    (user: {
+      id: string;
+      firstName?: string | null;
+      lastName?: string | null;
+    }) =>
       `{% link to="/settings/team/users/${user.id}" text="${user.firstName} ${user.lastName}" /%}`
   ),
   wrapAssetsWithDataForNote: vi.fn(
@@ -61,7 +62,9 @@ describe("audit helpers", () => {
           auditSessionId: "audit-1",
           userId: "user-1",
           type: "UPDATE",
-          content: expect.stringContaining("created this audit with **1** expected asset."),
+          content: expect.stringContaining(
+            "created this audit with **1** expected asset."
+          ),
         },
       });
     });
@@ -85,7 +88,9 @@ describe("audit helpers", () => {
           auditSessionId: "audit-2",
           userId: "user-2",
           type: "UPDATE",
-          content: expect.stringContaining("created this audit with **5** expected assets."),
+          content: expect.stringContaining(
+            "created this audit with **5** expected assets."
+          ),
         },
       });
     });
@@ -105,7 +110,9 @@ describe("audit helpers", () => {
       });
 
       const createCall = mockTx.auditNote.create.mock.calls[0][0];
-      expect(createCall.data.content).toContain('{% link to="/settings/team/users/user-3"');
+      expect(createCall.data.content).toContain(
+        '{% link to="/settings/team/users/user-3"'
+      );
       expect(createCall.data.content).toContain('text="Alice Johnson"');
     });
 
