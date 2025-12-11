@@ -89,9 +89,13 @@ export default function AddAssetsToExistingBookingDialog() {
                     }
                   />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent
+                  position="popper"
+                  className="min-w-[var(--radix-select-trigger-width)]"
+                  align="start"
+                >
                   {bookings.map((booking) => (
-                    <SelectItem asChild key={booking.id} value={booking.id}>
+                    <SelectItem key={booking.id} value={booking.id}>
                       <div className="flex flex-col items-start gap-1  text-black">
                         <div className="semi-bold max-w-[250px] truncate">
                           {booking.name}

@@ -1,5 +1,5 @@
 # Base Node image
-FROM node:22-bookworm-slim AS base
+FROM node:22.20.0-bookworm-slim AS base
 
 # Set for base and all layer that inherit from it
 ENV PORT="8080"
