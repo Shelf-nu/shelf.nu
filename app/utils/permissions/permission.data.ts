@@ -39,6 +39,7 @@ export enum PermissionEntity {
   custody = "custody",
   assetReminders = "assetReminders",
   audit = "audit",
+  auditNote = "auditNote",
   userData = "user-data", // This is for the user to load their own data.
   update = "update",
   commandPaletteSearch = "command-palette-search",
@@ -61,6 +62,10 @@ export const Role2PermissionMap: {
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+    ],
+    [PermissionEntity.auditNote]: [
       PermissionAction.read,
       PermissionAction.create,
     ],
@@ -107,6 +112,10 @@ export const Role2PermissionMap: {
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+    ],
+    [PermissionEntity.auditNote]: [
       PermissionAction.read,
       PermissionAction.create,
     ],
@@ -164,6 +173,12 @@ export const Role2PermissionMap: {
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.auditNote]: [
       PermissionAction.read,
       PermissionAction.create,
       PermissionAction.update,
@@ -281,6 +296,12 @@ export const Role2PermissionMap: {
       PermissionAction.export,
     ],
     [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.auditNote]: [
       PermissionAction.read,
       PermissionAction.create,
       PermissionAction.update,

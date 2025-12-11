@@ -32,7 +32,7 @@ type CompleteAuditDialogProps = {
 
 /**
  * Dialog component for completing an audit with optional completion note.
- * 
+ *
  * This component:
  * - Shows a confirmation dialog with audit statistics
  * - Allows user to add an optional markdown note
@@ -79,9 +79,7 @@ export default function CompleteAuditDialog({
             <div className="space-y-4">
               <p>
                 You are about to complete the audit{" "}
-                <span className="font-semibold text-gray-900">
-                  {auditName}
-                </span>
+                <span className="font-semibold text-gray-900">{auditName}</span>
                 . This action cannot be undone.
               </p>
 

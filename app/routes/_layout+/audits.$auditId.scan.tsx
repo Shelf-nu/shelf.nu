@@ -282,7 +282,9 @@ export default function AuditSessionRoute() {
         contextLabel={contextLabel}
         contextName={contextName}
         expectedAssets={expectedItems}
-        portalContainer={typeof document !== "undefined" ? document.body : undefined}
+        portalContainer={
+          typeof document !== "undefined" ? document.body : undefined
+        }
         defaultExpanded
         emptyStateContent={({ expanded, stats }) =>
           expanded ? (

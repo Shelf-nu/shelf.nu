@@ -6,7 +6,7 @@ const label = "Audit";
 
 /**
  * Creates a note for an audit session.
- * 
+ *
  * Notes can be:
  * - COMMENT: User-added comments (e.g., completion notes)
  * - UPDATE: System-generated updates (e.g., status changes)

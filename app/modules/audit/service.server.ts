@@ -9,6 +9,10 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import {
+  createAssetScanNote,
+  createAuditCreationNote,
+} from "./helpers.server";
 
 const label: ErrorLabel = "Audit";
 
@@ -215,6 +219,14 @@ export async function createAuditSession(
         additionalData: { sessionId: session.id },
       });
     }
+
+    // Create automatic note for audit creation
+    await createAuditCreationNote({
+      auditSessionId: session.id,
+      createdById,
+      expectedAssetCount: assets.length,
+      tx,
+    });
 
     return {
       session: sessionWithAssignments,
@@ -596,6 +608,15 @@ export async function recordAuditScan(
             ? { increment: 1 }
             : session.unexpectedAssetCount,
         },
+      });
+
+      // Create automatic note for asset scan
+      await createAssetScanNote({
+        auditSessionId,
+        assetId,
+        userId,
+        isExpected,
+        tx,
       });
 
       return {
