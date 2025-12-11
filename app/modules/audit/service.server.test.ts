@@ -5,12 +5,24 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { createAuditSession } from "./service.server";
 
+// why: Mock the helper functions that create automatic notes to avoid database dependencies in unit tests
+vi.mock("./helpers.server", () => ({
+  createAuditCreationNote: vi.fn(),
+  createAssetScanNote: vi.fn(),
+}));
+
 vi.mock("~/database/db.server", () => {
   const mockDb = {
     auditSession: {
       create: vi.fn(),
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+    },
+    auditNote: {
+      create: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
     },
     auditAsset: {
       createMany: vi.fn(),
