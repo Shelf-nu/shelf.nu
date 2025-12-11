@@ -9,7 +9,12 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
-import { createAssetScanNote, createAuditCreationNote } from "./helpers.server";
+import {
+  createAssetScanNote,
+  createAuditCreationNote,
+  createAuditStartedNote,
+  createAuditCompletedNote,
+} from "./helpers.server";
 
 const label: ErrorLabel = "Audit";
 
@@ -534,6 +539,13 @@ export async function recordAuditScan(
             startedAt: new Date(),
           },
         });
+
+        // Create automatic note for audit being started
+        await createAuditStartedNote({
+          auditSessionId,
+          userId,
+          tx,
+        });
       }
 
       // Create the scan record
@@ -756,13 +768,34 @@ export async function completeAuditSession({
         },
       });
 
-      // Count missing assets
-      const missingCount = await tx.auditAsset.count({
-        where: {
-          auditSessionId: sessionId,
-          status: "MISSING",
-        },
-      });
+      // Get all counts for completion note
+      const [expectedCount, foundCount, missingCount, unexpectedCount] =
+        await Promise.all([
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: sessionId,
+              expected: true,
+            },
+          }),
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: sessionId,
+              status: "FOUND",
+            },
+          }),
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: sessionId,
+              status: "MISSING",
+            },
+          }),
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: sessionId,
+              expected: false,
+            },
+          }),
+        ]);
 
       // Update session to completed
       await tx.auditSession.update({
@@ -774,17 +807,17 @@ export async function completeAuditSession({
         },
       });
 
-      // Create completion note if provided
-      if (completionNote && completionNote.trim()) {
-        await tx.auditNote.create({
-          data: {
-            content: completionNote,
-            type: "COMMENT",
-            userId,
-            auditSessionId: sessionId,
-          },
-        });
-      }
+      // Create automatic completion note with stats and optional user message
+      await createAuditCompletedNote({
+        auditSessionId: sessionId,
+        userId,
+        expectedCount,
+        foundCount,
+        missingCount,
+        unexpectedCount,
+        completionNote,
+        tx,
+      });
     });
   } catch (cause) {
     throw new ShelfError({

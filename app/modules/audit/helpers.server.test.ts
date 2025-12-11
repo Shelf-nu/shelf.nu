@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createAssetScanNote, createAuditCreationNote } from "./helpers.server";
+import {
+  createAssetScanNote,
+  createAuditCreationNote,
+  createAuditStartedNote,
+  createAuditCompletedNote,
+} from "./helpers.server";
 
 // Mock the markdoc wrappers
 vi.mock("~/utils/markdoc-wrappers", () => ({
@@ -337,6 +342,314 @@ describe("audit helpers", () => {
         tx: mockTx,
       });
 
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAuditStartedNote", () => {
+    let mockTx: any;
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findUnique: vi.fn(),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("creates a note when audit is started", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      });
+
+      await createAuditStartedNote({
+        auditSessionId: "audit-1",
+        userId: "user-1",
+        tx: mockTx,
+      });
+
+      expect(mockTx.user.findUnique).toHaveBeenCalledWith({
+        where: { id: "user-1" },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          type: "UPDATE",
+          content: expect.stringContaining("started the audit"),
+        },
+      });
+    });
+
+    it("includes user link in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-2",
+        firstName: "Jane",
+        lastName: "Smith",
+      });
+
+      await createAuditStartedNote({
+        auditSessionId: "audit-2",
+        userId: "user-2",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% link to="/settings/team/users/user-2"'
+      );
+      expect(createCall.data.content).toContain('text="Jane Smith"');
+    });
+
+    it("skips note creation when user not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue(null);
+
+      await createAuditStartedNote({
+        auditSessionId: "audit-3",
+        userId: "nonexistent-user",
+        tx: mockTx,
+      });
+
+      expect(mockTx.user.findUnique).toHaveBeenCalled();
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAuditCompletedNote", () => {
+    let mockTx: any;
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findUnique: vi.fn(),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("creates a note when audit is completed without user note", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-1",
+        userId: "user-1",
+        expectedCount: 50,
+        foundCount: 45,
+        missingCount: 5,
+        unexpectedCount: 3,
+        tx: mockTx,
+      });
+
+      expect(mockTx.user.findUnique).toHaveBeenCalledWith({
+        where: { id: "user-1" },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          type: "UPDATE",
+          content: expect.stringContaining("completed the audit"),
+        },
+      });
+    });
+
+    it("includes stats in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-2",
+        firstName: "Jane",
+        lastName: "Smith",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-2",
+        userId: "user-2",
+        expectedCount: 100,
+        foundCount: 90,
+        missingCount: 10,
+        unexpectedCount: 5,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain("Found **90/100** expected assets");
+      expect(createCall.data.content).toContain("**90%**");
+      expect(createCall.data.content).toContain("**10** missing");
+      expect(createCall.data.content).toContain("**5** unexpected");
+    });
+
+    it("includes user's completion note when provided", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-3",
+        firstName: "Bob",
+        lastName: "Wilson",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-3",
+        userId: "user-3",
+        expectedCount: 50,
+        foundCount: 48,
+        missingCount: 2,
+        unexpectedCount: 1,
+        completionNote: "All critical assets accounted for. Minor items missing.",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain("**Completion note:**");
+      expect(createCall.data.content).toContain(
+        "All critical assets accounted for. Minor items missing."
+      );
+    });
+
+    it("handles completion note with markdown formatting", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-4",
+        firstName: "Alice",
+        lastName: "Johnson",
+      });
+
+      const markdownNote = `## Summary\n\n- Found most items\n- **2 laptops** still missing\n- Need to check storage room`;
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-4",
+        userId: "user-4",
+        expectedCount: 25,
+        foundCount: 23,
+        missingCount: 2,
+        unexpectedCount: 0,
+        completionNote: markdownNote,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(markdownNote);
+    });
+
+    it("calculates correct percentage", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-5",
+        firstName: "Carol",
+        lastName: "Davis",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-5",
+        userId: "user-5",
+        expectedCount: 30,
+        foundCount: 27,
+        missingCount: 3,
+        unexpectedCount: 2,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain("**90%**"); // 27/30 = 90%
+    });
+
+    it("handles zero expected count without division error", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-6",
+        firstName: "Dave",
+        lastName: "Brown",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-6",
+        userId: "user-6",
+        expectedCount: 0,
+        foundCount: 0,
+        missingCount: 0,
+        unexpectedCount: 5,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain("**0%**");
+      expect(createCall.data.content).toContain("Found **0/0** expected assets");
+    });
+
+    it("does not include completion note section when note is empty string", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-7",
+        firstName: "Eve",
+        lastName: "Martinez",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-7",
+        userId: "user-7",
+        expectedCount: 10,
+        foundCount: 10,
+        missingCount: 0,
+        unexpectedCount: 0,
+        completionNote: "",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).not.toContain("**Completion note:**");
+    });
+
+    it("does not include completion note section when note is whitespace", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-8",
+        firstName: "Frank",
+        lastName: "Garcia",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-8",
+        userId: "user-8",
+        expectedCount: 15,
+        foundCount: 14,
+        missingCount: 1,
+        unexpectedCount: 1,
+        completionNote: "   \n  ",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).not.toContain("**Completion note:**");
+    });
+
+    it("skips note creation when user not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue(null);
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-9",
+        userId: "nonexistent-user",
+        expectedCount: 20,
+        foundCount: 18,
+        missingCount: 2,
+        unexpectedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.user.findUnique).toHaveBeenCalled();
       expect(mockTx.auditNote.create).not.toHaveBeenCalled();
     });
   });

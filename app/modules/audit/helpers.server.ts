@@ -100,3 +100,108 @@ export async function createAssetScanNote({
     },
   });
 }
+
+/**
+ * Creates an automatic note when an audit is started (activated from PENDING status).
+ * This note records who performed the first scan that activated the audit.
+ */
+export async function createAuditStartedNote({
+  auditSessionId,
+  userId,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  tx: any; // Prisma transaction client
+}) {
+  const starter = await tx.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!starter) {
+    return; // Skip note creation if user not found
+  }
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: starter.id,
+      type: "UPDATE",
+      content: `${wrapUserLinkForNote({
+        id: starter.id,
+        firstName: starter.firstName,
+        lastName: starter.lastName,
+      })} started the audit.`,
+    },
+  });
+}
+
+/**
+ * Creates an automatic note when an audit is completed.
+ * This note records who completed the audit, shows statistics, and includes
+ * the optional completion message provided by the user.
+ */
+export async function createAuditCompletedNote({
+  auditSessionId,
+  userId,
+  expectedCount,
+  foundCount,
+  missingCount,
+  unexpectedCount,
+  completionNote,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  expectedCount: number;
+  foundCount: number;
+  missingCount: number;
+  unexpectedCount: number;
+  completionNote?: string | null;
+  tx: any; // Prisma transaction client
+}) {
+  const completer = await tx.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!completer) {
+    return; // Skip note creation if user not found
+  }
+
+  // Calculate completion percentage
+  const percentage =
+    expectedCount > 0
+      ? Math.round((foundCount / expectedCount) * 100)
+      : 0;
+
+  // Build the note content
+  let content = `${wrapUserLinkForNote({
+    id: completer.id,
+    firstName: completer.firstName,
+    lastName: completer.lastName,
+  })} completed the audit. Found **${foundCount}/${expectedCount}** expected assets (**${percentage}%**), **${missingCount}** missing, **${unexpectedCount}** unexpected.`;
+
+  // Append user's completion note if provided
+  if (completionNote && completionNote.trim()) {
+    content += `\n\n**Completion note:**\n${completionNote}`;
+  }
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: completer.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
