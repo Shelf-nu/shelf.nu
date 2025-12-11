@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { useNavigate } from "react-router";
@@ -17,6 +16,7 @@ import {
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
+import useApiQuery from "~/hooks/use-api-query";
 
 export const addAssetsToExistingBookingSchema = z.object({
   id: z
@@ -37,25 +37,18 @@ export default function AddAssetsToExistingBookingDialog() {
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
 
-  const [isFetchingBookings, setIsFetchingBookings] = useState(false);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-
   const isDialogOpen = bulkDialogOpenState["booking-exist"] === true;
 
-  useEffect(() => {
-    if (isDialogOpen) {
-      setIsFetchingBookings(true);
+  const {
+    data: bookingsData,
+    isLoading: isFetchingBookings,
+    error: _bookingsError,
+  } = useApiQuery<{ error: null; bookings: Booking[] }>({
+    api: "/api/bookings/get-all",
+    enabled: isDialogOpen,
+  });
 
-      void fetch("/api/bookings/get-all")
-        .then((response) => response.json())
-        .then((data: { bookings: Booking[] }) => {
-          setBookings(data.bookings);
-        })
-        .finally(() => {
-          setIsFetchingBookings(false);
-        });
-    }
-  }, [isDialogOpen]);
+  const bookings = bookingsData?.bookings || [];
 
   return (
     <BulkUpdateDialogContent
@@ -85,6 +78,8 @@ export default function AddAssetsToExistingBookingDialog() {
                     placeholder={
                       isFetchingBookings
                         ? "Fetching bookings..."
+                        : bookings.length === 0
+                        ? "No bookings available"
                         : "Select booking"
                     }
                   />
@@ -94,21 +89,35 @@ export default function AddAssetsToExistingBookingDialog() {
                   className="min-w-[var(--radix-select-trigger-width)]"
                   align="start"
                 >
-                  {bookings.map((booking) => (
-                    <SelectItem key={booking.id} value={booking.id}>
-                      <div className="flex flex-col items-start gap-1  text-black">
-                        <div className="semi-bold max-w-[250px] truncate">
-                          {booking.name}
+                  {bookings.length > 0 ? (
+                    bookings.map((booking) => (
+                      <SelectItem key={booking.id} value={booking.id}>
+                        <div className="flex flex-col items-start gap-1  text-black">
+                          <div className="semi-bold max-w-[250px] truncate">
+                            {booking.name}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            <DateS date={booking.from} includeTime /> -{" "}
+                            <DateS date={booking.to} includeTime />
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          <DateS date={booking.from} includeTime /> -{" "}
-                          <DateS date={booking.to} includeTime />
-                        </div>
-                      </div>
-                    </SelectItem>
-                  ))}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-center text-sm text-gray-500">
+                      No bookings available
+                    </div>
+                  )}
                 </SelectContent>
               </Select>
+              <When truthy={!isFetchingBookings && bookings.length === 0}>
+                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
+                  <p className="text-sm text-gray-600">
+                    No draft or reserved bookings found. Create a new booking
+                    first to add assets to it.
+                  </p>
+                </div>
+              </When>
               <When truthy={!!zo.errors.id()?.message}>
                 <p className="mb-4 text-sm text-error-500">
                   {zo.errors.id()?.message}
