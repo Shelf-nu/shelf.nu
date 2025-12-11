@@ -494,7 +494,9 @@ describe("audit helpers", () => {
       });
 
       const createCall = mockTx.auditNote.create.mock.calls[0][0];
-      expect(createCall.data.content).toContain("Found **90/100** expected assets");
+      expect(createCall.data.content).toContain(
+        "Found **90/100** expected assets"
+      );
       expect(createCall.data.content).toContain("**90%**");
       expect(createCall.data.content).toContain("**10** missing");
       expect(createCall.data.content).toContain("**5** unexpected");
@@ -514,7 +516,8 @@ describe("audit helpers", () => {
         foundCount: 48,
         missingCount: 2,
         unexpectedCount: 1,
-        completionNote: "All critical assets accounted for. Minor items missing.",
+        completionNote:
+          "All critical assets accounted for. Minor items missing.",
         tx: mockTx,
       });
 
@@ -589,7 +592,9 @@ describe("audit helpers", () => {
 
       const createCall = mockTx.auditNote.create.mock.calls[0][0];
       expect(createCall.data.content).toContain("**0%**");
-      expect(createCall.data.content).toContain("Found **0/0** expected assets");
+      expect(createCall.data.content).toContain(
+        "Found **0/0** expected assets"
+      );
     });
 
     it("does not include completion note section when note is empty string", async () => {

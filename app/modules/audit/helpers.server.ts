@@ -180,9 +180,7 @@ export async function createAuditCompletedNote({
 
   // Calculate completion percentage
   const percentage =
-    expectedCount > 0
-      ? Math.round((foundCount / expectedCount) * 100)
-      : 0;
+    expectedCount > 0 ? Math.round((foundCount / expectedCount) * 100) : 0;
 
   // Build the note content
   let content = `${wrapUserLinkForNote({
