@@ -116,7 +116,7 @@ export type AdvancedAssetBooking = Pick<
 > & {
   from: string;
   to: string;
-  tags: Array<Pick<Tag, "id" | "name">>;
+  tags: Array<Pick<Tag, "id" | "name" | "color">>;
   custodianTeamMember?: Pick<TeamMember, "id" | "name">;
   custodianUser?: Pick<
     User,
@@ -149,7 +149,7 @@ export type AdvancedIndexAsset = Pick<
   qrId: string; // QR code will always be available
   kit: Pick<Kit, "id" | "name"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
-  tags: Pick<Tag, "id" | "name">[];
+  tags: Pick<Tag, "id" | "name" | "color">[];
   location:
     | (Pick<Location, "id" | "name"> & {
         parentId?: Location["parentId"];

@@ -142,7 +142,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderDirection,
         tags: filterTags,
         extraInclude: {
-          tags: { select: { id: true, name: true } },
+          tags: { select: { id: true, name: true, color: true } },
         },
       }),
 
@@ -397,7 +397,7 @@ const ListBookingsContent = ({
       to: true;
       custodianUser: true;
       custodianTeamMember: true;
-      tags: { select: { id: true; name: true } };
+      tags: { select: { id: true; name: true; color: true } };
     };
   }>;
 }) => {

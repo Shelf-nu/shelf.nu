@@ -20,7 +20,7 @@ export interface PdfDbResult {
     include: {
       custodianTeamMember: true;
       custodianUser: true;
-      tags: { select: { id: true; name: true } };
+      tags: { select: { id: true; name: true; color: true } };
     };
   }>;
   assets: (Asset & {
@@ -52,7 +52,7 @@ export async function fetchAllPdfRelatedData(
       id: bookingId,
       organizationId,
       request,
-      extraInclude: { tags: { select: { id: true, name: true } } },
+      extraInclude: { tags: { select: { id: true, name: true, color: true } } },
     });
 
     if (role) {

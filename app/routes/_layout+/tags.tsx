@@ -192,11 +192,13 @@ export default function CategoriesPage() {
 const TagItem = ({
   item,
 }: {
-  item: Pick<Tag, "id" | "description" | "name" | "useFor">;
+  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color">;
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
-      <TagBadge>{item.name}</TagBadge>
+      <TagBadge color={item.color} withDot>
+        {item.name}
+      </TagBadge>
     </Td>
     <Td className="max-w-62 md:w-3/4">
       {item.description ? (

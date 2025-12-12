@@ -7,6 +7,7 @@ import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-t
 const createTag = (id: number) => ({
   id: `tag-${id}`,
   name: `Tag ${id}`,
+  color: "#ff0000",
 });
 
 describe("ListItemTagsColumn", () => {

@@ -101,7 +101,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custodianTeamMemberIds: teamMemberIds,
           tags: filterTags,
           extraInclude: {
-            tags: { select: { id: true, name: true } },
+            tags: { select: { id: true, name: true, color: true } },
           },
         }),
 
