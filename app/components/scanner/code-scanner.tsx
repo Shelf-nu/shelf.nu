@@ -13,7 +13,12 @@ import {
 import { Link } from "react-router";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
-import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
@@ -229,7 +234,7 @@ export const CodeScanner = ({
             {isMd && !forceMode && (
               <div>
                 <Tabs
-                  defaultValue={mode}
+                  value={mode}
                   onValueChange={(mode) => handleModeChange(mode as Mode)}
                 >
                   <TabsList>
@@ -240,6 +245,11 @@ export const CodeScanner = ({
                       <CameraIcon className="mr-2 size-5" /> Camera
                     </TabsTrigger>
                   </TabsList>
+                  {/* Empty TabsContent elements required for ARIA compliance.
+                      The aria-controls attribute on tab triggers must reference valid DOM IDs.
+                      Actual scanner/camera UI is rendered separately below based on mode state. */}
+                  <TabsContent value="scanner" className="hidden" />
+                  <TabsContent value="camera" className="hidden" />
                 </Tabs>
               </div>
             )}
@@ -447,6 +457,7 @@ function ScannerMode({
           disabled={paused || !inputValue.trim()}
           variant="secondary"
           className="absolute bottom-1 right-1"
+          aria-label={`Submit scanned code: ${inputValue}`}
         >
           <ArrowRight className="size-4" />
         </Button>
