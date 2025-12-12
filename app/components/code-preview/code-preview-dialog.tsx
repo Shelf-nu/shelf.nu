@@ -1,12 +1,11 @@
-import type { ComponentProps, ForwardedRef, ReactElement } from "react";
-import { cloneElement, forwardRef, useState } from "react";
+import type { ComponentProps, ReactElement } from "react";
+import { cloneElement, useCallback, useMemo, useState } from "react";
 import type { Asset, Kit, BarcodeType } from "@prisma/client";
 import useApiQuery from "~/hooks/use-api-query";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { CodePreview, type CodeType } from "./code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
-import type { HTMLButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import When from "../when/when";
@@ -25,15 +24,16 @@ type CodePreviewDialogProps = {
       });
   trigger: ReactElement<{
     onClick: () => void;
-    ref: ForwardedRef<HTMLButtonProps>;
   }>;
   selectedBarcodeId?: string;
 };
 
-export const CodePreviewDialog = forwardRef<
-  HTMLButtonProps,
-  CodePreviewDialogProps
->(function ({ className, item, trigger, selectedBarcodeId }, ref) {
+export function CodePreviewDialog({
+  className,
+  item,
+  trigger,
+  selectedBarcodeId,
+}: CodePreviewDialogProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedCode, setSelectedCode] = useState<CodeType | null>(null);
   const { canUseBarcodes } = useBarcodePermissions();
@@ -54,15 +54,35 @@ export const CodePreviewDialog = forwardRef<
     enabled: isDialogOpen,
   });
 
-  function openDialog() {
+  const openDialog = useCallback(() => {
     setIsDialogOpen(true);
-  }
+  }, []);
 
-  function closeDialog() {
+  const closeDialog = useCallback(() => {
     setIsDialogOpen(false);
-  }
+  }, []);
+
+  const handleCodeChange = useCallback((code: CodeType | null) => {
+    setSelectedCode(code);
+  }, []);
+
+  // Memoize barcodes array to prevent creating new array reference on every render
+  const barcodes = useMemo(
+    () => (canUseBarcodes ? data?.barcodes || [] : []),
+    [canUseBarcodes, data?.barcodes]
+  );
 
   const itemName = item.type === "asset" ? item.title : item.name;
+
+  // Memoize item prop object to prevent recreation
+  const codePreviewItem = useMemo(
+    () => ({
+      id: item.id,
+      name: itemName,
+      type: item.type,
+    }),
+    [item.id, item.type, itemName]
+  );
 
   // Generate dynamic title based on selected code
   const dialogTitle = selectedCode
@@ -71,9 +91,15 @@ export const CodePreviewDialog = forwardRef<
       : `Barcode: ${selectedCode.barcodeData?.value || selectedCode.id}`
     : `Codes for ${itemName}`;
 
+  // Memoize trigger element to prevent recreation on every render
+  const triggerElement = useMemo(
+    () => cloneElement(trigger, { onClick: openDialog }),
+    [trigger, openDialog]
+  );
+
   return (
     <>
-      {cloneElement(trigger, { onClick: openDialog, ref })}
+      {triggerElement}
 
       <DialogPortal>
         <Dialog
@@ -105,14 +131,10 @@ export const CodePreviewDialog = forwardRef<
                 <Card className="min-w-[360px] px-0">
                   <CodePreview
                     className="mb-0 flex size-full flex-col items-center justify-center border-0"
-                    item={{
-                      id: item.id,
-                      name: itemName,
-                      type: item.type,
-                    }}
+                    item={codePreviewItem}
                     qrObj={data?.qrObj}
-                    barcodes={canUseBarcodes ? data?.barcodes || [] : []}
-                    onCodeChange={setSelectedCode}
+                    barcodes={barcodes}
+                    onCodeChange={handleCodeChange}
                     selectedBarcodeId={selectedBarcodeId}
                     onRefetchData={refetch}
                     sequentialId={
@@ -133,6 +155,4 @@ export const CodePreviewDialog = forwardRef<
       </DialogPortal>
     </>
   );
-});
-
-CodePreviewDialog.displayName = "CodePreviewDialog";
+}
