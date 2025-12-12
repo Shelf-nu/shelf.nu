@@ -1,6 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { CheckCircle2 } from "lucide-react";
-import { Form } from "react-router";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -45,6 +45,14 @@ export default function CompleteAuditDialog({
 }: CompleteAuditDialogProps) {
   const [open, setOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fetcher = useFetcher();
+
+  // Close dialog after successful submission
+  useEffect(() => {
+    if (fetcher.data?.success && fetcher.state === "idle") {
+      setOpen(false);
+    }
+  }, [fetcher.data, fetcher.state]);
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
@@ -64,7 +72,7 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        <Form method="post" onSubmit={() => setOpen(false)}>
+        <fetcher.Form method="post">
           <input type="hidden" name="intent" value="complete-audit" />
 
           <AlertDialogHeader>
@@ -140,11 +148,15 @@ export default function CompleteAuditDialog({
                 Cancel
               </Button>
             </AlertDialogCancel>
-            <Button type="submit" variant="primary">
-              Complete Audit
+            <Button 
+              type="submit" 
+              variant="primary"
+              disabled={fetcher.state !== "idle"}
+            >
+              {fetcher.state !== "idle" ? "Completing..." : "Complete Audit"}
             </Button>
           </AlertDialogFooter>
-        </Form>
+        </fetcher.Form>
       </AlertDialogContent>
     </AlertDialog>
   );
