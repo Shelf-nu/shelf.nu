@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { CheckCircle2 } from "lucide-react";
-import { useFetcher } from "react-router";
+import { Form, useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -36,6 +36,7 @@ type CompleteAuditDialogProps = {
  * - Shows a confirmation dialog with audit statistics
  * - Allows user to add an optional text note
  * - Submits with intent="complete-audit"
+ * - Dialog closes automatically on redirect after successful submission
  */
 export default function CompleteAuditDialog({
   disabled,
@@ -45,14 +46,9 @@ export default function CompleteAuditDialog({
 }: CompleteAuditDialogProps) {
   const [open, setOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fetcher = useFetcher();
+  const navigation = useNavigation();
 
-  // Close dialog after successful submission
-  useEffect(() => {
-    if (fetcher.data?.success && fetcher.state === "idle") {
-      setOpen(false);
-    }
-  }, [fetcher.data, fetcher.state]);
+  const isSubmitting = navigation.state !== "idle";
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
@@ -72,7 +68,7 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        <fetcher.Form method="post">
+        <Form method="post">
           <input type="hidden" name="intent" value="complete-audit" />
 
           <AlertDialogHeader>
@@ -148,15 +144,11 @@ export default function CompleteAuditDialog({
                 Cancel
               </Button>
             </AlertDialogCancel>
-            <Button 
-              type="submit" 
-              variant="primary"
-              disabled={fetcher.state !== "idle"}
-            >
-              {fetcher.state !== "idle" ? "Completing..." : "Complete Audit"}
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? "Completing..." : "Complete Audit"}
             </Button>
           </AlertDialogFooter>
-        </fetcher.Form>
+        </Form>
       </AlertDialogContent>
     </AlertDialog>
   );
