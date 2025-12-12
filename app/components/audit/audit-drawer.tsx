@@ -94,9 +94,9 @@ function AuditDrawerFooter({
     unexpectedCount: number;
   };
 }) {
- return (
+  return (
     <div className="sticky bottom-0 flex w-full gap-2 border-t border-gray-200 bg-white p-3">
-     {/* Cancel button */}
+      {/* Cancel button */}
       <Button type="button" variant="secondary" to=".." className="ml-auto">
         Cancel
       </Button>
