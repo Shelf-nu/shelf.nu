@@ -20,6 +20,8 @@ import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
 import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
 import { ErrorContent } from "~/components/errors";
+import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
@@ -30,7 +32,8 @@ import {
   getAuditScans,
   completeAuditSession,
 } from "~/modules/audit/service.server";
-import auditStyles from "~/styles/assets.css?url";
+import scannerCss from "~/styles/scanner.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -41,16 +44,15 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: auditStyles },
+  { rel: "stylesheet", href: scannerCss },
 ];
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  {
-    title: data ? `Audit · ${data.session.name}` : "Audit",
-  },
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
 ];
 
 export const handle = {
+  breadcrumb: () => "Scan QR codes",
   name: "audit.scan",
 };
 
@@ -150,7 +152,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    return data(payload({ session, expectedAssets, existingScans }));
+    const title = `Scan assets for audit | ${session.name}`;
+    const header: HeaderData = {
+      title,
+    };
+
+    return data(
+      payload({ title, header, session, expectedAssets, existingScans })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
@@ -278,6 +287,8 @@ export default function AuditSessionRoute() {
 
   return (
     <>
+      <Header hidePageDescription />
+
       <AuditDrawer
         contextLabel={contextLabel}
         contextName={contextName}

@@ -40,7 +40,7 @@ export async function createAuditCreationNote({
         id: creator.id,
         firstName: creator.firstName,
         lastName: creator.lastName,
-      })} created this audit with **${expectedAssetCount}** expected asset${
+      })} created audit with **${expectedAssetCount}** expected asset${
         expectedAssetCount === 1 ? "" : "s"
       }.`,
     },

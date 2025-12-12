@@ -2,7 +2,6 @@ import type React from "react";
 import { useMemo, type ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-
 import {
   auditSessionAtom,
   clearScannedItemsAtom,
@@ -27,6 +26,7 @@ import {
   Tr,
 } from "~/components/scanner/drawer/generic-item-row";
 import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
@@ -74,6 +74,42 @@ type AuditDrawerProps = {
     contextName: string;
   }) => React.ReactNode;
 };
+
+/**
+ * Custom footer form for audit drawer that includes Cancel button and Complete Audit dialog
+ */
+function AuditDrawerFooter({
+  disabled,
+  auditName,
+  portalContainer,
+  stats,
+}: {
+  disabled: boolean;
+  auditName: string;
+  portalContainer?: HTMLElement;
+  stats: {
+    expectedCount: number;
+    foundCount: number;
+    missingCount: number;
+    unexpectedCount: number;
+  };
+}) {
+ return (
+    <div className="sticky bottom-0 flex w-full gap-2 border-t border-gray-200 bg-white p-3">
+     {/* Cancel button */}
+      <Button type="button" variant="secondary" to=".." className="ml-auto">
+        Cancel
+      </Button>
+      {/* Complete Audit dialog trigger */}
+      <CompleteAuditDialog
+        disabled={disabled}
+        auditName={auditName}
+        portalContainer={portalContainer}
+        stats={stats}
+      />
+    </div>
+  );
+}
 
 export function AuditDrawer({
   contextLabel,
@@ -376,27 +412,23 @@ export function AuditDrawer({
     stats.foundCount + stats.unexpectedCount === 0;
 
   return (
-    <>
-      <ConfigurableDrawer
-        schema={AuditSchema}
-        formData={formData}
-        items={items}
-        onClearItems={clearList}
-        title={auditTitle}
-        isLoading={isLoading}
-        customRenderAllItems={customRenderAllItems}
-        Blockers={Blockers}
-        disableSubmit={shouldDisableSubmit}
-        submitButtonText=""
-        submitButtonClassName="hidden"
-        defaultExpanded={defaultExpanded}
-        className={className}
-        style={style}
-        emptyStateContent={resolvedEmptyState}
-        headerContent={headerContent}
-      />
-      <div className="fixed bottom-4 right-4 z-50">
-        <CompleteAuditDialog
+    <ConfigurableDrawer
+      schema={AuditSchema}
+      formData={formData}
+      items={items}
+      onClearItems={clearList}
+      title={auditTitle}
+      isLoading={isLoading}
+      customRenderAllItems={customRenderAllItems}
+      Blockers={Blockers}
+      disableSubmit={shouldDisableSubmit}
+      defaultExpanded={defaultExpanded}
+      className={className}
+      style={style}
+      emptyStateContent={resolvedEmptyState}
+      headerContent={headerContent}
+      form={
+        <AuditDrawerFooter
           disabled={shouldDisableSubmit}
           auditName={auditSession?.name || ""}
           portalContainer={portalContainer}
@@ -407,8 +439,8 @@ export function AuditDrawer({
             unexpectedCount: stats.unexpectedCount,
           }}
         />
-      </div>
-    </>
+      }
+    />
   );
 }
 

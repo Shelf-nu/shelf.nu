@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { Form } from "react-router";
-import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -35,7 +34,7 @@ type CompleteAuditDialogProps = {
  *
  * This component:
  * - Shows a confirmation dialog with audit statistics
- * - Allows user to add an optional markdown note
+ * - Allows user to add an optional text note
  * - Submits with intent="complete-audit"
  */
 export default function CompleteAuditDialog({
@@ -44,18 +43,13 @@ export default function CompleteAuditDialog({
   portalContainer,
   stats,
 }: CompleteAuditDialogProps) {
-  const [note, setNote] = useState("");
   const [open, setOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button
-          disabled={disabled}
-          variant="primary"
-          icon="check"
-          type="button"
-        >
+        <Button disabled={disabled} variant="primary" type="button">
           Complete Audit
         </Button>
       </AlertDialogTrigger>
@@ -63,10 +57,15 @@ export default function CompleteAuditDialog({
       <AlertDialogContent
         portalProps={{ container: portalContainer }}
         className="max-w-2xl"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          requestAnimationFrame(() => {
+            textareaRef.current?.focus();
+          });
+        }}
       >
         <Form method="post" onSubmit={() => setOpen(false)}>
           <input type="hidden" name="intent" value="complete-audit" />
-          <input type="hidden" name="note" value={note} />
 
           <AlertDialogHeader>
             <div className="flex items-center gap-2">
@@ -123,20 +122,19 @@ export default function CompleteAuditDialog({
                 <p className="text-sm text-gray-500">
                   Add any final observations or notes about this audit.
                 </p>
-                <MarkdownEditor
+                <textarea
+                  ref={textareaRef}
                   id="completion-note"
                   name="note"
-                  label=""
-                  defaultValue={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Add completion notes here (supports markdown)..."
-                  className="min-h-[120px]"
+                  placeholder="Add completion notes here..."
+                  className="min-h-[120px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
+                  rows={5}
                 />
               </div>
             </div>
           </AlertDialogDescription>
 
-          <AlertDialogFooter>
+          <AlertDialogFooter className="mt-4">
             <AlertDialogCancel asChild>
               <Button variant="secondary" type="button">
                 Cancel

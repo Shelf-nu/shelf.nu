@@ -68,7 +68,7 @@ describe("audit helpers", () => {
           userId: "user-1",
           type: "UPDATE",
           content: expect.stringContaining(
-            "created this audit with **1** expected asset."
+            "created audit with **1** expected asset."
           ),
         },
       });
@@ -94,7 +94,7 @@ describe("audit helpers", () => {
           userId: "user-2",
           type: "UPDATE",
           content: expect.stringContaining(
-            "created this audit with **5** expected assets."
+            "created audit with **5** expected assets."
           ),
         },
       });
