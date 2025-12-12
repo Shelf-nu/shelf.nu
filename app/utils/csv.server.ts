@@ -797,6 +797,26 @@ export async function exportBookingNotesToCsv({
   });
 }
 
+export async function exportAuditNotesToCsv({
+  request,
+  auditId,
+  organizationId,
+}: {
+  request: Request;
+  auditId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.AuditNoteWhereInput>({
+    request,
+    where: {
+      auditSessionId: auditId,
+      auditSession: { organizationId },
+    },
+    findMany: (args) =>
+      db.auditNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
 /** Define some types to use for normalizing bookings across the different fetches */
 type FlexibleAsset = Partial<Asset> & {
   title: string;
