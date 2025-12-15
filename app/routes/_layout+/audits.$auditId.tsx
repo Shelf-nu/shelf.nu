@@ -9,10 +9,10 @@ import {
   useLoaderData,
   Outlet,
   useMatches,
-  Form,
   useActionData,
 } from "react-router";
 import { z } from "zod";
+import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import { EditAuditDialog } from "~/components/audit/edit-audit-dialog";
 import { EditAuditSchema } from "~/components/audit/edit-audit-dialog";
 import { ErrorContent } from "~/components/errors";
@@ -23,6 +23,7 @@ import { db } from "~/database/db.server";
 import {
   getAuditSessionDetails,
   updateAuditSession,
+  completeAuditSession,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -65,6 +66,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           name: parsedData.name,
           description: parsedData.description || null,
         },
+      });
+
+      return payload({ success: true });
+    }
+
+    if (intent === "complete-audit") {
+      const note = formData.get("note");
+
+      await completeAuditSession({
+        sessionId: auditId,
+        organizationId,
+        userId,
+        completionNote: typeof note === "string" && note ? note : undefined,
       });
 
       return payload({ success: true });
@@ -122,6 +136,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
     const hasScans = scanCount > 0;
 
+    const stats = {
+      expectedCount: session.expectedAssetCount,
+      foundCount: session.foundAssetCount,
+      missingCount: session.missingAssetCount,
+      unexpectedCount: session.unexpectedAssetCount,
+    };
+
     const rolesForOrg = userOrganizations.find(
       (org) => org.organization.id === organizationId
     )?.roles;
@@ -154,6 +175,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         session,
         isAdminOrOwner,
         hasScans,
+        stats,
       })
     );
   } catch (cause) {
@@ -163,7 +185,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function AuditDetailsPage() {
-  const { session, isAdminOrOwner, hasScans } = useLoaderData<typeof loader>();
+  const { session, isAdminOrOwner, hasScans, stats } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
@@ -219,12 +242,11 @@ export default function AuditDetailsPage() {
           )}
 
           {!isCompleted && isAdminOrOwner && (
-            <Form method="post">
-              <input type="hidden" name="intent" value="complete-audit" />
-              <Button type="submit" disabled={!hasScans} variant="primary">
-                Complete audit
-              </Button>
-            </Form>
+            <CompleteAuditDialog
+              disabled={!hasScans}
+              auditName={session.name}
+              stats={stats}
+            />
           )}
         </div>
       </Header>

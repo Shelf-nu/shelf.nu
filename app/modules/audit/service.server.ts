@@ -14,6 +14,7 @@ import {
   createAuditCreationNote,
   createAuditStartedNote,
   createAuditCompletedNote,
+  createAuditUpdateNote,
 } from "./helpers.server";
 
 const label: ErrorLabel = "Audit";
@@ -312,10 +313,6 @@ export async function updateAuditSession({
 
   // Create automatic note for changes
   if (changes.length > 0) {
-    const { createAuditUpdateNote } = await import(
-      "./helpers.server"
-    );
-
     await createAuditUpdateNote({
       auditSessionId: id,
       userId,

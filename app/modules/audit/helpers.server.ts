@@ -234,8 +234,7 @@ export async function createAuditUpdateNote({
 
   // Build the content describing the changes
   const changeDescriptions = changes.map((change) => {
-    const fieldLabel =
-      change.field === "name" ? "audit name" : change.field;
+    const fieldLabel = change.field === "name" ? "audit name" : change.field;
     return `- **${fieldLabel}**: "${change.from}" → "${change.to}"`;
   });
 

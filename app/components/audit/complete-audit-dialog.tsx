@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
-import { CheckCircle2 } from "lucide-react";
-import { Form, useNavigation } from "react-router";
+import { CheckCircle2, X } from "lucide-react";
+import { Form } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { useDisabled } from "~/hooks/use-disabled";
 
 type CompleteAuditDialogProps = {
   /** Whether the button should be disabled */
@@ -46,9 +47,7 @@ export default function CompleteAuditDialog({
 }: CompleteAuditDialogProps) {
   const [open, setOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const navigation = useNavigation();
-
-  const isSubmitting = navigation.state !== "idle";
+  const formDisabled = useDisabled();
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
@@ -76,6 +75,15 @@ export default function CompleteAuditDialog({
               <CheckCircle2 className="size-5 text-success-500" />
               <AlertDialogTitle>Complete Audit</AlertDialogTitle>
             </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="absolute right-6 top-6 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 disabled:pointer-events-none"
+              disabled={formDisabled}
+            >
+              <X className="size-4" />
+              <span className="sr-only">Close</span>
+            </button>
           </AlertDialogHeader>
 
           <AlertDialogDescription asChild>
@@ -144,8 +152,8 @@ export default function CompleteAuditDialog({
                 Cancel
               </Button>
             </AlertDialogCancel>
-            <Button type="submit" variant="primary" disabled={isSubmitting}>
-              {isSubmitting ? "Completing..." : "Complete Audit"}
+            <Button type="submit" variant="primary" disabled={formDisabled}>
+              {formDisabled ? "Completing..." : "Complete Audit"}
             </Button>
           </AlertDialogFooter>
         </Form>
