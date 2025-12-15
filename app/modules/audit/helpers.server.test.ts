@@ -549,7 +549,11 @@ describe("audit helpers", () => {
       });
 
       const createCall = mockTx.auditNote.create.mock.calls[0][0];
-      expect(createCall.data.content).toContain(markdownNote);
+      // Check that the note is formatted as a blockquote
+      expect(createCall.data.content).toContain("**Completion note:**");
+      expect(createCall.data.content).toContain("> ## Summary");
+      expect(createCall.data.content).toContain("> - Found most items");
+      expect(createCall.data.content).toContain("> - **2 laptops** still missing");
     });
 
     it("calculates correct percentage", async () => {

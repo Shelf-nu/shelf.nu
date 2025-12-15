@@ -4,11 +4,14 @@ import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
+import { z } from "zod";
 
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+
+import type { AuditFilterType } from "./audit-filter-utils";
 import {
   createAssetScanNote,
   createAuditCreationNote,
@@ -455,19 +458,75 @@ export async function getAssetsForAuditSession({
   const searchParams = new URL(request.url).searchParams;
   const search = searchParams.get("s") || null;
 
+  // Validate audit status with Zod schema
+  // Extract all possible filter values from AuditFilterType
+  const filterValues: [AuditFilterType, ...AuditFilterType[]] = [
+    "ALL",
+    "EXPECTED",
+    "FOUND",
+    "MISSING",
+    "UNEXPECTED",
+  ];
+
+  const auditStatusSchema = z.object({
+    auditStatus: z.enum(filterValues).optional(),
+  });
+
+  const { auditStatus } = auditStatusSchema.parse({
+    auditStatus: searchParams.get("auditStatus") || undefined,
+  });
+
   try {
-    // First get the expected asset IDs from the audit
+    // Build where clause for audit assets based on status filter
+    const auditAssetWhere: Prisma.AuditAssetWhereInput = {
+      auditSessionId,
+    };
+
+    // Apply status filter
+    if (auditStatus && auditStatus !== "ALL") {
+      switch (auditStatus) {
+        case "EXPECTED":
+          // Assets that are expected in the audit
+          auditAssetWhere.expected = true;
+          break;
+        case "FOUND":
+          // Assets that were found (scanned)
+          auditAssetWhere.status = AuditAssetStatus.FOUND;
+          break;
+        case "MISSING":
+          // Assets that are expected but not found
+          auditAssetWhere.expected = true;
+          auditAssetWhere.status = AuditAssetStatus.MISSING;
+          break;
+        case "UNEXPECTED":
+          // Assets that were scanned but not expected
+          auditAssetWhere.expected = false;
+          auditAssetWhere.status = AuditAssetStatus.UNEXPECTED;
+          break;
+      }
+    }
+    // If auditStatus is "ALL" or not provided, no filter is applied
+    // This shows all assets (expected + unexpected)
+
+    // Get the filtered audit assets
     const auditAssets = await db.auditAsset.findMany({
-      where: {
-        auditSessionId,
-        expected: true,
-      },
+      where: auditAssetWhere,
       select: {
         assetId: true,
+        expected: true,
+        status: true,
       },
     });
 
     const assetIds = auditAssets.map((aa) => aa.assetId);
+
+    // Create lookup map for audit status data
+    const auditStatusMap = new Map(
+      auditAssets.map((aa) => [
+        aa.assetId,
+        { expected: aa.expected, auditStatus: aa.status },
+      ])
+    );
 
     if (assetIds.length === 0) {
       return {
@@ -540,12 +599,18 @@ export async function getAssetsForAuditSession({
       },
     });
 
+    // Enrich assets with audit status data for "ALL" filter
+    const enrichedAssets = assets.map((asset) => ({
+      ...asset,
+      auditData: auditStatusMap.get(asset.id) || null,
+    }));
+
     const totalItems = assets.length;
 
     return {
       page: 1,
       perPage: totalItems,
-      items: assets,
+      items: enrichedAssets,
       totalItems,
       totalPages: 1,
       search,

@@ -191,7 +191,7 @@ export async function createAuditCompletedNote({
 
   // Append user's completion note if provided
   if (completionNote && completionNote.trim()) {
-    content += `\n\n**Completion note:**\n${completionNote}`;
+    content += `\n\n**Completion note:**\n\n> ${completionNote.trim().replace(/\n/g, "\n> ")}`;
   }
 
   await tx.auditNote.create({

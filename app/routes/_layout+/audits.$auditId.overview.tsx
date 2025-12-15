@@ -10,7 +10,9 @@ import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { CategoryBadge } from "~/components/assets/category-badge";
+import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
 import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
+import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -19,6 +21,12 @@ import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { Td, Th } from "~/components/table";
+import { useSearchParams } from "~/hooks/search-params";
+import {
+  getAuditFilterMetadata,
+  getAuditStatusLabel,
+} from "~/modules/audit/audit-filter-utils";
+import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import {
   getAuditSessionDetails,
   completeAuditSession,
@@ -32,8 +40,16 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 const label = "Audit";
+
+const AUDIT_STATUS_ITEMS = {
+  EXPECTED: "EXPECTED",
+  FOUND: "FOUND",
+  MISSING: "MISSING",
+  UNEXPECTED: "UNEXPECTED",
+};
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "Audit Overview" },
@@ -160,11 +176,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AuditOverview() {
   const { session, totalItems } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+  const currentFilter = searchParams.get(
+    "auditStatus"
+  ) as AuditFilterType | null;
+  const showAuditStatusColumn = currentFilter === "ALL";
 
-  const totalExpected = totalItems;
+  const expectedCount = session.expectedAssetCount || 0;
   const foundCount = session.foundAssetCount || 0;
   const missingCount = session.missingAssetCount || 0;
   const unexpectedCount = session.unexpectedAssetCount || 0;
+
+  const filterMetadata = getAuditFilterMetadata(currentFilter);
 
   return (
     <div className="mt-8 flex flex-col gap-6">
@@ -174,10 +197,30 @@ export default function AuditOverview() {
         <div className="flex-1">
           <h2 className="mb-4 text-lg font-semibold">Statistics</h2>
           <div className="grid grid-cols-2 gap-4">
-            <StatCard label="Expected" value={totalExpected} color="blue" />
-            <StatCard label="Found" value={foundCount} color="green" />
-            <StatCard label="Missing" value={missingCount} color="yellow" />
-            <StatCard label="Unexpected" value={unexpectedCount} color="red" />
+            <StatCard
+              label="Expected"
+              value={expectedCount}
+              filterType="EXPECTED"
+              isActive={currentFilter === "EXPECTED" || !currentFilter}
+            />
+            <StatCard
+              label="Found"
+              value={foundCount}
+              filterType="FOUND"
+              isActive={currentFilter === "FOUND"}
+            />
+            <StatCard
+              label="Missing"
+              value={missingCount}
+              filterType="MISSING"
+              isActive={currentFilter === "MISSING"}
+            />
+            <StatCard
+              label="Unexpected"
+              value={unexpectedCount}
+              filterType="UNEXPECTED"
+              isActive={currentFilter === "UNEXPECTED"}
+            />
           </div>
         </div>
 
@@ -244,29 +287,34 @@ export default function AuditOverview() {
         </div>
       </div>
 
-      {/* Expected Assets List */}
-      {totalExpected > 0 && (
-        <div>
-          <h2 className="mb-4 text-lg font-semibold">
-            Expected Assets ({totalExpected})
-          </h2>
-          <Filters className="responsive-filters mb-2" />
-          <List
-            ItemComponent={AssetListItem}
-            customEmptyStateContent={{
-              title: "No expected assets",
-              text: "This audit has no assets assigned to it.",
-            }}
-            headerChildren={
-              <>
-                <Th>Category</Th>
-                <Th>Location</Th>
-              </>
-            }
-            className="overflow-x-visible md:overflow-x-auto"
-          />
-        </div>
-      )}
+      {/* Assets List */}
+      <div>
+        <h2 className="mb-4 text-lg font-semibold">
+          {filterMetadata.label} ({totalItems})
+        </h2>
+        <Filters
+          className="responsive-filters mb-2"
+          slots={{
+            "right-of-search": (
+              <AuditStatusFilter statusItems={AUDIT_STATUS_ITEMS} />
+            ),
+          }}
+        />
+        <List
+          ItemComponent={AssetListItem}
+          customEmptyStateContent={filterMetadata.emptyState}
+          headerChildren={
+            <>
+              {showAuditStatusColumn && (
+                <Th className="whitespace-nowrap">Audit Status</Th>
+              )}
+              <Th>Category</Th>
+              <Th>Location</Th>
+            </>
+          }
+          className="overflow-x-visible md:overflow-x-auto"
+        />
+      </div>
     </div>
   );
 }
@@ -276,6 +324,14 @@ type AuditAssetItem = LoaderData["data"]["items"][number];
 
 function AssetListItem({ item }: { item: AuditAssetItem }) {
   const { category, location } = item;
+  const [searchParams] = useSearchParams();
+  const currentFilter = searchParams.get("auditStatus");
+
+  // Show audit status column when "ALL" filter is active
+  const showAuditStatus = currentFilter === "ALL";
+  const auditStatusLabel = item.auditData
+    ? getAuditStatusLabel(item.auditData)
+    : null;
 
   return (
     <>
@@ -316,7 +372,15 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
           </div>
         </div>
       </Td>
-
+      {showAuditStatus && (
+        <Td>
+          {auditStatusLabel ? (
+            <AuditAssetStatusBadge status={auditStatusLabel} />
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      )}
       <Td>
         {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
       </Td>
@@ -342,23 +406,35 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
 function StatCard({
   label,
   value,
-  color,
+  filterType,
+  isActive,
 }: {
   label: string;
   value: number;
-  color: "blue" | "green" | "yellow" | "red";
+  filterType: AuditFilterType;
+  isActive: boolean;
 }) {
-  const colorClasses = {
-    blue: "bg-blue-50 text-blue-700",
-    green: "bg-green-50 text-green-700",
-    yellow: "bg-yellow-50 text-yellow-700",
-    red: "bg-red-50 text-red-700",
+  const [, setSearchParams] = useSearchParams();
+
+  const handleClick = () => {
+    setSearchParams((prev) => {
+      prev.set("auditStatus", filterType);
+      return prev;
+    });
   };
 
   return (
-    <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
+    <button
+      onClick={handleClick}
+      className={tw(
+        "rounded-lg border p-4 text-left transition-all hover:shadow-md",
+        isActive
+          ? "border-gray-900 bg-gray-900 text-white"
+          : "border-gray-200 bg-white text-gray-900 hover:border-gray-300"
+      )}
+    >
       <div className="text-sm font-medium">{label}</div>
       <div className="mt-1 text-3xl font-bold">{value}</div>
-    </div>
+    </button>
   );
 }
