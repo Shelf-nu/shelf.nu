@@ -242,6 +242,91 @@ export async function createAuditSession(
   return result;
 }
 
+/**
+ * Updates an audit session's details (name and/or description).
+ * Creates automatic notes for tracked changes.
+ */
+export async function updateAuditSession({
+  id,
+  organizationId,
+  userId,
+  data,
+}: {
+  id: string;
+  organizationId: string;
+  userId: string;
+  data: {
+    name?: string;
+    description?: string | null;
+  };
+}) {
+  // Fetch the current audit to track changes
+  const currentAudit = await db.auditSession.findUnique({
+    where: { id, organizationId },
+    select: {
+      name: true,
+      description: true,
+    },
+  });
+
+  if (!currentAudit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 404,
+    });
+  }
+
+  // Track what changed
+  const changes: Array<{ field: string; from: string; to: string }> = [];
+
+  if (data.name !== undefined && data.name !== currentAudit.name) {
+    changes.push({
+      field: "name",
+      from: currentAudit.name,
+      to: data.name,
+    });
+  }
+
+  if (
+    data.description !== undefined &&
+    data.description !== currentAudit.description
+  ) {
+    changes.push({
+      field: "description",
+      from: currentAudit.description || "(empty)",
+      to: data.description || "(empty)",
+    });
+  }
+
+  // Update the audit
+  const updatedAudit = await db.auditSession.update({
+    where: { id, organizationId },
+    data: {
+      name: data.name,
+      description: data.description,
+    },
+  });
+
+  // Create automatic note for changes
+  if (changes.length > 0) {
+    const { createAuditUpdateNote } = await import(
+      "./helpers.server"
+    );
+
+    await createAuditUpdateNote({
+      auditSessionId: id,
+      userId,
+      changes,
+      tx: db,
+    });
+  }
+
+  return updatedAudit;
+}
+
 export async function getAuditSessionDetails({
   id,
   organizationId,

@@ -1,17 +1,34 @@
 import { AuditStatus, OrganizationRoles } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, useLoaderData, Outlet, useMatches, Form } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
+import {
+  data,
+  useLoaderData,
+  Outlet,
+  useMatches,
+  Form,
+  useActionData,
+} from "react-router";
 import { z } from "zod";
+import { EditAuditDialog } from "~/components/audit/edit-audit-dialog";
+import { EditAuditSchema } from "~/components/audit/edit-audit-dialog";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { getAuditSessionDetails } from "~/modules/audit/service.server";
+import {
+  getAuditSessionDetails,
+  updateAuditSession,
+} from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
+import { parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -19,6 +36,52 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 const label = "Audit";
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { auditId } = getParams(params, z.object({ auditId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.update,
+    });
+
+    const formData = await request.formData();
+    const intent = formData.get("intent");
+
+    if (intent === "edit-audit") {
+      const parsedData = parseData(formData, EditAuditSchema);
+
+      await updateAuditSession({
+        id: auditId,
+        organizationId,
+        userId,
+        data: {
+          name: parsedData.name,
+          description: parsedData.description || null,
+        },
+      });
+
+      return payload({ success: true });
+    }
+
+    throw new ShelfError({
+      cause: null,
+      message: "Invalid action intent",
+      additionalData: { intent },
+      label,
+      status: 400,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, auditId });
+    return data(error(reason), { status: reason.status });
+  }
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   {
@@ -101,6 +164,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export default function AuditDetailsPage() {
   const { session, isAdminOrOwner, hasScans } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const items = [
@@ -140,6 +204,10 @@ export default function AuditDetailsPage() {
       >
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-2">
+          {!isCompleted && isAdminOrOwner && (
+            <EditAuditDialog audit={session} actionData={actionData} />
+          )}
+
           {!isCompleted && (
             <Button
               to={`/audits/${session.id}/scan`}

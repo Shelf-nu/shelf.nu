@@ -203,3 +203,54 @@ export async function createAuditCompletedNote({
     },
   });
 }
+
+/**
+ * Creates an automatic note when audit details are updated.
+ * Tracks changes to name and/or description.
+ */
+export async function createAuditUpdateNote({
+  auditSessionId,
+  userId,
+  changes,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  changes: Array<{ field: string; from: string; to: string }>;
+  tx: any; // Prisma transaction client
+}) {
+  const updater = await tx.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!updater || changes.length === 0) {
+    return; // Skip note creation if user not found or no changes
+  }
+
+  // Build the content describing the changes
+  const changeDescriptions = changes.map((change) => {
+    const fieldLabel =
+      change.field === "name" ? "audit name" : change.field;
+    return `- **${fieldLabel}**: "${change.from}" → "${change.to}"`;
+  });
+
+  const content = `${wrapUserLinkForNote({
+    id: updater.id,
+    firstName: updater.firstName,
+    lastName: updater.lastName,
+  })} updated audit details:\n\n${changeDescriptions.join("\n\n")}`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: updater.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
