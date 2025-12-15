@@ -67,11 +67,7 @@ export function getAuditFilterMetadata(
 
 import type { AuditAssetStatus } from "@prisma/client";
 
-export type AuditStatusLabel =
-  | "Expected"
-  | "Found"
-  | "Missing"
-  | "Unexpected";
+export type AuditStatusLabel = "Expected" | "Found" | "Missing" | "Unexpected";
 
 /**
  * Determine the audit status label for an asset based on its audit data.

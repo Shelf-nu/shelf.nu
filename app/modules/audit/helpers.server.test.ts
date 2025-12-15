@@ -553,7 +553,9 @@ describe("audit helpers", () => {
       expect(createCall.data.content).toContain("**Completion note:**");
       expect(createCall.data.content).toContain("> ## Summary");
       expect(createCall.data.content).toContain("> - Found most items");
-      expect(createCall.data.content).toContain("> - **2 laptops** still missing");
+      expect(createCall.data.content).toContain(
+        "> - **2 laptops** still missing"
+      );
     });
 
     it("calculates correct percentage", async () => {
