@@ -10,6 +10,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import type { SortingDirection } from "~/components/list/filters/sort-by";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
@@ -31,6 +33,11 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+const AUDIT_SORTING_OPTIONS = {
+  name: "Name",
+  createdAt: "Creation Date",
+} as const;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -56,12 +63,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         ? (statusFilter.toUpperCase() as AuditStatus)
         : null;
 
+    // Get sorting params
+    const orderBy = searchParams.get("orderBy") ?? "createdAt";
+    const orderDirection = (searchParams.get("orderDirection") ??
+      "desc") as SortingDirection;
+
     const { audits, totalAudits } = await getAuditsForOrganization({
       organizationId,
       page,
       perPage,
       search,
       status,
+      orderBy,
+      orderDirection,
     });
 
     const totalPages = Math.ceil(totalAudits / perPage);
@@ -119,6 +133,13 @@ export default function AuditsIndexPage() {
                   COMPLETED: "COMPLETED",
                   CANCELLED: "CANCELLED",
                 }}
+              />
+            ),
+            "right-of-search": (
+              <SortBy
+                sortingOptions={AUDIT_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+                defaultSortingDirection="desc"
               />
             ),
           }}

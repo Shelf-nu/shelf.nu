@@ -6,6 +6,7 @@ import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
+import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -988,8 +989,20 @@ export async function getAuditsForOrganization(params: {
   search?: string | null;
   /** Filter by status */
   status?: AuditStatus | null;
+  /** Field to sort by */
+  orderBy?: string;
+  /** Sort direction */
+  orderDirection?: SortingDirection;
 }) {
-  const { organizationId, page = 1, perPage = 8, search, status } = params;
+  const {
+    organizationId,
+    page = 1,
+    perPage = 8,
+    search,
+    status,
+    orderBy = "createdAt",
+    orderDirection = "desc",
+  } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -1015,7 +1028,7 @@ export async function getAuditsForOrganization(params: {
         skip,
         take,
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: { [orderBy]: orderDirection },
         include: AUDIT_LIST_INCLUDE,
       }),
       db.auditSession.count({ where }),
