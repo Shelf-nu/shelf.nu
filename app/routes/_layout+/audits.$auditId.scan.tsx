@@ -27,10 +27,10 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
   getAuditScans,
-  completeAuditSession,
 } from "~/modules/audit/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -70,16 +70,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
+    const formData = await request.clone().formData();
     const intent = formData.get("intent");
-    const note = formData.get("note");
 
     if (intent === "complete-audit") {
-      await completeAuditSession({
-        sessionId: auditId,
+      await completeAuditWithImages({
+        request,
+        auditSessionId: auditId,
         organizationId,
         userId,
-        completionNote: typeof note === "string" ? note : undefined,
       });
 
       return redirect(`/audits/${auditId}/overview`);

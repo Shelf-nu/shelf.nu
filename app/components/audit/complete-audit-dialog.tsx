@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { Form } from "react-router";
+import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-box";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -67,7 +68,7 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        <Form method="post">
+        <Form method="post" encType="multipart/form-data">
           <input type="hidden" name="intent" value="complete-audit" />
 
           <AlertDialogHeader>
@@ -143,6 +144,11 @@ export default function CompleteAuditDialog({
                   rows={5}
                 />
               </div>
+
+              <AuditImageUploadSection
+                maxCount={5}
+                disabled={formDisabled}
+              />
             </div>
           </AlertDialogDescription>
 

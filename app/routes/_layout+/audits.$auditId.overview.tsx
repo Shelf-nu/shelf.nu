@@ -13,6 +13,7 @@ import { CategoryBadge } from "~/components/assets/category-badge";
 import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
 import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -27,9 +28,10 @@ import {
   getAuditStatusLabel,
 } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
+import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
+import { getAuditImages } from "~/modules/audit/image.service.server";
 import {
   getAuditSessionDetails,
-  completeAuditSession,
   getAssetsForAuditSession,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -75,7 +77,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { organizationId, userOrganizations } = permissionResult;
 
-    const [{ session }, assetsData] = await Promise.all([
+    const [{ session }, assetsData, auditImages] = await Promise.all([
       getAuditSessionDetails({
         id: auditId,
         organizationId,
@@ -86,6 +88,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         auditSessionId: auditId,
+      }),
+      getAuditImages({
+        auditSessionId: auditId,
+        organizationId,
+        auditAssetId: undefined, // Get general audit images only
       }),
     ]);
 
@@ -121,6 +128,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         session,
         isAdminOrOwner,
         header,
+        auditImages,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -148,12 +156,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
+    const formData = await request.clone().formData();
     const intent = formData.get("intent");
 
     if (intent === "complete-audit") {
-      await completeAuditSession({
-        sessionId: auditId,
+      await completeAuditWithImages({
+        request,
+        auditSessionId: auditId,
         organizationId,
         userId,
       });
@@ -175,7 +184,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AuditOverview() {
-  const { session, totalItems } = useLoaderData<typeof loader>();
+  const { session, totalItems, auditImages } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
     "auditStatus"
@@ -191,7 +200,7 @@ export default function AuditOverview() {
 
   return (
     <div className="mt-8 flex flex-col gap-6">
-      {/* Two Column Layout with Flex: Stats & Audit Info */}
+      {/* Three Column Layout with Flex: Stats, Audit Info, Images */}
       <div className="flex flex-col gap-6 lg:flex-row">
         {/* Left Column: Stats Cards */}
         <div className="flex-1">
@@ -283,6 +292,38 @@ export default function AuditOverview() {
                 </div>
               </li>
             </ul>
+          </Card>
+        </div>
+
+        {/* Right Column: Audit Images */}
+        <div className="flex-1">
+          <h2 className="mb-4 text-lg font-semibold">Images</h2>
+          <Card className="mt-0 md:border">
+            {auditImages.length > 0 ? (
+              <div className="flex flex-wrap gap-3">
+                {auditImages.map((image) => (
+                  <ImageWithPreview
+                    key={image.id}
+                    imageUrl={image.imageUrl}
+                    thumbnailUrl={image.thumbnailUrl}
+                    alt={image.description || "Audit image"}
+                    withPreview
+                    className="size-24 rounded border"
+                    images={auditImages.map((img) => ({
+                      id: img.id,
+                      imageUrl: img.imageUrl,
+                      thumbnailUrl: img.thumbnailUrl,
+                      alt: img.description || "Audit image",
+                    }))}
+                    currentImageId={image.id}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="px-4 py-6 text-center text-sm text-gray-500">
+                No images uploaded
+              </div>
+            )}
           </Card>
         </div>
       </div>

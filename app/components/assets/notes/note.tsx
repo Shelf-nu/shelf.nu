@@ -39,8 +39,8 @@ export const Note = ({ note, actionsDropdown }: NoteProps) => (
 );
 
 const Update = ({ note }: { note: NoteWithUser; when?: boolean }) => (
-  <div className="flex px-3.5 py-3">
-    <div className="message flex flex-1 items-start gap-2">
+  <div className="px-3.5 py-3">
+    <div className="message flex flex-1 flex-col items-start gap-2 md:flex-row">
       <Tag>
         <DateS date={note.createdAt} includeTime />
       </Tag>{" "}

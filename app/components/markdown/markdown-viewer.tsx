@@ -6,6 +6,7 @@ import { markdocConfig } from "~/utils/markdoc.config";
 import { parseMarkdownToReact } from "~/utils/md";
 import { tw } from "~/utils/tw";
 import { AssetsListComponent } from "./assets-list-component";
+import { AuditImagesComponent } from "./audit-images-component";
 import { BookingStatusComponent } from "./booking-status-component";
 import { CategoryBadgeComponent } from "./category-badge-component";
 import { DateComponent } from "./date-component";
@@ -41,6 +42,7 @@ interface Props {
 const defaultComponents = {
   DateComponent,
   AssetsListComponent,
+  AuditImagesComponent,
   KitsListComponent,
   LinkComponent,
   BookingStatusComponent,

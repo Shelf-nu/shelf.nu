@@ -158,6 +158,16 @@ async function validateImageLimits({
   auditAssetId?: AuditAsset["id"];
   organizationId: Organization["id"];
 }) {
+  // Safety check - ensure the AuditImage model exists
+  if (!db.auditImage) {
+    throw new ShelfError({
+      cause: null,
+      message: "AuditImage model not available. Please restart the server after running migrations.",
+      additionalData: { auditSessionId, auditAssetId, organizationId },
+      label,
+    });
+  }
+
   if (auditAssetId) {
     // Check asset-specific image limit
     const assetImageCount = await db.auditImage.count({

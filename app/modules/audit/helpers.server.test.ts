@@ -36,6 +36,9 @@ describe("audit helpers", () => {
         auditNote: {
           create: vi.fn(),
         },
+        auditImage: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
       };
     });
 
@@ -437,6 +440,9 @@ describe("audit helpers", () => {
         auditNote: {
           create: vi.fn(),
         },
+        auditImage: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
       };
     });
 
@@ -662,6 +668,100 @@ describe("audit helpers", () => {
 
       expect(mockTx.user.findUnique).toHaveBeenCalled();
       expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+
+    it("includes audit_images tag when images exist", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-10",
+        firstName: "Grace",
+        lastName: "Wilson",
+      });
+
+      // Mock auditImage.findMany to return 3 images
+      mockTx.auditImage.findMany.mockResolvedValue([
+        { id: "img-1" },
+        { id: "img-2" },
+        { id: "img-3" },
+      ]);
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-10",
+        userId: "user-10",
+        expectedCount: 50,
+        foundCount: 48,
+        missingCount: 2,
+        unexpectedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditImage.findMany).toHaveBeenCalledWith({
+        where: {
+          auditSessionId: "audit-10",
+          auditAssetId: null,
+        },
+        select: { id: true },
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% audit_images count=3 ids="img-1,img-2,img-3" /%}'
+      );
+    });
+
+    it("does not include audit_images tag when no images exist", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-11",
+        firstName: "Henry",
+        lastName: "Taylor",
+      });
+
+      // Mock auditImage.findMany to return empty array
+      mockTx.auditImage.findMany.mockResolvedValue([]);
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-11",
+        userId: "user-11",
+        expectedCount: 30,
+        foundCount: 30,
+        missingCount: 0,
+        unexpectedCount: 0,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).not.toContain("audit_images");
+    });
+
+    it("correctly formats image IDs in audit_images tag", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-12",
+        firstName: "Isabel",
+        lastName: "Anderson",
+      });
+
+      // Mock with 5 images (max limit)
+      mockTx.auditImage.findMany.mockResolvedValue([
+        { id: "abc-123" },
+        { id: "def-456" },
+        { id: "ghi-789" },
+        { id: "jkl-012" },
+        { id: "mno-345" },
+      ]);
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-12",
+        userId: "user-12",
+        expectedCount: 100,
+        foundCount: 95,
+        missingCount: 5,
+        unexpectedCount: 3,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% audit_images count=5 ids="abc-123,def-456,ghi-789,jkl-012,mno-345" /%}'
+      );
     });
   });
 });

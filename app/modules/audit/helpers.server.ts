@@ -196,6 +196,21 @@ export async function createAuditCompletedNote({
       .replace(/\n/g, "\n> ")}`;
   }
 
+  // Fetch and append audit images if any were uploaded during completion
+  const auditImages = await tx.auditImage.findMany({
+    where: {
+      auditSessionId,
+      auditAssetId: null, // Only general audit images, not asset-specific
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (auditImages.length > 0) {
+    const imageIds = auditImages.map((img: { id: string }) => img.id).join(",");
+    content += `\n\n{% audit_images count=${auditImages.length} ids="${imageIds}" /%}`;
+  }
+
   await tx.auditNote.create({
     data: {
       auditSessionId,
