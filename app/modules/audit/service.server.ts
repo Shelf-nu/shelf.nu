@@ -59,6 +59,7 @@ export type CreateAuditSessionInput = {
 export type AuditExpectedAsset = {
   id: string;
   name: string;
+  auditAssetId: string;
 };
 
 export type CreateAuditSessionResult = {
@@ -235,11 +236,29 @@ export async function createAuditSession(
       tx,
     });
 
+    // Fetch the created audit assets to get their IDs
+    const createdAuditAssets = await tx.auditAsset.findMany({
+      where: {
+        auditSessionId: session.id,
+        expected: true,
+      },
+      select: {
+        id: true,
+        assetId: true,
+      },
+    });
+
+    // Create a map for quick lookup
+    const auditAssetMap = new Map(
+      createdAuditAssets.map((aa) => [aa.assetId, aa.id])
+    );
+
     return {
       session: sessionWithAssignments,
       expectedAssets: assets.map((asset) => ({
         id: asset.id,
         name: asset.title,
+        auditAssetId: auditAssetMap.get(asset.id) ?? "",
       })),
     } satisfies CreateAuditSessionResult;
   });
@@ -419,6 +438,7 @@ export async function getAuditSessionDetails({
       .map((auditAsset) => ({
         id: auditAsset.assetId,
         name: auditAsset.asset?.title ?? "",
+        auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
       }));
 
     return {

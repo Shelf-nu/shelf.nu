@@ -212,6 +212,7 @@ export default function AuditSessionRoute() {
             name: asset.name,
             type: "asset",
             auditStatus: "missing",
+            auditAssetId: asset.auditAssetId,
           }) as AuditScannedItem
       ),
     [expectedAssets]

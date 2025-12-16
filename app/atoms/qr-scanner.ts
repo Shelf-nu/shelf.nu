@@ -197,6 +197,7 @@ export type AuditScannedItem = {
   auditStatus: AuditAssetStatus;
   expectedLocation?: string;
   currentLocation?: string;
+  auditAssetId?: string; // Link to AuditAsset record for notes/images
 };
 
 // Stores current audit session information

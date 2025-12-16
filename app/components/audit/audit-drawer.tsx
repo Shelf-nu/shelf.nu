@@ -12,6 +12,7 @@ import {
   type AuditSessionInfo,
   type ScanListItems,
 } from "~/atoms/qr-scanner";
+import { AuditAssetActions } from "~/components/audit/audit-asset-actions";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
@@ -316,13 +317,22 @@ export function AuditDrawer({
                   "inline-block bg-gray-50 px-[6px] py-[2px]",
                   "rounded-md border border-gray-200",
                   "text-xs text-gray-700"
-                )}
-              >
-                {item.type === "asset" ? "asset" : "kit"}
-              </span>
-              <AuditLabels />
-            </div>
+              )}
+            >
+              {item.type === "asset" ? "asset" : "kit"}
+            </span>
+            <AuditLabels />
+            {/* Action buttons for notes and images */}
+            {auditSession && item.type === "asset" && data?.id && (
+              <AuditAssetActions
+                auditAssetId={data.auditAssetId || ""}
+                auditSessionId={auditSession.id}
+                assetName={("title" in data ? data.title : data.name) || "Asset"}
+                isPending={false}
+              />
+            )}
           </div>
+        </div>
         );
       }}
     />
@@ -347,6 +357,15 @@ export function AuditDrawer({
                 tooltipContent="This asset is expected but has not been scanned yet."
                 className="border-gray-200 bg-gray-50 text-gray-600"
               />
+              {/* Action buttons for notes and images on pending assets */}
+              {auditSession && (
+                <AuditAssetActions
+                  auditAssetId={asset.auditAssetId || ""}
+                  auditSessionId={auditSession.id}
+                  assetName={asset.name}
+                  isPending={true}
+                />
+              )}
             </div>
           </div>
         </div>

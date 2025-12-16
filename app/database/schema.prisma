@@ -1304,9 +1304,14 @@ model AuditNote {
   auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   auditSessionId String
 
+  // Optional link to specific asset within the audit
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
   // Indexes for foreign keys
   @@index([auditSessionId])
   @@index([userId])
+  @@index([auditAssetId])
 }
 
 model AuditSession {
@@ -1388,6 +1393,7 @@ model AuditAsset {
 
   scans AuditScan[]
   images AuditImage[]
+  notes AuditNote[]
 
   @@unique([auditSessionId, assetId])
   @@index([status])
@@ -1433,7 +1439,7 @@ model AuditImage {
   auditSessionId String
 
   // Optional link to specific asset within the audit
-  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   auditAssetId String?
 
   uploadedBy   User   @relation("AuditImageUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
