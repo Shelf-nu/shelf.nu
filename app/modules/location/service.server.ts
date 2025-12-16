@@ -7,10 +7,14 @@ import type {
   Asset,
   Kit,
 } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { PUBLIC_BUCKET } from "~/utils/constants";
+import {
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -54,6 +58,7 @@ export async function getLocation(
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
     include?: Prisma.LocationInclude;
+    teamMemberIds?: string[] | null;
   }
 ) {
   const {
@@ -67,6 +72,7 @@ export async function getLocation(
     orderBy = "createdAt",
     orderDirection,
     include,
+    teamMemberIds,
   } = params;
 
   try {
@@ -85,6 +91,41 @@ export async function getLocation(
         contains: search,
         mode: "insensitive",
       };
+    }
+
+    if (teamMemberIds && teamMemberIds.length) {
+      assetsWhere.OR = [
+        ...(assetsWhere.OR ?? []),
+        {
+          custody: { teamMemberId: { in: teamMemberIds } },
+        },
+        {
+          custody: { custodian: { userId: { in: teamMemberIds } } },
+        },
+        {
+          bookings: {
+            some: {
+              custodianTeamMemberId: { in: teamMemberIds },
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        },
+        {
+          bookings: {
+            some: {
+              custodianUserId: { in: teamMemberIds },
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
+      ];
     }
 
     const parentInclude = {
@@ -112,6 +153,25 @@ export async function getLocation(
                 select: {
                   id: true,
                   name: true,
+                },
+              },
+              custody: {
+                select: {
+                  custodian: {
+                    select: {
+                      id: true,
+                      name: true,
+                      user: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          profilePicture: true,
+                          email: true,
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -817,6 +877,7 @@ export async function updateLocationImage({
       },
       generateThumbnail: true,
       thumbnailSize: 108,
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string | null;
@@ -874,7 +935,7 @@ export async function updateLocationImage({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while updating the location image.",
-      additionalData: { locationId },
+      additionalData: { locationId, field: "image" },
       label,
     });
   }
@@ -950,6 +1011,7 @@ export async function getLocationKits(
     search?: string | null;
     orderBy?: string;
     orderDirection?: "asc" | "desc";
+    teamMemberIds?: string[] | null;
   }
 ) {
   const {
@@ -960,6 +1022,7 @@ export async function getLocationKits(
     search,
     orderBy = "createdAt",
     orderDirection,
+    teamMemberIds,
   } = params;
 
   try {
@@ -971,6 +1034,49 @@ export async function getLocationKits(
       locationId: id,
     };
 
+    if (teamMemberIds && teamMemberIds.length) {
+      kitWhere.OR = [
+        ...(kitWhere.OR ?? []),
+        {
+          custody: { custodianId: { in: teamMemberIds } },
+        },
+        {
+          custody: { custodian: { userId: { in: teamMemberIds } } },
+        },
+        {
+          assets: {
+            some: {
+              bookings: {
+                some: {
+                  custodianTeamMemberId: { in: teamMemberIds },
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          assets: {
+            some: {
+              bookings: {
+                some: {
+                  custodianUserId: { in: teamMemberIds },
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
+            },
+          },
+        },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
+      ];
+    }
+
     if (search) {
       kitWhere.name = {
         contains: search,
@@ -981,7 +1087,28 @@ export async function getLocationKits(
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         where: kitWhere,
-        include: { category: true },
+        include: {
+          category: true,
+          custody: {
+            select: {
+              custodian: {
+                select: {
+                  id: true,
+                  name: true,
+                  user: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         skip,
         take,
         orderBy: { [orderBy]: orderDirection },

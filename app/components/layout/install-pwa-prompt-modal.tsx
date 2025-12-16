@@ -90,10 +90,11 @@ export function InstallPwaPromptModal() {
                   variant="primary"
                   className="mb-3"
                   onClick={async () => {
-                    await promptInstall().then(() =>
-                      fetcher.submit(hidePwaPromptForm.current, {
-                        method: "POST",
-                      })
+                    await promptInstall().then(
+                      () =>
+                        void fetcher.submit(hidePwaPromptForm.current, {
+                          method: "POST",
+                        })
                     );
                   }}
                 >

@@ -12,6 +12,7 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 
+import { db } from "~/database/db.server";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   createLocation,
@@ -62,6 +63,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
+  name: "locations.new",
 };
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -84,7 +86,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
      */
     const clonedRequest = request.clone();
 
-    const payload = parseData(
+    const parsedData = parseData(
       await clonedRequest.formData(),
       NewLocationFormSchema,
       {
@@ -92,7 +94,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, description, address, addAnother, parentId } = payload;
+    const {
+      name,
+      description,
+      address,
+      addAnother,
+      parentId,
+      preventRedirect,
+    } = parsedData;
 
     const location = await createLocation({
       name,
@@ -109,12 +118,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
     });
 
+    const locationWithImage =
+      (await db.location.findUnique({
+        where: { id: location.id, organizationId },
+        select: {
+          id: true,
+          name: true,
+          thumbnailUrl: true,
+          imageUrl: true,
+        },
+      })) ?? location;
+
     sendNotification({
       title: "Location created",
       message: "Your location has been created successfully",
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
+
+    if (preventRedirect === "true") {
+      return data(payload({ success: true, location: locationWithImage }));
+    }
 
     /** If the user clicked add-another, reload the document to clear the form */
     if (addAnother) {

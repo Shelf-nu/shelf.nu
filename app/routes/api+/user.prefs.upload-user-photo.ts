@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { type ActionFunctionArgs, data } from "react-router";
 import sharp from "sharp";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import { makeShelfError, ShelfError } from "~/utils/error";
 
@@ -35,6 +36,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         fit: sharp.fit.cover,
         withoutEnlargement: true,
       },
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const profilePicture = formData.get("file") as string;

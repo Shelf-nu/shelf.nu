@@ -7,9 +7,14 @@ import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
 import { generateOrphanedCodes } from "~/modules/qr/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+
+export const meta = () => [
+  { title: appendToMetaTitle("Organization QR codes") },
+];
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

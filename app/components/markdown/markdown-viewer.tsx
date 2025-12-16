@@ -1,4 +1,5 @@
 import React from "react";
+import type { ComponentType } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
 import { markdocConfig } from "~/utils/markdoc.config";
@@ -31,7 +32,7 @@ const RawBlockComponent = ({ raw }: { raw: string }) => (
 
 interface Props {
   content: string | RenderableTreeNodes;
-  components?: Record<string, React.ComponentType>;
+  components?: Record<string, ComponentType>;
   className?: string;
   pre?: string;
 }

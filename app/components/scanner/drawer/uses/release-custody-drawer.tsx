@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
@@ -78,7 +79,7 @@ export default function ReleaseCustodyDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

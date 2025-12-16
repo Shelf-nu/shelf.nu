@@ -11,6 +11,7 @@ import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -25,6 +26,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
+
+export const meta = () => [{ title: appendToMetaTitle("Release custody") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

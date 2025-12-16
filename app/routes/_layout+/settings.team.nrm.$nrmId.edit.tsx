@@ -8,6 +8,7 @@ import {
 } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
@@ -15,6 +16,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -50,6 +52,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+export const meta = () => [{ title: appendToMetaTitle("Edit team member") }];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();

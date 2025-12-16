@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -12,6 +13,7 @@ export const Dialog = ({
   onClose,
   className,
   headerClassName,
+  wrapperClassName,
 }: {
   title: string | ReactNode;
   children: ReactNode;
@@ -19,6 +21,7 @@ export const Dialog = ({
   onClose: () => void;
   className?: string;
   headerClassName?: string;
+  wrapperClassName?: string;
 }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const onCloseRef = useRef(onClose);
@@ -47,9 +50,12 @@ export const Dialog = ({
     document.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
+      dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]") ||
+      dialog.querySelector<HTMLElement>("[autofocus]") ||
       dialog.querySelector<HTMLElement>(
-        '[data-dialog-initial-focus],[autofocus],button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
-      ) ?? dialog;
+        'input,select,textarea,button,[href],[tabindex]:not([tabindex="-1"])'
+      ) ||
+      dialog;
 
     focusTarget.focus();
 
@@ -62,15 +68,18 @@ export const Dialog = ({
 
   return open ? (
     <div
-      className="dialog-backdrop"
+      className={tw("dialog-backdrop", wrapperClassName)}
+      role="button"
+      tabIndex={0}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
+      onKeyDown={handleActivationKeyPress(() => onClose())}
     >
       <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
-        <div className="flex h-full flex-col bg-white">
+        <div className="flex h-full cursor-default flex-col bg-white">
           <div
             className={tw(
               "dialog-header flex items-start justify-between bg-white px-6 py-3",
@@ -94,5 +103,5 @@ export const Dialog = ({
   ) : null;
 };
 
-export const DialogPortal = ({ children }: { children: React.ReactNode }) =>
+export const DialogPortal = ({ children }: { children: ReactNode }) =>
   ReactDOM.createPortal(children, document.body);

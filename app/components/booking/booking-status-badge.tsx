@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -50,7 +51,7 @@ export function BookingStatusBadge({
   );
 }
 
-function ExtraInfoTooltip({ children }: { children: React.ReactNode }) {
+function ExtraInfoTooltip({ children }: { children: ReactNode }) {
   return (
     <TooltipProvider>
       <Tooltip>

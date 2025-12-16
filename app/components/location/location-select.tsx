@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 
 import { XIcon } from "../icons/library";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 
 type IsBulk = {
   isBulk: true;
@@ -29,6 +31,10 @@ type LocationSelectProps = BulkProps & {
   placeholder?: string;
   /** Which form field name to bind the selected value to. */
   fieldName?: string;
+  /** Additional classes for the outer container. */
+  className?: string;
+  /** Custom z-index class for dropdown when used inside dialogs. */
+  popoverZIndexClassName?: string;
   /** External value to pre-populate the selector with. */
   defaultValue?: string | null;
   /**
@@ -38,6 +44,11 @@ type LocationSelectProps = BulkProps & {
   hideCurrentLocationInput?: boolean;
   /** List of location ids that should be hidden from the dropdown (e.g., the current record). */
   excludeIds?: string[];
+  /**
+   * When true, hides the "Create new location" button in extraContent.
+   * Used to prevent nested creation buttons when LocationSelect is used inside LocationForm.
+   */
+  hideExtraContent?: boolean;
 };
 
 /**
@@ -48,9 +59,12 @@ export const LocationSelect = ({
   hideClearButton = false,
   placeholder,
   fieldName = "newLocationId",
+  className,
+  popoverZIndexClassName,
   defaultValue,
   hideCurrentLocationInput = false,
   excludeIds,
+  hideExtraContent = false,
   ...restProps
 }: LocationSelectProps) => {
   const navigation = useNavigation();
@@ -67,7 +81,7 @@ export const LocationSelect = ({
   }, [initialLocationId]);
 
   return (
-    <div className="relative w-full">
+    <div className={tw("relative w-full", className)}>
       {showCurrentLocationInput && (
         <input
           type="hidden"
@@ -75,7 +89,7 @@ export const LocationSelect = ({
           value={locationIdToUse ?? undefined}
         />
       )}
-      <div className="flex items-center gap-2">
+      <div className={tw("flex items-center gap-2")}>
         <DynamicSelect
           disabled={disabled}
           fieldName={fieldName}
@@ -89,16 +103,33 @@ export const LocationSelect = ({
           allowClear
           excludeItems={excludeIds}
           onChange={(value) => setLocationId(value)}
+          popoverZIndexClassName={popoverZIndexClassName}
           extraContent={
-            <Button
-              to="/locations/new"
-              variant="link"
-              icon="plus"
-              className="w-full justify-start pt-4"
-              target="_blank"
-            >
-              Create new location
-            </Button>
+            hideExtraContent
+              ? undefined
+              : ({ onItemCreated, closePopover }) => (
+                  <InlineEntityCreationDialog
+                    type="location"
+                    title="Create new location"
+                    buttonLabel="Create new location"
+                    onCreated={(created) => {
+                      if (created?.type !== "location") return;
+                      const createdLocation = created.entity;
+
+                      const item = {
+                        id: createdLocation.id,
+                        name: createdLocation.name,
+                        metadata: {
+                          ...createdLocation,
+                        },
+                      };
+
+                      setLocationId(createdLocation.id);
+                      onItemCreated(item);
+                      closePopover();
+                    }}
+                  />
+                )
           }
           renderItem={({ name, metadata }) => (
             <div className="flex items-center gap-2">

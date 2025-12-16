@@ -1,12 +1,14 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
+import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
 
 type CategoriesInputProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   disabled?: boolean;
   name: (index: number) => string;
   categories: string[];
@@ -50,6 +52,27 @@ export default function CategoriesInput({
                     setCategories([...categories]);
                   }
                 }}
+                extraContent={({ onItemCreated, closePopover }) => (
+                  <InlineEntityCreationDialog
+                    type="category"
+                    title="Create new category"
+                    buttonLabel="Create new category"
+                    onCreated={(created) => {
+                      if (created?.type !== "category") return;
+
+                      const newId = created.entity.id;
+                      categories[i] = newId;
+                      setCategories([...categories]);
+                      onItemCreated({
+                        id: newId,
+                        name: created.entity.name,
+                        color: created.entity.color,
+                        metadata: { ...created.entity },
+                      });
+                      closePopover();
+                    }}
+                  />
+                )}
               />
 
               <Button

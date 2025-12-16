@@ -6,6 +6,7 @@ import {
   softDeleteCustomField,
   getCustomField,
 } from "~/modules/custom-field/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -15,6 +16,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [
+  { title: appendToMetaTitle("Custom fields settings") },
+];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

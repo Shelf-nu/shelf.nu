@@ -23,6 +23,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -41,6 +42,8 @@ const updateBookingSchema = z.object({
   assetIds: z.string().array().min(1, "At least one asset is required."),
   bookingId: z.string().min(1, "Please select a booking."),
 });
+
+export const meta = () => [{ title: appendToMetaTitle("Add to booking") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

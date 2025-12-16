@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
@@ -11,6 +12,7 @@ import { resolveShowShelfBranding } from "~/utils/branding";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
+import { waitForImagesToLoad } from "~/utils/wait-for-images";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
 import { Ean13LookupLink } from "../barcode/barcode-card";
 import { CrispButton } from "../marketing/crisp";
@@ -36,7 +38,7 @@ export interface CodeType {
 
 interface CodePreviewProps {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   hideButton?: boolean;
   item: {
     id: string; // Need the ID to construct the action URL
@@ -193,22 +195,30 @@ export const CodePreview = ({
     }
   }, [item, selectedCode]);
 
-  function downloadCode(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
+  function downloadCode(e: MouseEvent<HTMLButtonElement>) {
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 
     if (captureDiv && downloadBtn) {
       e.preventDefault();
-      toPng(captureDiv, {
+
+      const options = {
         height: captureDiv.offsetHeight * 2,
         width: captureDiv.offsetWidth * 2,
+        cacheBust: true,
         style: {
           transform: `scale(${2})`,
           transformOrigin: "top left",
           width: `${captureDiv.offsetWidth}px`,
           height: `${captureDiv.offsetHeight}px`,
         },
-      })
+      };
+
+      // Safari/iPad workaround: html-to-image needs to be called twice
+      // First call "primes" the rendering, second call captures correctly
+      waitForImagesToLoad(captureDiv)
+        .then(() => toPng(captureDiv, options)) // First call (prime)
+        .then(() => toPng(captureDiv, options)) // Second call (actual capture)
         .then((dataUrl: string) => {
           const downloadLink = document.createElement("a");
           downloadLink.href = changeDpiDataUrl(dataUrl, 300);
@@ -221,7 +231,14 @@ export const CodePreview = ({
     }
   }
 
-  const printCode = useReactToPrint({ contentRef: captureDivRef });
+  const printCode = useReactToPrint({
+    contentRef: captureDivRef,
+    onBeforePrint: () => {
+      const container = captureDivRef.current;
+      if (!container) return Promise.resolve();
+      return waitForImagesToLoad(container);
+    },
+  });
 
   // Don't render if no codes available
   if (availableCodes.length === 0) {

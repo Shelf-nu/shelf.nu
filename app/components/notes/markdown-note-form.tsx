@@ -119,7 +119,7 @@ export function MarkdownNoteForm({
         setDisabled(true);
         // Submit the form
         if (formElement) {
-          fetcher.submit(formElement);
+          void fetcher.submit(formElement);
         }
         return true; // Event handled, prevent default
       }

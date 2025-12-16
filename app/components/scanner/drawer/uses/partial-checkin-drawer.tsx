@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import type { Booking } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -13,6 +14,7 @@ import {
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckinDialog from "~/components/booking/checkin-dialog";
+import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
@@ -31,7 +33,6 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
-import { Form } from "~/components/custom-form";
 
 // Export the schema so it can be reused
 export const partialCheckinAssetsSchema = z.object({
@@ -48,7 +49,7 @@ export default function PartialCheckinDrawer({
   defaultExpanded = false,
 }: {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {

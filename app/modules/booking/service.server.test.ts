@@ -66,6 +66,7 @@ vitest.mock("~/database/db.server", () => ({
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
       findFirstOrThrow: vitest.fn().mockResolvedValue({}),
+      findUnique: vitest.fn().mockResolvedValue(null),
       findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
@@ -1031,8 +1032,8 @@ describe("reserveBooking", () => {
     organizationId: "org-1",
     custodianUserId: "user-1",
     custodianTeamMemberId: "team-1",
-    from: new Date("2025-12-01T09:00:00Z"), // Future date
-    to: new Date("2025-12-01T17:00:00Z"),
+    from: new Date("2026-12-01T09:00:00Z"), // Future date
+    to: new Date("2026-12-01T17:00:00Z"),
     description: "Reserved booking description",
     hints: mockClientHints,
     isSelfServiceOrBase: false,
@@ -1045,6 +1046,8 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
       assets: [
         {
           id: "asset-1",
@@ -1077,8 +1080,8 @@ describe("reserveBooking", () => {
           name: "Reserved Booking",
           custodianUser: { connect: { id: "user-1" } },
           custodianTeamMember: { connect: { id: "team-1" } },
-          from: new Date("2025-12-01T09:00:00Z"),
-          to: new Date("2025-12-01T17:00:00Z"),
+          from: new Date("2026-12-01T09:00:00Z"),
+          to: new Date("2026-12-01T17:00:00Z"),
           description: "Reserved booking description",
         }),
       })
@@ -1122,6 +1125,8 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
       assets: [], // No assets to conflict
     };
     const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
@@ -1633,7 +1638,7 @@ describe("deleteBooking", () => {
     expect.assertions(1);
 
     //@ts-expect-error missing vitest type
-    db.booking.findFirst.mockResolvedValue(mockBookingData);
+    db.booking.findUnique.mockResolvedValue(mockBookingData);
     //@ts-expect-error missing vitest type
     db.booking.delete.mockResolvedValue(mockBookingData);
 
@@ -1642,7 +1647,7 @@ describe("deleteBooking", () => {
       mockClientHints
     );
 
-    expect(db.booking.findFirst).toHaveBeenCalled();
+    expect(db.booking.findUnique).toHaveBeenCalled();
   });
 });
 

@@ -1,8 +1,14 @@
-import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
+import {
+  AssetIndexMode,
+  OrganizationRoles,
+  OrganizationType,
+  Roles,
+} from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
@@ -173,7 +179,7 @@ export async function createOrganization({
 
       assetIndexSettings: {
         create: {
-          mode: "SIMPLE",
+          mode: AssetIndexMode.ADVANCED,
           columns: defaultFields,
           user: {
             connect: {
@@ -277,6 +283,19 @@ export async function updateOrganization({
     };
 
     if (image?.size && image?.size > 0) {
+      if (image.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
+        throw new ShelfError({
+          cause: null,
+          message: `Image size exceeds maximum allowed size of ${
+            DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          }MB`,
+          additionalData: { id, userId, field: "image" },
+          label,
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
       const imageData = {
         blob: Buffer.from(await image.arrayBuffer()),
         contentType: image.type,
@@ -309,8 +328,9 @@ export async function updateOrganization({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while updating the organization. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating the organization. Please try again or contact support.",
       additionalData: { id, userId, name },
       label,
     });

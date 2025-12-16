@@ -56,7 +56,10 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { getLocale } from "~/utils/client-hints";
-import { LEGACY_CUID_LENGTH } from "~/utils/constants";
+import {
+  ASSET_MAX_IMAGE_UPLOAD_SIZE,
+  LEGACY_CUID_LENGTH,
+} from "~/utils/constants";
 import {
   getFiltersFromRequest,
   setCookie,
@@ -1606,6 +1609,7 @@ export async function updateAssetMainImage({
       },
       generateThumbnail: true, // Enable thumbnail generation
       thumbnailSize: 108, // Size matches what we use in AssetImage component
+      maxFileSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("mainImage") as string | null;
@@ -1668,7 +1672,7 @@ export async function updateAssetMainImage({
       message: isShelfError
         ? cause.message
         : "Something went wrong while updating asset main image",
-      additionalData: { assetId, userId },
+      additionalData: { assetId, userId, field: "mainImage" },
       label,
     });
   }
@@ -3727,7 +3731,7 @@ export async function getUserAssetsTabLoaderData({
     const { filters, redirectNeeded } = await getFiltersFromRequest(
       request,
       organizationId,
-      { name: "assetFilter", path: "/assets" }
+      { name: "assetFilter_v2", path: "/" } // Use root path for RR7 single fetch
     );
 
     if (filters && redirectNeeded) {

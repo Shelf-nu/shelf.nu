@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { RefObject, InputHTMLAttributes } from "react";
 import { forwardRef } from "react";
 
 import { tw } from "~/utils/tw";
@@ -7,7 +7,7 @@ import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
 export interface InputProps
-  extends React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
+  extends InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
   name?: string;
 
   /** Label for the input field */

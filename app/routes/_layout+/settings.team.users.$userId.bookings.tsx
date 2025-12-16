@@ -1,8 +1,10 @@
+import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -25,6 +27,10 @@ import { requirePermission } from "~/utils/roles.server";
 import BookingsIndexPage, {
   bookingsSearchFieldTooltipText,
 } from "./bookings._index";
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
+  { title: appendToMetaTitle(loaderData?.header?.title) },
+];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -82,7 +88,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(bookingCount / perPage);
 
     const header: HeaderData = {
-      title: "Bookings",
+      title: "Team member bookings",
     };
     const modelName = {
       singular: "booking",

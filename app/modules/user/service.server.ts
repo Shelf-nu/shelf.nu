@@ -4,7 +4,12 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
-import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
+import {
+  Prisma,
+  Roles,
+  OrganizationRoles,
+  AssetIndexMode,
+} from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "react-router";
@@ -23,6 +28,7 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -42,6 +48,7 @@ import type { MergeInclude } from "~/utils/utils";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
+import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
@@ -247,7 +254,7 @@ export async function createUserOrAttachOrg({
         }
       );
 
-      return await createUser({
+      const newUser = await createUser({
         email,
         userId: authAccount.id,
         username: randomUsernameFromEmail(email),
@@ -256,6 +263,14 @@ export async function createUserOrAttachOrg({
         firstName,
         createdWithInvite,
       });
+
+      await ensureAssetIndexModeForRole({
+        userId: newUser.id,
+        organizationId,
+        role: roles[0],
+      });
+
+      return newUser;
     }
 
     /** If the user already exists, we just attach the new org to it */
@@ -263,6 +278,12 @@ export async function createUserOrAttachOrg({
       userId: shelfUser.id,
       organizationIds: [organizationId],
       roles,
+    });
+
+    await ensureAssetIndexModeForRole({
+      userId: shelfUser.id,
+      organizationId,
+      role: roles[0],
     });
 
     return shelfUser;
@@ -711,7 +732,7 @@ export async function createUser(
                     // Creating asset index settings for new users' personal org
                     assetIndexSettings: {
                       create: {
-                        mode: "SIMPLE",
+                        mode: AssetIndexMode.ADVANCED,
                         columns: defaultFields,
                         user: {
                           connect: {
@@ -1046,6 +1067,7 @@ export async function updateProfilePicture({
         fit: sharp.fit.cover,
         withoutEnlargement: true,
       },
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const profilePicture = fileData.get("profile-picture") as string;
@@ -1067,9 +1089,10 @@ export async function updateProfilePicture({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while updating your profile picture. Please try again or contact support.",
-      additionalData: { userId },
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating your profile picture. Please try again or contact support.",
+      additionalData: { userId, field: "profile-picture" },
       label,
     });
   }

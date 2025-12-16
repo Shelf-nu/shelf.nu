@@ -55,6 +55,7 @@ import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { updateKitAssets } from "~/modules/kit/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -65,6 +66,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
+export const meta = () => [{ title: appendToMetaTitle("Manage kit assets") }];
 
 type LoaderData = typeof loader;
 

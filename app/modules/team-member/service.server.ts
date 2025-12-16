@@ -690,11 +690,11 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
      * 4. Using "Unknown" as last resort if no email exists
      */
     await Promise.all(
-      teamMembersWithEmptyNames.map((teamMember) => {
-        let name: string;
-
-        if (teamMember.user) {
-          const { firstName, lastName, email } = teamMember.user;
+      teamMembersWithEmptyNames
+        .filter((teamMember) => teamMember.user !== null)
+        .map((teamMember) => {
+          let name: string;
+          const { firstName, lastName, email } = teamMember.user!;
 
           if (firstName?.trim() || lastName?.trim()) {
             // At least one name exists - concatenate available names
@@ -714,9 +714,7 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
             where: { id: teamMember.id },
             data: { name },
           });
-        }
-        return null;
-      })
+        })
     );
 
     /** If there are broken ones, log them so we know what is going on. If this keeps on appearing in the logs that means its an ongoing issue and the cause should be found. */

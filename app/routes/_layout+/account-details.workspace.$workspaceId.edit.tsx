@@ -1,5 +1,8 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
-import { parseFormData } from "@remix-run/form-data-parser";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -250,21 +253,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           nextShowShelfBranding = true;
         }
 
-        const formDataFile = await parseFormData(request);
+        let formDataFile: FormData;
+        try {
+          formDataFile = await parseFormData(request, {
+            maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+          });
+        } catch (parseError) {
+          if (parseError instanceof MaxFileSizeExceededError) {
+            const reason = new ShelfError({
+              cause: parseError,
+              message: `Image size exceeds maximum allowed size of ${
+                DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+              }MB`,
+              status: 400,
+              label: "Organization",
+              additionalData: { userId, id, field: "image" },
+              shouldBeCaptured: false,
+            });
+            return data(error(reason), { status: reason.status });
+          }
+
+          const reason = makeShelfError(parseError, {
+            userId,
+            organizationId: id,
+          });
+          return data(error(reason), { status: reason.status });
+        }
 
         const file = formDataFile.get("image") as File | null;
-
-        // Validate file size
-        if (file && file.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
-          throw new ShelfError({
-            cause: null,
-            message: `Image size exceeds maximum allowed size of ${
-              DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-            }MB`,
-            status: 400,
-            label: "Organization",
-          });
-        }
 
         await updateOrganization({
           id,

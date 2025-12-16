@@ -27,7 +27,7 @@ export const createCustodianSchema = (errorMessage?: string) =>
       }
 
       return parsed;
-    } catch (e) {
+    } catch (_e) {
       ctx.addIssue({
         code: "custom",
         message: errorMessage || "Please select a team member",

@@ -7,6 +7,7 @@ import {
   type User,
   type Kit,
 } from "@prisma/client";
+import type { TypeNumber, ErrorCorrectionLevel } from "qrcode-generator";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";

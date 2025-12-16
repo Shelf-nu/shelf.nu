@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { cloneElement } from "react";
 import type { Kit } from "@prisma/client";
 import { useNavigation } from "react-router";
@@ -18,7 +19,7 @@ import {
 
 type DeleteKitProps = {
   kit: Pick<Kit, "id" | "name" | "image">;
-  trigger?: React.ReactElement;
+  trigger?: ReactElement;
 };
 
 export default function DeleteKit({ kit, trigger }: DeleteKitProps) {

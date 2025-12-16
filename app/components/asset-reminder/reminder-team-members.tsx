@@ -1,3 +1,4 @@
+import type { CSSProperties, ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
 import { Link } from "react-router";
 import { tw } from "~/utils/tw";
@@ -12,7 +13,7 @@ import When from "../when/when";
 
 type ReminderTeamMembersProps = {
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   teamMembers: Prisma.TeamMemberGetPayload<{
     select: {
       id: true;
@@ -28,7 +29,7 @@ type ReminderTeamMembersProps = {
     };
   }>[];
   imgClassName?: string;
-  extraContent?: React.ReactNode;
+  extraContent?: ReactNode;
   isAlreadySent?: boolean;
 };
 

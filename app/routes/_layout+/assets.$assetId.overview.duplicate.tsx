@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -29,6 +30,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Duplicate asset") }];
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

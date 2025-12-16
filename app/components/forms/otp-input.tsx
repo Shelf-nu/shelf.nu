@@ -1,12 +1,13 @@
 import * as React from "react";
+import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import { OTPInput, OTPInputContext } from "input-otp";
 import { Minus } from "lucide-react";
 import { tw } from "~/utils/tw";
 import { InnerLabel } from "./inner-label";
 
 const InputOTP = React.forwardRef<
-  React.ElementRef<typeof OTPInput>,
-  React.ComponentPropsWithoutRef<typeof OTPInput>
+  ElementRef<typeof OTPInput>,
+  ComponentPropsWithoutRef<typeof OTPInput>
 >(({ className, containerClassName, ...props }, ref) => (
   <OTPInput
     ref={ref}
@@ -21,16 +22,16 @@ const InputOTP = React.forwardRef<
 InputOTP.displayName = "InputOTP";
 
 const InputOTPGroup = React.forwardRef<
-  React.ElementRef<"div">,
-  React.ComponentPropsWithoutRef<"div">
+  ElementRef<"div">,
+  ComponentPropsWithoutRef<"div">
 >(({ className, ...props }, ref) => (
   <div ref={ref} className={tw("flex items-center", className)} {...props} />
 ));
 InputOTPGroup.displayName = "InputOTPGroup";
 
 const InputOTPSlot = React.forwardRef<
-  React.ElementRef<"div">,
-  React.ComponentPropsWithoutRef<"div"> & { index: number }
+  ElementRef<"div">,
+  ComponentPropsWithoutRef<"div"> & { index: number }
 >(({ index, className, ...props }, ref) => {
   const inputOTPContext = React.useContext(OTPInputContext);
   const { char, hasFakeCaret, isActive } = inputOTPContext.slots[index];
@@ -57,8 +58,8 @@ const InputOTPSlot = React.forwardRef<
 InputOTPSlot.displayName = "InputOTPSlot";
 
 const InputOTPSeparator = React.forwardRef<
-  React.ElementRef<"div">,
-  React.ComponentPropsWithoutRef<"div">
+  ElementRef<"div">,
+  ComponentPropsWithoutRef<"div">
 >(({ ...props }, ref) => (
   <div ref={ref} role="separator" {...props}>
     <Minus />

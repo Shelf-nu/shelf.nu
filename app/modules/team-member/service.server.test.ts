@@ -194,7 +194,7 @@ describe("getTeamMember", () => {
           select: { id: true },
           include: { user: true },
         } as any);
-      } catch (error) {
+      } catch (_error) {
         // Expected to throw
       }
 

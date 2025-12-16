@@ -7,6 +7,7 @@ import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import { getKit, updateKitLocation } from "~/modules/kit/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, getParams, parseData } from "~/utils/http.server";
@@ -15,6 +16,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Update kit location") }];
 
 const ParamsSchema = z.object({ kitId: z.string() });
 

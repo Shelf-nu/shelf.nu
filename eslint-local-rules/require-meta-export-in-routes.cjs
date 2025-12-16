@@ -43,13 +43,13 @@ module.exports = {
     }
 
     let hasMetaExport = false;
-    let hasLoaderOrAction = false;
     let hasDefaultExport = false;
 
     return {
       ExportNamedDeclaration(node) {
         // Check if this is a meta export
         if (node.declaration) {
+          // Check for: export const meta = ...
           if (
             node.declaration.type === "VariableDeclaration" &&
             node.declaration.declarations.some(
@@ -57,17 +57,18 @@ module.exports = {
             )
           ) {
             hasMetaExport = true;
-          } else if (
+          }
+          // Check for: export function meta(...) { ... }
+          else if (
             node.declaration.type === "FunctionDeclaration" &&
             node.declaration.id &&
-            (node.declaration.id.name === "loader" ||
-              node.declaration.id.name === "action")
+            node.declaration.id.name === "meta"
           ) {
-            hasLoaderOrAction = true;
+            hasMetaExport = true;
           }
         }
 
-        // Handle export const meta = ...
+        // Handle: export { meta }
         if (
           node.specifiers &&
           node.specifiers.some(
@@ -79,11 +80,6 @@ module.exports = {
         }
       },
 
-      // Check for export function loader/action
-      ExportAllDeclaration() {
-        // Not relevant for this rule
-      },
-
       // Check for default export (component)
       ExportDefaultDeclaration() {
         hasDefaultExport = true;
@@ -91,9 +87,9 @@ module.exports = {
 
       // At the end of the file, check if meta export exists
       "Program:exit"(node) {
-        // Only warn if this is a route file with a component or loader/action
-        // Skip if no default export and no loader/action (likely not a route file)
-        if (!hasDefaultExport && !hasLoaderOrAction) {
+        // Only warn if this is a route file with a default export (page component)
+        // Resource routes (without default export) don't need meta tags
+        if (!hasDefaultExport) {
           return;
         }
 

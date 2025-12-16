@@ -1,12 +1,20 @@
 import { Readable } from "node:stream";
 
-import { parseFormData } from "@remix-run/form-data-parser";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "./constants";
+import {
+  ASSET_MAX_IMAGE_UPLOAD_SIZE,
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "./constants";
 import { cropImage } from "./crop-image";
+import { delay } from "./delay";
 import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
@@ -49,28 +57,109 @@ export async function createSignedUrl({
 }: {
   filename: string;
   bucketName?: string;
-}) {
+}): Promise<string> {
+  const normalizedFilename = filename.startsWith("/")
+    ? filename.substring(1)
+    : filename;
+  const maxAttempts = 2;
+
   try {
-    // Check if there is a leading slash and we need to remove it as signing will not work with the slash included
-    if (filename.startsWith("/")) {
-      filename = filename.substring(1); // Remove the first character
-    }
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { data, error } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .createSignedUrl(normalizedFilename, 24 * 60 * 60); //24h
 
-    const { data, error } = await getSupabaseAdmin()
-      .storage.from(bucketName)
-      .createSignedUrl(filename, 24 * 60 * 60); //24h
+      if (!error) {
+        const signedUrl = data?.signedUrl;
+        if (!signedUrl) {
+          throw new ShelfError({
+            cause: null,
+            message: "Supabase did not return a signed URL",
+            additionalData: { filename: normalizedFilename, bucketName },
+            label,
+          });
+        }
+        return signedUrl;
+      }
 
-    if (error) {
+      // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
+      // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
+      // transient CDN hiccups from bubbling up as user-facing ShelfErrors.
+      if (isSupabaseHtmlError(error)) {
+        if (attempt < maxAttempts) {
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message:
+                "Supabase returned a non-JSON response while creating a signed URL. Retrying.",
+              additionalData: {
+                filename: normalizedFilename,
+                bucketName,
+                attempt,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+          await delay(1000);
+          continue;
+        }
+
+        // All retry attempts exhausted with HTML errors - this is a transient
+        // infrastructure issue that shouldn't spam Sentry
+        throw new ShelfError({
+          cause: error,
+          message:
+            "Supabase is experiencing temporary issues. Using existing URL.",
+          additionalData: {
+            filename: normalizedFilename,
+            bucketName,
+            attempts: maxAttempts,
+            errorType: "persistent_html_error",
+          },
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
       throw error;
     }
 
-    return data.signedUrl;
+    // The loop should always return or throw, but ensure we never fall through.
+    throw new ShelfError({
+      cause: null,
+      message: "Unable to create signed URL after retries.",
+      additionalData: { filename: normalizedFilename, bucketName },
+      label,
+    });
   } catch (cause) {
+    // If it's already a ShelfError, preserve it (including shouldBeCaptured flag)
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while creating a signed URL. Please try again. If the issue persists contact support.",
-      additionalData: { filename, bucketName },
+      additionalData: {
+        filename: normalizedFilename,
+        bucketName,
+        errorName:
+          typeof cause === "object" &&
+          cause !== null &&
+          "name" in cause &&
+          typeof (cause as { name?: unknown }).name === "string"
+            ? (cause as { name: string }).name
+            : undefined,
+        errorMessage:
+          typeof cause === "object" &&
+          cause !== null &&
+          "message" in cause &&
+          typeof (cause as { message?: unknown }).message === "string"
+            ? (cause as { message: string }).message
+            : undefined,
+      },
       label,
     });
   }
@@ -177,6 +266,7 @@ export async function parseFileFormData({
   resizeOptions,
   generateThumbnail = false,
   thumbnailSize = 108,
+  maxFileSize = DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
 }: {
   request: Request;
   newFileName: string;
@@ -184,6 +274,7 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
   generateThumbnail?: boolean;
   thumbnailSize?: number;
+  maxFileSize?: number;
 }) {
   try {
     const uploadHandler = async (upload: any) => {
@@ -207,20 +298,6 @@ export async function parseFileFormData({
       if (!fileStream) {
         return undefined;
       }
-
-      // const fileSize = await calculateAsyncIterableSize(file);
-      // if (fileSize > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
-      //   throw new ShelfError({
-      //     cause: null,
-      //     title: "File too large",
-      //     message: `Image file size exceeds maximum allowed size of ${
-      //       ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-      //     }MB`,
-      //     additionalData: { filename: name, contentType: type, bucketName },
-      //     label,
-      //     shouldBeCaptured: false,
-      //   });
-      // }
 
       const extension = originalName?.includes(".")
         ? originalName.split(".").pop()
@@ -254,10 +331,29 @@ export async function parseFileFormData({
       return (uploadedFilePaths as { originalPath: string }).originalPath;
     };
 
-    const formData = await parseFormData(request, uploadHandler);
+    const formData = await parseFormData(
+      request,
+      { maxFileSize },
+      uploadHandler
+    );
 
     return formData;
   } catch (cause) {
+    const sizeLimitError = getMaxFileSizeExceededError(cause);
+
+    if (sizeLimitError) {
+      throw new ShelfError({
+        cause,
+        title: "File too large",
+        message: `Image file size exceeds maximum allowed size of ${
+          maxFileSize / (1024 * 1024)
+        }MB`,
+        additionalData: { maxFileSize },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
     throw new ShelfError({
       cause,
       message: isLikeShelfError(cause)
@@ -266,6 +362,29 @@ export async function parseFileFormData({
       label,
     });
   }
+}
+
+/**
+ * Recursively walks the `.cause` chain to find a `MaxFileSizeExceededError`.
+ *
+ * `parseFormData` wraps errors, so this helper normalises the shape and lets
+ * callers respond with the correct user-facing message when the underlying
+ * file exceeds the configured size.
+ */
+function getMaxFileSizeExceededError(
+  error: unknown
+): MaxFileSizeExceededError | null {
+  if (error instanceof MaxFileSizeExceededError) {
+    return error;
+  }
+
+  const cause = (error as { cause?: unknown })?.cause;
+
+  if (!cause) {
+    return null;
+  }
+
+  return getMaxFileSizeExceededError(cause);
 }
 
 /**
@@ -476,7 +595,7 @@ export async function uploadImageFromUrl(
             return null;
           }
           // Wait a moment before retrying
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await delay(1000);
         }
       } catch (cause) {
         fetchError = cause as Error;
@@ -497,7 +616,7 @@ export async function uploadImageFromUrl(
           return null;
         }
         // Wait a moment before retrying
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await delay(1000);
       }
     }
 
@@ -741,13 +860,32 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
   }
 }
 
-// Utility function to get size from AsyncIterable<Uint8Array>
-export async function calculateAsyncIterableSize(
-  data: AsyncIterable<Uint8Array>
-): Promise<number> {
-  let totalSize = 0;
-  for await (const chunk of data) {
-    totalSize += chunk.byteLength;
+/**
+ * Supabase can sporadically return HTML error pages (e.g., CDN/edge 50x) that the storage
+ * client surfaces as StorageUnknownError due to JSON parsing. Detect that shape so callers
+ * can retry once instead of immediately failing user-visible flows.
+ */
+function isSupabaseHtmlError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
   }
-  return totalSize;
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+
+  // Detect JSON parse failures that typically show up when HTML is returned instead of JSON
+  const lowerMessage = message.toLowerCase();
+  const isUnexpectedHtml =
+    message.includes("Unexpected token <") && lowerMessage.includes("json");
+  const isStorageUnknown =
+    name === "StorageUnknownError" ||
+    ("__isStorageError" in error &&
+      typeof error.__isStorageError === "boolean" &&
+      error.__isStorageError === true);
+
+  return isUnexpectedHtml && isStorageUnknown;
 }
