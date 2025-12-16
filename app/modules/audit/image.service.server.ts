@@ -1,10 +1,23 @@
-import type { AuditAsset, AuditImage, AuditSession, Organization, User } from "@prisma/client";
+import type {
+  AuditAsset,
+  AuditImage,
+  AuditSession,
+  Organization,
+  User,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "~/utils/constants";
+import {
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
-import { getFileUploadPath, parseFileFormData, removePublicFile } from "~/utils/storage.server";
+import {
+  getFileUploadPath,
+  parseFileFormData,
+  removePublicFile,
+} from "~/utils/storage.server";
 
 const label: ErrorLabel = "Audit Image";
 
@@ -102,7 +115,9 @@ export async function uploadAuditImage({
     if (thumbnailPath) {
       const {
         data: { publicUrl },
-      } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(thumbnailPath);
+      } = getSupabaseAdmin()
+        .storage.from(PUBLIC_BUCKET)
+        .getPublicUrl(thumbnailPath);
       thumbnailPublicUrl = publicUrl;
     }
 
@@ -157,7 +172,11 @@ async function validateImageLimits({
       throw new ShelfError({
         cause: null,
         message: `Maximum of ${MAX_IMAGES_PER_ASSET} images per asset exceeded`,
-        additionalData: { auditSessionId, auditAssetId, currentCount: assetImageCount },
+        additionalData: {
+          auditSessionId,
+          auditAssetId,
+          currentCount: assetImageCount,
+        },
         label,
       });
     }

@@ -37,3 +37,6 @@ ALTER TABLE "AuditImage" ADD CONSTRAINT "AuditImage_uploadedById_fkey" FOREIGN K
 
 -- AddForeignKey
 ALTER TABLE "AuditImage" ADD CONSTRAINT "AuditImage_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Enable RLS
+ALTER TABLE "AuditImage" ENABLE row level security;
