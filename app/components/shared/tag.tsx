@@ -21,8 +21,8 @@ export const Tag = forwardRef<HTMLSpanElement, TagProps>(function Tag(
     <span
       ref={ref}
       className={tw(
-        "mb-1 inline-flex items-center justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700",
-        withDot ? "gap-1 pr-2" : "",
+        "inline-flex items-center rounded-2xl py-[2px] pl-[6px] text-[12px] font-medium",
+        withDot ? " gap-1 pr-2" : "px-2",
         className
       )}
       style={
