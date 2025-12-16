@@ -5,6 +5,7 @@ import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
 import { DateS } from "~/components/shared/date";
 import { getUpdatesForUser } from "~/modules/update/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error, payload } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
@@ -14,6 +15,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
+export const meta = () => [{ title: appendToMetaTitle("Updates") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
