@@ -700,6 +700,7 @@ describe("audit helpers", () => {
           auditAssetId: null,
         },
         select: { id: true },
+        orderBy: { createdAt: "asc" },
       });
 
       const createCall = mockTx.auditNote.create.mock.calls[0][0];

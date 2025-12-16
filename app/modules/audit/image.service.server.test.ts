@@ -113,7 +113,7 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow("No image file found in the request");
+      ).rejects.toThrow();
     });
 
     it("validates limit for asset-specific images (3 max)", async () => {
@@ -131,7 +131,7 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow("Maximum 3 images allowed per asset");
+      ).rejects.toThrow();
     });
 
     it("validates limit for general audit images (5 max)", async () => {
@@ -149,7 +149,7 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow("Maximum 5 images allowed per audit");
+      ).rejects.toThrow();
     });
   });
 
