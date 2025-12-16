@@ -42,7 +42,7 @@ export default function ImageWithPreview({
   const [isImageError, setIsImageError] = useState(false);
 
   const [open, setOpen] = useState(false);
-const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
   // Determine if navigation is enabled
   const hasNavigation = Boolean(images && images.length > 1);
 

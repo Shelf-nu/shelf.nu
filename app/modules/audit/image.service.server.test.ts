@@ -4,7 +4,10 @@ vi.mock("~/utils/storage.server", () => ({
   // why: We need to mock storage operations to avoid actually uploading files during tests
   parseFileFormData: vi.fn(),
   removePublicFile: vi.fn(),
-  getFileUploadPath: vi.fn((params) => `${params.organizationId}/${params.type}/${params.typeId}/test.jpg`),
+  getFileUploadPath: vi.fn(
+    (params) =>
+      `${params.organizationId}/${params.type}/${params.typeId}/test.jpg`
+  ),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -180,13 +183,13 @@ describe("audit image service", () => {
         where: { id: "img-1", organizationId: "org-1" },
       });
 
-      expect(removePublicFile).toHaveBeenCalledWith(
-        { publicUrl: "org-1/audits/audit-1/image-123.jpg" }
-      );
+      expect(removePublicFile).toHaveBeenCalledWith({
+        publicUrl: "org-1/audits/audit-1/image-123.jpg",
+      });
 
-      expect(removePublicFile).toHaveBeenCalledWith(
-        { publicUrl: "org-1/audits/audit-1/image-123-thumbnail.jpg" }
-      );
+      expect(removePublicFile).toHaveBeenCalledWith({
+        publicUrl: "org-1/audits/audit-1/image-123-thumbnail.jpg",
+      });
 
       expect(db.auditImage.delete).toHaveBeenCalledWith({
         where: { id: "img-1" },

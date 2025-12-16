@@ -32,11 +32,7 @@ function UploadedImageBox({
 }: UploadedImageBoxProps) {
   return (
     <div className="group relative size-24 shrink-0 overflow-hidden rounded-lg border-2 border-gray-200">
-      <img
-        src={previewUrl}
-        alt="Audit"
-        className="size-full object-cover"
-      />
+      <img src={previewUrl} alt="Audit" className="size-full object-cover" />
       {!disabled && (
         <button
           type="button"
@@ -132,10 +128,7 @@ export function AuditImageUploadSection({
 
   const handleImageSelect = (file: File, previewUrl: string) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setImages((prev) => [
-      ...prev,
-      { file, previewUrl, id },
-    ]);
+    setImages((prev) => [...prev, { file, previewUrl, id }]);
   };
 
   const handleImageRemove = (id: string) => {
@@ -149,26 +142,35 @@ export function AuditImageUploadSection({
     });
   };
 
-  const setFileInputRef = useCallback((id: string, file: File) => (el: HTMLInputElement | null) => {
+  const setFileInputRef = useCallback(
+    (id: string, file: File) => (el: HTMLInputElement | null) => {
       if (el) {
         const dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
         el.files = dataTransfer.files;
         fileInputsRef.current.set(id, el);
       }
-    }, []);
+    },
+    []
+  );
 
   // Cleanup preview URLs on unmount
-  useEffect(() => () => {
+  useEffect(
+    () => () => {
       images.forEach((image) => {
         URL.revokeObjectURL(image.previewUrl);
       });
-    }, [images]);
+    },
+    [images]
+  );
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label htmlFor="audit-images" className="text-sm font-medium text-gray-700">
+        <label
+          htmlFor="audit-images"
+          className="text-sm font-medium text-gray-700"
+        >
           Add Photos (Optional)
         </label>
         <span className="text-xs text-gray-500">
@@ -196,9 +198,7 @@ export function AuditImageUploadSection({
         />
       </div>
 
-      {fileError && (
-        <p className="text-sm text-error-500">{fileError}</p>
-      )}
+      {fileError && <p className="text-sm text-error-500">{fileError}</p>}
 
       {/* Hidden inputs to submit files with the form */}
       {images.map((image) => (

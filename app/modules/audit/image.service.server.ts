@@ -162,7 +162,8 @@ async function validateImageLimits({
   if (!db.auditImage) {
     throw new ShelfError({
       cause: null,
-      message: "AuditImage model not available. Please restart the server after running migrations.",
+      message:
+        "AuditImage model not available. Please restart the server after running migrations.",
       additionalData: { auditSessionId, auditAssetId, organizationId },
       label,
     });

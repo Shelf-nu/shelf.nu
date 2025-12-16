@@ -145,10 +145,7 @@ export default function CompleteAuditDialog({
                 />
               </div>
 
-              <AuditImageUploadSection
-                maxCount={5}
-                disabled={formDisabled}
-              />
+              <AuditImageUploadSection maxCount={5} disabled={formDisabled} />
             </div>
           </AlertDialogDescription>
 
