@@ -36,6 +36,7 @@ import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -166,7 +167,7 @@ export async function simpleModeLoader({
                   description: true,
                   custodianTeamMember: true,
                   custodianUser: true,
-                  tags: { select: { id: true, name: true, color: true } },
+                  tags: TAG_WITH_COLOR_SELECT,
                   creator: {
                     select: {
                       id: true,

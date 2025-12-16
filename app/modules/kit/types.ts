@@ -1,5 +1,6 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
 import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 
 export type UpdateKitPayload = Partial<
   Pick<
@@ -88,12 +89,7 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
     },
   },
   location: LOCATION_WITH_HIERARCHY,
-  tags: {
-    select: {
-      id: true,
-      name: true,
-    },
-  },
+  tags: TAG_WITH_COLOR_SELECT,
 };
 
 /** Type used for the list item component */

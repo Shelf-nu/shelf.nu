@@ -14,13 +14,14 @@ import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 export interface PdfDbResult {
   booking: Prisma.BookingGetPayload<{
     include: {
       custodianTeamMember: true;
       custodianUser: true;
-      tags: { select: { id: true; name: true; color: true } };
+      tags: typeof TAG_WITH_COLOR_SELECT;
     };
   }>;
   assets: (Asset & {
@@ -52,7 +53,7 @@ export async function fetchAllPdfRelatedData(
       id: bookingId,
       organizationId,
       request,
-      extraInclude: { tags: { select: { id: true, name: true, color: true } } },
+      extraInclude: { tags: TAG_WITH_COLOR_SELECT },
     });
 
     if (role) {

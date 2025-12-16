@@ -35,6 +35,7 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
@@ -141,9 +142,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy,
         orderDirection,
         tags: filterTags,
-        extraInclude: {
-          tags: { select: { id: true, name: true, color: true } },
-        },
+        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
       }),
 
       // team members for filter dropdown

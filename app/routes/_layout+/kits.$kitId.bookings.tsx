@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -78,9 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custodianTeamMemberIds: teamMemberIds,
           kitId,
           tags: filterTags,
-          extraInclude: {
-            tags: { select: { id: true, name: true, color: true } },
-          },
+          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
         }),
 
         // TeamMember data for custodian

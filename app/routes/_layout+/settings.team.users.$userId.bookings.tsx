@@ -3,6 +3,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getBookings } from "~/modules/booking/service.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -77,9 +78,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           statuses: [status],
         }),
         tags: filterTags,
-        extraInclude: {
-          tags: { select: { id: true, name: true, color: true } },
-        },
+        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
       }),
       getTagsForBookingTagsFilter({
         organizationId,
