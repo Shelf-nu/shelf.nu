@@ -82,6 +82,17 @@ SUPABASE_SERVICE_ROLE="your-service-role-key"
 
 > 💡 **Note**: Include both HTTP and HTTPS localhost URLs to support different SSL configurations
 
+### Configure OTP Length
+
+⚠️ **IMPORTANT**: Shelf.nu expects 6-digit OTP codes. Supabase's default has changed to 8 digits, which will cause authentication to fail.
+
+1. **Go to Authentication** → **Sign In / Providers** → **Email**
+2. **Scroll down to "OTP Settings"**
+3. **Set "OTP Length" to 6 digits**
+4. **Click "Save"**
+
+> 💡 **Why this is important**: If the OTP length is not set to 6, users won't be able to sign up or log in, as the application only accepts 6-digit codes.
+
 ### Setup Email Templates for OTP
 
 Shelf uses One-Time Passwords (OTP) instead of magic links. Update the email templates:
@@ -314,6 +325,7 @@ Your Supabase setup is complete! You should now have:
 - ✅ Database connection strings in `.env`
 - ✅ API keys in `.env`
 - ✅ Connection mode set to "Transaction"
+- ✅ OTP length set to 6 digits
 - ✅ Auth templates configured for OTP
 - ✅ Storage buckets created with policies
 - ✅ Email configuration completed
