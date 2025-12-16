@@ -7,9 +7,7 @@ interface AuditAssetStatusBadgeProps {
   status: AuditStatusLabel;
 }
 
-const auditStatusColorMap = (
-  status: AuditStatusLabel
-): BadgeColorScheme => {
+const auditStatusColorMap = (status: AuditStatusLabel): BadgeColorScheme => {
   switch (status) {
     case "Expected":
       return BADGE_COLORS.gray;
@@ -29,5 +27,9 @@ const auditStatusColorMap = (
 export function AuditAssetStatusBadge({ status }: AuditAssetStatusBadgeProps) {
   const colors = auditStatusColorMap(status);
 
-  return <Badge color={colors.bg} textColor={colors.text}>{status}</Badge>;
+  return (
+    <Badge color={colors.bg} textColor={colors.text}>
+      {status}
+    </Badge>
+  );
 }

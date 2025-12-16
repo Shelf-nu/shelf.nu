@@ -84,6 +84,7 @@ model User {
   auditAssignments   AuditAssignment[]
   auditAssetsScanned AuditAsset[]
   auditScans         AuditScan[]
+  auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
 
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
@@ -699,6 +700,7 @@ model Organization {
   assetReminders     AssetReminder[]
   auditSessions      AuditSession[]
   assetFilterPresets AssetFilterPreset[]
+  auditImages        AuditImage[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1335,6 +1337,7 @@ model AuditSession {
   assets      AuditAsset[]
   scans       AuditScan[]
   notes       AuditNote[]
+  images      AuditImage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1384,6 +1387,7 @@ model AuditAsset {
   updatedAt DateTime @updatedAt
 
   scans AuditScan[]
+  images AuditImage[]
 
   @@unique([auditSessionId, assetId])
   @@index([status])
@@ -1415,4 +1419,36 @@ model AuditScan {
   @@index([auditSessionId, scannedAt])
   @@index([auditAssetId])
   @@index([assetId])
+}
+
+model AuditImage {
+  id String @id @default(cuid())
+
+  imageUrl     String
+  thumbnailUrl String?
+  description  String?
+
+  // Relationships
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  // Optional link to specific asset within the audit
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditAssetId String?
+
+  uploadedBy   User   @relation("AuditImageUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  uploadedById String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for performance
+  @@index([auditSessionId])
+  @@index([auditAssetId])
+  @@index([organizationId])
+  @@index([uploadedById])
 }
