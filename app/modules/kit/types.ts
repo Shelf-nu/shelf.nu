@@ -1,6 +1,6 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
-import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
+import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 
 export type UpdateKitPayload = Partial<
   Pick<
