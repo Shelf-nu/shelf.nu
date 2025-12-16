@@ -196,7 +196,7 @@ const TagItem = ({
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
-      <TagBadge color={item.color} withDot>
+      <TagBadge color={item.color} withDot={false}>
         {item.name}
       </TagBadge>
     </Td>

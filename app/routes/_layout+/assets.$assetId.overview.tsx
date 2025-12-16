@@ -375,7 +375,7 @@ export default function AssetOverview() {
                         key={tag.id}
                         className="ml-2"
                         color={tag.color}
-                        withDot
+                        withDot={false}
                       >
                         {tag.name}
                       </Tag>
