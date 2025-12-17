@@ -274,6 +274,7 @@ export function AuditDrawer({
       qrId={qrId}
       item={item}
       onRemove={removeItem}
+      searchParams={auditSession ? { auditSessionId: auditSession.id } : undefined}
       renderLoading={(pendingQrId: string, error?: string) => (
         <DefaultLoadingState qrId={pendingQrId} error={error} />
       )}

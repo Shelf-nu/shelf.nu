@@ -141,8 +141,18 @@ describe("audit service", () => {
     mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
     mockDb.auditAssignment.createMany.mockResolvedValue({ count: 2 });
     mockDb.auditAsset.findMany.mockResolvedValue([
-      { id: "audit-asset-1", assetId: "asset-1", auditSessionId: "audit-1", expected: true },
-      { id: "audit-asset-2", assetId: "asset-2", auditSessionId: "audit-1", expected: true },
+      {
+        id: "audit-asset-1",
+        assetId: "asset-1",
+        auditSessionId: "audit-1",
+        expected: true,
+      },
+      {
+        id: "audit-asset-2",
+        assetId: "asset-2",
+        auditSessionId: "audit-1",
+        expected: true,
+      },
     ]);
   });
 

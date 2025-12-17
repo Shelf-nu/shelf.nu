@@ -68,6 +68,10 @@ type GenericItemRowProps<T> = {
    * The strings inside the array should be a json representation of prisma's include/select syntax,
    */
   kitExtraInclude?: Prisma.KitInclude;
+  /**
+   * Optional additional search params to be sent to the get-scanned-item endpoint
+   */
+  searchParams?: Record<string, string>;
 };
 
 /**
@@ -82,6 +86,7 @@ export function GenericItemRow<T>({
   renderLoading,
   assetExtraInclude,
   kitExtraInclude,
+  searchParams: additionalSearchParams,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
 
@@ -95,6 +100,12 @@ export function GenericItemRow<T>({
   // Add kit extra include if provided
   if (kitExtraInclude) {
     searchParams.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
+  }
+  // Add any additional search params
+  if (additionalSearchParams) {
+    Object.entries(additionalSearchParams).forEach(([key, value]) => {
+      searchParams.append(key, value);
+    });
   }
 
   // Determine which API to call based on codeType
