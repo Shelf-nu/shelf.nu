@@ -11,7 +11,7 @@ export default function UpdatesNavItem() {
   const isActive = location.pathname === "/updates";
 
   return (
-    <SidebarMenuItem className="hidden md:block">
+    <SidebarMenuItem>
       <SidebarMenuButton
         asChild
         className={tw(
