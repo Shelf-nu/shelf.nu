@@ -6,6 +6,7 @@ import { UpdateTimelineItem } from "./update-timeline-item";
 type UpdateWithParsedContent = Omit<Update, "content"> & {
   content: string | RenderableTreeNodes;
   userReads: UserUpdateRead[];
+  imageUrl: string | null;
 };
 
 interface UpdateTimelineProps {

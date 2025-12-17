@@ -323,6 +323,7 @@ export async function createUpdate({
   title,
   content,
   url,
+  imageUrl,
   publishDate,
   status = UpdateStatus.DRAFT,
   targetRoles = [],
@@ -331,6 +332,7 @@ export async function createUpdate({
   title: string;
   content: string;
   url?: string | null;
+  imageUrl?: string | null;
   publishDate: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -342,6 +344,7 @@ export async function createUpdate({
         title,
         content,
         url: url === undefined ? null : url, // Convert undefined to null for database
+        imageUrl: imageUrl === undefined ? null : imageUrl, // Convert undefined to null for database
         publishDate,
         status,
         targetRoles,
@@ -366,6 +369,7 @@ export async function updateUpdate({
   title,
   content,
   url,
+  imageUrl,
   publishDate,
   status,
   targetRoles,
@@ -374,6 +378,7 @@ export async function updateUpdate({
   title?: string;
   content?: string;
   url?: string | null;
+  imageUrl?: string | null;
   publishDate?: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -385,6 +390,7 @@ export async function updateUpdate({
         ...(title !== undefined && { title }),
         ...(content !== undefined && { content }),
         ...(url !== undefined && { url }),
+        ...(imageUrl !== undefined && { imageUrl }),
         ...(publishDate !== undefined && { publishDate }),
         ...(status !== undefined && { status }),
         ...(targetRoles !== undefined && { targetRoles }),

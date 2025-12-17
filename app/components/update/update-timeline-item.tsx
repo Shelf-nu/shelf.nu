@@ -11,6 +11,7 @@ import { tw } from "~/utils/tw";
 type UpdateWithParsedContent = Omit<Update, "content"> & {
   content: string | RenderableTreeNodes;
   userReads: UserUpdateRead[];
+  imageUrl: string | null;
 };
 
 interface UpdateTimelineItemProps {
@@ -91,6 +92,22 @@ export function UpdateTimelineItem({ update }: UpdateTimelineItemProps) {
         <h2 className="mb-4 text-2xl font-bold leading-tight text-gray-900">
           {update.title}
         </h2>
+
+        {/* Featured Image */}
+        {update.imageUrl && (
+          <div className="mb-6 overflow-hidden rounded-lg">
+            <img
+              src={update.imageUrl}
+              alt={update.title}
+              className="aspect-video h-auto w-full object-cover"
+              loading="lazy"
+              decoding="async"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          </div>
+        )}
 
         <div className="prose prose-gray max-w-none text-[15px] leading-relaxed text-gray-700">
           <MarkdownViewer content={update.content} />

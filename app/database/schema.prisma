@@ -1214,6 +1214,7 @@ model Update {
   title       String
   content     String // Markdown content
   url         String? // Optional URL to redirect to when clicked
+  imageUrl    String? // Optional featured image URL (external hosting)
   publishDate DateTime // When the update should be visible to users
   status      UpdateStatus @default(DRAFT)
 
