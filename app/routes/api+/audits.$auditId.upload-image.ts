@@ -26,11 +26,16 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       additionalData: { userId },
     });
 
+    // Parse form data to extract auditAssetId if present
+    const formData = await request.clone().formData();
+    const auditAssetId = formData.get("auditAssetId") as string | null;
+
     const result = await uploadAuditImage({
       request,
       auditSessionId: auditId,
       organizationId,
       uploadedById: userId,
+      auditAssetId: auditAssetId || undefined,
     });
 
     return data(payload({ success: true, image: result }));

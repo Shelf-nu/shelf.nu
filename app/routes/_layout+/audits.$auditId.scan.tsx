@@ -178,8 +178,14 @@ export function shouldRevalidate({
   formAction,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
-  // Don't revalidate if a scan is being recorded
+  // Don't revalidate for audit-related API actions that shouldn't affect the scan view
   if (formAction === "/api/audits/record-scan") {
+    return false;
+  }
+  
+  // Don't revalidate when notes or images are being added/deleted from dialog
+  if (formAction?.includes("/api/audits/") && 
+      (formAction?.includes("/notes") || formAction?.includes("/images"))) {
     return false;
   }
 
