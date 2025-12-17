@@ -26,6 +26,7 @@ vi.mock("~/database/db.server", () => {
     },
     auditAsset: {
       createMany: vi.fn(),
+      findMany: vi.fn(),
     },
     auditAssignment: {
       createMany: vi.fn(),
@@ -49,6 +50,7 @@ const mockDb = db as unknown as {
   };
   auditAsset: {
     createMany: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
   };
   auditAssignment: {
     createMany: ReturnType<typeof vi.fn>;
@@ -138,6 +140,10 @@ describe("audit service", () => {
     });
     mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
     mockDb.auditAssignment.createMany.mockResolvedValue({ count: 2 });
+    mockDb.auditAsset.findMany.mockResolvedValue([
+      { id: "audit-asset-1", assetId: "asset-1", auditSessionId: "audit-1", expected: true },
+      { id: "audit-asset-2", assetId: "asset-2", auditSessionId: "audit-1", expected: true },
+    ]);
   });
 
   it("creates an audit session with expected assets and assignments", async () => {
@@ -182,8 +188,8 @@ describe("audit service", () => {
     });
 
     expect(result.expectedAssets).toEqual([
-      { id: "asset-1", name: "Camera A" },
-      { id: "asset-2", name: "Camera B" },
+      { id: "asset-1", name: "Camera A", auditAssetId: "audit-asset-1" },
+      { id: "asset-2", name: "Camera B", auditAssetId: "audit-asset-2" },
     ]);
     expect(result.session.assignments).toHaveLength(2);
   });

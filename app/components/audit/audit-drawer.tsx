@@ -317,22 +317,24 @@ export function AuditDrawer({
                   "inline-block bg-gray-50 px-[6px] py-[2px]",
                   "rounded-md border border-gray-200",
                   "text-xs text-gray-700"
+                )}
+              >
+                {item.type === "asset" ? "asset" : "kit"}
+              </span>
+              <AuditLabels />
+              {/* Action buttons for notes and images */}
+              {auditSession && item.type === "asset" && data?.id && (
+                <AuditAssetActions
+                  auditAssetId={data.auditAssetId || ""}
+                  auditSessionId={auditSession.id}
+                  assetName={
+                    ("title" in data ? data.title : data.name) || "Asset"
+                  }
+                  isPending={false}
+                />
               )}
-            >
-              {item.type === "asset" ? "asset" : "kit"}
-            </span>
-            <AuditLabels />
-            {/* Action buttons for notes and images */}
-            {auditSession && item.type === "asset" && data?.id && (
-              <AuditAssetActions
-                auditAssetId={data.auditAssetId || ""}
-                auditSessionId={auditSession.id}
-                assetName={("title" in data ? data.title : data.name) || "Asset"}
-                isPending={false}
-              />
-            )}
+            </div>
           </div>
-        </div>
         );
       }}
     />
