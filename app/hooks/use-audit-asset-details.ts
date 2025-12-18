@@ -203,7 +203,8 @@ export function useAuditAssetDetails({
     ) {
       refetchImages();
     }
-  }, [imageMutationFetcher.state, imageMutationFetcher.data, refetchImages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageMutationFetcher.state, imageMutationFetcher.data]);
 
   /**
    * Refetch images after image upload completes successfully.
@@ -216,7 +217,8 @@ export function useAuditAssetDetails({
     ) {
       refetchImages();
     }
-  }, [imageUploadFetcher.state, imageUploadFetcher.data, refetchImages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageUploadFetcher.state, imageUploadFetcher.data]);
 
   /**
    * Refetch notes after note deletion completes successfully.
@@ -226,7 +228,8 @@ export function useAuditAssetDetails({
     if (noteDeleteFetcher.state === "idle" && noteDeleteFetcher.data?.payload) {
       refetchNotes();
     }
-  }, [noteDeleteFetcher.state, noteDeleteFetcher.data, refetchNotes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteDeleteFetcher.state, noteDeleteFetcher.data]);
 
   /**
    * Handle note creation completion.
@@ -248,7 +251,8 @@ export function useAuditAssetDetails({
         }
       }
     }
-  }, [noteFetcher.state, noteFetcher.data, refetchNotes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteFetcher.state, noteFetcher.data]);
 
   /**
    * Refetch notes after note deletion completes.
@@ -257,7 +261,8 @@ export function useAuditAssetDetails({
     if (noteDeleteFetcher.state === "idle" && noteDeleteFetcher.data?.payload) {
       refetchNotes();
     }
-  }, [noteDeleteFetcher.state, noteDeleteFetcher.data, refetchNotes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteDeleteFetcher.state, noteDeleteFetcher.data]);
 
   // ========== Mutation Handlers ==========
 
