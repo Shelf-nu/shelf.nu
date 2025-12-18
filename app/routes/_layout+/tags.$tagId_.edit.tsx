@@ -28,7 +28,12 @@ import { zodFieldIsRequired } from "~/utils/zod";
 export const UpdateTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .or(z.literal(""))
+    .transform((val) => (val === "" || !val ? null : val)),
   useFor: z
     .string()
     .optional()
@@ -62,7 +67,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       header,
       tag,
-      colorFromServer: tag.color,
+      colorFromServer: tag.color ?? undefined,
       tagUseFor: Object.values(TagUseFor).map((useFor) => ({
         label: formatEnum(useFor),
         value: useFor,

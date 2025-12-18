@@ -28,7 +28,12 @@ import { zodFieldIsRequired } from "~/utils/zod";
 export const NewTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .or(z.literal(""))
+    .transform((val) => (val === "" || !val ? null : val)),
   useFor: z
     .string()
     .optional()

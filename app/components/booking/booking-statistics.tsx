@@ -25,7 +25,7 @@ export function BookingStatistics({
   assetsCount: number;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
-  tags: (Pick<PrismaTag, "id" | "name"> & { color?: string | null })[];
+  tags: Pick<PrismaTag, "id" | "name" | "color">[];
   creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
   partialCheckinProgress?: ReturnType<typeof calculatePartialCheckinProgress>;
 }) {

@@ -311,7 +311,7 @@ model Tag {
   id          String  @id @default(cuid())
   name        String
   description String?
-  color       String  @default("#f2f4f7")
+  color       String?
 
   useFor TagUseFor[] @default([ASSET])
 

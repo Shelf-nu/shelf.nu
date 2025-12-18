@@ -10,13 +10,13 @@ export const ColorInput = ({
   colorFromServer,
   ...rest
 }: {
-  colorFromServer: string;
+  colorFromServer?: string;
   [key: string]: any;
 }) => {
   const [color, setColor] = useState<string>("");
 
   useEffect(() => {
-    setColor(() => `${colorFromServer}`);
+    setColor(() => colorFromServer || "");
   }, [colorFromServer]);
 
   const handleColorChange = (e: ChangeEvent<HTMLInputElement>) => {

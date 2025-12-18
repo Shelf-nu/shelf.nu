@@ -374,7 +374,7 @@ export default function AssetOverview() {
                       <Tag
                         key={tag.id}
                         className="ml-2"
-                        color={tag.color}
+                        color={tag.color ?? undefined}
                         withDot={false}
                       >
                         {tag.name}
