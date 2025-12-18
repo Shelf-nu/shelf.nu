@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useOptimistic, startTransition } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import type { FetcherWithComponents } from "react-router";
 import { useFetcher } from "react-router";
 import useApiQuery from "~/hooks/use-api-query";
-import { useUserData } from "~/hooks/use-user-data";
-import { isFormProcessing } from "~/utils/form";
+
+/**
+ * @deprecated This hook is being refactored to use a simpler pattern.
+ * See AuditAssetDetailsDialog component for the new implementation.
+ * 
+ * The new approach:
+ * - Uses local state for optimistic UI (no useOptimistic hook)
+ * - Each note component has its own fetcher with unique key
+ * - Notes/images pre-fetched in scan route loader
+ * 
+ * TODO: Remove this file once refactor is complete and tested.
+ */
 
 /**
  * Type definition for note data returned from the API.
@@ -49,20 +59,18 @@ type UseAuditAssetDetailsParams = {
 };
 
 type UseAuditAssetDetailsReturn = {
-  notes: NoteData[];
+  optimisticNotes: NoteData[];
   images: ImageData[];
-  optimisticNote: NoteData | null;
+  handleNoteFormAction: (formData: FormData) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
   noteFormRef: RefObject<HTMLFormElement | null>;
   isLoadingNotes: boolean;
   isLoadingImages: boolean;
-  isSubmittingNote: boolean;
   isUploadingImage: boolean;
   isMutatingImage: boolean;
   noteFetcher: FetcherWithComponents<any>;
   noteDeleteFetcher: FetcherWithComponents<any>;
   handleImageUpload: () => void;
-  handleSubmitNote: () => void;
   handleFileSelected: (event: ChangeEvent<HTMLInputElement>) => void;
   handleDeleteImage: (imageId: string) => void;
 };
@@ -101,18 +109,13 @@ export function useAuditAssetDetails({
   // Ref for note form (used to reset after successful submission)
   const noteFormRef = useRef<HTMLFormElement>(null);
 
-  // Local state for tracking note submission (for optimistic disabled state)
-  const [isSubmittingNote, setIsSubmittingNote] = useState(false);
-
-  // Current user data - needed for optimistic note preview
-  const user = useUserData();
-
   // ========== Fetchers for Mutations ==========
   // Using separate fetchers for each mutation type prevents conflicts and
   // allows tracking individual loading states
 
   // Fetcher for creating notes - keyed to prevent duplicate simultaneous requests
-  const noteFetcher = useFetcher({ key: `audit-asset-note-${auditAssetId}` });
+  // Remove key to allow multiple concurrent submissions without abort signals
+  const noteFetcher = useFetcher();
 
   // Fetcher for deleting notes
   const noteDeleteFetcher = useFetcher();
@@ -153,40 +156,24 @@ export function useAuditAssetDetails({
   });
 
   // Extract data arrays from API responses (with fallback to empty arrays)
-  const notes = notesData?.notes || [];
   const images = imagesData?.images || [];
 
-  // ========== Optimistic UI for Notes ==========
-  // Shows note immediately while waiting for server response, creating smooth UX
-
-  // Extract the note content being submitted from fetcher form data
-  let optimisticNoteContent = "";
-  if (noteFetcher.formData) {
-    optimisticNoteContent =
-      noteFetcher.formData.get("content")?.toString() || "";
-  }
-
+  // ========== Optimistic UI with React's useOptimistic Hook ==========
   /**
-   * Create a temporary note object to show while submission is in progress.
-   * This note will be displayed with reduced opacity (60%) to indicate it's pending.
-   * Once the server responds, the real note replaces this optimistic one.
+   * Use React's useOptimistic for proper multi-note optimistic handling.
+   * This allows multiple notes to be submitted rapidly without conflicts.
+   *
+   * Pattern from: https://react.dev/reference/react/useOptimistic
+   * - Optimistic updates are added immediately to the UI
+   * - When server responds, optimistic updates are replaced with real data
+   * - Multiple pending submissions are handled gracefully
    */
-  const optimisticNote =
-    isFormProcessing(noteFetcher.state) && optimisticNoteContent
-      ? {
-          id: "optimistic-note",
-          content: optimisticNoteContent,
-          createdAt: new Date().toISOString(),
-          userId: user?.id || "",
-          user: {
-            id: user?.id || "",
-            firstName: user?.firstName || "",
-            lastName: user?.lastName || "",
-            email: user?.email || "",
-            profilePicture: user?.profilePicture || null,
-          },
-        }
-      : null;
+  const [optimisticNotes, addOptimisticNote] = useOptimistic(
+    notesData?.notes || [],
+    (state: NoteData[], newNote: NoteData) =>
+      // Add new optimistic note at the beginning (newest first)
+      [newNote, ...state]
+  );
 
   // ========== Auto-Refetch Effects ==========
   // These effects watch for completed mutations and trigger data refresh.
@@ -238,9 +225,6 @@ export function useAuditAssetDetails({
    */
   useEffect(() => {
     if (noteFetcher.state === "idle") {
-      // Always re-enable submission when fetcher is idle
-      setIsSubmittingNote(false);
-
       // If we have data, it means submission was successful
       if (noteFetcher.data?.note) {
         // Refetch notes to get the real note from server
@@ -254,17 +238,55 @@ export function useAuditAssetDetails({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteFetcher.state, noteFetcher.data]);
 
-  /**
-   * Refetch notes after note deletion completes.
-   */
-  useEffect(() => {
-    if (noteDeleteFetcher.state === "idle" && noteDeleteFetcher.data?.payload) {
-      refetchNotes();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteDeleteFetcher.state, noteDeleteFetcher.data]);
-
   // ========== Mutation Handlers ==========
+
+  /**
+   * Handles note form submission with optimistic UI update.
+   * 
+   * Following React's useOptimistic pattern:
+   * 1. Add optimistic note immediately to UI
+   * 2. Reset form
+   * 3. Submit to server in a transition (prevents revalidation)
+   * 4. When server responds, real note replaces optimistic one
+   * 
+   * @param formData - Form data containing note content
+   */
+  const handleNoteFormAction = (formData: FormData) => {
+    const content = formData.get("content") as string;
+    if (!content?.trim()) return;
+
+    // Add optimistic note immediately
+    addOptimisticNote({
+      id: `optimistic-${Date.now()}`,
+      content,
+      createdAt: new Date().toISOString(),
+      userId: "",
+      user: {
+        id: "",
+        firstName: "",
+        lastName: "",
+        email: "",
+        profilePicture: null,
+      },
+    });
+
+    // Reset form
+    if (noteFormRef.current) {
+      noteFormRef.current.reset();
+    }
+
+    // Submit to server in a transition to prevent revalidation
+    startTransition(async () => {
+      // Create a unique fetcher for this submission to prevent abort signals
+      // Using native fetch to avoid abort signal conflicts
+      await fetch(`/api/audits/${auditSessionId}/assets/${auditAssetId}/notes`, {
+        method: "POST",
+        body: formData,
+      });
+      // Refetch notes to update UI with server response
+      refetchNotes();
+    });
+  };
 
   /**
    * Handles file selection from the hidden input element.
@@ -323,31 +345,19 @@ export function useAuditAssetDetails({
     });
   };
 
-  /**
-   * Handles note form submission with optimistic UI.
-   *
-   * Sets submitting state immediately to disable the form,
-   * preventing double submissions while keeping UX smooth.
-   */
-  const handleSubmitNote = () => {
-    setIsSubmittingNote(true);
-  };
-
   // ========== Return Values ==========
   return {
-    notes,
+    optimisticNotes,
     images,
-    optimisticNote,
+    handleNoteFormAction,
     fileInputRef,
     noteFormRef,
     isLoadingNotes,
     isLoadingImages,
-    isSubmittingNote,
     isUploadingImage: imageUploadFetcher.state !== "idle",
     isMutatingImage: imageMutationFetcher.state !== "idle",
     noteFetcher,
     noteDeleteFetcher,
-    handleSubmitNote,
     handleFileSelected,
     handleImageUpload,
     handleDeleteImage,

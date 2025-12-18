@@ -182,10 +182,14 @@ export function shouldRevalidate({
   if (formAction === "/api/audits/record-scan") {
     return false;
   }
-  
+
   // Don't revalidate when notes or images are being added/deleted from dialog
-  if (formAction?.includes("/api/audits/") && 
-      (formAction?.includes("/notes") || formAction?.includes("/images"))) {
+  // This prevents the scan route from reloading and closing the dialog
+  if (
+    formAction &&
+    formAction.includes("/assets/") &&
+    (formAction.includes("/notes") || formAction.includes("/images"))
+  ) {
     return false;
   }
 

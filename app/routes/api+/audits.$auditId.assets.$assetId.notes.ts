@@ -15,7 +15,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-// GET - Fetch notes for an audit asset
+export type AuditAssetNoteLoaderData = Awaited<ReturnType<typeof loader>>;
+
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -46,7 +47,6 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   }
 }
 
-// POST/PATCH/DELETE - Handle note mutations
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
