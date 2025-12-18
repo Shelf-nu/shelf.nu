@@ -1,9 +1,8 @@
 import type React from "react";
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import type { AuditAsset } from "@prisma/client";
 import { Camera, MessageSquare, Loader } from "lucide-react";
-import { useFetcher } from "react-router";
-import { AuditAssetDetailsDialog } from "~/components/audit/audit-asset-details-dialog";
+import { useFetcher, Link } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 
@@ -23,20 +22,15 @@ type AuditAssetActionsProps = {
 export function AuditAssetActions({
   auditAssetId,
   auditSessionId,
-  assetName,
+  assetName: _assetName,
   notesCount = 0,
   imagesCount = 0,
   isPending: _isPending = false,
 }: AuditAssetActionsProps) {
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fetcher = useFetcher();
   // Check if fetcher is uploading
   const isUploading = useDisabled(fetcher);
-
-  const handleOpenDialog = () => {
-    setIsDialogOpen(true);
-  };
 
   const handleQuickImageUpload = () => {
     fileInputRef.current?.click();
@@ -64,11 +58,6 @@ export function AuditAssetActions({
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
-
-      // If upload failed, open dialog for manual management
-      if (fetcher.data.error) {
-        setIsDialogOpen(true);
-      }
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -87,19 +76,21 @@ export function AuditAssetActions({
 
       {/* Main action button - opens dialog */}
       <Button
+        asChild
         type="button"
         variant="ghost"
         size="xs"
-        onClick={handleOpenDialog}
         className="relative size-8 p-0"
         title="View notes and images"
       >
-        <MessageSquare className="size-4" />
-        {totalCount > 0 && (
-          <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-medium text-white">
-            {totalCount}
-          </span>
-        )}
+        <Link to={`${auditAssetId}/details`}>
+          <MessageSquare className="size-4" />
+          {totalCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-medium text-white">
+              {totalCount}
+            </span>
+          )}
+        </Link>
       </Button>
 
       {/* Quick camera/image picker - especially useful on mobile */}
@@ -121,17 +112,6 @@ export function AuditAssetActions({
           <Camera className="size-4" />
         )}
       </Button>
-
-      {/* Dialog for managing notes and images */}
-      {isDialogOpen && auditAssetId && (
-        <AuditAssetDetailsDialog
-          open={isDialogOpen}
-          onClose={() => setIsDialogOpen(false)}
-          auditAssetId={auditAssetId}
-          auditSessionId={auditSessionId}
-          assetName={assetName}
-        />
-      )}
     </div>
   );
 }

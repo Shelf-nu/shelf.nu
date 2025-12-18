@@ -3,7 +3,7 @@ import { Trash } from "lucide-react";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
-import type { action } from "~/routes/api+/audits.$auditId.assets.$assetId.notes";
+import type { action } from "~/routes/_layout+/audits.$auditId.scan.$auditAssetId.details";
 import { tw } from "~/utils/tw";
 import { UserBadge } from "../shared/user-badge";
 
@@ -23,8 +23,6 @@ export type NoteData = {
 
 type AuditAssetNoteItemProps = {
   note: NoteData;
-  auditSessionId: string;
-  auditAssetId: string;
   /** Called when server returns the real note data */
   onServerSync?: (realNote: NoteData) => void;
   /** Called when delete is successful */
@@ -41,12 +39,16 @@ type AuditAssetNoteItemProps = {
  * 4. onServerSync callback updates parent state
  * 5. Component re-renders with real data
  *
+ * When deleting a note:
+ * 1. User clicks delete button
+ * 2. Parent removes note from local state immediately (optimistic)
+ * 3. If note is real (exists in DB), submit DELETE request via same fetcher
+ * 4. If note is temp (still creating), just remove from state (no API call needed)
+ *
  * Each note has its own fetcher with unique key to prevent abort signals.
  */
 export function AuditAssetNoteItem({
   note,
-  auditSessionId,
-  auditAssetId,
   onServerSync,
   onDelete,
 }: AuditAssetNoteItemProps) {
@@ -63,12 +65,11 @@ export function AuditAssetNoteItem({
     if (!note.needsServerSync) return;
 
     const formData = new FormData();
-    formData.append("intent", "create");
+    formData.append("intent", "create-note");
     formData.append("content", note.content);
 
     void fetcher.submit(formData, {
       method: "POST",
-      action: `/api/audits/${auditSessionId}/assets/${auditAssetId}/notes`,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount
@@ -77,6 +78,7 @@ export function AuditAssetNoteItem({
    * When server responds with real note data, notify parent to update state.
    */
   useEffect(() => {
+    // Handle successful response
     if (
       fetcher.state === "idle" &&
       fetcher.data &&
@@ -98,8 +100,37 @@ export function AuditAssetNoteItem({
         needsServerSync: false,
       });
     }
+
+    // Handle error response
+    if (fetcher.state === "idle" && fetcher.data && fetcher.data.error) {
+      // Remove failed note from local state
+      onDelete?.(note.id);
+      // TODO: Show toast notification to user
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetcher.state, fetcher.data]);
+
+  const handleDelete = () => {
+    if (!confirm("Are you sure you want to delete this note?")) {
+      return;
+    }
+
+    // Optimistically remove from parent state immediately
+    onDelete?.(note.id);
+
+    // If note is already saved to server, delete it from DB
+    // If note is temp (starts with "temp-"), no API call needed
+    if (!note.id.startsWith("temp-")) {
+      const formData = new FormData();
+      formData.append("intent", "delete-note");
+      formData.append("noteId", note.id);
+
+      void fetcher.submit(formData, {
+        method: "POST",
+      });
+    }
+    // If note is temp and fetcher is still submitting, the new submit will abort it
+  };
 
   return (
     <div className={tw("rounded-md border border-gray-200 bg-gray-50 p-3")}>
@@ -116,18 +147,13 @@ export function AuditAssetNoteItem({
             </>
           </div>
         </div>
-        {/* Only show delete button for saved notes */}
-        {!note.needsServerSync && onDelete && (
+        {onDelete && (
           <Button
             type="button"
             variant="ghost"
             size="xs"
             className="text-gray-400 hover:text-red-600"
-            onClick={() => {
-              if (confirm("Are you sure you want to delete this note?")) {
-                onDelete(note.id);
-              }
-            }}
+            onClick={handleDelete}
           >
             <Trash className="size-4" />
           </Button>

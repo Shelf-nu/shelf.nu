@@ -34,8 +34,8 @@ type AuditAssetDetailsDialogProps = {
 export function AuditAssetDetailsDialog({
   open,
   onClose,
-  auditAssetId,
-  auditSessionId,
+  auditAssetId: _auditAssetId,
+  auditSessionId: _auditSessionId,
   assetName,
   initialNotes = [],
 }: AuditAssetDetailsDialogProps) {
@@ -141,8 +141,6 @@ export function AuditAssetDetailsDialog({
                   <AuditAssetNoteItem
                     key={note.id}
                     note={note}
-                    auditSessionId={auditSessionId}
-                    auditAssetId={auditAssetId}
                     onServerSync={(realNote) =>
                       handleNoteServerSync(note.id, realNote)
                     }

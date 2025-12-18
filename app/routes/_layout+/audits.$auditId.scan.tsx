@@ -6,7 +6,6 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
   LinksFunction,
-  ShouldRevalidateFunctionArgs,
 } from "react-router";
 import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
@@ -20,6 +19,7 @@ import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
 import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
 import { ErrorContent } from "~/components/errors";
+import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
@@ -169,33 +169,6 @@ const label = "Audit" as const;
 
 export const ErrorBoundary = () => <ErrorContent />;
 
-/**
- * Prevent revalidation when recording audit scans.
- * The scan persistence API calls don't affect the loader data,
- * so we don't need to reload the audit session details.
- */
-export function shouldRevalidate({
-  formAction,
-  defaultShouldRevalidate,
-}: ShouldRevalidateFunctionArgs) {
-  // Don't revalidate for audit-related API actions that shouldn't affect the scan view
-  if (formAction === "/api/audits/record-scan") {
-    return false;
-  }
-
-  // Don't revalidate when notes or images are being added/deleted from dialog
-  // This prevents the scan route from reloading and closing the dialog
-  if (
-    formAction &&
-    formAction.includes("/assets/") &&
-    (formAction.includes("/notes") || formAction.includes("/images"))
-  ) {
-    return false;
-  }
-
-  return defaultShouldRevalidate;
-}
-
 export default function AuditSessionRoute() {
   const { session, expectedAssets, existingScans } =
     useLoaderData<typeof loader>();
@@ -297,6 +270,7 @@ export default function AuditSessionRoute() {
 
   return (
     <>
+      <ContextualSidebar className="md:w-[45vw] md:max-w-[40vw]" />
       <Header hidePageDescription />
 
       <AuditDrawer
