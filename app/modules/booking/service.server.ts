@@ -94,6 +94,7 @@ import {
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
@@ -3326,7 +3327,7 @@ export async function getBookingsForCalendar(params: {
             profilePicture: true,
           },
         },
-        tags: { select: { id: true, name: true } },
+        tags: TAG_WITH_COLOR_SELECT,
       },
       takeAll: true,
     });

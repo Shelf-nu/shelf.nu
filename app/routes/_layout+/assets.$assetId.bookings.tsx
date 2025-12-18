@@ -8,6 +8,7 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -100,9 +101,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           orderDirection,
           custodianTeamMemberIds: teamMemberIds,
           tags: filterTags,
-          extraInclude: {
-            tags: { select: { id: true, name: true } },
-          },
+          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
         }),
 
         // team members/custodian
