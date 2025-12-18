@@ -4,6 +4,7 @@ import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
+import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
 import MultiSelect from "~/components/multi-select/multi-select";
 
@@ -14,6 +15,7 @@ import { createTag } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { formatEnum } from "~/utils/misc";
 import {
@@ -26,6 +28,12 @@ import { zodFieldIsRequired } from "~/utils/zod";
 export const NewTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .or(z.literal(""))
+    .transform((val) => (val === "" || !val ? null : val)),
   useFor: z
     .string()
     .optional()
@@ -53,6 +61,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     return payload({
       header,
+      colorFromServer: getRandomColor(),
       tagUseFor: Object.values(TagUseFor).map((useFor) => ({
         label: formatEnum(useFor),
         value: useFor,
@@ -108,7 +117,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function NewTag() {
   const zo = useZorm("NewQuestionWizardScreen", NewTagFormSchema);
-  const { tagUseFor } = useLoaderData<typeof loader>();
+  const { tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
 
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
@@ -142,7 +151,16 @@ export default function NewTag() {
               className="mb-4 lg:mb-0"
               required={zodFieldIsRequired(NewTagFormSchema.shape.description)}
             />
-
+            <div className="mb-6 lg:mb-0">
+              <ColorInput
+                name={zo.fields.color()}
+                disabled={disabled}
+                error={zo.errors.color()?.message}
+                hideErrorText
+                colorFromServer={colorFromServer}
+                required={zodFieldIsRequired(NewTagFormSchema.shape.color)}
+              />
+            </div>
             <MultiSelect
               name="useFor"
               items={tagUseFor}

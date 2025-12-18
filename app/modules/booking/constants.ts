@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {
@@ -20,7 +21,7 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
 export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
-  tags: { select: { id: true, name: true } },
+  tags: TAG_WITH_COLOR_SELECT,
 } as Prisma.BookingInclude;
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {

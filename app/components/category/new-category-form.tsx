@@ -16,7 +16,7 @@ import { Button } from "../shared/button";
 export const NewCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
-  color: z.string().regex(/^#/).min(7),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   preventRedirect: z.string().optional(),
 });
 
