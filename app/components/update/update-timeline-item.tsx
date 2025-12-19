@@ -125,9 +125,10 @@ export function UpdateTimelineItem({ update }: UpdateTimelineItemProps) {
                   { method: "POST", action: "/api/updates" }
                 );
               }}
+              aria-label={`Learn more about ${update.title}`}
               className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700 hover:underline"
             >
-              Learn more about {update.title}
+              Learn more
               <ExternalLinkIcon className="size-4" />
             </a>
           </div>
