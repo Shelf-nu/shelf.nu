@@ -3,6 +3,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { useAtom } from "jotai";
 import { Plus, X } from "lucide-react";
 import { auditImageValidateFileAtom, fileErrorAtom } from "~/atoms/file";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { tw } from "~/utils/tw";
 
 type AuditImageUploadBoxProps = {
@@ -110,6 +111,14 @@ type AuditImageUploadSectionProps = {
   disabled?: boolean;
   /** Name prefix for file inputs */
   inputNamePrefix?: string;
+  /** Existing images from server */
+  existingImages?: Array<{
+    id: string;
+    imageUrl: string;
+    thumbnailUrl?: string | null;
+  }>;
+  /** Callback when an existing image is removed */
+  onExistingImageRemove?: (imageId: string) => void;
 };
 
 /**
@@ -119,12 +128,17 @@ export function AuditImageUploadSection({
   maxCount = 5,
   disabled = false,
   inputNamePrefix = "auditImage",
+  existingImages = [],
+  onExistingImageRemove,
 }: AuditImageUploadSectionProps) {
   const [images, setImages] = useState<
     Array<{ file: File; previewUrl: string; id: string }>
   >([]);
   const [fileError] = useAtom(fileErrorAtom);
   const fileInputsRef = useRef<Map<string, HTMLInputElement>>(new Map());
+
+  // Total count includes both existing and new images
+  const totalCount = existingImages.length + images.length;
 
   const handleImageSelect = (file: File, previewUrl: string) => {
     const id = `${Date.now()}-${Math.random()}`;
@@ -174,7 +188,7 @@ export function AuditImageUploadSection({
           Add Photos (Optional)
         </label>
         <span className="text-xs text-gray-500">
-          {images.length}/{maxCount} images
+          {totalCount}/{maxCount} images
         </span>
       </div>
       <p className="text-sm text-gray-500">
@@ -182,6 +196,38 @@ export function AuditImageUploadSection({
       </p>
 
       <div id="audit-images" className="flex flex-wrap gap-2">
+        {/* Display existing server images */}
+        {existingImages.map((image) => (
+          <div
+            key={image.id}
+            className="group relative size-24 shrink-0"
+          >
+            <ImageWithPreview
+              imageUrl={image.imageUrl}
+              thumbnailUrl={image.thumbnailUrl || image.imageUrl}
+              alt="Audit image"
+              withPreview
+              className="size-24 rounded-lg border-2 border-gray-200"
+              images={existingImages.map((img) => ({
+                id: img.id,
+                imageUrl: img.imageUrl,
+                thumbnailUrl: img.thumbnailUrl || img.imageUrl,
+                alt: "Audit image",
+              }))}
+              currentImageId={image.id}
+            />
+            {!disabled && onExistingImageRemove && (
+              <button
+                type="button"
+                onClick={() => onExistingImageRemove(image.id)}
+                className="absolute right-1 top-1 z-10 rounded-full bg-gray-900/70 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-gray-900"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        ))}
+        {/* Display new uploaded images */}
         {images.map((image) => (
           <UploadedImageBox
             key={image.id}
@@ -190,12 +236,15 @@ export function AuditImageUploadSection({
             disabled={disabled}
           />
         ))}
-        <AuditImageUploadBox
-          onImageSelect={handleImageSelect}
-          currentCount={images.length}
-          maxCount={maxCount}
-          disabled={disabled}
-        />
+        {/* Upload box - only show if under limit */}
+        {totalCount < maxCount && (
+          <AuditImageUploadBox
+            onImageSelect={handleImageSelect}
+            currentCount={totalCount}
+            maxCount={maxCount}
+            disabled={disabled}
+          />
+        )}
       </div>
 
       {fileError && <p className="text-sm text-error-500">{fileError}</p>}

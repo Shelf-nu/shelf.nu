@@ -149,19 +149,13 @@ export function AuditAssetNoteItem({
             >
               <input type="hidden" name="intent" value="delete-note" />
               <input type="hidden" name="noteId" value={note.id} />
-              <Button type="submit" variant="tertiary">
+              <Button type="submit" variant="secondary">
                 <Trash className="size-4" />
               </Button>
             </fetcher.Form>
           ) : (
             // Temp notes just remove from state, no server call
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="text-gray-400 hover:text-red-600"
-              onClick={handleDelete}
-            >
+            <Button variant="secondary" onClick={handleDelete}>
               <Trash className="size-4" />
             </Button>
           ))}

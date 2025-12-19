@@ -5,6 +5,7 @@ import { Camera, MessageSquare, Loader } from "lucide-react";
 import { useFetcher, Link } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
+import { tw } from "~/utils/tw";
 
 type AuditAssetActionsProps = {
   auditAssetId: AuditAsset["id"];
@@ -28,9 +29,10 @@ export function AuditAssetActions({
   isPending: _isPending = false,
 }: AuditAssetActionsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const fetcher = useFetcher();
+  const fetcher = useFetcher({ key: `quick-image-upload-${auditAssetId}` });
   // Check if fetcher is uploading
   const isUploading = useDisabled(fetcher);
+  const hasError = fetcher.state === "idle" && fetcher.data?.error;
 
   const handleQuickImageUpload = () => {
     fileInputRef.current?.click();
@@ -54,8 +56,8 @@ export function AuditAssetActions({
   // Handle upload completion or errors
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
-      // Clear file input on success
-      if (fileInputRef.current) {
+      // Clear file input on success or error
+      if (fileInputRef.current && !fetcher.data.error) {
         fileInputRef.current.value = "";
       }
     }
@@ -100,7 +102,7 @@ export function AuditAssetActions({
         size="xs"
         disabled={isUploading}
         onClick={handleQuickImageUpload}
-        className="relative size-8 p-0"
+        className={tw("relative size-8 p-0", hasError && "border border-error-500")}
         title="Quick image upload"
       >
         {isUploading ? (

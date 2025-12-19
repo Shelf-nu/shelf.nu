@@ -12,7 +12,7 @@ import {
   PUBLIC_BUCKET,
 } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import {
   getFileUploadPath,
   parseFileFormData,
@@ -136,9 +136,10 @@ export async function uploadAuditImage({
 
     return auditImage;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: "Failed to upload audit image",
+      message: isShelfError ? cause.message : "Failed to upload audit image",
       additionalData: { auditSessionId, auditAssetId },
       label,
     });
@@ -183,6 +184,7 @@ async function validateImageLimits({
       throw new ShelfError({
         cause: null,
         message: `Maximum of ${MAX_IMAGES_PER_ASSET} images per asset exceeded`,
+        title: "Image Limit Exceeded",
         additionalData: {
           auditSessionId,
           auditAssetId,

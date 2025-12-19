@@ -22,7 +22,8 @@ export function useNprogress() {
       !excludeFetchers.includes(fetcher.key) &&
       !fetcher.key.startsWith("toggle-star-") &&
       !fetcher.key.startsWith("delete-preset-") &&
-      !fetcher.key.startsWith("audit-asset-note-")
+      !fetcher.key.startsWith("audit-asset-note-") &&
+      !fetcher.key.startsWith("quick-image-upload-")
   );
 
   const state = useMemo<"idle" | "loading">(

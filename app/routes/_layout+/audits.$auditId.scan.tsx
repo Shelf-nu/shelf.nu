@@ -6,6 +6,7 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
   LinksFunction,
+  ShouldRevalidateFunctionArgs,
 } from "react-router";
 import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
@@ -55,6 +56,23 @@ export const handle = {
   breadcrumb: () => "Scan QR codes",
   name: "audit.scan",
 };
+
+/**
+ * Prevent revalidation for certain actions that should not trigger a full scan route reload.
+ * Specifically, quick image uploads from AuditAssetActions should not revalidate the scan route.
+ */
+export function shouldRevalidate({
+  formAction,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  // Don't revalidate when quick image upload is triggered
+  if (formAction?.includes("/upload-image")) {
+    return false;
+  }
+
+  // Default revalidation for all other actions
+  return defaultShouldRevalidate;
+}
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();

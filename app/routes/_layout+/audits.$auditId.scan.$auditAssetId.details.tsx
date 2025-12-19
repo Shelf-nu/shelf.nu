@@ -12,9 +12,14 @@ import {
   AuditAssetNoteItem,
   type NoteData,
 } from "~/components/audit/audit-asset-note-item";
+import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-box";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
+import {
+  uploadAuditImage,
+  deleteAuditImage,
+} from "~/modules/audit/image.service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -101,6 +106,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       where: {
         auditAssetId: auditAssetId,
       },
+      select: {
+        id: true,
+        imageUrl: true,
+        thumbnailUrl: true,
+      },
       orderBy: {
         createdAt: "desc",
       },
@@ -146,8 +156,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    // We don't use organizationId in action, but requirePermission validates access
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -215,6 +224,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return payload({ success: true });
     }
 
+    if (intent === "upload-image") {
+      const image = await uploadAuditImage({
+        request,
+        auditSessionId: auditId,
+        organizationId,
+        uploadedById: userId,
+        auditAssetId: auditAssetId,
+      });
+
+      return payload({ image });
+    }
+
+    if (intent === "delete-image") {
+      const imageId = formData.get("imageId") as string;
+
+      if (!imageId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Image ID is required",
+          additionalData: { auditAssetId },
+          label: "Audit",
+          status: 400,
+        });
+      }
+
+      await deleteAuditImage({
+        imageId,
+        organizationId,
+      });
+
+      return payload({ success: true });
+    }
+
     throw new ShelfError({
       cause: null,
       message: "Invalid intent",
@@ -238,6 +280,7 @@ export default function AuditAssetDetails() {
    * Each AuditAssetNoteItem handles its own server submission with unique fetcher.
    */
   const [localNotes, setLocalNotes] = useState<NoteData[]>([]);
+  const [localImages, setLocalImages] = useState<typeof images>([]);
 
   // Sync local state with server data when revalidation happens
   useEffect(() => {
@@ -261,6 +304,11 @@ export default function AuditAssetDetails() {
       }))
     );
   }, [initialNotes]);
+
+  // Sync local images with server data when revalidation happens
+  useEffect(() => {
+    setLocalImages(images);
+  }, [images]);
 
   const handleNoteFormAction = (formData: FormData) => {
     const content = formData.get("content") as string;
@@ -319,6 +367,34 @@ export default function AuditAssetDetails() {
         form.requestSubmit();
       }
     }
+  };
+
+  /**
+   * Called when image delete is clicked.
+   * Removes image from local state immediately (optimistic).
+   */
+  const handleImageDelete = (imageId: string) => {
+    setLocalImages((prev) => prev.filter((img) => img.id !== imageId));
+  };
+
+  /**
+   * Handle image delete with confirmation and Form submission.
+   * This triggers the delete-image action which will revalidate.
+   */
+  const handleImageDeleteWithConfirm = (imageId: string) => {
+    if (!confirm("Are you sure you want to delete this image?")) {
+      return;
+    }
+    // Optimistic removal
+    handleImageDelete(imageId);
+    // Submit delete to server
+    const formData = new FormData();
+    formData.set("intent", "delete-image");
+    formData.set("imageId", imageId);
+    void fetch(window.location.href, {
+      method: "POST",
+      body: formData,
+    });
   };
 
   return (
@@ -380,35 +456,28 @@ export default function AuditAssetDetails() {
       </div>
 
       {/* Images section - fixed height at bottom */}
-      <div className="h-64 shrink-0 overflow-y-auto border-t border-gray-200 px-6 py-4">
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <Paperclip className="size-5 text-gray-600" />
-            <h3 className="text-base font-semibold text-gray-900">Images</h3>
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-              {images.length}
-            </span>
-          </div>
-
-          {images.length === 0 ? (
-            <p className="text-sm text-gray-500">No images yet</p>
-          ) : (
-            <div className="grid grid-cols-3 gap-3">
-              {images.map((image) => (
-                <div
-                  key={image.id}
-                  className="overflow-hidden rounded-md border border-gray-200"
-                >
-                  <img
-                    src={image.imageUrl}
-                    alt="Asset"
-                    className="aspect-square w-full object-cover"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+      <div className="h-68 shrink-0 overflow-y-auto  border-gray-200 px-6 py-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Paperclip className="size-5 text-gray-600" />
+          <h3 className="text-base font-semibold text-gray-900">Images</h3>
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+            {localImages.length}
+          </span>
         </div>
+
+        {/* Upload section */}
+        <Form method="POST" encType="multipart/form-data">
+          <input type="hidden" name="intent" value="upload-image" />
+          <AuditImageUploadSection
+            maxCount={3}
+            inputNamePrefix="auditImage"
+            existingImages={localImages}
+            onExistingImageRemove={handleImageDeleteWithConfirm}
+          />
+          <Button type="submit" size="sm" className="mt-3">
+            Upload Images
+          </Button>
+        </Form>
       </div>
     </div>
   );
