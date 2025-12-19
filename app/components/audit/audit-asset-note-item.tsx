@@ -105,7 +105,6 @@ export function AuditAssetNoteItem({
     if (fetcher.state === "idle" && fetcher.data && fetcher.data.error) {
       // Remove failed note from local state
       onDelete?.(note.id);
-      // TODO: Show toast notification to user
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetcher.state, fetcher.data]);
@@ -117,19 +116,6 @@ export function AuditAssetNoteItem({
 
     // Optimistically remove from parent state immediately
     onDelete?.(note.id);
-
-    // If note is already saved to server, delete it from DB
-    // If note is temp (starts with "temp-"), no API call needed
-    if (!note.id.startsWith("temp-")) {
-      const formData = new FormData();
-      formData.append("intent", "delete-note");
-      formData.append("noteId", note.id);
-
-      void fetcher.submit(formData, {
-        method: "POST",
-      });
-    }
-    // If note is temp and fetcher is still submitting, the new submit will abort it
   };
 
   return (
@@ -147,17 +133,38 @@ export function AuditAssetNoteItem({
             </>
           </div>
         </div>
-        {onDelete && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="text-gray-400 hover:text-red-600"
-            onClick={handleDelete}
-          >
-            <Trash className="size-4" />
-          </Button>
-        )}
+        {onDelete &&
+          // Only show delete form for real notes (not temp)
+          (!note.id.startsWith("temp-") ? (
+            <fetcher.Form
+              method="POST"
+              onSubmit={(e) => {
+                if (!confirm("Are you sure you want to delete this note?")) {
+                  e.preventDefault();
+                  return;
+                }
+                // Only do optimistic removal if user confirmed (didn't preventDefault)
+                onDelete?.(note.id);
+              }}
+            >
+              <input type="hidden" name="intent" value="delete-note" />
+              <input type="hidden" name="noteId" value={note.id} />
+              <Button type="submit" variant="tertiary">
+                <Trash className="size-4" />
+              </Button>
+            </fetcher.Form>
+          ) : (
+            // Temp notes just remove from state, no server call
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="text-gray-400 hover:text-red-600"
+              onClick={handleDelete}
+            >
+              <Trash className="size-4" />
+            </Button>
+          ))}
       </div>
     </div>
   );

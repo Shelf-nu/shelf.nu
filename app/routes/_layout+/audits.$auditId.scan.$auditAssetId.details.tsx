@@ -1,5 +1,5 @@
 import type React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MessageSquare, Paperclip } from "lucide-react";
 import type {
   LoaderFunctionArgs,
@@ -125,6 +125,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Force revalidation even when actions return errors (4xx/5xx status codes).
+ * By default, React Router only revalidates on successful responses (< 400).
+ * We need this so failed deletes refresh the UI and optimistic removals get undone.
+ * @TODO this needs to be investigated as it might be a bug
+ */
+export function shouldRevalidate() {
+  return true;
+}
+
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
   const { auditId, auditAssetId } = getParams(
@@ -184,13 +194,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "delete-note") {
-      throw new ShelfError({
-        cause: null,
-        message: "Note ID is required",
-        additionalData: { auditAssetId },
-        label: "Audit",
-        status: 400,
-      });
       const noteId = formData.get("noteId") as string;
 
       if (!noteId) {
@@ -234,23 +237,30 @@ export default function AuditAssetDetails() {
    * Local state for notes - starts with server notes, gets temp notes added optimistically.
    * Each AuditAssetNoteItem handles its own server submission with unique fetcher.
    */
-  const [localNotes, setLocalNotes] = useState<NoteData[]>(() =>
-    initialNotes.map((note) => ({
-      id: note.id,
-      content: note.content,
-      createdAt: note.createdAt,
-      userId: note.userId ?? "",
-      user: {
-        id: note.user?.id ?? "",
-        name:
-          `${note.user?.firstName || ""} ${note.user?.lastName || ""}`.trim() ||
-          note.user?.email ||
-          "",
-        img: note.user?.profilePicture ?? null,
-      },
-      needsServerSync: false,
-    }))
-  );
+  const [localNotes, setLocalNotes] = useState<NoteData[]>([]);
+
+  // Sync local state with server data when revalidation happens
+  useEffect(() => {
+    setLocalNotes(
+      initialNotes.map((note) => ({
+        id: note.id,
+        content: note.content,
+        createdAt: note.createdAt,
+        userId: note.userId ?? "",
+        user: {
+          id: note.user?.id ?? "",
+          name:
+            `${note.user?.firstName || ""} ${
+              note.user?.lastName || ""
+            }`.trim() ||
+            note.user?.email ||
+            "",
+          img: note.user?.profilePicture ?? null,
+        },
+        needsServerSync: false,
+      }))
+    );
+  }, [initialNotes]);
 
   const handleNoteFormAction = (formData: FormData) => {
     const content = formData.get("content") as string;
@@ -314,7 +324,7 @@ export default function AuditAssetDetails() {
   return (
     <div className="flex h-full flex-col">
       {/* Add note form */}
-      <div className="flex-shrink-0 border-b border-gray-200 px-6 py-4">
+      <div className="shrink-0 border-b border-gray-200 px-6 py-4">
         <Form
           ref={formRef}
           onSubmit={(e) => {
@@ -370,7 +380,7 @@ export default function AuditAssetDetails() {
       </div>
 
       {/* Images section - fixed height at bottom */}
-      <div className="h-64 flex-shrink-0 overflow-y-auto border-t border-gray-200 px-6 py-4">
+      <div className="h-64 shrink-0 overflow-y-auto border-t border-gray-200 px-6 py-4">
         <div>
           <div className="mb-3 flex items-center gap-2">
             <Paperclip className="size-5 text-gray-600" />
