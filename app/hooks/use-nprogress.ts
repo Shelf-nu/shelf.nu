@@ -19,7 +19,8 @@ export function useNprogress() {
     (fetcher) =>
       !excludeFetchers.includes(fetcher.key) &&
       !fetcher.key.startsWith("toggle-star-") &&
-      !fetcher.key.startsWith("delete-preset-")
+      !fetcher.key.startsWith("delete-preset-") &&
+      !fetcher.key.startsWith("mark-update-read-")
   );
 
   const state = useMemo<"idle" | "loading">(

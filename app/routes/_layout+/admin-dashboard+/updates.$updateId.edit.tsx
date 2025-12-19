@@ -68,6 +68,11 @@ export const action = async ({
         title: z.string().min(1, "Title is required"),
         content: z.string().min(1, "Content is required"),
         url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+        imageUrl: z
+          .string()
+          .url("Must be a valid URL")
+          .optional()
+          .or(z.literal("")),
         publishDate: z.string().transform((str) => new Date(str)),
         status: z.nativeEnum(UpdateStatus),
       })
@@ -77,6 +82,7 @@ export const action = async ({
       id: updateId,
       ...payload,
       url: payload.url || undefined, // Convert empty string to undefined
+      imageUrl: payload.imageUrl || undefined, // Convert empty string to undefined
       targetRoles,
     });
 
@@ -98,6 +104,7 @@ export default function EditUpdate() {
         title={update.title}
         content={update.content}
         url={update.url}
+        imageUrl={update.imageUrl}
         publishDate={new Date(update.publishDate)}
         status={update.status}
         targetRoles={update.targetRoles}
