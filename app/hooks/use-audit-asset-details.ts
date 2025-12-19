@@ -7,12 +7,12 @@ import useApiQuery from "~/hooks/use-api-query";
 /**
  * @deprecated This hook is being refactored to use a simpler pattern.
  * See AuditAssetDetailsDialog component for the new implementation.
- * 
+ *
  * The new approach:
  * - Uses local state for optimistic UI (no useOptimistic hook)
  * - Each note component has its own fetcher with unique key
  * - Notes/images pre-fetched in scan route loader
- * 
+ *
  * TODO: Remove this file once refactor is complete and tested.
  */
 
@@ -242,13 +242,13 @@ export function useAuditAssetDetails({
 
   /**
    * Handles note form submission with optimistic UI update.
-   * 
+   *
    * Following React's useOptimistic pattern:
    * 1. Add optimistic note immediately to UI
    * 2. Reset form
    * 3. Submit to server in a transition (prevents revalidation)
    * 4. When server responds, real note replaces optimistic one
-   * 
+   *
    * @param formData - Form data containing note content
    */
   const handleNoteFormAction = (formData: FormData) => {
@@ -279,10 +279,13 @@ export function useAuditAssetDetails({
     startTransition(async () => {
       // Create a unique fetcher for this submission to prevent abort signals
       // Using native fetch to avoid abort signal conflicts
-      await fetch(`/api/audits/${auditSessionId}/assets/${auditAssetId}/notes`, {
-        method: "POST",
-        body: formData,
-      });
+      await fetch(
+        `/api/audits/${auditSessionId}/assets/${auditAssetId}/notes`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
       // Refetch notes to update UI with server response
       refetchNotes();
     });
