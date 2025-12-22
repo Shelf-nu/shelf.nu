@@ -198,15 +198,13 @@ export function AuditImageUploadSection({
       <div id="audit-images" className="flex flex-wrap gap-2">
         {/* Display existing server images */}
         {existingImages.map((image) => (
-          <div
-            key={image.id}
-            className="group relative size-24 shrink-0"
-          >
+          <div key={image.id} className="group relative size-24 shrink-0">
             <ImageWithPreview
               imageUrl={image.imageUrl}
               thumbnailUrl={image.thumbnailUrl || image.imageUrl}
               alt="Audit image"
               withPreview
+              disablePortal
               className="size-24 rounded-lg border-2 border-gray-200"
               images={existingImages.map((img) => ({
                 id: img.id,

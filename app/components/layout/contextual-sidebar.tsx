@@ -37,7 +37,13 @@ export default function ContextualSidebar({
       if (open) {
         setOpen(true);
       } else {
-        void navigate(prevRoute.pathname);
+        // Check if there's a nested dialog open before closing
+        const dialogBackdrops = document.querySelectorAll(".dialog-backdrop");
+
+        // Only navigate away if there's no nested dialog open
+        if (!dialogBackdrops) {
+          void navigate(prevRoute.pathname);
+        }
       }
     },
     [navigate, prevRoute.pathname]

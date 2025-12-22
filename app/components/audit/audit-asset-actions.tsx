@@ -102,7 +102,10 @@ export function AuditAssetActions({
         size="xs"
         disabled={isUploading}
         onClick={handleQuickImageUpload}
-        className={tw("relative size-8 p-0", hasError && "border border-error-500")}
+        className={tw(
+          "relative size-8 p-0",
+          hasError && "border border-error-500"
+        )}
         title="Quick image upload"
       >
         {isUploading ? (

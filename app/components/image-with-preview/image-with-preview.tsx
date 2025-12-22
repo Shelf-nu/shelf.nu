@@ -24,6 +24,8 @@ type ImageWithPreviewProps = {
   images?: ImageItem[];
   currentImageId?: string;
   onNavigate?: (imageId: string) => void;
+  // Set to true when rendering inside another dialog/modal to avoid portal conflicts
+  disablePortal?: boolean;
 } & HTMLProps<HTMLImageElement>;
 
 export default function ImageWithPreview({
@@ -36,6 +38,7 @@ export default function ImageWithPreview({
   images,
   currentImageId,
   onNavigate,
+  disablePortal = false,
   ...restProps
 }: ImageWithPreviewProps) {
   const [isLoading, setIsLoading] = useState(true);
@@ -159,77 +162,85 @@ export default function ImageWithPreview({
         />
       </div>
 
-      {withPreview && (
-        <DialogPortal>
-          <Dialog
-            open={open}
-            onClose={handleCloseDialog}
-            className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
-            title={
-              <div>
-                <div className="text-lg font-semibold text-gray-900">
-                  {currentImage.alt}
+      {withPreview &&
+        (() => {
+          const dialogContent = (
+            <Dialog
+              open={open}
+              onClose={handleCloseDialog}
+              className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+              wrapperClassName="z-[100]"
+              title={
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {currentImage.alt}
+                  </div>
+                  <div className="text-sm font-normal text-gray-600">
+                    {hasNavigation
+                      ? `${currentIndex + 1} of ${images!.length} image(s)`
+                      : "1 image(s)"}
+                  </div>
                 </div>
-                <div className="text-sm font-normal text-gray-600">
-                  {hasNavigation
-                    ? `${currentIndex + 1} of ${images!.length} image(s)`
-                    : "1 image(s)"}
-                </div>
-              </div>
-            }
-          >
-            <div
-              ref={handleDialogContentMount}
-              className="relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
-              role="dialog"
-              tabIndex={-1}
-              onKeyDown={handleKeyDown}
+              }
             >
-              <div className="relative flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
-                {hasNavigation && canGoPrevious && (
-                  <button
-                    type="button"
-                    onClick={handlePrevious}
-                    className="absolute left-4 top-1/2 z-10 -translate-y-1/2 text-gray-900 transition-all hover:text-gray-600"
-                    aria-label="Previous"
-                  >
-                    <ChevronRight className="size-8 rotate-180" />
-                  </button>
-                )}
+              <div
+                ref={handleDialogContentMount}
+                className="relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
+                role="dialog"
+                tabIndex={-1}
+                onKeyDown={handleKeyDown}
+              >
+                <div className="relative flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+                  {hasNavigation && canGoPrevious && (
+                    <button
+                      type="button"
+                      onClick={handlePrevious}
+                      className="absolute left-4 top-1/2 z-10 -translate-y-1/2 text-gray-900 transition-all hover:text-gray-600"
+                      aria-label="Previous"
+                    >
+                      <ChevronRight className="size-8 rotate-180" />
+                    </button>
+                  )}
 
-                <img
-                  src={currentImage.imageUrl}
-                  className="max-h-full"
-                  alt={currentImage.alt}
-                />
+                  <img
+                    src={currentImage.imageUrl}
+                    className="max-h-full"
+                    alt={currentImage.alt}
+                  />
 
-                {hasNavigation && canGoNext && (
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    className="absolute right-4 top-1/2 z-10 -translate-y-1/2 text-gray-900 transition-all hover:text-gray-600"
-                    aria-label="Next"
-                  >
-                    <ChevronRight className="size-8" />
-                  </button>
-                )}
-              </div>
+                  {hasNavigation && canGoNext && (
+                    <button
+                      type="button"
+                      onClick={handleNext}
+                      className="absolute right-4 top-1/2 z-10 -translate-y-1/2 text-gray-900 transition-all hover:text-gray-600"
+                      aria-label="Next"
+                    >
+                      <ChevronRight className="size-8" />
+                    </button>
+                  )}
+                </div>
 
-              <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
-                {editImageUrl ? (
-                  <Button to={editImageUrl} variant="secondary">
-                    Edit image(s)
+                <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
+                  {editImageUrl ? (
+                    <Button to={editImageUrl} variant="secondary">
+                      Edit image(s)
+                    </Button>
+                  ) : null}
+
+                  <Button variant="secondary" onClick={handleCloseDialog}>
+                    Close
                   </Button>
-                ) : null}
-
-                <Button variant="secondary" onClick={handleCloseDialog}>
-                  Close
-                </Button>
+                </div>
               </div>
-            </div>
-          </Dialog>
-        </DialogPortal>
-      )}
+            </Dialog>
+          );
+
+          return disablePortal ? (
+            dialogContent
+          ) : (
+            <DialogPortal>{dialogContent}</DialogPortal>
+          );
+        })()}
     </>
   );
 }
