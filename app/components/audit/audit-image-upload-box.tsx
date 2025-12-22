@@ -2,9 +2,13 @@ import type React from "react";
 import { useRef, useState, useEffect, useCallback } from "react";
 import { useAtom } from "jotai";
 import { Plus, X } from "lucide-react";
-import { auditImageValidateFileAtom, fileErrorAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { Spinner } from "~/components/shared/spinner";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { sanitizeFile } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
+import { verifyAccept } from "~/utils/verify-file-accept";
 
 type AuditImageUploadBoxProps = {
   /** Callback when an image is selected */
@@ -57,8 +61,7 @@ export function AuditImageUploadBox({
   disabled = false,
 }: AuditImageUploadBoxProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [fileError] = useAtom(fileErrorAtom);
-  const [, validateFile] = useAtom(auditImageValidateFileAtom);
+  const [, setFileError] = useAtom(fileErrorAtom);
 
   const canAddMore = currentCount < maxCount;
 
@@ -69,15 +72,53 @@ export function AuditImageUploadBox({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    validateFile(e);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    const file = e.target.files?.[0];
-    if (file && !fileError) {
-      const previewUrl = URL.createObjectURL(file);
-      onImageSelect(file, previewUrl);
-      // Reset input so the same file can be selected again if needed
+    // Clear any previous errors
+    setFileError(undefined);
+
+    // Check if adding these files would exceed the limit
+    const filesArray = Array.from(files);
+    const remainingSlots = maxCount - currentCount;
+
+    if (filesArray.length > remainingSlots) {
+      setFileError(
+        `You can only upload ${remainingSlots} more image${
+          remainingSlots === 1 ? "" : "s"
+        }`
+      );
       e.target.value = "";
+      return;
     }
+
+    // Validate and process each file
+    filesArray.forEach((file) => {
+      // Validate file type
+      const allowedType = verifyAccept(
+        file.type,
+        "image/png,image/jpeg,image/jpg"
+      );
+      if (!allowedType) {
+        setFileError("Allowed file types are: PNG, JPG or JPEG");
+        return;
+      }
+
+      // Validate file size (4MB limit)
+      const allowedSize = file.size < DEFAULT_MAX_IMAGE_UPLOAD_SIZE;
+      if (!allowedSize) {
+        setFileError("Max file size is 4MB");
+        return;
+      }
+
+      // Sanitize filename and create preview
+      const sanitizedFile = sanitizeFile(file);
+      const previewUrl = URL.createObjectURL(sanitizedFile);
+      onImageSelect(sanitizedFile, previewUrl);
+    });
+
+    // Reset input so the same file can be selected again if needed
+    e.target.value = "";
   };
 
   return (
@@ -96,6 +137,7 @@ export function AuditImageUploadBox({
         ref={inputRef}
         type="file"
         accept="image/png,image/jpeg,image/jpg"
+        multiple
         onChange={handleFileChange}
         className="hidden"
       />
@@ -119,6 +161,10 @@ type AuditImageUploadSectionProps = {
   }>;
   /** Callback when an existing image is removed */
   onExistingImageRemove?: (imageId: string) => void;
+  /** Callback when new images are added (for auto-submit) */
+  onImagesAdded?: () => void;
+  /** Indicates if upload is currently in progress */
+  isUploading?: boolean;
 };
 
 /**
@@ -130,19 +176,47 @@ export function AuditImageUploadSection({
   inputNamePrefix = "auditImage",
   existingImages = [],
   onExistingImageRemove,
+  onImagesAdded,
+  isUploading = false,
 }: AuditImageUploadSectionProps) {
   const [images, setImages] = useState<
     Array<{ file: File; previewUrl: string; id: string }>
   >([]);
   const [fileError] = useAtom(fileErrorAtom);
   const fileInputsRef = useRef<Map<string, HTMLInputElement>>(new Map());
+  const previousIsUploadingRef = useRef(isUploading);
+
+  // Clear preview images when upload completes successfully
+  useEffect(() => {
+    // Detect when upload transitions from in-progress to complete
+    const uploadJustCompleted = previousIsUploadingRef.current && !isUploading;
+
+    if (uploadJustCompleted && images.length > 0) {
+      // Clean up blob URLs
+      images.forEach((image) => {
+        URL.revokeObjectURL(image.previewUrl);
+      });
+      setImages([]);
+      fileInputsRef.current.clear();
+    }
+
+    previousIsUploadingRef.current = isUploading;
+  }, [isUploading, images]);
 
   // Total count includes both existing and new images
   const totalCount = existingImages.length + images.length;
 
   const handleImageSelect = (file: File, previewUrl: string) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setImages((prev) => [...prev, { file, previewUrl, id }]);
+    setImages((prev) => {
+      const newImages = [...prev, { file, previewUrl, id }];
+      // Trigger auto-submit callback after state update
+      if (onImagesAdded) {
+        // Use setTimeout to ensure state is updated before form submission
+        setTimeout(() => onImagesAdded(), 0);
+      }
+      return newImages;
+    });
   };
 
   const handleImageRemove = (id: string) => {
@@ -194,6 +268,12 @@ export function AuditImageUploadSection({
       <p className="text-sm text-gray-500">
         Add up to {maxCount} photos to document this audit completion.
       </p>
+      {isUploading && (
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <Spinner className="size-4" />
+          Uploading images...
+        </div>
+      )}
 
       <div id="audit-images" className="flex flex-wrap gap-2">
         {/* Display existing server images */}

@@ -5,8 +5,9 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
   MetaFunction,
+ShouldRevalidateFunctionArgs,
 } from "react-router";
-import { data, useLoaderData, Form } from "react-router";
+import { data, useLoaderData, Form, useFetcher } from "react-router";
 import { z } from "zod";
 import {
   AuditAssetNoteItem,
@@ -136,13 +137,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 /**
- * Force revalidation even when actions return errors (4xx/5xx status codes).
- * By default, React Router only revalidates on successful responses (< 400).
- * We need this so failed deletes refresh the UI and optimistic removals get undone.
- * @TODO this needs to be investigated as it might be a bug
+ * Revalidate on errors to refresh UI after failed operations.
+ * Skip revalidation on successful image uploads to prevent flashing.
  */
-export function shouldRevalidate() {
-  return true;
+export function shouldRevalidate({
+  formAction,
+  actionStatus,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  if (
+    formAction?.includes("intent=upload-image") &&
+    actionStatus === 200
+  ) {
+    return false;
+  }
+  return defaultShouldRevalidate;
 }
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -163,7 +172,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
+    const formData = await request.clone().formData();
     const intent = formData.get("intent") as string;
 
     if (intent === "create-note") {
@@ -225,15 +234,47 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "upload-image") {
-      const image = await uploadAuditImage({
-        request,
-        auditSessionId: auditId,
-        organizationId,
-        uploadedById: userId,
-        auditAssetId: auditAssetId,
-      });
+      // Get all files from the form data (already parsed above via clone)
+      const fileEntries = formData.getAll("auditImage");
+      
+      // Filter to only actual File objects
+      const files = fileEntries.filter((entry): entry is File => entry instanceof File);
 
-      return payload({ image });
+      if (files.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          message: "No image files found in the request",
+          additionalData: { auditAssetId },
+          label: "Audit Image",
+          status: 400,
+        });
+      }
+
+      // Upload each file sequentially
+      const uploadedImages = [];
+      for (const file of files) {
+        // Create a new FormData with single file
+        const singleFileFormData = new FormData();
+        singleFileFormData.set("image", file);
+
+        // Create a new Request with this FormData
+        const singleFileRequest = new Request(request.url, {
+          method: "POST",
+          body: singleFileFormData,
+        });
+
+        const image = await uploadAuditImage({
+          request: singleFileRequest,
+          auditSessionId: auditId,
+          organizationId,
+          uploadedById: userId,
+          auditAssetId: auditAssetId,
+        });
+        
+        uploadedImages.push(image);
+      }
+
+      return payload({ images: uploadedImages });
     }
 
     if (intent === "delete-image") {
@@ -274,6 +315,19 @@ export default function AuditAssetDetails() {
   const { notes: initialNotes, images } = useLoaderData<typeof loader>();
   const user = useUserData();
   const formRef = useRef<HTMLFormElement>(null);
+  const imageFormRef = useRef<HTMLFormElement>(null);
+
+  const imageUploadFetcher = useFetcher<typeof action>();
+
+  const [isUploadInProgress, setIsUploadInProgress] = useState(false);
+
+  useEffect(() => {
+    if (imageUploadFetcher.state === "submitting" || imageUploadFetcher.state === "loading") {
+      setIsUploadInProgress(true);
+    } else if (imageUploadFetcher.state === "idle") {
+      setIsUploadInProgress(false);
+    }
+  }, [imageUploadFetcher.state]);
 
   /**
    * Local state for notes - starts with server notes, gets temp notes added optimistically.
@@ -305,10 +359,38 @@ export default function AuditAssetDetails() {
     );
   }, [initialNotes]);
 
-  // Sync local images with server data when revalidation happens
+  // Sync local images with server data when loader runs
   useEffect(() => {
     setLocalImages(images);
   }, [images]);
+
+  // Handle successful image upload from fetcher
+  useEffect(() => {
+    if (imageUploadFetcher.state === "idle" && imageUploadFetcher.data) {
+      const data = imageUploadFetcher.data as any;
+      if (data.images && Array.isArray(data.images)) {
+        // Add newly uploaded images to local state, avoiding duplicates
+        setLocalImages((prev) => {
+          const existingIds = new Set(prev.map((img) => img.id));
+          const newImages = data.images.filter((img: any) => !existingIds.has(img.id));
+          return [...newImages, ...prev];
+        });
+      }
+    }
+  }, [imageUploadFetcher.state, imageUploadFetcher.data]);
+
+ /**
+  * Auto-submit the image upload form when new images are added
+  */
+ const handleImagesAdded = () => {
+    if (imageFormRef.current) {
+      const formData = new FormData(imageFormRef.current);
+      void imageUploadFetcher.submit(formData, {
+        method: "POST",
+        encType: "multipart/form-data",
+      });
+    }
+  };
 
   const handleNoteFormAction = (formData: FormData) => {
     const content = formData.get("content") as string;
@@ -466,18 +548,18 @@ export default function AuditAssetDetails() {
         </div>
 
         {/* Upload section */}
-        <Form method="POST" encType="multipart/form-data">
+        <imageUploadFetcher.Form method="post" encType="multipart/form-data" ref={imageFormRef}>
           <input type="hidden" name="intent" value="upload-image" />
           <AuditImageUploadSection
             maxCount={3}
             inputNamePrefix="auditImage"
             existingImages={localImages}
             onExistingImageRemove={handleImageDeleteWithConfirm}
+            disabled={isUploadInProgress}
+            isUploading={isUploadInProgress}
+            onImagesAdded={handleImagesAdded}
           />
-          <Button type="submit" size="sm" className="mt-3">
-            Upload Images
-          </Button>
-        </Form>
+        </imageUploadFetcher.Form>
       </div>
     </div>
   );
