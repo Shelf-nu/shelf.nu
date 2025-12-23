@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Trash } from "lucide-react";
 import { useFetcher } from "react-router";
+import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import type { action } from "~/routes/_layout+/audits.$auditId.scan.$auditAssetId.details";
@@ -12,6 +13,7 @@ export type NoteData = {
   content: string;
   createdAt: string | Date;
   userId: string;
+  type?: "COMMENT" | "UPDATE";
   user: {
     id: string;
     name: string;
@@ -57,6 +59,9 @@ export function AuditAssetNoteItem({
     key: `audit-asset-note-${note.id}`,
   });
 
+  // Only allow deletion of COMMENT notes (manual notes), not UPDATE notes (auto-generated)
+  const canDelete = note.type === "COMMENT" || note.type === undefined;
+
   /**
    * Auto-submit note to server when component mounts with needsServerSync=true.
    * This happens in the background without affecting the UI.
@@ -92,6 +97,7 @@ export function AuditAssetNoteItem({
         content: fetcher.data.note.content,
         createdAt: fetcher.data.note.createdAt,
         userId: fetcher.data.note.userId ?? "",
+        type: fetcher.data.note.type,
         user: {
           id: fetcher.data.note.user.id,
           name: `${fetcher.data.note.user.firstName} ${fetcher.data.note.user.lastName}`,
@@ -122,8 +128,10 @@ export function AuditAssetNoteItem({
     <div className={tw("rounded-md border border-gray-200 bg-gray-50 p-3")}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
-          <p className="text-sm text-gray-900">{note.content}</p>
-          <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+          <div className="text-sm text-gray-900">
+            <MarkdownViewer content={note.content} disablePortal={true} />
+          </div>
+          <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
             <>
               <span>
                 <UserBadge name={note.user.name} img={note.user.img} />
@@ -134,6 +142,7 @@ export function AuditAssetNoteItem({
           </div>
         </div>
         {onDelete &&
+          canDelete &&
           // Only show delete form for real notes (not temp)
           (!note.id.startsWith("temp-") ? (
             <fetcher.Form

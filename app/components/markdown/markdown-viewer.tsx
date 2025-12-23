@@ -36,6 +36,7 @@ interface Props {
   components?: Record<string, ComponentType>;
   className?: string;
   pre?: string;
+  disablePortal?: boolean;
 }
 
 // Default components map including our custom components
@@ -57,11 +58,26 @@ export const MarkdownViewer = ({
   components = {},
   pre,
   className,
+  disablePortal,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
+  // Memoize the wrapped AuditImagesComponent to prevent recreation
+  const WrappedAuditImages = React.useMemo(() => {
+    if (!disablePortal) return AuditImagesComponent;
+    
+    // Create a stable wrapper that injects disablePortal
+    const Wrapped = (props: any) => <AuditImagesComponent {...props} disablePortal={true} />;
+    Wrapped.displayName = 'WrappedAuditImagesComponent';
+    return Wrapped as any;
+  }, [disablePortal]);
+
   // Merge custom components with defaults
-  const allComponents = { ...defaultComponents, ...components };
+  const allComponents = React.useMemo(() => ({
+      ...defaultComponents,
+      ...components,
+      AuditImagesComponent: WrappedAuditImages,
+    }), [components, WrappedAuditImages]);
 
   // Parse content if it's a string, otherwise use as-is
   const parsedContent = React.useMemo(() => {

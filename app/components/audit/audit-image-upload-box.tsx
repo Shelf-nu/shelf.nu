@@ -13,6 +13,8 @@ import { verifyAccept } from "~/utils/verify-file-accept";
 type AuditImageUploadBoxProps = {
   /** Callback when an image is selected */
   onImageSelect: (file: File, previewUrl: string) => void;
+  /** Callback after all selected files are processed */
+  onBatchComplete?: () => void;
   /** Current number of uploaded images */
   currentCount: number;
   /** Maximum number of images allowed */
@@ -56,6 +58,7 @@ function UploadedImageBox({
  */
 export function AuditImageUploadBox({
   onImageSelect,
+  onBatchComplete,
   currentCount,
   maxCount,
   disabled = false,
@@ -116,6 +119,11 @@ export function AuditImageUploadBox({
       const previewUrl = URL.createObjectURL(sanitizedFile);
       onImageSelect(sanitizedFile, previewUrl);
     });
+
+    // Call batch complete after all files are processed
+    if (onBatchComplete && filesArray.length > 0) {
+      onBatchComplete();
+    }
 
     // Reset input so the same file can be selected again if needed
     e.target.value = "";
@@ -208,15 +216,14 @@ export function AuditImageUploadSection({
 
   const handleImageSelect = (file: File, previewUrl: string) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setImages((prev) => {
-      const newImages = [...prev, { file, previewUrl, id }];
-      // Trigger auto-submit callback after state update
-      if (onImagesAdded) {
-        // Use setTimeout to ensure state is updated before form submission
-        setTimeout(() => onImagesAdded(), 0);
-      }
-      return newImages;
-    });
+    setImages((prev) => [...prev, { file, previewUrl, id }]);
+  };
+
+  const handleBatchComplete = () => {
+    // Trigger auto-submit after all files are added to state
+    if (onImagesAdded) {
+      setTimeout(() => onImagesAdded(), 0);
+    }
   };
 
   const handleImageRemove = (id: string) => {
@@ -318,6 +325,7 @@ export function AuditImageUploadSection({
         {totalCount < maxCount && (
           <AuditImageUploadBox
             onImageSelect={handleImageSelect}
+            onBatchComplete={handleBatchComplete}
             currentCount={totalCount}
             maxCount={maxCount}
             disabled={disabled}

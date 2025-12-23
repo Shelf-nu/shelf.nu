@@ -5,6 +5,7 @@ import {
   createAuditCreationNote,
   createAuditStartedNote,
   createAuditCompletedNote,
+  createAuditAssetImagesAddedNote,
 } from "./helpers.server";
 
 // Mock the markdoc wrappers
@@ -763,6 +764,187 @@ describe("audit helpers", () => {
       expect(createCall.data.content).toContain(
         '{% audit_images count=5 ids="abc-123,def-456,ghi-789,jkl-012,mno-345" /%}'
       );
+    });
+  });
+
+  describe("createAuditAssetImagesAddedNote", () => {
+    let mockTx: any;
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findUnique: vi.fn(),
+        },
+        auditAsset: {
+          findUnique: vi.fn(),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("creates a note with single image", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      });
+
+      mockTx.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-1",
+        asset: {
+          id: "asset-1",
+          title: "Camera Equipment",
+        },
+      });
+
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: "audit-1",
+        auditAssetId: "audit-asset-1",
+        userId: "user-1",
+        imageIds: ["img-1"],
+        tx: mockTx,
+      });
+
+      expect(mockTx.user.findUnique).toHaveBeenCalledWith({
+        where: { id: "user-1" },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
+
+      expect(mockTx.auditAsset.findUnique).toHaveBeenCalledWith({
+        where: { id: "audit-asset-1" },
+        include: {
+          asset: {
+            select: { id: true, title: true },
+          },
+        },
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-1",
+          auditAssetId: "audit-asset-1",
+          userId: "user-1",
+          type: "UPDATE",
+          content: expect.any(String),
+        },
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% audit_images count=1 ids="img-1" /%}'
+      );
+      expect(createCall.data.content).toContain('text="Camera Equipment"');
+    });
+
+    it("creates a note with multiple images", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-2",
+        firstName: "Jane",
+        lastName: "Smith",
+      });
+
+      mockTx.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-2",
+        asset: {
+          id: "asset-2",
+          title: "Laptop",
+        },
+      });
+
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: "audit-2",
+        auditAssetId: "audit-asset-2",
+        userId: "user-2",
+        imageIds: ["img-1", "img-2", "img-3"],
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-2",
+          auditAssetId: "audit-asset-2",
+          userId: "user-2",
+          type: "UPDATE",
+          content: expect.any(String),
+        },
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% audit_images count=3 ids="img-1,img-2,img-3" /%}'
+      );
+      expect(createCall.data.content).toContain('text="Laptop"');
+    });
+
+    it("includes asset link in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-3",
+        firstName: "Alice",
+        lastName: "Johnson",
+      });
+
+      mockTx.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-3",
+        asset: {
+          id: "asset-3",
+          title: "Server Rack",
+        },
+      });
+
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: "audit-3",
+        auditAssetId: "audit-asset-3",
+        userId: "user-3",
+        imageIds: ["img-1", "img-2"],
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain('to="/assets/asset-3"');
+      expect(createCall.data.content).toContain('text="Server Rack"');
+    });
+
+    it("skips note creation when user not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue(null);
+      mockTx.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-4",
+        asset: { id: "asset-4", title: "Test Asset" },
+      });
+
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: "audit-4",
+        auditAssetId: "audit-asset-4",
+        userId: "nonexistent-user",
+        imageIds: ["img-1"],
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+
+    it("skips note creation when asset not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-5",
+        firstName: "Bob",
+        lastName: "Williams",
+      });
+      mockTx.auditAsset.findUnique.mockResolvedValue(null);
+
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: "audit-5",
+        auditAssetId: "nonexistent-asset",
+        userId: "user-5",
+        imageIds: ["img-1"],
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,11 +1,10 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquare, Paperclip } from "lucide-react";
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
   MetaFunction,
-  ShouldRevalidateFunctionArgs,
 } from "react-router";
 import { data, useLoaderData, Form, useFetcher } from "react-router";
 import { z } from "zod";
@@ -17,6 +16,7 @@ import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-b
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
+import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import {
   uploadAuditImage,
   deleteAuditImage,
@@ -86,7 +86,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         auditSessionId: auditId,
         auditAssetId: auditAssetId,
       },
-      include: {
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        userId: true,
+        type: true,
         user: {
           select: {
             id: true,
@@ -134,21 +139,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const reason = makeShelfError(cause, { userId, auditId, auditAssetId });
     throw data(error(reason), { status: reason.status });
   }
-}
-
-/**
- * Revalidate on errors to refresh UI after failed operations.
- * Skip revalidation on successful image uploads to prevent flashing.
- */
-export function shouldRevalidate({
-  formAction,
-  actionStatus,
-  defaultShouldRevalidate,
-}: ShouldRevalidateFunctionArgs) {
-  if (formAction?.includes("intent=upload-image") && actionStatus === 200) {
-    return false;
-  }
-  return defaultShouldRevalidate;
 }
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -221,6 +211,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
+      // Prevent deletion of auto-generated notes (UPDATE type)
+      const noteToDelete = await db.auditNote.findUnique({
+        where: { id: noteId },
+        select: { type: true },
+      });
+
+      if (noteToDelete?.type === "UPDATE") {
+        throw new ShelfError({
+          cause: null,
+          message: "Cannot delete auto-generated notes",
+          additionalData: { noteId },
+          label: "Audit",
+          status: 403,
+        });
+      }
+
       await db.auditNote.delete({
         where: {
           id: noteId,
@@ -250,7 +256,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       // Upload each file sequentially
-      const uploadedImages = [];
+      const uploadedImages: Array<{ id: string }> = [];
       for (const file of files) {
         // Create a new FormData with single file
         const singleFileFormData = new FormData();
@@ -270,11 +276,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditAssetId: auditAssetId,
         });
 
-        uploadedImages.push(image);
-      }
-
-      return payload({ images: uploadedImages });
+      uploadedImages.push(image);
     }
+
+    // Create a note in a transaction to track the image uploads
+    await db.$transaction(async (tx) => {
+      const imageIds = uploadedImages.map((img) => img.id);
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: auditId,
+        auditAssetId: auditAssetId,
+        userId,
+        imageIds,
+        tx,
+      });
+    });
+
+    return payload({ images: uploadedImages });
+  }
 
     if (intent === "delete-image") {
       const imageId = formData.get("imageId") as string;
@@ -346,6 +364,7 @@ export default function AuditAssetDetails() {
         content: note.content,
         createdAt: note.createdAt,
         userId: note.userId ?? "",
+        type: note.type,
         user: {
           id: note.user?.id ?? "",
           name:
@@ -426,7 +445,7 @@ export default function AuditAssetDetails() {
    * Called by AuditAssetNoteItem when server returns real note data.
    * Replaces temp note with real note in local state.
    */
-  const handleServerSync = (realNote: NoteData) => {
+  const handleServerSync = useCallback((realNote: NoteData) => {
     setLocalNotes((prev) =>
       prev.map((note) =>
         // Replace temp note with real note
@@ -435,15 +454,15 @@ export default function AuditAssetDetails() {
           : note
       )
     );
-  };
+  }, []);
 
   /**
    * Called by AuditAssetNoteItem when delete is clicked.
    * Removes note from local state immediately (optimistic).
    */
-  const handleNoteDelete = (noteId: string) => {
+  const handleNoteDelete = useCallback((noteId: string) => {
     setLocalNotes((prev) => prev.filter((note) => note.id !== noteId));
-  };
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

@@ -89,7 +89,7 @@ const Comment = ({
             <span className="text-gray-600">on</span>{" "}
             <Button
               to={`${assetLinkBase}/${note.auditAsset.id}/details`}
-              variant="inherit"
+              variant="link-gray"
             >
               {note.auditAsset.asset.title}
             </Button>

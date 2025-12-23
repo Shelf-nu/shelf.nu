@@ -270,3 +270,70 @@ export async function createAuditUpdateNote({
     },
   });
 }
+
+/**
+ * Creates an automatic note when images are added to a specific audit asset.
+ * This note includes an embedded preview of the uploaded images.
+ */
+export async function createAuditAssetImagesAddedNote({
+  auditSessionId,
+  auditAssetId,
+  userId,
+  imageIds,
+  tx,
+}: {
+  auditSessionId: string;
+  auditAssetId: string;
+  userId: string;
+  imageIds: string[];
+  tx: any; // Prisma transaction client
+}) {
+  const [uploader, asset] = await Promise.all([
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+    tx.auditAsset.findUnique({
+      where: { id: auditAssetId },
+      include: {
+        asset: {
+          select: { id: true, title: true },
+        },
+      },
+    }),
+  ]);
+
+  if (!uploader || !asset) {
+    return; // Skip note creation if user or asset not found
+  }
+
+  const imageCount = imageIds.length;
+  const imageWord = imageCount === 1 ? "image" : "images";
+
+  // Build content with image preview
+  let content = `${wrapUserLinkForNote({
+    id: uploader.id,
+    firstName: uploader.firstName,
+    lastName: uploader.lastName,
+  })} added ${imageCount} ${imageWord} to ${wrapAssetsWithDataForNote(
+    asset.asset
+  )}.`;
+
+  // Add the audit_images tag for rendering
+  const imageIdsStr = imageIds.join(",");
+  content += `\n\n{% audit_images count=${imageCount} ids="${imageIdsStr}" /%}`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      auditAssetId, // Associate with specific asset
+      userId: uploader.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
