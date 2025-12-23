@@ -41,7 +41,7 @@ export const AuditImagesComponent = React.memo(
 
     // Parse expected image IDs
     const { expectedIds, expectedCount } = React.useMemo(() => {
-      const idsArray = ids.split(',').filter(Boolean);
+      const idsArray = ids.split(",").filter(Boolean);
       return { expectedIds: idsArray, expectedCount: idsArray.length };
     }, [ids]);
     // Note: expectedIds not currently used, but keeping for potential future use
@@ -64,8 +64,8 @@ export const AuditImagesComponent = React.memo(
       return (
         <div className="my-2 text-sm text-gray-500">
           {expectedCount > 0
-            ? `${expectedCount} image${expectedCount === 1 ? '' : 's'} attached`
-            : 'No images attached'}
+            ? `${expectedCount} image${expectedCount === 1 ? "" : "s"} attached`
+            : "No images attached"}
         </div>
       );
     }
@@ -107,11 +107,8 @@ export const AuditImagesComponent = React.memo(
       </div>
     );
   },
-  (prevProps, nextProps) => 
+  (prevProps, nextProps) =>
     // Only re-render if ids or disablePortal actually changed
-     (
-      prevProps.ids === nextProps.ids &&
-      prevProps.disablePortal === nextProps.disablePortal
-    )
-  
+    prevProps.ids === nextProps.ids &&
+    prevProps.disablePortal === nextProps.disablePortal
 );

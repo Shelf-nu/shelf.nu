@@ -65,19 +65,24 @@ export const MarkdownViewer = ({
   // Memoize the wrapped AuditImagesComponent to prevent recreation
   const WrappedAuditImages = React.useMemo(() => {
     if (!disablePortal) return AuditImagesComponent;
-    
+
     // Create a stable wrapper that injects disablePortal
-    const Wrapped = (props: any) => <AuditImagesComponent {...props} disablePortal={true} />;
-    Wrapped.displayName = 'WrappedAuditImagesComponent';
+    const Wrapped = (props: any) => (
+      <AuditImagesComponent {...props} disablePortal={true} />
+    );
+    Wrapped.displayName = "WrappedAuditImagesComponent";
     return Wrapped as any;
   }, [disablePortal]);
 
   // Merge custom components with defaults
-  const allComponents = React.useMemo(() => ({
+  const allComponents = React.useMemo(
+    () => ({
       ...defaultComponents,
       ...components,
       AuditImagesComponent: WrappedAuditImages,
-    }), [components, WrappedAuditImages]);
+    }),
+    [components, WrappedAuditImages]
+  );
 
   // Parse content if it's a string, otherwise use as-is
   const parsedContent = React.useMemo(() => {

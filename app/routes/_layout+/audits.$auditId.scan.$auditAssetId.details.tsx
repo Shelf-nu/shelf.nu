@@ -276,23 +276,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditAssetId: auditAssetId,
         });
 
-      uploadedImages.push(image);
-    }
+        uploadedImages.push(image);
+      }
 
-    // Create a note in a transaction to track the image uploads
-    await db.$transaction(async (tx) => {
-      const imageIds = uploadedImages.map((img) => img.id);
-      await createAuditAssetImagesAddedNote({
-        auditSessionId: auditId,
-        auditAssetId: auditAssetId,
-        userId,
-        imageIds,
-        tx,
+      // Create a note in a transaction to track the image uploads
+      await db.$transaction(async (tx) => {
+        const imageIds = uploadedImages.map((img) => img.id);
+        await createAuditAssetImagesAddedNote({
+          auditSessionId: auditId,
+          auditAssetId: auditAssetId,
+          userId,
+          imageIds,
+          tx,
+        });
       });
-    });
 
-    return payload({ images: uploadedImages });
-  }
+      return payload({ images: uploadedImages });
+    }
 
     if (intent === "delete-image") {
       const imageId = formData.get("imageId") as string;
