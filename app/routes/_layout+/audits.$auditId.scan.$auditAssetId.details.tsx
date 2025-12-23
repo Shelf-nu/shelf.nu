@@ -5,7 +5,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
   MetaFunction,
-ShouldRevalidateFunctionArgs,
+  ShouldRevalidateFunctionArgs,
 } from "react-router";
 import { data, useLoaderData, Form, useFetcher } from "react-router";
 import { z } from "zod";
@@ -145,10 +145,7 @@ export function shouldRevalidate({
   actionStatus,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
-  if (
-    formAction?.includes("intent=upload-image") &&
-    actionStatus === 200
-  ) {
+  if (formAction?.includes("intent=upload-image") && actionStatus === 200) {
     return false;
   }
   return defaultShouldRevalidate;
@@ -236,9 +233,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (intent === "upload-image") {
       // Get all files from the form data (already parsed above via clone)
       const fileEntries = formData.getAll("auditImage");
-      
+
       // Filter to only actual File objects
-      const files = fileEntries.filter((entry): entry is File => entry instanceof File);
+      const files = fileEntries.filter(
+        (entry): entry is File => entry instanceof File
+      );
 
       if (files.length === 0) {
         throw new ShelfError({
@@ -270,7 +269,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           uploadedById: userId,
           auditAssetId: auditAssetId,
         });
-        
+
         uploadedImages.push(image);
       }
 
@@ -322,7 +321,10 @@ export default function AuditAssetDetails() {
   const [isUploadInProgress, setIsUploadInProgress] = useState(false);
 
   useEffect(() => {
-    if (imageUploadFetcher.state === "submitting" || imageUploadFetcher.state === "loading") {
+    if (
+      imageUploadFetcher.state === "submitting" ||
+      imageUploadFetcher.state === "loading"
+    ) {
       setIsUploadInProgress(true);
     } else if (imageUploadFetcher.state === "idle") {
       setIsUploadInProgress(false);
@@ -372,17 +374,19 @@ export default function AuditAssetDetails() {
         // Add newly uploaded images to local state, avoiding duplicates
         setLocalImages((prev) => {
           const existingIds = new Set(prev.map((img) => img.id));
-          const newImages = data.images.filter((img: any) => !existingIds.has(img.id));
+          const newImages = data.images.filter(
+            (img: any) => !existingIds.has(img.id)
+          );
           return [...newImages, ...prev];
         });
       }
     }
   }, [imageUploadFetcher.state, imageUploadFetcher.data]);
 
- /**
-  * Auto-submit the image upload form when new images are added
-  */
- const handleImagesAdded = () => {
+  /**
+   * Auto-submit the image upload form when new images are added
+   */
+  const handleImagesAdded = () => {
     if (imageFormRef.current) {
       const formData = new FormData(imageFormRef.current);
       void imageUploadFetcher.submit(formData, {
@@ -548,7 +552,11 @@ export default function AuditAssetDetails() {
         </div>
 
         {/* Upload section */}
-        <imageUploadFetcher.Form method="post" encType="multipart/form-data" ref={imageFormRef}>
+        <imageUploadFetcher.Form
+          method="post"
+          encType="multipart/form-data"
+          ref={imageFormRef}
+        >
           <input type="hidden" name="intent" value="upload-image" />
           <AuditImageUploadSection
             maxCount={3}

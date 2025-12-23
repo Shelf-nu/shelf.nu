@@ -15,6 +15,9 @@ export const AuditNotes = () => {
 
   const hasNotes = session?.notes && session?.notes.length > 0;
 
+  // Construct base URL for asset links
+  const assetLinkBase = `/audits/${session.id}/scan`;
+
   /* Importing fetcher here in the parent file such that we can use fetcher's states to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
   const fetcher = useFetcher({ key: "add-audit-note" });
   let onSubmissionContent = "";
@@ -66,6 +69,7 @@ export const AuditNotes = () => {
               key={optimisticNote.id}
               note={optimisticNote}
               actionsDropdown={<ActionsDopdown noteId={optimisticNote.id} />}
+              assetLinkBase={assetLinkBase}
             />
           )}
           {/* Render all existing notes */}
@@ -74,6 +78,7 @@ export const AuditNotes = () => {
               key={note.id}
               note={note}
               actionsDropdown={<ActionsDopdown noteId={note.id} />}
+              assetLinkBase={assetLinkBase}
             />
           ))}
         </ul>

@@ -71,6 +71,17 @@ export async function getAuditNotes({
             profilePicture: true,
           },
         },
+        auditAsset: {
+          select: {
+            id: true,
+            asset: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
         createdAt: "desc",
