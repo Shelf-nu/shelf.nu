@@ -10,6 +10,12 @@ import { sanitizeFile } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { verifyAccept } from "~/utils/verify-file-accept";
 
+export type SelectedImage = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
+
 type AuditImageUploadBoxProps = {
   /** Callback when an image is selected */
   onImageSelect: (file: File, previewUrl: string) => void;
@@ -169,10 +175,12 @@ type AuditImageUploadSectionProps = {
   }>;
   /** Callback when an existing image is removed */
   onExistingImageRemove?: (imageId: string) => void;
-  /** Callback when new images are added (for auto-submit) */
-  onImagesAdded?: () => void;
+  /** Callback when new images are selected (opens dialog) */
+  onImagesSelected?: (images: SelectedImage[]) => void;
   /** Indicates if upload is currently in progress */
   isUploading?: boolean;
+  /** External trigger to clear selected images */
+  clearTrigger?: number;
 };
 
 /**
@@ -184,15 +192,28 @@ export function AuditImageUploadSection({
   inputNamePrefix = "auditImage",
   existingImages = [],
   onExistingImageRemove,
-  onImagesAdded,
+  onImagesSelected,
   isUploading = false,
+  clearTrigger = 0,
 }: AuditImageUploadSectionProps) {
   const [images, setImages] = useState<
     Array<{ file: File; previewUrl: string; id: string }>
   >([]);
+  const [pendingBatchComplete, setPendingBatchComplete] = useState(false);
   const [fileError] = useAtom(fileErrorAtom);
   const fileInputsRef = useRef<Map<string, HTMLInputElement>>(new Map());
   const previousIsUploadingRef = useRef(isUploading);
+
+  // Effect to clear images when external trigger changes
+  useEffect(() => {
+    if (clearTrigger > 0) {
+      images.forEach((image) => {
+        URL.revokeObjectURL(image.previewUrl);
+      });
+      setImages([]);
+      fileInputsRef.current.clear();
+    }
+  }, [clearTrigger, images]);
 
   // Clear preview images when upload completes successfully
   useEffect(() => {
@@ -220,11 +241,17 @@ export function AuditImageUploadSection({
   };
 
   const handleBatchComplete = () => {
-    // Trigger auto-submit after all files are added to state
-    if (onImagesAdded) {
-      setTimeout(() => onImagesAdded(), 0);
-    }
+    // Mark that we need to call onImagesSelected after state updates
+    setPendingBatchComplete(true);
   };
+
+  // Effect to call onImagesSelected after images state updates
+  useEffect(() => {
+    if (pendingBatchComplete && images.length > 0 && onImagesSelected) {
+      onImagesSelected(images);
+      setPendingBatchComplete(false);
+    }
+  }, [pendingBatchComplete, images, onImagesSelected]);
 
   const handleImageRemove = (id: string) => {
     setImages((prev) => {

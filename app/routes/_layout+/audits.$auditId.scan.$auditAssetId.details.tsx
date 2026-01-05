@@ -1,5 +1,4 @@
-import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MessageSquare, Paperclip } from "lucide-react";
 import type {
   LoaderFunctionArgs,
@@ -12,10 +11,13 @@ import {
   AuditAssetNoteItem,
   type NoteData,
 } from "~/components/audit/audit-asset-note-item";
-import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-box";
+import {
+  AuditImageUploadSection,
+  type SelectedImage,
+} from "~/components/audit/audit-image-upload-box";
+import { AuditImageUploadDialog } from "~/components/audit/audit-image-upload-dialog";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { useUserData } from "~/hooks/use-user-data";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import {
   uploadAuditImage,
@@ -236,9 +238,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return payload({ success: true });
     }
 
-    if (intent === "upload-image") {
+    if (intent === "upload-image" || intent === "upload-images") {
+      // Get optional note content
+      const noteContent = formData.get("content") as string | null;
+
       // Get all files from the form data (already parsed above via clone)
-      const fileEntries = formData.getAll("auditImage");
+      const fileEntries = formData.getAll(intent === "upload-images" ? "images" : "auditImage");
 
       // Filter to only actual File objects
       const files = fileEntries.filter(
@@ -282,13 +287,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // Create a note in a transaction to track the image uploads
       await db.$transaction(async (tx) => {
         const imageIds = uploadedImages.map((img) => img.id);
-        await createAuditAssetImagesAddedNote({
-          auditSessionId: auditId,
-          auditAssetId: auditAssetId,
-          userId,
-          imageIds,
-          tx,
-        });
+        // Create note with custom content if provided, otherwise use default
+        if (noteContent?.trim()) {
+          // User provided a note - create a COMMENT note with images
+          await tx.auditNote.create({
+            data: {
+              auditSessionId: auditId,
+              auditAssetId: auditAssetId,
+              userId,
+              content: `${noteContent.trim()}\n\n{% audit_images count=${imageIds.length} ids="${imageIds.join(",")}" /%}`,
+              type: "COMMENT",
+            },
+          });
+        } else {
+          // No note provided - use default auto-generated note
+          await createAuditAssetImagesAddedNote({
+            auditSessionId: auditId,
+            auditAssetId: auditAssetId,
+            userId,
+            imageIds,
+            tx,
+          });
+        }
       });
 
       return payload({ images: uploadedImages });
@@ -330,13 +350,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AuditAssetDetails() {
   const { notes: initialNotes, images } = useLoaderData<typeof loader>();
-  const user = useUserData();
-  const formRef = useRef<HTMLFormElement>(null);
-  const imageFormRef = useRef<HTMLFormElement>(null);
 
   const imageUploadFetcher = useFetcher<typeof action>();
 
   const [isUploadInProgress, setIsUploadInProgress] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | undefined>();
+  const [clearTrigger, setClearTrigger] = useState(0);
+
+  // Set portal container on mount
+  useEffect(() => {
+    setPortalContainer(document.body);
+  }, []);
 
   useEffect(() => {
     if (
@@ -403,42 +429,37 @@ export default function AuditAssetDetails() {
   }, [imageUploadFetcher.state, imageUploadFetcher.data]);
 
   /**
-   * Auto-submit the image upload form when new images are added
+   * Called when images are selected.
+   * Opens the dialog to allow adding a note.
    */
-  const handleImagesAdded = () => {
-    if (imageFormRef.current) {
-      const formData = new FormData(imageFormRef.current);
-      void imageUploadFetcher.submit(formData, {
-        method: "POST",
-        encType: "multipart/form-data",
-      });
-    }
+  const handleImagesSelected = (images: SelectedImage[]) => {
+  setSelectedImages(images);
+  setDialogOpen(true);
+};
+
+  /**
+   * Handle removing an image from the selection
+   */
+  const handleRemoveImage = (id: string) => {
+    setSelectedImages((prev) => {
+      const image = prev.find((img) => img.id === id);
+      if (image) {
+        URL.revokeObjectURL(image.previewUrl);
+      }
+      return prev.filter((img) => img.id !== id);
+    });
   };
 
-  const handleNoteFormAction = (formData: FormData) => {
-    const content = formData.get("content") as string;
-
-    if (!content?.trim()) return;
-
-    // Create temp note with needsServerSync flag
-    const tempNote: NoteData = {
-      id: `temp-${Date.now()}`,
-      content: content.trim(),
-      createdAt: new Date().toISOString(),
-      userId: user!.id,
-      user: {
-        id: user!.id,
-        name:
-          `${user!.firstName || ""} ${user!.lastName || ""}`.trim() ||
-          user!.email,
-        img: user!.profilePicture || null,
-      },
-      needsServerSync: true, // Triggers AuditAssetNoteItem to submit to server
-    };
-
-    // Add temp note to local state immediately (optimistic UI)
-    setLocalNotes((prev) => [tempNote, ...prev]);
-    formRef.current?.reset();
+  /**
+   * Handle dialog close - cleanup preview URLs
+   */
+  const handleDialogClose = () => {
+    setDialogOpen(false);
+    // Cleanup preview URLs
+    selectedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    setSelectedImages([]);
+    // Trigger cleanup in AuditImageUploadSection
+    setClearTrigger((prev) => prev + 1);
   };
 
   /**
@@ -463,16 +484,6 @@ export default function AuditAssetDetails() {
   const handleNoteDelete = useCallback((noteId: string) => {
     setLocalNotes((prev) => prev.filter((note) => note.id !== noteId));
   }, []);
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      const form = e.currentTarget.form;
-      if (form) {
-        form.requestSubmit();
-      }
-    }
-  };
 
   /**
    * Called when image delete is clicked.
@@ -506,22 +517,14 @@ export default function AuditAssetDetails() {
     <div className="flex h-full flex-col">
       {/* Add note form */}
       <div className="shrink-0 border-b border-gray-200 px-6 py-4">
-        <Form
-          ref={formRef}
-          onSubmit={(e) => {
-            e.preventDefault();
-            const formData = new FormData(e.currentTarget);
-            handleNoteFormAction(formData);
-          }}
-        >
+        <Form method="post">
           <input type="hidden" name="intent" value="create-note" />
           <div className="space-y-2">
             <textarea
               name="content"
-              placeholder="Add a note... (Cmd/Ctrl+Enter to submit)"
+              placeholder="Add a note..."
               rows={3}
               className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
-              onKeyDown={handleKeyDown}
             />
             <div className="flex justify-end">
               <Button type="submit" size="sm">
@@ -571,23 +574,30 @@ export default function AuditAssetDetails() {
         </div>
 
         {/* Upload section */}
-        <imageUploadFetcher.Form
-          method="post"
-          encType="multipart/form-data"
-          ref={imageFormRef}
-        >
-          <input type="hidden" name="intent" value="upload-image" />
-          <AuditImageUploadSection
-            maxCount={3}
-            inputNamePrefix="auditImage"
-            existingImages={localImages}
-            onExistingImageRemove={handleImageDeleteWithConfirm}
-            disabled={isUploadInProgress}
-            isUploading={isUploadInProgress}
-            onImagesAdded={handleImagesAdded}
-          />
-        </imageUploadFetcher.Form>
+        <AuditImageUploadSection
+          maxCount={3}
+          inputNamePrefix="auditImage"
+          existingImages={localImages}
+          onExistingImageRemove={handleImageDeleteWithConfirm}
+          disabled={isUploadInProgress}
+          isUploading={isUploadInProgress}
+          onImagesSelected={handleImagesSelected}
+          clearTrigger={clearTrigger}
+        />
       </div>
+
+      {/* Image upload dialog */}
+      {dialogOpen && (
+        <AuditImageUploadDialog
+          open={dialogOpen}
+          onClose={handleDialogClose}
+          selectedImages={selectedImages}
+          onRemoveImage={handleRemoveImage}
+          onChangeImages={() => {/* TODO: Re-open file picker */}}
+          fetcher={imageUploadFetcher}
+          portalContainer={portalContainer}
+        />
+      )}
     </div>
   );
 }

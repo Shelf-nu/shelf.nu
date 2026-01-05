@@ -39,9 +39,13 @@ export default function ContextualSidebar({
       } else {
         // Check if there's a nested dialog open before closing
         const dialogBackdrops = document.querySelectorAll(".dialog-backdrop");
+        // Check for Radix AlertDialog overlays that are actually visible
+        const radixOverlays = document.querySelectorAll(
+          '[data-radix-alert-dialog-overlay][data-state="open"]'
+        );
 
         // Only navigate away if there's no nested dialog open
-        if (!dialogBackdrops) {
+        if (dialogBackdrops.length === 0 && radixOverlays.length === 0) {
           void navigate(prevRoute.pathname);
         }
       }

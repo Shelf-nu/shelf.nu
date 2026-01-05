@@ -61,14 +61,33 @@ export const AuditImagesComponent = React.memo(
     }
 
     if (error || images.length === 0) {
+    // If we expected images but got none (all deleted), show placeholders
+    if (expectedCount > 0) {
       return (
-        <div className="my-2 text-sm text-gray-500">
-          {expectedCount > 0
-            ? `${expectedCount} image${expectedCount === 1 ? "" : "s"} attached`
-            : "No images attached"}
+        <div className="my-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Render placeholders for all deleted images */}
+            {Array.from({ length: expectedCount }).map((_, i) => (
+              <div
+                key={`deleted-${i}`}
+                className="flex size-16 items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50"
+                title="Image deleted"
+              >
+                <span className="text-xs text-gray-400">Deleted</span>
+              </div>
+            ))}
+          </div>
         </div>
       );
     }
+    
+    // No images expected or error
+    return (
+      <div className="my-2 text-sm text-gray-500">
+        No images attached
+      </div>
+    );
+  }
 
     return (
       <div className="my-3">
