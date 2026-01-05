@@ -31,6 +31,10 @@ type AuditAssetNoteItemProps = {
   onDelete?: (noteId: string) => void;
   /** Called when user wants to attach images to this note */
   onAttachImages?: (noteId: string) => void;
+  /** Current number of images attached to the asset */
+  currentImageCount?: number;
+  /** Maximum number of images allowed */
+  maxImageCount?: number;
 };
 
 /**
@@ -56,6 +60,8 @@ export function AuditAssetNoteItem({
   onServerSync,
   onDelete,
   onAttachImages,
+  currentImageCount = 0,
+  maxImageCount = 3,
 }: AuditAssetNoteItemProps) {
   // Unique fetcher key prevents abort signals when multiple notes submit simultaneously
   const fetcher = useFetcher<typeof action>({
@@ -64,6 +70,7 @@ export function AuditAssetNoteItem({
 
   // Only allow deletion of COMMENT notes (manual notes), not UPDATE notes (auto-generated)
   const canDelete = note.type === "COMMENT" || note.type === undefined;
+  const canAttachImages = currentImageCount < maxImageCount;
 
   /**
    * Auto-submit note to server when component mounts with needsServerSync=true.
@@ -150,7 +157,12 @@ export function AuditAssetNoteItem({
             <Button
               variant="secondary"
               onClick={() => onAttachImages(note.id)}
-              title="Attach images to this note"
+              disabled={!canAttachImages}
+              title={
+                canAttachImages
+                  ? "Attach images to this note"
+                  : `Maximum ${maxImageCount} images allowed`
+              }
             >
               <ImagePlus className="size-4" />
             </Button>

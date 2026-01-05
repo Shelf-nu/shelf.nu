@@ -209,11 +209,17 @@ export function AuditImageUploadDialog({
                       )}
                     </div>
                   ))}
-                  {!isSubmitting && canAddMore && (
+                  {!isSubmitting && (
                     <button
                       type="button"
                       onClick={onChangeImages}
-                      className="flex size-24 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 transition-colors hover:border-gray-400 hover:bg-gray-100"
+                      disabled={!canAddMore}
+                      title={
+                        canAddMore
+                          ? "Add more images"
+                          : `Maximum ${maxCount} images allowed`
+                      }
+                      className="flex size-24 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 transition-colors hover:border-gray-400 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:bg-gray-50"
                     >
                       <span className="text-xs text-gray-600">Add more</span>
                     </button>

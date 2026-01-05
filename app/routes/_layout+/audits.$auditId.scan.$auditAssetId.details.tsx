@@ -714,6 +714,8 @@ export default function AuditAssetDetails() {
                   onServerSync={handleServerSync}
                   onDelete={handleNoteDelete}
                   onAttachImages={handleAttachImages}
+                  currentImageCount={localImages.length}
+                  maxImageCount={3}
                 />
               ))}
             </div>
