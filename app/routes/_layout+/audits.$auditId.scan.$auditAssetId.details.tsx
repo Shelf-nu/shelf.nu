@@ -630,14 +630,17 @@ export default function AuditAssetDetails() {
     setLocalNotes((prev) => prev.filter((note) => note.id !== noteId));
   }, []);
 
-  const handleAttachImages = useCallback((noteId: string) => {
-    setAttachingToNoteId(noteId);
-    setSelectedImages([]);
-    // Trigger file picker immediately when attaching to note
-    if (filePickerTriggerRef.current) {
-      filePickerTriggerRef.current(localImages.length);
-    }
-  }, [localImages.length]);
+  const handleAttachImages = useCallback(
+    (noteId: string) => {
+      setAttachingToNoteId(noteId);
+      setSelectedImages([]);
+      // Trigger file picker immediately when attaching to note
+      if (filePickerTriggerRef.current) {
+        filePickerTriggerRef.current(localImages.length);
+      }
+    },
+    [localImages.length]
+  );
 
   /**
    * Called when image delete is clicked.

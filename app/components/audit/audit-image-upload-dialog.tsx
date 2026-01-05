@@ -223,27 +223,27 @@ export function AuditImageUploadDialog({
 
               {!existingNoteId && (
                 <div className="space-y-2">
-                <label
-                  htmlFor="image-note"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Note (Optional)
-                </label>
+                  <label
+                    htmlFor="image-note"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Note (Optional)
+                  </label>
                   <p className="text-sm text-gray-500">
                     Add a note to accompany these images.
                   </p>
-                <textarea
-                  ref={textareaRef}
-                  id="image-note"
-                  name="content"
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="Add a note about these images..."
-                  className="min-h-[100px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
-                  rows={4}
-                  disabled={isSubmitting}
-                />
-              </div>
+                  <textarea
+                    ref={textareaRef}
+                    id="image-note"
+                    name="content"
+                    value={noteContent}
+                    onChange={(e) => setNoteContent(e.target.value)}
+                    placeholder="Add a note about these images..."
+                    className="min-h-[100px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
+                    rows={4}
+                    disabled={isSubmitting}
+                  />
+                </div>
               )}
               {existingNoteId && (
                 <p className="text-sm text-gray-500">

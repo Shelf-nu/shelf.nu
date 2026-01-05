@@ -159,29 +159,29 @@ export function AuditAssetNoteItem({
             canDelete &&
             // Only show delete form for real notes (not temp)
             (!note.id.startsWith("temp-") ? (
-            <fetcher.Form
-              method="POST"
-              onSubmit={(e) => {
-                if (!confirm("Are you sure you want to delete this note?")) {
-                  e.preventDefault();
-                  return;
-                }
-                // Only do optimistic removal if user confirmed (didn't preventDefault)
-                onDelete?.(note.id);
-              }}
-            >
-              <input type="hidden" name="intent" value="delete-note" />
-              <input type="hidden" name="noteId" value={note.id} />
-              <Button type="submit" variant="secondary">
+              <fetcher.Form
+                method="POST"
+                onSubmit={(e) => {
+                  if (!confirm("Are you sure you want to delete this note?")) {
+                    e.preventDefault();
+                    return;
+                  }
+                  // Only do optimistic removal if user confirmed (didn't preventDefault)
+                  onDelete?.(note.id);
+                }}
+              >
+                <input type="hidden" name="intent" value="delete-note" />
+                <input type="hidden" name="noteId" value={note.id} />
+                <Button type="submit" variant="secondary">
+                  <Trash className="size-4" />
+                </Button>
+              </fetcher.Form>
+            ) : (
+              // Temp notes just remove from state, no server call
+              <Button variant="secondary" onClick={handleDelete}>
                 <Trash className="size-4" />
               </Button>
-            </fetcher.Form>
-          ) : (
-            // Temp notes just remove from state, no server call
-            <Button variant="secondary" onClick={handleDelete}>
-              <Trash className="size-4" />
-            </Button>
-          ))}
+            ))}
         </div>
       </div>
     </div>
