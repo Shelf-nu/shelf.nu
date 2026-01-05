@@ -318,6 +318,110 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return payload({ images: uploadedImages });
     }
 
+    if (intent === "add-images-to-note") {
+      const noteId = formData.get("noteId") as string;
+
+      if (!noteId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Note ID is required to attach images",
+          additionalData: { auditAssetId },
+          label: "Audit Image",
+          status: 400,
+        });
+      }
+
+      // Get all files from the form data
+      const fileEntries = formData.getAll("images");
+
+      // Filter to only actual File objects
+      const files = fileEntries.filter(
+        (entry): entry is File => entry instanceof File
+      );
+
+      if (files.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          message: "No image files found in the request",
+          additionalData: { auditAssetId },
+          label: "Audit Image",
+          status: 400,
+        });
+      }
+
+      // Upload each file sequentially
+      const uploadedImages: Array<{ id: string }> = [];
+      for (const file of files) {
+        // Create a new FormData with single file
+        const singleFileFormData = new FormData();
+        singleFileFormData.set("image", file);
+
+        // Create a new Request with this FormData
+        const singleFileRequest = new Request(request.url, {
+          method: "POST",
+          body: singleFileFormData,
+        });
+
+        const image = await uploadAuditImage({
+          request: singleFileRequest,
+          auditSessionId: auditId,
+          organizationId,
+          uploadedById: userId,
+          auditAssetId: auditAssetId,
+        });
+
+        uploadedImages.push(image);
+      }
+
+      // Update the note to append the audit_images tag
+      await db.$transaction(async (tx) => {
+        const existingNote = await tx.auditNote.findUnique({
+          where: { id: noteId },
+        });
+
+        if (!existingNote) {
+          throw new ShelfError({
+            cause: null,
+            message: "Note not found",
+            additionalData: { noteId },
+            label: "Audit Image",
+            status: 404,
+          });
+        }
+
+        // Extract existing image IDs from content if any
+        const existingImageIds: string[] = [];
+        const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
+        let match;
+        while ((match = regex.exec(existingNote.content)) !== null) {
+          existingImageIds.push(...match[1].split(","));
+        }
+
+        // Add new image IDs
+        const newImageIds = uploadedImages.map((img) => img.id);
+        const allImageIds = [...existingImageIds, ...newImageIds];
+
+        // Remove existing audit_images tags and append new one with all images
+        let updatedContent = existingNote.content.replace(
+          /{%\s*audit_images[^%]*%}/g,
+          ""
+        );
+        updatedContent = updatedContent.trim();
+        updatedContent += `\n\n{% audit_images count=${
+          allImageIds.length
+        } ids="${allImageIds.join(",")}" /%}`;
+
+        await tx.auditNote.update({
+          where: { id: noteId },
+          data: {
+            content: updatedContent,
+          },
+        });
+      });
+
+      return payload({ images: uploadedImages });
+    }
+
     if (intent === "delete-image") {
       const imageId = formData.get("imageId") as string;
 
@@ -368,6 +472,9 @@ export default function AuditAssetDetails() {
     ((currentSelectedCount?: number) => void) | null
   >(null);
   const imageRemovalRef = useRef<((id: string) => void) | null>(null);
+  const [attachingToNoteId, setAttachingToNoteId] = useState<string | null>(
+    null
+  );
 
   // Set portal container on mount
   useEffect(() => {
@@ -448,6 +555,17 @@ export default function AuditAssetDetails() {
   };
 
   /**
+   * Called when images are selected while attaching to existing note.
+   * The images parameter comes from handleImagesSelected callback.
+   */
+  useEffect(() => {
+    // If we have attachingToNoteId and images were just selected, open dialog
+    if (attachingToNoteId && selectedImages.length > 0 && !dialogOpen) {
+      setDialogOpen(true);
+    }
+  }, [attachingToNoteId, selectedImages.length, dialogOpen]);
+
+  /**
    * Handle removing an image from the selection
    */
   const handleRemoveImage = (id: string) => {
@@ -469,6 +587,7 @@ export default function AuditAssetDetails() {
    */
   const handleDialogClose = () => {
     setDialogOpen(false);
+    setAttachingToNoteId(null);
     // Cleanup preview URLs
     selectedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setSelectedImages([]);
@@ -510,6 +629,15 @@ export default function AuditAssetDetails() {
   const handleNoteDelete = useCallback((noteId: string) => {
     setLocalNotes((prev) => prev.filter((note) => note.id !== noteId));
   }, []);
+
+  const handleAttachImages = useCallback((noteId: string) => {
+    setAttachingToNoteId(noteId);
+    setSelectedImages([]);
+    // Trigger file picker immediately when attaching to note
+    if (filePickerTriggerRef.current) {
+      filePickerTriggerRef.current(localImages.length);
+    }
+  }, [localImages.length]);
 
   /**
    * Called when image delete is clicked.
@@ -582,6 +710,7 @@ export default function AuditAssetDetails() {
                   note={note}
                   onServerSync={handleServerSync}
                   onDelete={handleNoteDelete}
+                  onAttachImages={handleAttachImages}
                 />
               ))}
             </div>
@@ -624,6 +753,7 @@ export default function AuditAssetDetails() {
         <AuditImageUploadDialog
           open={dialogOpen}
           onClose={handleDialogClose}
+          existingNoteId={attachingToNoteId}
           selectedImages={selectedImages}
           onRemoveImage={handleRemoveImage}
           onChangeImages={handleAddMoreImages}

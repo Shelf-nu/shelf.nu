@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Trash } from "lucide-react";
+import { Trash, ImagePlus } from "lucide-react";
 import { useFetcher } from "react-router";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
@@ -29,6 +29,8 @@ type AuditAssetNoteItemProps = {
   onServerSync?: (realNote: NoteData) => void;
   /** Called when delete is successful */
   onDelete?: (noteId: string) => void;
+  /** Called when user wants to attach images to this note */
+  onAttachImages?: (noteId: string) => void;
 };
 
 /**
@@ -53,6 +55,7 @@ export function AuditAssetNoteItem({
   note,
   onServerSync,
   onDelete,
+  onAttachImages,
 }: AuditAssetNoteItemProps) {
   // Unique fetcher key prevents abort signals when multiple notes submit simultaneously
   const fetcher = useFetcher<typeof action>({
@@ -141,10 +144,21 @@ export function AuditAssetNoteItem({
             </>
           </div>
         </div>
-        {onDelete &&
-          canDelete &&
-          // Only show delete form for real notes (not temp)
-          (!note.id.startsWith("temp-") ? (
+        <div className="flex gap-2">
+          {/* Show attach images button only for COMMENT notes that are saved (not temp) */}
+          {onAttachImages && canDelete && !note.id.startsWith("temp-") && (
+            <Button
+              variant="secondary"
+              onClick={() => onAttachImages(note.id)}
+              title="Attach images to this note"
+            >
+              <ImagePlus className="size-4" />
+            </Button>
+          )}
+          {onDelete &&
+            canDelete &&
+            // Only show delete form for real notes (not temp)
+            (!note.id.startsWith("temp-") ? (
             <fetcher.Form
               method="POST"
               onSubmit={(e) => {
@@ -168,6 +182,7 @@ export function AuditAssetNoteItem({
               <Trash className="size-4" />
             </Button>
           ))}
+        </div>
       </div>
     </div>
   );

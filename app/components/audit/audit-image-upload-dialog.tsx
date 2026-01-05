@@ -27,6 +27,8 @@ type AuditImageUploadDialogProps = {
   open: boolean;
   /** Callback when dialog should close */
   onClose: () => void;
+  /** ID of existing note to attach images to (if attaching to existing note) */
+  existingNoteId?: string | null;
   /** Selected images to display */
   selectedImages: SelectedImage[];
   /** Callback when an image is removed */
@@ -55,6 +57,7 @@ type AuditImageUploadDialogProps = {
 export function AuditImageUploadDialog({
   open,
   onClose,
+  existingNoteId,
   selectedImages,
   onRemoveImage,
   onChangeImages,
@@ -145,10 +148,19 @@ export function AuditImageUploadDialog({
           encType="multipart/form-data"
           onSubmit={handleSubmit}
         >
-          <input type="hidden" name="intent" value="upload-images" />
+          <input
+            type="hidden"
+            name="intent"
+            value={existingNoteId ? "add-images-to-note" : "upload-images"}
+          />
+          {existingNoteId && (
+            <input type="hidden" name="noteId" value={existingNoteId} />
+          )}
 
           <AlertDialogHeader>
-            <AlertDialogTitle>Upload Images</AlertDialogTitle>
+            <AlertDialogTitle>
+              {existingNoteId ? "Attach Images to Note" : "Upload Images"}
+            </AlertDialogTitle>
             <button
               type="button"
               onClick={() => handleOpenChange(false)}
@@ -209,16 +221,17 @@ export function AuditImageUploadDialog({
                 </div>
               </div>
 
-              <div className="space-y-2">
+              {!existingNoteId && (
+                <div className="space-y-2">
                 <label
                   htmlFor="image-note"
                   className="text-sm font-medium text-gray-700"
                 >
                   Note (Optional)
                 </label>
-                <p className="text-sm text-gray-500">
-                  Add a note to accompany these images.
-                </p>
+                  <p className="text-sm text-gray-500">
+                    Add a note to accompany these images.
+                  </p>
                 <textarea
                   ref={textareaRef}
                   id="image-note"
@@ -231,6 +244,12 @@ export function AuditImageUploadDialog({
                   disabled={isSubmitting}
                 />
               </div>
+              )}
+              {existingNoteId && (
+                <p className="text-sm text-gray-500">
+                  Images will be added to the existing note.
+                </p>
+              )}
             </div>
           </AlertDialogDescription>
 
