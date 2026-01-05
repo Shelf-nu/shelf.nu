@@ -168,7 +168,8 @@ export function AuditImageUploadDialog({
                 </label>
                 {totalImages < maxCount && (
                   <p className="text-xs text-gray-500">
-                    You can add {remainingSlots} more image{remainingSlots === 1 ? "" : "s"}
+                    You can add {remainingSlots} more image
+                    {remainingSlots === 1 ? "" : "s"}
                   </p>
                 )}
                 {fileError && (
@@ -194,8 +195,8 @@ export function AuditImageUploadDialog({
                           <X className="size-3" />
                         </button>
                       )}
-                  </div>
-                ))}
+                    </div>
+                  ))}
                   {!isSubmitting && canAddMore && (
                     <button
                       type="button"

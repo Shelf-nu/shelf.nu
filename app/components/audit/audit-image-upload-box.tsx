@@ -28,7 +28,9 @@ type AuditImageUploadBoxProps = {
   /** Disabled state */
   disabled?: boolean;
   /** Ref to expose file picker trigger function */
-  onExposeFilePicker?: (trigger: (currentSelectedCount?: number) => void) => void;
+  onExposeFilePicker?: (
+    trigger: (currentSelectedCount?: number) => void
+  ) => void;
   /** Total count from parent (includes dialog selections) */
   totalCountFromParent?: number;
 };
@@ -82,17 +84,17 @@ export function AuditImageUploadBox({
 
   // Create stable trigger function using refs to avoid stale closures
   const triggerRef = useRef<(currentSelectedCount?: number) => void>(() => {});
-  
+
   // Update the trigger function whenever dependencies change
   triggerRef.current = (currentSelectedCount?: number) => {
     const input = inputRef.current;
     // Priority: currentSelectedCount > totalCountFromParent > currentCount
-    const effectiveCount = 
-      currentSelectedCount !== undefined 
-        ? currentSelectedCount 
-        : totalCountFromParent !== undefined 
-          ? totalCountFromParent 
-          : currentCount;
+    const effectiveCount =
+      currentSelectedCount !== undefined
+        ? currentSelectedCount
+        : totalCountFromParent !== undefined
+        ? totalCountFromParent
+        : currentCount;
     const canAdd = effectiveCount < maxCount;
     if (input && canAdd && !disabled) {
       input.click();
@@ -215,7 +217,9 @@ type AuditImageUploadSectionProps = {
   /** External trigger to clear selected images */
   clearTrigger?: number;
   /** Ref to expose file picker trigger function */
-  onExposeFilePicker?: (trigger: (currentSelectedCount?: number) => void) => void;
+  onExposeFilePicker?: (
+    trigger: (currentSelectedCount?: number) => void
+  ) => void;
   /** Current count of images selected in dialog (overrides local count for trigger) */
   currentSelectedInDialog?: number;
   /** Ref to expose image removal function */
@@ -280,9 +284,10 @@ export function AuditImageUploadSection({
 
   // Total count includes both existing and new images
   const totalCount = existingImages.length + images.length;
-  const effectiveCountForBox = currentSelectedInDialog !== undefined 
-    ? existingImages.length + currentSelectedInDialog 
-    : totalCount;
+  const effectiveCountForBox =
+    currentSelectedInDialog !== undefined
+      ? existingImages.length + currentSelectedInDialog
+      : totalCount;
 
   const handleImageSelect = (file: File, previewUrl: string) => {
     const id = `${Date.now()}-${Math.random()}`;

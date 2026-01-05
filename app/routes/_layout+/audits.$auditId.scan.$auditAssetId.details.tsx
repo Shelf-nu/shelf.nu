@@ -364,7 +364,9 @@ export default function AuditAssetDetails() {
     HTMLElement | undefined
   >();
   const [clearTrigger, setClearTrigger] = useState(0);
-  const filePickerTriggerRef = useRef<((currentSelectedCount?: number) => void) | null>(null);
+  const filePickerTriggerRef = useRef<
+    ((currentSelectedCount?: number) => void) | null
+  >(null);
   const imageRemovalRef = useRef<((id: string) => void) | null>(null);
 
   // Set portal container on mount
