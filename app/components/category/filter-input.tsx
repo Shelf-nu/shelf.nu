@@ -1,3 +1,4 @@
+import type React from "react";
 import { useEffect, useRef } from "react";
 import Input from "../forms/input";
 
@@ -8,7 +9,7 @@ export const FilterInput = ({
   filter: string;
   handleFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) => {
-  const inputRef = useRef<HTMLInputElement>();
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef?.current?.focus();

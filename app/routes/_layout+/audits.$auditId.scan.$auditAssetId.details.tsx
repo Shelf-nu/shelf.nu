@@ -243,7 +243,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const noteContent = formData.get("content") as string | null;
 
       // Get all files from the form data (already parsed above via clone)
-      const fileEntries = formData.getAll(intent === "upload-images" ? "images" : "auditImage");
+      const fileEntries = formData.getAll(
+        intent === "upload-images" ? "images" : "auditImage"
+      );
 
       // Filter to only actual File objects
       const files = fileEntries.filter(
@@ -295,7 +297,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               auditSessionId: auditId,
               auditAssetId: auditAssetId,
               userId,
-              content: `${noteContent.trim()}\n\n{% audit_images count=${imageIds.length} ids="${imageIds.join(",")}" /%}`,
+              content: `${noteContent.trim()}\n\n{% audit_images count=${
+                imageIds.length
+              } ids="${imageIds.join(",")}" /%}`,
               type: "COMMENT",
             },
           });
@@ -356,7 +360,9 @@ export default function AuditAssetDetails() {
   const [isUploadInProgress, setIsUploadInProgress] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
-  const [portalContainer, setPortalContainer] = useState<HTMLElement | undefined>();
+  const [portalContainer, setPortalContainer] = useState<
+    HTMLElement | undefined
+  >();
   const [clearTrigger, setClearTrigger] = useState(0);
 
   // Set portal container on mount
@@ -433,9 +439,9 @@ export default function AuditAssetDetails() {
    * Opens the dialog to allow adding a note.
    */
   const handleImagesSelected = (images: SelectedImage[]) => {
-  setSelectedImages(images);
-  setDialogOpen(true);
-};
+    setSelectedImages(images);
+    setDialogOpen(true);
+  };
 
   /**
    * Handle removing an image from the selection
@@ -593,7 +599,9 @@ export default function AuditAssetDetails() {
           onClose={handleDialogClose}
           selectedImages={selectedImages}
           onRemoveImage={handleRemoveImage}
-          onChangeImages={() => {/* TODO: Re-open file picker */}}
+          onChangeImages={() => {
+            /* TODO: Re-open file picker */
+          }}
           fetcher={imageUploadFetcher}
           portalContainer={portalContainer}
         />

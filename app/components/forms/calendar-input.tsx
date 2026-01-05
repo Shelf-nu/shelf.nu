@@ -1,3 +1,4 @@
+import type React from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import { DayPicker } from "react-day-picker";
 
@@ -70,8 +71,12 @@ const Calendar: React.ForwardRefRenderFunction<HTMLElement, CalendarProps> = (
         ...classNames,
       }}
       components={{
-        IconLeft: () => <ChevronLeftIcon className="size-4" />,
-        IconRight: () => <ChevronRightIcon className="size-4" />,
+        Chevron: ({ orientation }) =>
+          orientation === "left" ? (
+            <ChevronLeftIcon className="size-4" />
+          ) : (
+            <ChevronRightIcon className="size-4" />
+          ),
       }}
       {...props}
     />

@@ -102,14 +102,14 @@ export function AuditImageUploadDialog({
     };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-  const formData = new FormData(e.currentTarget);
-  void fetcher.submit(formData, {
-    method: "post",
-    encType: "multipart/form-data",
-  });
-  // Don't close here - let useEffect handle closing after upload completes
-};
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    void fetcher.submit(formData, {
+      method: "post",
+      encType: "multipart/form-data",
+    });
+    // Don't close here - let useEffect handle closing after upload completes
+  };
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>

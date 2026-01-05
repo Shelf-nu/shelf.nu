@@ -20,6 +20,7 @@ import type {
   BasicUserName,
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
+export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
