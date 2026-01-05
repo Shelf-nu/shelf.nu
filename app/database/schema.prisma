@@ -86,7 +86,8 @@ model User {
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
 
-  partialCheckins PartialBookingCheckin[] @relation("PartialCheckinUser")
+  partialCheckins      PartialBookingCheckin[]     @relation("PartialCheckinUser")
+  conflictAttempts     BookingConflictAttempt[]
 
   // Updates feature
   createdUpdates Update[]
@@ -687,6 +688,7 @@ model Organization {
   customFields       CustomField[]
   images             Image[]              @relation("owner")
   bookings           Booking[]
+  conflictAttempts   BookingConflictAttempt[]
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
@@ -996,8 +998,9 @@ model Booking {
   assets Asset[]
   notes  BookingNote[]
 
-  tags            Tag[]
-  partialCheckins PartialBookingCheckin[]
+  tags             Tag[]
+  partialCheckins  PartialBookingCheckin[]
+  conflictAttempts BookingConflictAttempt[]
 
   // Datetime
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -1063,6 +1066,43 @@ model PartialBookingCheckin {
   @@index([checkedInById])
   @@index([checkinTimestamp])
   @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+}
+
+model BookingConflictAttempt {
+  id String @id @default(cuid())
+
+  // The booking that attempted to reserve/checkout
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId String
+
+  // User who made the attempt
+  attemptedBy   User   @relation(fields: [attemptedById], references: [id], onDelete: Cascade)
+  attemptedById String
+
+  // Organization context
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  // What action was being attempted: "reserve" or "checkout"
+  attemptType String
+
+  // Conflicted assets info
+  conflictedAssetIds   String[] // Array of asset IDs that had conflicts
+  conflictedAssetNames String   // Comma-separated names for quick reference
+
+  // Timing info - what date range was attempted
+  attemptedFrom DateTime @db.Timestamptz(3)
+  attemptedTo   DateTime @db.Timestamptz(3)
+
+  // Timestamp
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  // Indexes
+  @@index([bookingId])
+  @@index([attemptedById])
+  @@index([organizationId])
+  @@index([createdAt])
+  @@index([attemptType])
 }
 
 model Kit {

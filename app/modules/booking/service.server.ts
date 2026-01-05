@@ -783,6 +783,22 @@ export async function reserveBooking({
         const additionalText =
           additionalCount > 0 ? ` and ${additionalCount} more` : "";
 
+        // Log the conflict attempt for analytics
+        if (userId) {
+          await logBookingConflictAttempt({
+            bookingId: id,
+            userId,
+            organizationId,
+            attemptType: "reserve",
+            conflictedAssets: conflictedAssets.map((a) => ({
+              id: a.id,
+              title: a.title,
+            })),
+            from,
+            to,
+          });
+        }
+
         throw new ShelfError({
           cause: null,
           label,
@@ -1045,6 +1061,22 @@ export async function checkoutBooking({
           conflictedAssets.length > 3 ? conflictedAssets.length - 3 : 0;
         const additionalText =
           additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        // Log the conflict attempt for analytics
+        if (userId) {
+          await logBookingConflictAttempt({
+            bookingId: id,
+            userId,
+            organizationId,
+            attemptType: "checkout",
+            conflictedAssets: conflictedAssets.map((a) => ({
+              id: a.id,
+              title: a.title,
+            })),
+            from: from || bookingFound.from!,
+            to: to || bookingFound.to!,
+          });
+        }
 
         throw new ShelfError({
           cause: null,
@@ -4634,5 +4666,54 @@ export async function getOngoingBookingForAsset({
         ? cause.message
         : "Something went wrong while getting ongoing booking for asset.",
     });
+  }
+}
+
+/**
+ * Logs a booking conflict attempt for future analytics and tracking.
+ * This captures when a user tries to reserve or checkout a booking but
+ * encounters conflicts with already-booked assets.
+ */
+export async function logBookingConflictAttempt({
+  bookingId,
+  userId,
+  organizationId,
+  attemptType,
+  conflictedAssets,
+  from,
+  to,
+}: {
+  bookingId: string;
+  userId: string;
+  organizationId: string;
+  attemptType: "reserve" | "checkout";
+  conflictedAssets: Array<{ id: string; title: string }>;
+  from: Date;
+  to: Date;
+}) {
+  try {
+    await db.bookingConflictAttempt.create({
+      data: {
+        bookingId,
+        attemptedById: userId,
+        organizationId,
+        attemptType,
+        conflictedAssetIds: conflictedAssets.map((a) => a.id),
+        conflictedAssetNames: conflictedAssets.map((a) => a.title).join(", "),
+        attemptedFrom: from,
+        attemptedTo: to,
+      },
+    });
+
+    Logger.info(
+      `Booking conflict attempt logged: ${attemptType} for booking ${bookingId}`
+    );
+  } catch (cause) {
+    // Don't throw - logging failures shouldn't break the main flow
+    Logger.error(
+      `Failed to log booking conflict attempt: ${
+        cause instanceof Error ? cause.message : "Unknown error"
+      }`
+    );
   }
 }
