@@ -1,7 +1,9 @@
 import type React from "react";
 import { useState, useRef, useEffect } from "react";
+import { useAtom } from "jotai";
 import { X } from "lucide-react";
 import type { FetcherWithComponents } from "react-router";
+import { fileErrorAtom } from "~/atoms/file";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -35,6 +37,10 @@ type AuditImageUploadDialogProps = {
   fetcher: FetcherWithComponents<unknown>;
   /** Container for portal rendering */
   portalContainer?: HTMLElement;
+  /** Maximum number of images allowed */
+  maxCount: number;
+  /** Number of existing images already uploaded */
+  existingImagesCount: number;
 };
 
 /**
@@ -54,11 +60,19 @@ export function AuditImageUploadDialog({
   onChangeImages,
   fetcher,
   portalContainer,
+  maxCount,
+  existingImagesCount,
 }: AuditImageUploadDialogProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputsRef = useRef<Map<string, HTMLInputElement>>(new Map());
   const [noteContent, setNoteContent] = useState("");
+  const [fileError, setFileError] = useAtom(fileErrorAtom);
   const isSubmitting = useDisabled(fetcher);
+
+  // Calculate remaining slots
+  const totalImages = existingImagesCount + selectedImages.length;
+  const remainingSlots = maxCount - totalImages;
+  const canAddMore = remainingSlots > 0;
 
   // Track previous fetcher state to detect completion
   const prevStateRef = useRef(fetcher.state);
@@ -74,11 +88,12 @@ export function AuditImageUploadDialog({
       // Upload completed successfully, close the dialog
       // Clean up note content and close
       setNoteContent("");
+      setFileError(undefined);
       onClose();
     }
 
     prevStateRef.current = fetcher.state;
-  }, [fetcher.state, onClose]);
+  }, [fetcher.state, onClose, setFileError]);
 
   // Prevent closing during submission
   const handleOpenChange = (newOpen: boolean) => {
@@ -87,6 +102,8 @@ export function AuditImageUploadDialog({
       return;
     }
     if (!newOpen) {
+      // Clear error when closing
+      setFileError(undefined);
       onClose();
     }
   };
@@ -147,8 +164,16 @@ export function AuditImageUploadDialog({
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">
-                  Selected Images ({selectedImages.length})
+                  Selected Images ({selectedImages.length}/{maxCount})
                 </label>
+                {totalImages < maxCount && (
+                  <p className="text-xs text-gray-500">
+                    You can add {remainingSlots} more image{remainingSlots === 1 ? "" : "s"}
+                  </p>
+                )}
+                {fileError && (
+                  <p className="text-sm text-error-500">{fileError}</p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {selectedImages.map((image) => (
                     <div
@@ -169,9 +194,9 @@ export function AuditImageUploadDialog({
                           <X className="size-3" />
                         </button>
                       )}
-                    </div>
-                  ))}
-                  {!isSubmitting && (
+                  </div>
+                ))}
+                  {!isSubmitting && canAddMore && (
                     <button
                       type="button"
                       onClick={onChangeImages}

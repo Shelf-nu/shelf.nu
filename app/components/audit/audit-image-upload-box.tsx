@@ -27,6 +27,10 @@ type AuditImageUploadBoxProps = {
   maxCount: number;
   /** Disabled state */
   disabled?: boolean;
+  /** Ref to expose file picker trigger function */
+  onExposeFilePicker?: (trigger: (currentSelectedCount?: number) => void) => void;
+  /** Total count from parent (includes dialog selections) */
+  totalCountFromParent?: number;
 };
 
 type UploadedImageBoxProps = {
@@ -68,11 +72,40 @@ export function AuditImageUploadBox({
   currentCount,
   maxCount,
   disabled = false,
+  onExposeFilePicker,
+  totalCountFromParent,
 }: AuditImageUploadBoxProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [, setFileError] = useAtom(fileErrorAtom);
 
   const canAddMore = currentCount < maxCount;
+
+  // Create stable trigger function using refs to avoid stale closures
+  const triggerRef = useRef<(currentSelectedCount?: number) => void>(() => {});
+  
+  // Update the trigger function whenever dependencies change
+  triggerRef.current = (currentSelectedCount?: number) => {
+    const input = inputRef.current;
+    // Priority: currentSelectedCount > totalCountFromParent > currentCount
+    const effectiveCount = 
+      currentSelectedCount !== undefined 
+        ? currentSelectedCount 
+        : totalCountFromParent !== undefined 
+          ? totalCountFromParent 
+          : currentCount;
+    const canAdd = effectiveCount < maxCount;
+    if (input && canAdd && !disabled) {
+      input.click();
+    }
+  };
+
+  // Expose file picker trigger to parent
+  useEffect(() => {
+    if (onExposeFilePicker) {
+      // Pass a stable function that calls the current ref
+      onExposeFilePicker((count) => triggerRef.current(count));
+    }
+  }, [onExposeFilePicker]);
 
   const handleClick = () => {
     if (!disabled && canAddMore) {
@@ -181,6 +214,12 @@ type AuditImageUploadSectionProps = {
   isUploading?: boolean;
   /** External trigger to clear selected images */
   clearTrigger?: number;
+  /** Ref to expose file picker trigger function */
+  onExposeFilePicker?: (trigger: (currentSelectedCount?: number) => void) => void;
+  /** Current count of images selected in dialog (overrides local count for trigger) */
+  currentSelectedInDialog?: number;
+  /** Ref to expose image removal function */
+  onExposeImageRemoval?: (removalFn: (id: string) => void) => void;
 };
 
 /**
@@ -195,6 +234,9 @@ export function AuditImageUploadSection({
   onImagesSelected,
   isUploading = false,
   clearTrigger = 0,
+  onExposeFilePicker,
+  currentSelectedInDialog,
+  onExposeImageRemoval,
 }: AuditImageUploadSectionProps) {
   const [images, setImages] = useState<
     Array<{ file: File; previewUrl: string; id: string }>
@@ -203,16 +245,20 @@ export function AuditImageUploadSection({
   const [fileError] = useAtom(fileErrorAtom);
   const fileInputsRef = useRef<Map<string, HTMLInputElement>>(new Map());
   const previousIsUploadingRef = useRef(isUploading);
+  const previousClearTriggerRef = useRef(clearTrigger);
 
   // Effect to clear images when external trigger changes
   useEffect(() => {
-    if (clearTrigger > 0) {
+    // Only clear if clearTrigger actually changed (not on initial mount)
+    if (clearTrigger > 0 && clearTrigger !== previousClearTriggerRef.current) {
       images.forEach((image) => {
         URL.revokeObjectURL(image.previewUrl);
       });
       setImages([]);
       fileInputsRef.current.clear();
+      setPendingBatchComplete(false);
     }
+    previousClearTriggerRef.current = clearTrigger;
   }, [clearTrigger, images]);
 
   // Clear preview images when upload completes successfully
@@ -234,6 +280,9 @@ export function AuditImageUploadSection({
 
   // Total count includes both existing and new images
   const totalCount = existingImages.length + images.length;
+  const effectiveCountForBox = currentSelectedInDialog !== undefined 
+    ? existingImages.length + currentSelectedInDialog 
+    : totalCount;
 
   const handleImageSelect = (file: File, previewUrl: string) => {
     const id = `${Date.now()}-${Math.random()}`;
@@ -263,6 +312,13 @@ export function AuditImageUploadSection({
       return prev.filter((img) => img.id !== id);
     });
   };
+
+  // Expose image removal function to parent
+  useEffect(() => {
+    if (onExposeImageRemoval) {
+      onExposeImageRemoval(handleImageRemove);
+    }
+  }, [onExposeImageRemoval]);
 
   const setFileInputRef = useCallback(
     (id: string, file: File) => (el: HTMLInputElement | null) => {
@@ -353,9 +409,11 @@ export function AuditImageUploadSection({
           <AuditImageUploadBox
             onImageSelect={handleImageSelect}
             onBatchComplete={handleBatchComplete}
-            currentCount={totalCount}
+            currentCount={effectiveCountForBox}
             maxCount={maxCount}
             disabled={disabled}
+            onExposeFilePicker={onExposeFilePicker}
+            totalCountFromParent={effectiveCountForBox}
           />
         )}
       </div>

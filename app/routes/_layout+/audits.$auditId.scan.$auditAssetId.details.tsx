@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { MessageSquare, Paperclip } from "lucide-react";
 import type {
   LoaderFunctionArgs,
@@ -364,6 +364,8 @@ export default function AuditAssetDetails() {
     HTMLElement | undefined
   >();
   const [clearTrigger, setClearTrigger] = useState(0);
+  const filePickerTriggerRef = useRef<((currentSelectedCount?: number) => void) | null>(null);
+  const imageRemovalRef = useRef<((id: string) => void) | null>(null);
 
   // Set portal container on mount
   useEffect(() => {
@@ -454,6 +456,10 @@ export default function AuditAssetDetails() {
       }
       return prev.filter((img) => img.id !== id);
     });
+    // Also remove from AuditImageUploadSection's local state
+    if (imageRemovalRef.current) {
+      imageRemovalRef.current(id);
+    }
   };
 
   /**
@@ -466,6 +472,18 @@ export default function AuditAssetDetails() {
     setSelectedImages([]);
     // Trigger cleanup in AuditImageUploadSection
     setClearTrigger((prev) => prev + 1);
+  };
+
+  /**
+   * Called when "Add more" button is clicked in dialog.
+   * Triggers the file picker from AuditImageUploadBox.
+   */
+  const handleAddMoreImages = () => {
+    if (filePickerTriggerRef.current) {
+      // Pass the current selected count + existing count to properly calculate remaining slots
+      const totalCount = localImages.length + selectedImages.length;
+      filePickerTriggerRef.current(totalCount);
+    }
   };
 
   /**
@@ -589,6 +607,13 @@ export default function AuditAssetDetails() {
           isUploading={isUploadInProgress}
           onImagesSelected={handleImagesSelected}
           clearTrigger={clearTrigger}
+          onExposeFilePicker={(trigger) => {
+            filePickerTriggerRef.current = trigger;
+          }}
+          currentSelectedInDialog={selectedImages.length}
+          onExposeImageRemoval={(removalFn) => {
+            imageRemovalRef.current = removalFn;
+          }}
         />
       </div>
 
@@ -599,11 +624,11 @@ export default function AuditAssetDetails() {
           onClose={handleDialogClose}
           selectedImages={selectedImages}
           onRemoveImage={handleRemoveImage}
-          onChangeImages={() => {
-            /* TODO: Re-open file picker */
-          }}
+          onChangeImages={handleAddMoreImages}
           fetcher={imageUploadFetcher}
           portalContainer={portalContainer}
+          maxCount={3}
+          existingImagesCount={localImages.length}
         />
       )}
     </div>
