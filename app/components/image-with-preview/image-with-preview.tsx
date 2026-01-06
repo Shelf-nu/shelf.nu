@@ -1,6 +1,7 @@
 import type { HTMLProps, KeyboardEvent } from "react";
 import { useState, useCallback } from "react";
-import { ChevronRight, RefreshIcon } from "~/components/icons/library";
+import { RefreshCwIcon } from "lucide-react";
+import { ChevronRight } from "~/components/icons/library";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -166,19 +167,21 @@ export default function ImageWithPreview({
             <button
               type="button"
               onClick={handleRetry}
-              className="flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs text-gray-700 transition-colors hover:bg-gray-300"
-              title="Retry loading image"
-            >
-              <RefreshIcon className="size-3" />
-              Retry
-            </button>
+             className="flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs text-gray-700 transition-colors hover:bg-gray-300"
+             title="Retry loading image"
+           >
+              <RefreshCwIcon className="size-4" />
+             Retry
+           </button>
           </div>
         ) : null}
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
           key={retryKey}
-          src={thumbnailUrl ?? imageUrl ?? "/static/images/asset-placeholder.jpg"}
+          src={
+            thumbnailUrl ?? imageUrl ?? "/static/images/asset-placeholder.jpg"
+          }
           className={tw(
             "size-full object-cover",
             withPreview && "cursor-pointer"

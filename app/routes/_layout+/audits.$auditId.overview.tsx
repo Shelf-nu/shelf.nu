@@ -304,14 +304,16 @@ export default function AuditOverview() {
         {/* Right Column: Audit Images */}
         <div className="flex-1">
           <h2 className="mb-4 text-lg font-semibold">Audit Images</h2>
-          
+
           {/* Info text to explain image types */}
           {(generalImages.length > 0 || assetImages.length > 0) && (
             <p className="mb-3 text-sm text-gray-600">
-              Images captured during the audit. General images are associated with the audit itself, while asset images are linked to specific assets.
+              Images captured during the audit. General images are associated
+              with the audit itself, while asset images are linked to specific
+              assets.
             </p>
           )}
-          
+
           {/* General Audit Images */}
           {generalImages.length > 0 && (
             <div className="mb-4">
@@ -344,7 +346,7 @@ export default function AuditOverview() {
               </Card>
             </div>
           )}
-          
+
           {/* Asset-Specific Images */}
           {assetImages.length > 0 && (
             <div className="mb-4">
@@ -377,7 +379,7 @@ export default function AuditOverview() {
               </Card>
             </div>
           )}
-          
+
           {/* No Images State */}
           {generalImages.length === 0 && assetImages.length === 0 && (
             <Card className="mt-0 md:border">
