@@ -77,7 +77,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { organizationId, userOrganizations } = permissionResult;
 
-    const [{ session }, assetsData, auditImages] = await Promise.all([
+    const [{ session }, assetsData, allImages] = await Promise.all([
       getAuditSessionDetails({
         id: auditId,
         organizationId,
@@ -92,9 +92,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getAuditImages({
         auditSessionId: auditId,
         organizationId,
-        auditAssetId: undefined, // Get general audit images only
+        // undefined = get ALL images
       }),
     ]);
+
+    // Split images into general and asset-specific
+    const generalImages = allImages.filter((img) => img.auditAssetId === null);
+    const assetImages = allImages.filter((img) => img.auditAssetId !== null);
 
     const header = { title: `${session.name} · Overview` };
 
@@ -128,7 +132,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         session,
         isAdminOrOwner,
         header,
-        auditImages,
+        generalImages,
+        assetImages,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -184,7 +189,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AuditOverview() {
-  const { session, totalItems, auditImages } = useLoaderData<typeof loader>();
+  const { session, totalItems, generalImages, assetImages } =
+    useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
     "auditStatus"
@@ -297,34 +303,89 @@ export default function AuditOverview() {
 
         {/* Right Column: Audit Images */}
         <div className="flex-1">
-          <h2 className="mb-4 text-lg font-semibold">Images</h2>
-          <Card className="mt-0 md:border">
-            {auditImages.length > 0 ? (
-              <div className="flex flex-wrap gap-3">
-                {auditImages.map((image) => (
-                  <ImageWithPreview
-                    key={image.id}
-                    imageUrl={image.imageUrl}
-                    thumbnailUrl={image.thumbnailUrl}
-                    alt={image.description || "Audit image"}
-                    withPreview
-                    className="size-24 rounded border"
-                    images={auditImages.map((img) => ({
-                      id: img.id,
-                      imageUrl: img.imageUrl,
-                      thumbnailUrl: img.thumbnailUrl,
-                      alt: img.description || "Audit image",
-                    }))}
-                    currentImageId={image.id}
-                  />
-                ))}
-              </div>
-            ) : (
+          <h2 className="mb-4 text-lg font-semibold">Audit Images</h2>
+          
+          {/* Info text to explain image types */}
+          {(generalImages.length > 0 || assetImages.length > 0) && (
+            <p className="mb-3 text-sm text-gray-600">
+              Images captured during the audit. General images are associated with the audit itself, while asset images are linked to specific assets.
+            </p>
+          )}
+          
+          {/* General Audit Images */}
+          {generalImages.length > 0 && (
+            <div className="mb-4">
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                <span className="flex size-5 items-center justify-center rounded bg-primary-50 text-xs text-primary-600">
+                  {generalImages.length}
+                </span>
+                General Audit Images
+              </h3>
+              <Card className="mt-0 md:border">
+                <div className="flex flex-wrap gap-3">
+                  {generalImages.map((image) => (
+                    <ImageWithPreview
+                      key={image.id}
+                      imageUrl={image.imageUrl}
+                      thumbnailUrl={image.thumbnailUrl}
+                      alt={image.description || "General audit image"}
+                      withPreview
+                      className="size-24 rounded border"
+                      images={generalImages.map((img) => ({
+                        id: img.id,
+                        imageUrl: img.imageUrl,
+                        thumbnailUrl: img.thumbnailUrl,
+                        alt: img.description || "General audit image",
+                      }))}
+                      currentImageId={image.id}
+                    />
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+          
+          {/* Asset-Specific Images */}
+          {assetImages.length > 0 && (
+            <div className="mb-4">
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                <span className="flex size-5 items-center justify-center rounded bg-blue-50 text-xs text-blue-600">
+                  {assetImages.length}
+                </span>
+                Asset-Specific Images
+              </h3>
+              <Card className="mt-0 md:border">
+                <div className="flex flex-wrap gap-3">
+                  {assetImages.map((image) => (
+                    <ImageWithPreview
+                      key={image.id}
+                      imageUrl={image.imageUrl}
+                      thumbnailUrl={image.thumbnailUrl}
+                      alt={image.description || "Asset image"}
+                      withPreview
+                      className="size-24 rounded border"
+                      images={assetImages.map((img) => ({
+                        id: img.id,
+                        imageUrl: img.imageUrl,
+                        thumbnailUrl: img.thumbnailUrl,
+                        alt: img.description || "Asset image",
+                      }))}
+                      currentImageId={image.id}
+                    />
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+          
+          {/* No Images State */}
+          {generalImages.length === 0 && assetImages.length === 0 && (
+            <Card className="mt-0 md:border">
               <div className="px-4 py-6 text-center text-sm text-gray-500">
                 No images uploaded
               </div>
-            )}
-          </Card>
+            </Card>
+          )}
         </div>
       </div>
 

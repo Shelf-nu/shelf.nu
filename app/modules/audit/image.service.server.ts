@@ -4,6 +4,7 @@ import type {
   AuditSession,
   Organization,
   User,
+  Prisma,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -285,21 +286,20 @@ export async function getAuditImages({
 }: {
   auditSessionId: AuditSession["id"];
   organizationId: Organization["id"];
-  auditAssetId?: AuditAsset["id"];
+  auditAssetId?: AuditAsset["id"] | null;
 }): Promise<AuditImage[]> {
   try {
-    const where: {
-      auditSessionId: string;
-      organizationId: string;
-      auditAssetId?: string | null;
-    } = {
+    const where: Prisma.AuditImageWhereInput = {
       auditSessionId,
       organizationId,
     };
 
-    // If auditAssetId is provided, filter by it
-    // If auditAssetId is explicitly null, get only general images (not tied to assets)
-    if (auditAssetId !== undefined) {
+    // If auditAssetId is explicitly provided (string), filter by that specific asset
+    // If auditAssetId is explicitly null, get only general images (auditAssetId IS NULL in DB)
+    // If auditAssetId is undefined, get ALL images (no filter)
+    if (auditAssetId === null) {
+      where.auditAssetId = null;
+    } else if (auditAssetId !== undefined) {
       where.auditAssetId = auditAssetId;
     }
 

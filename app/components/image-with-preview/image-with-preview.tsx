@@ -1,6 +1,6 @@
 import type { HTMLProps, KeyboardEvent } from "react";
 import { useState, useCallback } from "react";
-import { ChevronRight } from "~/components/icons/library";
+import { ChevronRight, RefreshIcon } from "~/components/icons/library";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -43,6 +43,7 @@ export default function ImageWithPreview({
 }: ImageWithPreviewProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isImageError, setIsImageError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   const [open, setOpen] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -128,6 +129,13 @@ export default function ImageWithPreview({
     }
   }
 
+  function handleRetry() {
+    setIsImageError(false);
+    setIsLoading(true);
+    // Force image reload by changing key
+    setRetryKey((prev) => prev + 1);
+  }
+
   return (
     <>
       <div
@@ -147,9 +155,30 @@ export default function ImageWithPreview({
           </div>
         ) : null}
 
+        {isImageError && !isLoading ? (
+          <div
+            className={tw(
+              "absolute inset-0 z-10 flex flex-col items-center justify-center gap-2",
+              "bg-gray-100 text-gray-500"
+            )}
+          >
+            <div className="px-2 text-center text-xs">Failed to load</div>
+            <button
+              type="button"
+              onClick={handleRetry}
+              className="flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs text-gray-700 transition-colors hover:bg-gray-300"
+              title="Retry loading image"
+            >
+              <RefreshIcon className="size-3" />
+              Retry
+            </button>
+          </div>
+        ) : null}
+
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
-          src={thumbnailUrl ?? "/static/images/asset-placeholder.jpg"}
+          key={retryKey}
+          src={thumbnailUrl ?? imageUrl ?? "/static/images/asset-placeholder.jpg"}
           className={tw(
             "size-full object-cover",
             withPreview && "cursor-pointer"
