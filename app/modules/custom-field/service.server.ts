@@ -610,13 +610,13 @@ export async function getActiveCustomFields({
         ...(includeAllCategories
           ? {} // No category filtering
           : typeof category === "string"
-            ? {
-                OR: [
-                  { categories: { none: {} } }, // Uncategorized fields
-                  { categories: { some: { id: category } } }, // Category-specific fields
-                ],
-              }
-            : { categories: { none: {} } }), // Only uncategorized fields
+          ? {
+              OR: [
+                { categories: { none: {} } }, // Uncategorized fields
+                { categories: { some: { id: category } } }, // Category-specific fields
+              ],
+            }
+          : { categories: { none: {} } }), // Only uncategorized fields
       },
     });
   } catch (cause) {
