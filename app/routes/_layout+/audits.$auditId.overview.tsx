@@ -21,6 +21,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
+import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { useSearchParams } from "~/hooks/search-params";
 import {
@@ -294,9 +295,51 @@ export default function AuditOverview() {
                   Created by
                 </span>
                 <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  {session.createdBy.firstName} {session.createdBy.lastName}
+                  <UserBadge
+                    name={
+                      session.createdBy?.firstName &&
+                      session.createdBy?.lastName
+                        ? `${session.createdBy.firstName} ${session.createdBy.lastName}`
+                        : session.createdBy?.email || "Unknown"
+                    }
+                    img={
+                      session.createdBy?.profilePicture ||
+                      "/static/images/default_pfp.jpg"
+                    }
+                  />
                 </div>
               </li>
+              {session.assignments.length > 0 && (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Assigned to
+                  </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    <div className="flex flex-col gap-2">
+                      {session.assignments
+                        .filter(
+                          (assignment) =>
+                            assignment.userId !== session.createdById
+                        )
+                        .map((assignment) => (
+                          <UserBadge
+                            key={assignment.id}
+                            name={
+                              assignment.user?.firstName &&
+                              assignment.user?.lastName
+                                ? `${assignment.user.firstName} ${assignment.user.lastName}`
+                                : assignment.user?.email || "Unknown"
+                            }
+                            img={
+                              assignment.user?.profilePicture ||
+                              "/static/images/default_pfp.jpg"
+                            }
+                          />
+                        ))}
+                    </div>
+                  </div>
+                </li>
+              )}
             </ul>
           </Card>
         </div>

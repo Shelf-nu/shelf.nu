@@ -68,7 +68,7 @@ describe("audit service", () => {
     assetIds: ["asset-1", "asset-2"],
     organizationId: "org-1",
     createdById: "user-1",
-    assigneeIds: ["user-2"],
+    assignee: "user-2",
     scopeMeta: {
       contextType: "SELECTION",
       contextName: "Quarterly warehouse audit",
@@ -227,7 +227,6 @@ describe("audit service", () => {
     await createAuditSession({
       ...defaultInput,
       assetIds: ["asset-1", "asset-1"],
-      assigneeIds: ["user-2", "user-2"],
     });
 
     expect(mockDb.asset.findMany).toHaveBeenCalledWith({

@@ -242,6 +242,7 @@ export async function getTeamMemberForCustodianFilter({
   getAll,
   filterByUserId,
   userId,
+  usersOnly,
 }: {
   organizationId: Organization["id"];
   selectedTeamMembers?: TeamMember["id"][];
@@ -252,6 +253,10 @@ export async function getTeamMemberForCustodianFilter({
    */
   filterByUserId?: boolean;
   userId?: string;
+  /**
+   * If set to true, only return team members with users (exclude NRMs)
+   */
+  usersOnly?: boolean;
 }) {
   try {
     const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
@@ -262,6 +267,7 @@ export async function getTeamMemberForCustodianFilter({
             id: { notIn: selectedTeamMembers },
             deletedAt: null,
             userId: filterByUserId && userId ? userId : undefined,
+            ...(usersOnly ? { user: { isNot: null } } : {}),
           },
           include: {
             user: {
@@ -288,7 +294,13 @@ export async function getTeamMemberForCustodianFilter({
             },
           },
         }),
-        db.teamMember.count({ where: { organizationId, deletedAt: null } }),
+        db.teamMember.count({
+          where: {
+            organizationId,
+            deletedAt: null,
+            ...(usersOnly ? { user: { isNot: null } } : {}),
+          },
+        }),
       ]);
 
     const teamMembers = [
@@ -349,6 +361,7 @@ export async function getTeamMemberForForm({
   custodianUserId,
   custodianTeamMemberId,
   bookingStatus,
+  usersOnly,
 }: {
   organizationId: Organization["id"];
   userId: string;
@@ -357,6 +370,10 @@ export async function getTeamMemberForForm({
   custodianUserId?: string;
   custodianTeamMemberId?: string;
   bookingStatus?: BookingStatus;
+  /**
+   * If set to true, only return team members with users (exclude NRMs)
+   */
+  usersOnly?: boolean;
 }) {
   try {
     // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member
@@ -478,6 +495,7 @@ export async function getTeamMemberForForm({
       getAll,
       userId,
       filterByUserId: false,
+      usersOnly,
     });
   } catch (cause) {
     throw new ShelfError({

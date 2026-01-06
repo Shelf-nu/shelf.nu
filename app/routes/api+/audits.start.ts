@@ -26,7 +26,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { name, description, assetIds, assigneeIds } = parseData(
+    const { name, description, assetIds, assignee } = parseData(
       formData,
       BulkStartAuditSchema,
       {
@@ -42,13 +42,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assetIds,
       organizationId,
       createdById: userId,
-      assigneeIds,
+      assignee,
     });
+
+    // If assigned to someone else, redirect to overview page
+    // If assigned to self or no assignee, redirect to scan page
+    const isAssignedToOther = assignee && assignee !== userId;
+    const redirectPath = isAssignedToOther ? "overview" : "scan";
 
     return data(
       payload({
         success: true,
-        redirectTo: `/audits/${session.id}/scan`,
+        redirectTo: `/audits/${session.id}/${redirectPath}`,
       })
     );
   } catch (cause) {

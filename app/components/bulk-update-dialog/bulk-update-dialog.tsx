@@ -177,6 +177,11 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
    * If `true` then the dialog will not close after the success of dialog action.
    */
   skipCloseOnSuccess?: boolean;
+
+  /**
+   * Additional className to form
+   */
+  formClassName?: string;
 };
 
 /** This component is basically the body of the Dialog */
@@ -194,6 +199,7 @@ const BulkUpdateDialogContent = forwardRef<
     actionUrl,
     arrayFieldId,
     skipCloseOnSuccess = false,
+    formClassName = "",
   },
   ref
 ) {
@@ -272,7 +278,7 @@ const BulkUpdateDialogContent = forwardRef<
       <Dialog
         open={isDialogOpen}
         onClose={handleCloseDialog}
-        className={tw("bulk-tagging-dialog lg:w-[400px]", className)}
+        className={tw("bulk-tagging-dialog", className || "lg:w-[400px]")}
         title={
           <div className="w-full">
             {type !== "cancel" ? (
@@ -295,7 +301,7 @@ const BulkUpdateDialogContent = forwardRef<
           ref={ref}
           method="post"
           action={actionUrl ? actionUrl : `/api/assets/bulk-update-${type}`}
-          className="px-6 pb-6"
+          className={tw("px-6 pb-6", formClassName)}
         >
           <input
             type="hidden"

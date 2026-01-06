@@ -5,9 +5,11 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
+import AuditTeamMemberSelector from "~/components/audit/audit-team-member-selector";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { Separator } from "~/components/shared/separator";
 
 export const BulkStartAuditSchema = z.object({
   assetIds: z.array(z.string()).min(1),
@@ -16,7 +18,18 @@ export const BulkStartAuditSchema = z.object({
     .string()
     .max(1000, "Description must be 1000 characters or fewer")
     .optional(),
-  assigneeIds: z.array(z.string()).optional(),
+  assignee: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      try {
+        const parsed = JSON.parse(val);
+        return parsed.userId;
+      } catch {
+        return val;
+      }
+    }),
 });
 
 type StartAuditFetcherData = {
@@ -33,6 +46,7 @@ type StartAuditDialogContentProps = {
   descriptionField: string;
   nameError?: string;
   descriptionError?: string;
+  assigneeError?: string;
 };
 
 function StartAuditDialogContent({
@@ -44,6 +58,7 @@ function StartAuditDialogContent({
   descriptionField,
   nameError,
   descriptionError,
+  assigneeError,
 }: StartAuditDialogContentProps) {
   const navigate = useNavigate();
 
@@ -57,48 +72,54 @@ function StartAuditDialogContent({
   }, [fetcherData, handleCloseDialog, navigate]);
 
   return (
-    <div className="modal-content-wrapper">
-      <div className="flex flex-col gap-4">
-        <Input
-          name={nameField}
-          label="Audit name"
-          placeholder="Quarterly warehouse audit"
-          error={nameError}
-          required
-          disabled={disabled}
-        />
+    <>
+      <div className="grid grid-cols-1 border-t px-6 pb-4 md:grid-cols-2 md:divide-x">
+        {/* Left column: Form fields */}
+        <div className="py-4 pr-6">
+          <Input
+            name={nameField}
+            label="Audit name"
+            placeholder="Quarterly warehouse audit"
+            error={nameError}
+            required
+            disabled={disabled}
+            className="mb-4"
+          />
 
-        <Input
-          name={descriptionField}
-          label="Description"
-          placeholder="Add context that will help auditors (optional)."
-          inputType="textarea"
-          rows={5}
-          error={fetcherError || descriptionError}
-          disabled={disabled}
-        />
+          <Input
+            name={descriptionField}
+            label="Description"
+            placeholder="Add context that will help auditors (optional)."
+            inputType="textarea"
+            rows={5}
+            error={fetcherError || descriptionError}
+            disabled={disabled}
+          />
+        </div>
+
+        {/* Right column: Team member selector */}
+        <div className="!border-r">
+          <Separator className="md:hidden" />
+          <p className="border-b p-3 font-medium">Select assignee (optional)</p>
+          <AuditTeamMemberSelector error={assigneeError} />
+        </div>
       </div>
 
-      <div className="mt-6 flex gap-3">
+      {/* Footer buttons */}
+      <div className="flex items-center justify-end gap-2 border-t p-4 pb-0 md:col-span-2">
         <Button
           type="button"
           variant="secondary"
-          width="full"
           disabled={disabled}
           onClick={handleCloseDialog}
         >
           Cancel
         </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          width="full"
-          disabled={disabled}
-        >
+        <Button type="submit" variant="primary" disabled={disabled}>
           Start audit
         </Button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -110,17 +131,20 @@ export default function BulkStartAuditDialog() {
   const descriptionField = zo.fields.description();
   const nameError = zo.errors.name()?.message;
   const descriptionError = zo.errors.description()?.message;
+  const assigneeError = zo.errors.assignee()?.message;
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="start-audit"
+      className="md:w-[800px]"
       title="Start an audit"
       description={`You're about to start an audit for ${selectedCount} asset${
         selectedCount === 1 ? "" : "s"
       }.`}
       actionUrl="/api/audits/start"
       arrayFieldId="assetIds"
+      formClassName="px-0"
     >
       {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => (
         <StartAuditDialogContent
@@ -132,6 +156,7 @@ export default function BulkStartAuditDialog() {
           descriptionField={descriptionField}
           nameError={nameError}
           descriptionError={descriptionError}
+          assigneeError={assigneeError}
         />
       )}
     </BulkUpdateDialogContent>

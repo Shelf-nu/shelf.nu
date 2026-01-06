@@ -52,7 +52,7 @@ export type CreateAuditSessionInput = {
   assetIds: string[];
   organizationId: string;
   createdById: string;
-  assigneeIds?: string[];
+  assignee?: string;
   scopeMeta?: AuditScopeMeta | null;
 };
 
@@ -69,11 +69,21 @@ export type CreateAuditSessionResult = {
 
 export type GetAuditSessionResult = {
   session: AuditSession & {
-    assignments: AuditAssignment[];
+    assignments: (AuditAssignment & {
+      user: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+        profilePicture: string | null;
+      };
+    })[];
     createdBy: {
       id: string;
       firstName: string | null;
       lastName: string | null;
+      email: string;
+      profilePicture: string | null;
     };
   };
   expectedAssets: AuditExpectedAsset[];
@@ -139,7 +149,7 @@ export async function createAuditSession(
     assetIds,
     organizationId,
     createdById,
-    assigneeIds = [],
+    assignee,
     scopeMeta,
   } = input;
 
@@ -177,7 +187,9 @@ export async function createAuditSession(
     });
   }
 
-  const uniqueAssigneeIds = Array.from(new Set([createdById, ...assigneeIds]));
+  const uniqueAssigneeIds = assignee
+    ? Array.from(new Set([createdById, assignee]))
+    : [createdById];
 
   const result = await db.$transaction(async (tx) => {
     const session = await tx.auditSession.create({
@@ -373,12 +385,26 @@ export async function getAuditSessionDetails({
         ],
       },
       include: {
-        assignments: true,
+        assignments: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
         createdBy: {
           select: {
             id: true,
             firstName: true,
             lastName: true,
+            email: true,
+            profilePicture: true,
           },
         },
         assets: {
