@@ -127,7 +127,7 @@ export async function getFilteredAndPaginatedCustomFields(params: {
       };
     }
 
-    const [customFields, totalCustomFields] = await Promise.all([
+    const [customFields, totalCustomFields, usageCounts] = await Promise.all([
       /** Get the items */
       db.customField.findMany({
         skip,
@@ -139,9 +139,37 @@ export async function getFilteredAndPaginatedCustomFields(params: {
 
       /** Count them */
       db.customField.count({ where }),
+
+      /** Get usage counts for all custom fields in this organization */
+      db.assetCustomFieldValue.groupBy({
+        by: ["customFieldId"],
+        where: {
+          customField: {
+            organizationId,
+            deletedAt: null,
+          },
+        },
+        _count: {
+          assetId: true,
+        },
+      }),
     ]);
 
-    return { customFields, totalCustomFields };
+    /** Create a map of custom field ID to usage count */
+    const usageCountMap = new Map(
+      usageCounts.map((item) => [item.customFieldId, item._count.assetId])
+    );
+
+    /** Attach usage count to each custom field */
+    const customFieldsWithUsage = customFields.map((field) => ({
+      ...field,
+      usageCount: usageCountMap.get(field.id) || 0,
+    }));
+
+    return {
+      customFields: customFieldsWithUsage,
+      totalCustomFields,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -582,13 +610,13 @@ export async function getActiveCustomFields({
         ...(includeAllCategories
           ? {} // No category filtering
           : typeof category === "string"
-          ? {
-              OR: [
-                { categories: { none: {} } }, // Uncategorized fields
-                { categories: { some: { id: category } } }, // Category-specific fields
-              ],
-            }
-          : { categories: { none: {} } }), // Only uncategorized fields
+            ? {
+                OR: [
+                  { categories: { none: {} } }, // Uncategorized fields
+                  { categories: { some: { id: category } } }, // Category-specific fields
+                ],
+              }
+            : { categories: { none: {} } }), // Only uncategorized fields
       },
     });
   } catch (cause) {
