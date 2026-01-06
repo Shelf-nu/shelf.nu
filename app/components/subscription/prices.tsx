@@ -10,7 +10,7 @@ export type PriceWithProduct = Stripe.Price & {
 };
 
 export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
-  <div className="gap-8 xl:flex xl:justify-center">
+  <div className="flex flex-col gap-8 xl:flex-row xl:justify-center">
     <Price key={FREE_PLAN.id} price={FREE_PLAN} />
     {prices
       .filter(
