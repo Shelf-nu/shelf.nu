@@ -7,8 +7,15 @@ import {
   ArrowRight,
   Camera,
   CameraIcon,
+  Flashlight,
+  FlashlightOff,
+  Maximize2,
+  Minimize2,
   QrCode,
+  RotateCw,
   ScanQrCode,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Link } from "react-router";
 import Webcam from "react-webcam";
@@ -429,8 +436,8 @@ function ScannerMode({
             paused
               ? "Scanner paused"
               : inputIsFocused
-              ? "Waiting for scan..."
-              : "Please click on the text field before scanning"
+                ? "Waiting for scan..."
+                : "Please click on the text field before scanning"
           }
           icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
           iconClassName={tw(
@@ -480,6 +487,196 @@ function CameraMode({
   const [videoConstraints, setVideoConstraints] =
     useState<MediaTrackConstraints>({ facingMode: "environment" });
   const [hasRetriedConstraints, setHasRetriedConstraints] = useState(false);
+
+  // Camera control states
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>(
+    []
+  );
+  const [currentCameraIndex, setCurrentCameraIndex] = useState<number>(0);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [torchEnabled, setTorchEnabled] = useState<boolean>(false);
+  const [capabilities, setCapabilities] =
+    useState<MediaTrackCapabilities | null>(null);
+  const [showControls, setShowControls] = useState<boolean>(true);
+  const hideControlsTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Enumerate available cameras
+  const enumerateBackCameras = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+      return;
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const backCameras = devices.filter(
+        (device) =>
+          device.kind === "videoinput" &&
+          (device.label.toLowerCase().includes("back") ||
+            device.label.toLowerCase().includes("rear") ||
+            device.label.toLowerCase().includes("environment") ||
+            device.label.toLowerCase().includes("camera") ||
+            !device.label.toLowerCase().includes("front"))
+      );
+
+      if (backCameras.length > 0) {
+        setAvailableCameras(backCameras);
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Error enumerating cameras:", error);
+    }
+  }, []);
+
+  // Switch to next available camera
+  const switchCamera = useCallback(() => {
+    if (availableCameras.length <= 1) return;
+
+    const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
+    setCurrentCameraIndex(nextIndex);
+    setIsLoading(true);
+    setVideoConstraints({
+      deviceId: availableCameras[nextIndex].deviceId,
+    });
+  }, [availableCameras, currentCameraIndex, setIsLoading]);
+
+  // Apply zoom to camera
+  const applyZoom = useCallback(
+    (newZoom: number) => {
+      const track = videoRef.current?.video?.srcObject as MediaStream;
+      if (track && capabilities) {
+        const videoTrack = track.getVideoTracks()[0];
+        const zoomCap = capabilities.zoom as { min: number; max: number };
+
+        if (zoomCap && videoTrack) {
+          const clampedZoom = Math.max(
+            zoomCap.min,
+            Math.min(zoomCap.max, newZoom)
+          );
+          videoTrack
+            .applyConstraints({
+              // @ts-expect-error - zoom is not in the TypeScript types yet but is supported
+              advanced: [{ zoom: clampedZoom }],
+            })
+            .then(() => {
+              setZoomLevel(clampedZoom);
+            })
+            .catch((error) => {
+              // eslint-disable-next-line no-console
+              console.error("Error applying zoom:", error);
+            });
+        }
+      }
+    },
+    [capabilities]
+  );
+
+  // Toggle torch/flashlight
+  const toggleTorch = useCallback(() => {
+    const track = videoRef.current?.video?.srcObject as MediaStream;
+    if (track && capabilities) {
+      const videoTrack = track.getVideoTracks()[0];
+      // @ts-expect-error - torch is not in the TypeScript types yet but is supported
+      const torchSupported = capabilities.torch;
+
+      if (torchSupported && videoTrack) {
+        videoTrack
+          .applyConstraints({
+            // @ts-expect-error - torch is not in the TypeScript types yet but is supported
+            advanced: [{ torch: !torchEnabled }],
+          })
+          .then(() => {
+            setTorchEnabled(!torchEnabled);
+          })
+          .catch((error) => {
+            // eslint-disable-next-line no-console
+            console.error("Error toggling torch:", error);
+          });
+      }
+    }
+  }, [capabilities, torchEnabled]);
+
+  // Handle tap to focus
+  const handleTapToFocus = useCallback(
+    (
+      event:
+        | React.TouchEvent<HTMLCanvasElement>
+        | React.MouseEvent<HTMLCanvasElement>
+    ) => {
+      const track = videoRef.current?.video?.srcObject as MediaStream;
+      if (track && capabilities) {
+        const videoTrack = track.getVideoTracks()[0];
+        // @ts-expect-error - focusMode is not in the TypeScript types yet but is supported
+        const focusSupported = capabilities.focusMode;
+
+        if (focusSupported && videoTrack) {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const clientX =
+            "touches" in event ? event.touches[0].clientX : event.clientX;
+          const clientY =
+            "touches" in event ? event.touches[0].clientY : event.clientY;
+          const x = ((clientX - rect.left) / rect.width) * 100;
+          const y = ((clientY - rect.top) / rect.height) * 100;
+
+          videoTrack
+            .applyConstraints({
+              // @ts-expect-error - focusMode and pointsOfInterest are not in TypeScript types
+              advanced: [
+                {
+                  focusMode: "single-shot",
+                  pointsOfInterest: [{ x: x / 100, y: y / 100 }],
+                },
+              ],
+            })
+            .then(() => {
+              // Show focus indicator
+              showFocusIndicator(clientX - rect.left, clientY - rect.top);
+            })
+            .catch((error) => {
+              // eslint-disable-next-line no-console
+              console.error("Error applying focus:", error);
+            });
+        }
+      }
+    },
+    [capabilities]
+  );
+
+  // Show focus indicator animation
+  const showFocusIndicator = (x: number, y: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Draw focus square
+    const size = 60;
+    ctx.strokeStyle = "#22c55e";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x - size / 2, y - size / 2, size, size);
+
+    // Clear after animation
+    setTimeout(() => {
+      const video = videoRef.current?.video;
+      if (video && video.videoWidth && video.videoHeight) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }, 1000);
+  };
+
+  // Auto-hide controls after interaction
+  const resetControlsTimeout = useCallback(() => {
+    setShowControls(true);
+    if (hideControlsTimeout.current) {
+      clearTimeout(hideControlsTimeout.current);
+    }
+    hideControlsTimeout.current = setTimeout(() => {
+      setShowControls(false);
+    }, 3000);
+  }, []);
 
   const handleUserMediaError = useCallback(
     async (cameraError: unknown) => {
@@ -532,14 +729,41 @@ function CameraMode({
         cameraError instanceof Error
           ? cameraError.message
           : typeof cameraError === "object" && cameraError !== null
-          ? (cameraError as { message?: string }).message ?? String(cameraError)
-          : String(cameraError);
+            ? ((cameraError as { message?: string }).message ??
+              String(cameraError))
+            : String(cameraError);
 
       setError(`Camera error: ${errorMessage}`);
       setIsLoading(false);
     },
     [hasRetriedConstraints, setIsLoading]
   );
+
+  // Enumerate cameras on mount
+  useEffect(() => {
+    void enumerateBackCameras();
+  }, [enumerateBackCameras]);
+
+  // Get camera capabilities when video starts
+  useEffect(() => {
+    const video = videoRef.current?.video;
+    if (video && video.srcObject) {
+      const track = (video.srcObject as MediaStream).getVideoTracks()[0];
+      if (track) {
+        const caps = track.getCapabilities() as MediaTrackCapabilities;
+        setCapabilities(caps);
+      }
+    }
+  }, [videoConstraints]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (hideControlsTimeout.current) {
+        clearTimeout(hideControlsTimeout.current);
+      }
+    };
+  }, []);
 
   // Start the animation loop when the video starts playing
   useEffect(() => {
@@ -657,8 +881,117 @@ function CameraMode({
 
       <canvas
         ref={canvasRef}
-        className="pointer-events-none absolute left-0 top-0 size-full object-cover"
+        className="absolute left-0 top-0 size-full cursor-crosshair object-cover"
+        onTouchStart={handleTapToFocus}
+        onClick={(e) => {
+          handleTapToFocus(e);
+          resetControlsTimeout();
+        }}
       />
+
+      {/* Camera Controls Overlay */}
+      {!paused && (
+        <div
+          className={tw(
+            "absolute inset-0 transition-opacity duration-300",
+            showControls ? "opacity-100" : "pointer-events-none opacity-0"
+          )}
+          onClick={resetControlsTimeout}
+        >
+          {/* Top Controls - Camera Switch */}
+          <div className="absolute left-0 right-0 top-0 flex justify-between p-4">
+            {availableCameras.length > 1 && (
+              <Button
+                onClick={switchCamera}
+                variant="secondary"
+                size="sm"
+                className="flex items-center gap-2 bg-black/50 text-white hover:bg-black/70"
+              >
+                <RotateCw className="size-4" />
+                <span className="hidden sm:inline">Switch Camera</span>
+              </Button>
+            )}
+            <div className="flex-1" />
+            {/* @ts-expect-error - torch capability check */}
+            {capabilities?.torch && (
+              <Button
+                onClick={toggleTorch}
+                variant="secondary"
+                size="sm"
+                className="flex items-center gap-2 bg-black/50 text-white hover:bg-black/70"
+              >
+                {torchEnabled ? (
+                  <>
+                    <Flashlight className="size-4" />
+                    <span className="hidden sm:inline">Flash On</span>
+                  </>
+                ) : (
+                  <>
+                    <FlashlightOff className="size-4" />
+                    <span className="hidden sm:inline">Flash Off</span>
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+
+          {/* Bottom Controls - Zoom */}
+          {/* @ts-expect-error - zoom capability check */}
+          {capabilities?.zoom && (
+            <div className="absolute bottom-4 left-1/2 flex w-11/12 max-w-[400px] -translate-x-1/2 items-center gap-3 rounded-lg bg-black/50 p-3 backdrop-blur-sm">
+              <Button
+                onClick={() => applyZoom(Math.max(1, zoomLevel - 0.5))}
+                variant="secondary"
+                size="sm"
+                className="shrink-0 bg-white/20 text-white hover:bg-white/30"
+              >
+                <ZoomOut className="size-4" />
+              </Button>
+              <input
+                type="range"
+                min={
+                  // @ts-expect-error - zoom range from capabilities
+                  capabilities?.zoom?.min || 1
+                }
+                max={
+                  // @ts-expect-error - zoom range from capabilities
+                  capabilities?.zoom?.max || 4
+                }
+                step="0.1"
+                value={zoomLevel}
+                onChange={(e) => applyZoom(parseFloat(e.target.value))}
+                className="flex-1 accent-primary"
+              />
+              <Button
+                onClick={() =>
+                  applyZoom(
+                    Math.min(
+                      // @ts-expect-error - zoom max from capabilities
+                      capabilities?.zoom?.max || 4,
+                      zoomLevel + 0.5
+                    )
+                  )
+                }
+                variant="secondary"
+                size="sm"
+                className="shrink-0 bg-white/20 text-white hover:bg-white/30"
+              >
+                <ZoomIn className="size-4" />
+              </Button>
+              <span className="ml-2 min-w-[3ch] text-right text-sm text-white">
+                {zoomLevel.toFixed(1)}x
+              </span>
+            </div>
+          )}
+
+          {/* Focus Hint */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+            <div className="rounded-lg bg-black/30 px-3 py-1.5 text-xs text-white backdrop-blur-sm">
+              Tap to focus
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

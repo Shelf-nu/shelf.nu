@@ -92,14 +92,16 @@ export function getBestBackCamera(devices: MediaDeviceInfo[]) {
   }
 
   // If we have multiple matches, prefer devices with these keywords in order
+  // Note: For QR scanning, we prioritize main camera over wide/ultra to minimize
+  // distortion and improve focus on small codes
   const preferenceOrder = [
-    "ultra", // Ultra-wide cameras are often the best quality
-    "wide", // Wide-angle cameras are typically main cameras
-    "main", // Explicitly labeled main cameras
+    "main", // Explicitly labeled main cameras - best for QR scanning
     "back", // Generic back cameras
     "rear", // Generic rear cameras
     "camera 2", // Common pattern for main cameras
     "camera0", // Fallback for older devices
+    "wide", // Wide-angle cameras have more distortion
+    "ultra", // Ultra-wide has the most distortion
   ];
 
   for (const preference of preferenceOrder) {
