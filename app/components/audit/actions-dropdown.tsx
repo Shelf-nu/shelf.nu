@@ -24,6 +24,7 @@ const ConditionalActionsDropdown = () => {
   const user = useUserData();
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -111,14 +112,27 @@ const ConditionalActionsDropdown = () => {
                       setIsEditDialogOpen(true);
                     }}
                   >
-                    <span className="flex items-center gap-2">Edit details</span>
+                    <span className="flex items-center gap-2">
+                      Edit details
+                    </span>
                   </Button>
                 </div>
               </When>
 
               <When truthy={canCancelAudit}>
                 <div className="border-b px-0 py-1 md:p-0">
-                  <CancelAuditDialog auditName={session.name} />
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsCancelDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">Cancel audit</span>
+                  </Button>
                 </div>
               </When>
 
@@ -144,6 +158,13 @@ const ConditionalActionsDropdown = () => {
           open={isEditDialogOpen}
           onClose={() => setIsEditDialogOpen(false)}
           actionData={actionData}
+        />
+      </When>
+      <When truthy={isCancelDialogOpen}>
+        <CancelAuditDialog
+          auditName={session.name}
+          open={isCancelDialogOpen}
+          onClose={() => setIsCancelDialogOpen(false)}
         />
       </When>
     </>

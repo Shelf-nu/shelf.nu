@@ -7,7 +7,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
@@ -15,25 +14,20 @@ import { Form } from "../custom-form";
 import { AlertIcon } from "../icons/library";
 
 type CancelAuditDialogProps = {
-  auditName: string;
+ auditName: string;
+ open: boolean;
+ onClose: () => void;
 };
 
-export function CancelAuditDialog({ auditName }: CancelAuditDialogProps) {
+export function CancelAuditDialog({
+ auditName,
+ open,
+ onClose,
+}: CancelAuditDialogProps) {
   const disabled = useDisabled();
 
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="link"
-          className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-          width="full"
-        >
-          <span className="flex items-center gap-2">Cancel audit</span>
-        </Button>
-      </AlertDialogTrigger>
-
+    <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <div className="mx-auto md:m-0">

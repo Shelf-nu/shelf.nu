@@ -35,6 +35,7 @@ import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
   cancelAuditSession,
+  requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -168,6 +169,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const intent = formData.get("intent");
 
     if (intent === "complete-audit") {
+      // Only assignees can complete the audit
+      await requireAuditAssignee({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
+        request,
+      });
+
       await completeAuditWithImages({
         request,
         auditSessionId: auditId,

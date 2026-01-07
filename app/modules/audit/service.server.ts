@@ -1,4 +1,3 @@
-import { AuditAssignmentRole } from "@prisma/client";
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
@@ -189,9 +188,9 @@ export async function createAuditSession(
     });
   }
 
-  const uniqueAssigneeIds = assignee
-    ? Array.from(new Set([createdById, assignee]))
-    : [createdById];
+  // Only add assignees who are explicitly selected
+  // Creator is NOT automatically added as an assignee
+  const uniqueAssigneeIds = assignee ? [assignee] : [];
 
   const result = await db.$transaction(async (tx) => {
     const session = await tx.auditSession.create({
@@ -221,7 +220,8 @@ export async function createAuditSession(
         data: uniqueAssigneeIds.map((userId) => ({
           auditSessionId: session.id,
           userId,
-          role: userId === createdById ? AuditAssignmentRole.LEAD : undefined,
+          // LEAD role is reserved for future use (e.g., when we support multiple assignees)
+          role: undefined,
         })),
       });
     }
@@ -1089,6 +1089,46 @@ export async function getAuditsForOrganization(params: {
       message:
         "Something went wrong while fetching audits. Please try again or contact support.",
       additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Validates that the user is assigned to the audit session.
+ * Throws a 403 ShelfError if the user is not an assignee.
+ *
+ * @throws {ShelfError} 403 error if user is not an assignee
+ */
+export async function requireAuditAssignee({
+  auditSessionId,
+  organizationId,
+  userId,
+  request,
+}: {
+  auditSessionId: string;
+  organizationId: string;
+  userId: string;
+  request?: Request;
+}): Promise<void> {
+  const { session } = await getAuditSessionDetails({
+    id: auditSessionId,
+    organizationId,
+    userOrganizations: [],
+    request,
+  });
+
+  const isAssignee = session.assignments.some(
+    (assignment) => assignment.userId === userId
+  );
+
+  if (!isAssignee) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Only users assigned to this audit can perform this action. Please contact the audit creator to be assigned.",
+      additionalData: { auditSessionId, userId },
+      status: 403,
       label,
     });
   }

@@ -31,6 +31,7 @@ import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-ima
 import {
   getAuditSessionDetails,
   getAuditScans,
+  requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -85,6 +86,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
+    });
+
+    // Only assignees can complete the audit via scan route
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      request,
     });
 
     const formData = await request.clone().formData();

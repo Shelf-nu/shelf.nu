@@ -20,6 +20,7 @@ import {
   updateAuditSession,
   completeAuditSession,
   cancelAuditSession,
+  requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import actionsCss from "~/styles/actions-dropdown.css?url";
@@ -74,6 +75,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     if (intent === "complete-audit") {
       const note = formData.get("note");
+
+      // Only assignees can complete the audit
+      await requireAuditAssignee({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
+        request,
+      });
 
       await completeAuditSession({
         sessionId: auditId,
