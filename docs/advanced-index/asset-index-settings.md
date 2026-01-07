@@ -101,13 +101,11 @@ All settings are:
 ## Tips for Optimal Configuration
 
 1. **Column Selection**
-
    - Show only frequently used columns
    - Group related columns together
    - Consider screen size when selecting columns
 
 2. **First Column Freezing**
-
    - Enable for wide configurations
    - Disable on narrow screens
    - Use with limited columns for best performance

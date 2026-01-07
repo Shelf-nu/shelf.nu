@@ -6,8 +6,9 @@ import { InnerLabel } from "./inner-label";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
-export interface InputProps
-  extends InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
+export interface InputProps extends InputHTMLAttributes<
+  HTMLInputElement | HTMLTextAreaElement
+> {
   name?: string;
 
   /** Label for the input field */
