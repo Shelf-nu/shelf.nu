@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef } from "react";
-import { OrganizationRoles } from "@prisma/client";
 import { useSetAtom, useAtomValue } from "jotai";
 import type {
   LoaderFunctionArgs,
@@ -138,29 +137,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const rolesForOrg = userOrganizations.find(
-      (org) => org.organization.id === organizationId
-    )?.roles;
+    // Only assignees can scan, even admins/owners
+    const isAssignee = session.assignments.some(
+      (assignment) => assignment.userId === userId
+    );
 
-    const isAdminOrOwner = rolesForOrg
-      ? rolesForOrg.includes(OrganizationRoles.ADMIN) ||
-        rolesForOrg.includes(OrganizationRoles.OWNER)
-      : false;
-
-    if (!isAdminOrOwner) {
-      const isAssignee = session.assignments.some(
-        (assignment) => assignment.userId === userId
-      );
-
-      if (!isAssignee) {
-        throw new ShelfError({
-          cause: null,
-          message: "You are not assigned to this audit.",
-          additionalData: { auditId, userId },
-          status: 403,
-          label,
-        });
-      }
+    if (!isAssignee) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Only users assigned to this audit can perform scanning. Please contact the audit creator to be assigned.",
+        additionalData: { auditId, userId },
+        status: 403,
+        label,
+      });
     }
 
     // Fetch existing scans to restore state

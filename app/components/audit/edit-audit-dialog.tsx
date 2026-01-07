@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -22,11 +22,17 @@ type EditAuditDialogProps = {
     name: string;
     description: string | null;
   };
+  open: boolean;
+  onClose: () => void;
   actionData?: any;
 };
 
-export function EditAuditDialog({ audit, actionData }: EditAuditDialogProps) {
-  const [open, setOpen] = useState(false);
+export function EditAuditDialog({
+  audit,
+  open,
+  onClose,
+  actionData,
+}: EditAuditDialogProps) {
   const disabled = useDisabled();
   const zo = useZorm("EditAudit", EditAuditSchema);
 
@@ -38,79 +44,68 @@ export function EditAuditDialog({ audit, actionData }: EditAuditDialogProps) {
   // Close dialog on success (redirect happens in action)
   useEffect(() => {
     if (actionData?.success) {
-      setOpen(false);
+      onClose();
     }
-  }, [actionData]);
+  }, [actionData, onClose]);
 
   return (
-    <>
-      <Button
-        variant="secondary"
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-      >
-        Edit details
-      </Button>
-
-      <DialogPortal>
-        <Dialog
-          open={open}
-          onClose={() => setOpen(false)}
-          title={
-            <div className="-mb-3 w-full pb-6">
-              <h3>Edit audit details</h3>
-              <p className="text-gray-600">
-                Update the name and description of this audit.
-              </p>
-            </div>
-          }
-          headerClassName="border-b"
-          className="md:w-[650px] [&_.dialog-header>button]:mt-1"
-        >
-          <div className="px-6 py-4">
-            <Form ref={zo.ref} method="post" className="flex flex-col gap-4">
-              <input type="hidden" name="intent" value="edit-audit" />
-
-              <Input
-                name={nameField}
-                label="Audit name"
-                placeholder="Quarterly warehouse audit"
-                defaultValue={audit.name}
-                error={nameError || actionData?.error}
-                required
-                disabled={disabled}
-                data-dialog-initial-focus
-              />
-
-              <Input
-                name={descriptionField}
-                label="Description"
-                placeholder="Add context that will help auditors (optional)."
-                inputType="textarea"
-                rows={5}
-                defaultValue={audit.description || ""}
-                error={descriptionError}
-                disabled={disabled}
-              />
-
-              <div className="mt-4 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setOpen(false)}
-                  disabled={disabled}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={disabled}>
-                  {disabled ? "Saving..." : "Save changes"}
-                </Button>
-              </div>
-            </Form>
+    <DialogPortal>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title={
+          <div className="-mb-3 w-full pb-6">
+            <h3>Edit audit details</h3>
+            <p className="text-gray-600">
+              Update the name and description of this audit.
+            </p>
           </div>
-        </Dialog>
-      </DialogPortal>
-    </>
+        }
+        headerClassName="border-b"
+        className="md:w-[650px] [&_.dialog-header>button]:mt-1"
+      >
+        <div className="px-6 py-4">
+          <Form ref={zo.ref} method="post" className="flex flex-col gap-4">
+            <input type="hidden" name="intent" value="edit-audit" />
+
+            <Input
+              name={nameField}
+              label="Audit name"
+              placeholder="Quarterly warehouse audit"
+              defaultValue={audit.name}
+              error={nameError || actionData?.error}
+              required
+              disabled={disabled}
+              data-dialog-initial-focus
+            />
+
+            <Input
+              name={descriptionField}
+              label="Description"
+              placeholder="Add context that will help auditors (optional)."
+              inputType="textarea"
+              rows={5}
+              defaultValue={audit.description || ""}
+              error={descriptionError}
+              disabled={disabled}
+            />
+
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onClose}
+                disabled={disabled}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={disabled}>
+                {disabled ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
+          </Form>
+        </div>
+      </Dialog>
+    </DialogPortal>
   );
 }

@@ -8,10 +8,12 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 
+import { Logger } from "~/utils/logger";
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
   createAssetScanNote,
@@ -1087,6 +1089,164 @@ export async function getAuditsForOrganization(params: {
       message:
         "Something went wrong while fetching audits. Please try again or contact support.",
       additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Cancels an audit session
+ * Only the creator can cancel an audit
+ * Cannot cancel if audit is already COMPLETED or CANCELLED
+ */
+export async function cancelAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: string;
+  organizationId: string;
+  userId: string;
+}) {
+  try {
+    // Fetch audit session with creator and assignee info
+    const auditSession = await db.auditSession.findUnique({
+      where: { id: auditSessionId, organizationId },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        assignments: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: { assets: true },
+        },
+      },
+    });
+
+    if (!auditSession) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    // Check if user is the creator
+    if (auditSession.createdById !== userId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Only the audit creator can cancel the audit",
+        additionalData: {
+          auditSessionId,
+          userId,
+          creatorId: auditSession.createdById,
+        },
+        label,
+        status: 403,
+      });
+    }
+
+    // Check if audit can be cancelled
+    if (
+      auditSession.status === AuditStatus.COMPLETED ||
+      auditSession.status === AuditStatus.CANCELLED
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: `Cannot cancel an audit that is already ${auditSession.status.toLowerCase()}`,
+        additionalData: { auditSessionId, status: auditSession.status },
+        label,
+        status: 400,
+      });
+    }
+
+    // Update audit status to CANCELLED
+    const updatedAudit = await db.auditSession.update({
+      where: { id: auditSessionId },
+      data: { status: AuditStatus.CANCELLED },
+    });
+
+    // Create activity note for cancellation
+    await db.auditNote.create({
+      data: {
+        content: `${auditSession.createdBy.firstName} ${auditSession.createdBy.lastName} cancelled the audit`,
+        type: "UPDATE",
+        userId,
+        auditSessionId,
+      },
+    });
+
+    // Send cancellation email to assignees (excluding creator)
+    const assigneesToNotify = auditSession.assignments.filter(
+      (assignment) => assignment.userId !== userId && assignment.user.email
+    );
+
+    if (assigneesToNotify.length > 0) {
+      assigneesToNotify.forEach((assignment) => {
+        const subject = `❌ Audit cancelled: "${auditSession.name}" - shelf.nu`;
+        const text = `The audit "${auditSession.name}" has been cancelled by ${
+          auditSession.createdBy.firstName
+        } ${auditSession.createdBy.lastName}.\n\nAudit details:\n- Name: ${
+          auditSession.name
+        }\n- Assets: ${auditSession._count.assets}\n${
+          auditSession.description
+            ? `- Description: ${auditSession.description}\n`
+            : ""
+        }\nThis audit is no longer active.`;
+
+        try {
+          sendEmail({
+            to: assignment.user.email,
+            subject,
+            text,
+          });
+        } catch (emailError) {
+          Logger.error(
+            new ShelfError({
+              cause: emailError,
+              message: "Failed to send audit cancellation email",
+              additionalData: {
+                auditSessionId,
+                userId: assignment.userId,
+                email: assignment.user.email,
+              },
+              label,
+            })
+          );
+        }
+      });
+    }
+
+    return updatedAudit;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while cancelling the audit.",
+      additionalData: isShelfError
+        ? cause.additionalData
+        : { auditSessionId, organizationId, userId },
       label,
     });
   }

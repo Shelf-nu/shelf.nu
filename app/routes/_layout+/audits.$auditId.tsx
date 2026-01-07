@@ -3,17 +3,12 @@ import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
+  LinksFunction,
 } from "react-router";
-import {
-  data,
-  useLoaderData,
-  Outlet,
-  useMatches,
-  useActionData,
-} from "react-router";
+import { data, useLoaderData, Outlet, useMatches } from "react-router";
 import { z } from "zod";
+import { ActionsDropdown } from "~/components/audit/actions-dropdown";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
-import { EditAuditDialog } from "~/components/audit/edit-audit-dialog";
 import { EditAuditSchema } from "~/components/audit/edit-audit-dialog";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -24,8 +19,10 @@ import {
   getAuditSessionDetails,
   updateAuditSession,
   completeAuditSession,
+  cancelAuditSession,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
+import actionsCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -37,6 +34,10 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 const label = "Audit";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: actionsCss },
+];
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -79,6 +80,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
         userId,
         completionNote: typeof note === "string" && note ? note : undefined,
+      });
+
+      return payload({ success: true });
+    }
+
+    if (intent === "cancel-audit") {
+      await cancelAuditSession({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
       });
 
       return payload({ success: true });
@@ -176,6 +187,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         isAdminOrOwner,
         hasScans,
         stats,
+        userId,
       })
     );
   } catch (cause) {
@@ -185,11 +197,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function AuditDetailsPage() {
-  const { session, isAdminOrOwner, hasScans, stats } =
+  const { session, isAdminOrOwner, hasScans, stats, userId } =
     useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
+  const isCancelled = session.status === AuditStatus.CANCELLED;
+  const isCreator = session.createdById === userId;
+
+  // Check if current user is assigned to this audit
+  const isAssignee = session.assignments.some(
+    (assignment) => assignment.userId === userId
+  );
+
   const items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
@@ -227,11 +246,11 @@ export default function AuditDetailsPage() {
       >
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-2">
-          {!isCompleted && isAdminOrOwner && (
-            <EditAuditDialog audit={session} actionData={actionData} />
+          {!isCompleted && !isCancelled && (isAdminOrOwner || isCreator) && (
+            <ActionsDropdown />
           )}
 
-          {!isCompleted && (
+          {!isCompleted && isAssignee && (
             <Button
               to={`/audits/${session.id}/scan`}
               variant={"secondary"}
@@ -241,7 +260,7 @@ export default function AuditDetailsPage() {
             </Button>
           )}
 
-          {!isCompleted && isAdminOrOwner && (
+          {!isCompleted && isAdminOrOwner && isAssignee && (
             <CompleteAuditDialog
               disabled={!hasScans}
               auditName={session.name}

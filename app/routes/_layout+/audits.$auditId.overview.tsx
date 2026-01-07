@@ -34,6 +34,7 @@ import { getAuditImages } from "~/modules/audit/image.service.server";
 import {
   getAuditSessionDetails,
   getAssetsForAuditSession,
+  cancelAuditSession,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -132,6 +133,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       payload({
         session,
         isAdminOrOwner,
+        userId,
         header,
         generalImages,
         assetImages,
@@ -168,6 +170,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (intent === "complete-audit") {
       await completeAuditWithImages({
         request,
+        auditSessionId: auditId,
+        organizationId,
+        userId,
+      });
+
+      return redirect(`/audits/${auditId}/overview`);
+    }
+
+    if (intent === "cancel-audit") {
+      await cancelAuditSession({
         auditSessionId: auditId,
         organizationId,
         userId,
