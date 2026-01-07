@@ -27,17 +27,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const permissionResult = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.auditNote,
       action: PermissionAction.create,
     });
 
+    const { organizationId, isSelfServiceOrBase } = permissionResult;
+
     // Validate that the audit belongs to the user's organization
     const audit = await db.auditSession.findUnique({
       where: { id: auditId },
-      select: { id: true, organizationId: true },
+      select: {
+        id: true,
+        organizationId: true,
+        assignments: {
+          select: { userId: true },
+        },
+      },
     });
 
     if (!audit || audit.organizationId !== organizationId) {
@@ -49,6 +57,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         status: 404,
       });
     }
+
+    const { requireAuditAssigneeForBaseSelfService } = await import(
+      "~/modules/audit/service.server"
+    );
+    requireAuditAssigneeForBaseSelfService({
+      audit,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
+    });
 
     const method = getActionMethod(request);
 

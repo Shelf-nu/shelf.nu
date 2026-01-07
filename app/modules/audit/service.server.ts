@@ -7,13 +7,12 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
-import { sendEmail } from "~/emails/mail.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 
-import { Logger } from "~/utils/logger";
 import type { AuditFilterType } from "./audit-filter-utils";
+import { sendAuditCancelledEmails } from "./email-helpers";
 import {
   createAssetScanNote,
   createAuditCreationNote,
@@ -1030,6 +1029,8 @@ export async function completeAuditSession({
  */
 export async function getAuditsForOrganization(params: {
   organizationId: AuditSession["organizationId"];
+  userId?: string;
+  isSelfServiceOrBase?: boolean;
   /** Page number. Starts at 1 */
   page?: number;
   /** Items to be loaded per page */
@@ -1044,6 +1045,8 @@ export async function getAuditsForOrganization(params: {
 }) {
   const {
     organizationId,
+    userId,
+    isSelfServiceOrBase,
     page = 1,
     perPage = 8,
     search,
@@ -1057,6 +1060,15 @@ export async function getAuditsForOrganization(params: {
     const take = perPage >= 1 ? perPage : 8;
 
     const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+    // Filter by assignee for BASE/SELF_SERVICE users
+    if (isSelfServiceOrBase && userId) {
+      where.assignments = {
+        some: {
+          userId,
+        },
+      };
+    }
 
     // Add search filter
     if (search) {
@@ -1135,6 +1147,41 @@ export async function requireAuditAssignee({
 }
 
 /**
+ * Validates that a BASE/SELF_SERVICE user is assigned to an audit.
+ * For ADMIN/OWNER users, this check is skipped (they can access all audits).
+ *
+ * @throws {ShelfError} If BASE/SELF_SERVICE user is not assigned to the audit
+ */
+export function requireAuditAssigneeForBaseSelfService({
+  audit,
+  userId,
+  isSelfServiceOrBase,
+  auditId,
+}: {
+  audit: { assignments: { userId: string }[] };
+  userId: string;
+  isSelfServiceOrBase: boolean;
+  auditId: string;
+}) {
+  if (isSelfServiceOrBase) {
+    const isAssignee = audit.assignments.some(
+      (assignment) => assignment.userId === userId
+    );
+
+    if (!isAssignee) {
+      throw new ShelfError({
+        cause: null,
+        title: "Unauthorized",
+        message: "You don't have permission to view this audit",
+        additionalData: { auditId, userId },
+        status: 403,
+        label,
+      });
+    }
+  }
+}
+
+/**
  * Cancels an audit session
  * Only the creator can cancel an audit
  * Cannot cancel if audit is already COMPLETED or CANCELLED
@@ -1155,17 +1202,22 @@ export async function cancelAuditSession({
       include: {
         createdBy: {
           select: {
-            id: true,
             email: true,
             firstName: true,
             lastName: true,
+          },
+        },
+        organization: {
+          include: {
+            owner: {
+              select: { email: true },
+            },
           },
         },
         assignments: {
           include: {
             user: {
               select: {
-                id: true,
                 email: true,
                 firstName: true,
                 lastName: true,
@@ -1239,41 +1291,11 @@ export async function cancelAuditSession({
       (assignment) => assignment.userId !== userId && assignment.user.email
     );
 
-    if (assigneesToNotify.length > 0) {
-      assigneesToNotify.forEach((assignment) => {
-        const subject = `❌ Audit cancelled: "${auditSession.name}" - shelf.nu`;
-        const text = `The audit "${auditSession.name}" has been cancelled by ${
-          auditSession.createdBy.firstName
-        } ${auditSession.createdBy.lastName}.\n\nAudit details:\n- Name: ${
-          auditSession.name
-        }\n- Assets: ${auditSession._count.assets}\n${
-          auditSession.description
-            ? `- Description: ${auditSession.description}\n`
-            : ""
-        }\nThis audit is no longer active.`;
-
-        try {
-          sendEmail({
-            to: assignment.user.email,
-            subject,
-            text,
-          });
-        } catch (emailError) {
-          Logger.error(
-            new ShelfError({
-              cause: emailError,
-              message: "Failed to send audit cancellation email",
-              additionalData: {
-                auditSessionId,
-                userId: assignment.userId,
-                email: assignment.user.email,
-              },
-              label,
-            })
-          );
-        }
-      });
-    }
+    // Use email helper to send cancellation emails with HTML template
+    sendAuditCancelledEmails({
+      audit: auditSession,
+      assigneesToNotify,
+    });
 
     return updatedAudit;
   } catch (cause) {

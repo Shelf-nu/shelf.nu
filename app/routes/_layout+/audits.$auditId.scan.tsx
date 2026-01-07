@@ -32,6 +32,7 @@ import {
   getAuditSessionDetails,
   getAuditScans,
   requireAuditAssignee,
+  requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -147,20 +148,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     // Only assignees can scan, even admins/owners
-    const isAssignee = session.assignments.some(
-      (assignment) => assignment.userId === userId
-    );
-
-    if (!isAssignee) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "Only users assigned to this audit can perform scanning. Please contact the audit creator to be assigned.",
-        additionalData: { auditId, userId },
-        status: 403,
-        label,
-      });
-    }
+    // This check applies to ALL users, including admins/owners
+    requireAuditAssigneeForBaseSelfService({
+      audit: session,
+      userId,
+      isSelfServiceOrBase: true, // Force assignee check for scan route
+      auditId,
+    });
 
     // Fetch existing scans to restore state
     const existingScans = await getAuditScans({
@@ -181,8 +175,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
-
-const label = "Audit" as const;
 
 export const ErrorBoundary = () => <ErrorContent />;
 

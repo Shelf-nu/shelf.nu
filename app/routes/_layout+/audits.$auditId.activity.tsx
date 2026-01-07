@@ -34,18 +34,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
+    const permissionResult = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.read,
     });
 
+    const { organizationId, userOrganizations, isSelfServiceOrBase } = permissionResult;
+
     const { session } = await getAuditSessionDetails({
       id: auditId,
       organizationId,
       userOrganizations,
       request,
+    });
+
+    const { requireAuditAssigneeForBaseSelfService } = await import(
+      "~/modules/audit/service.server"
+    );
+    requireAuditAssigneeForBaseSelfService({
+      audit: session,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
     });
 
     // Fetch audit notes

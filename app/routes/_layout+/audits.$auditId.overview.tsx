@@ -36,6 +36,7 @@ import {
   getAssetsForAuditSession,
   cancelAuditSession,
   requireAuditAssignee,
+  requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -79,6 +80,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const { organizationId, userOrganizations } = permissionResult;
+    const isSelfServiceOrBase = permissionResult.isSelfServiceOrBase || false;
 
     const [{ session }, assetsData, allImages] = await Promise.all([
       getAuditSessionDetails({
@@ -114,21 +116,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         rolesForOrg.includes(OrganizationRoles.OWNER)
       : false;
 
-    if (!isAdminOrOwner) {
-      const isAssignee = session.assignments.some(
-        (assignment) => assignment.userId === userId
-      );
-
-      if (!isAssignee) {
-        throw new ShelfError({
-          cause: null,
-          message: "You are not assigned to this audit.",
-          additionalData: { auditId, userId },
-          status: 403,
-          label,
-        });
-      }
-    }
+    requireAuditAssigneeForBaseSelfService({
+      audit: session,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
+    });
 
     return data(
       payload({

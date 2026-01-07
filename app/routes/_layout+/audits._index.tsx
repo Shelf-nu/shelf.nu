@@ -44,7 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.audit,
@@ -70,6 +70,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const { audits, totalAudits } = await getAuditsForOrganization({
       organizationId,
+      userId,
+      isSelfServiceOrBase,
       page,
       perPage,
       search,

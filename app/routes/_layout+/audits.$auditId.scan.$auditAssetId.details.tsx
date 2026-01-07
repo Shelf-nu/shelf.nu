@@ -47,12 +47,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const permissionResult = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.read,
     });
+
+    const { organizationId, isSelfServiceOrBase } = permissionResult;
 
     // Fetch audit asset with notes and images
     const auditAsset = await db.auditAsset.findFirst({
@@ -69,6 +71,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             title: true,
           },
         },
+        auditSession: {
+          select: {
+            assignments: {
+              select: { userId: true },
+            },
+          },
+        },
       },
     });
 
@@ -81,6 +90,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         status: 404,
       });
     }
+
+    const { requireAuditAssigneeForBaseSelfService } = await import(
+      "~/modules/audit/service.server"
+    );
+    requireAuditAssigneeForBaseSelfService({
+      audit: auditAsset.auditSession,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
+    });
 
     // Fetch notes for this audit asset
     const notes = await db.auditNote.findMany({

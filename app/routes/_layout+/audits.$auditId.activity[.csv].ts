@@ -31,12 +31,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const permissionResult = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.read,
     });
+
+    const { organizationId, isSelfServiceOrBase } = permissionResult;
 
     await requirePermission({
       userId,
@@ -47,7 +49,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const audit = await db.auditSession.findFirstOrThrow({
       where: { id: auditId, organizationId },
-      select: { name: true },
+      select: {
+        name: true,
+        assignments: {
+          select: { userId: true },
+        },
+      },
+    });
+
+    const { requireAuditAssigneeForBaseSelfService } = await import(
+      "~/modules/audit/service.server"
+    );
+    requireAuditAssigneeForBaseSelfService({
+      audit,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
     });
 
     const csv = await exportAuditNotesToCsv({

@@ -69,6 +69,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
     ],
+    [PermissionEntity.audit]: [PermissionAction.read, PermissionAction.update],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
@@ -86,7 +87,6 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
-    [PermissionEntity.audit]: [PermissionAction.update],
     [PermissionEntity.userData]: [
       PermissionAction.read,
       PermissionAction.update,
@@ -119,6 +119,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
     ],
+    [PermissionEntity.audit]: [PermissionAction.read, PermissionAction.update],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
@@ -136,7 +137,6 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
-    [PermissionEntity.audit]: [PermissionAction.update],
     [PermissionEntity.userData]: [
       PermissionAction.read,
       PermissionAction.update,

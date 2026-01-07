@@ -151,7 +151,6 @@ export function useSidebarNavItems() {
       title: "Audits",
       to: "/audits",
       Icon: ClipboardCheckIcon,
-      hidden: isBaseOrSelfService,
     },
     {
       type: "parent",
