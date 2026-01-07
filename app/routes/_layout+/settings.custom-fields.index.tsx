@@ -132,7 +132,7 @@ export default function CustomFieldsIndexPage() {
       </div>
       <List
         bulkActions={isBaseOrSelfService ? undefined : <BulkActionsDropdown />}
-        ItemComponent={TeamMemberRow}
+        ItemComponent={CustomFieldRow}
         headerChildren={
           <>
             <Th>Categories</Th>
@@ -146,7 +146,7 @@ export default function CustomFieldsIndexPage() {
     </>
   );
 }
-function TeamMemberRow({
+function CustomFieldRow({
   item,
 }: {
   item: Prisma.CustomFieldGetPayload<{ include: { categories: true } }> & {
