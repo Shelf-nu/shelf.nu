@@ -132,12 +132,13 @@ export default function CustomFieldsIndexPage() {
       </div>
       <List
         bulkActions={isBaseOrSelfService ? undefined : <BulkActionsDropdown />}
-        ItemComponent={TeamMemberRow}
+        ItemComponent={CustomFieldRow}
         headerChildren={
           <>
             <Th>Categories</Th>
             <Th>Required</Th>
             <Th>Status</Th>
+            <Th>Used on</Th>
             <Th>Actions</Th>
           </>
         }
@@ -145,10 +146,12 @@ export default function CustomFieldsIndexPage() {
     </>
   );
 }
-function TeamMemberRow({
+function CustomFieldRow({
   item,
 }: {
-  item: Prisma.CustomFieldGetPayload<{ include: { categories: true } }>;
+  item: Prisma.CustomFieldGetPayload<{ include: { categories: true } }> & {
+    usageCount: number;
+  };
 }) {
   return (
     <>
@@ -195,6 +198,11 @@ function TeamMemberRow({
             Active
           </Badge>
         )}
+      </Td>
+      <Td>
+        <span className="text-text-sm font-medium text-gray-600">
+          {item.usageCount === 1 ? "1 asset" : `${item.usageCount} assets`}
+        </span>
       </Td>
       <Td>
         <ActionsDropdown customField={item} />
