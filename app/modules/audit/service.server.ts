@@ -13,7 +13,7 @@ import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 
 import type { AuditFilterType } from "./audit-filter-utils";
-import { sendAuditCancelledEmails } from "./email-helpers";
+import { sendAuditCancelledEmails, sendAuditCompletedEmail } from "./email-helpers";
 import {
   createAssetScanNote,
   createAuditCreationNote,
@@ -1086,9 +1086,6 @@ export async function completeAuditSession({
       );
 
       // Send completion email
-      const { sendAuditCompletedEmail } = await import(
-        "./email-helpers"
-      );
       sendAuditCompletedEmail({
         audit: completedAudit,
         assigneesToNotify,
