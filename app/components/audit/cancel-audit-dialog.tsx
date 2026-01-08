@@ -14,15 +14,15 @@ import { Form } from "../custom-form";
 import { AlertIcon } from "../icons/library";
 
 type CancelAuditDialogProps = {
- auditName: string;
- open: boolean;
- onClose: () => void;
+  auditName: string;
+  open: boolean;
+  onClose: () => void;
 };
 
 export function CancelAuditDialog({
- auditName,
- open,
- onClose,
+  auditName,
+  open,
+  onClose,
 }: CancelAuditDialogProps) {
   const disabled = useDisabled();
 

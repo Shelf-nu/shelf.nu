@@ -131,7 +131,9 @@ const ConditionalActionsDropdown = () => {
                       setIsCancelDialogOpen(true);
                     }}
                   >
-                    <span className="flex items-center gap-2">Cancel audit</span>
+                    <span className="flex items-center gap-2">
+                      Cancel audit
+                    </span>
                   </Button>
                 </div>
               </When>

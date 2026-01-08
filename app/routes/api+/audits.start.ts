@@ -89,9 +89,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         if (assigneeUser?.user.email) {
-          const assigneeName = `${
-            assigneeUser.user.firstName || "Unknown"
-          } ${assigneeUser.user.lastName || "User"}`;
+          const assigneeName = `${assigneeUser.user.firstName || "Unknown"} ${
+            assigneeUser.user.lastName || "User"
+          }`;
 
           // Send async email (don't await to avoid blocking response)
           void sendAuditAssignedEmail({

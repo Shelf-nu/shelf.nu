@@ -53,7 +53,9 @@ export function AuditUpdatesEmailTemplate({
   hideViewButton = false,
   isAdminEmail = false,
 }: Props) {
-  const creatorName = `${audit.createdBy.firstName || 'Unknown'} ${audit.createdBy.lastName || 'User'}`;
+  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
+    audit.createdBy.lastName || "User"
+  }`;
 
   return (
     <Html>

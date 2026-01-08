@@ -41,7 +41,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, userOrganizations, isSelfServiceOrBase } = permissionResult;
+    const { organizationId, userOrganizations, isSelfServiceOrBase } =
+      permissionResult;
 
     const { session } = await getAuditSessionDetails({
       id: auditId,

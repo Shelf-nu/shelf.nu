@@ -51,9 +51,7 @@ export const auditAssignedEmailContent = (args: BasicAuditEmailContentArgs) =>
 /**
  * Email content when an audit is cancelled
  */
-export const auditCancelledEmailContent = (
-  args: BasicAuditEmailContentArgs
-) =>
+export const auditCancelledEmailContent = (args: BasicAuditEmailContentArgs) =>
   baseAuditTextEmailContent({
     ...args,
     emailContent: `The audit "${args.auditName}" has been cancelled by ${args.creatorName}. This audit is no longer active.`,
@@ -62,9 +60,7 @@ export const auditCancelledEmailContent = (
 /**
  * Email content when an audit is completed
  */
-export const auditCompletedEmailContent = (
-  args: BasicAuditEmailContentArgs
-) =>
+export const auditCompletedEmailContent = (args: BasicAuditEmailContentArgs) =>
   baseAuditTextEmailContent({
     ...args,
     emailContent: `The audit "${args.auditName}" has been completed.`,
@@ -132,7 +128,10 @@ export function sendAuditCancelledEmails({
   assigneesToNotify,
 }: {
   audit: AuditForEmail;
-  assigneesToNotify: Array<{ userId: string; user: { email: string; firstName: string | null; lastName: string | null } }>;
+  assigneesToNotify: Array<{
+    userId: string;
+    user: { email: string; firstName: string | null; lastName: string | null };
+  }>;
 }) {
   const creatorName = `${audit.createdBy.firstName} ${audit.createdBy.lastName}`;
   const assetCount = audit._count.assets;
@@ -162,8 +161,12 @@ export function sendAuditCancelledEmails({
         html,
       });
 
-      const assigneeName = `${assignment.user.firstName || 'Unknown'} ${assignment.user.lastName || 'User'}`;
-      Logger.info(`Audit cancellation email sent to ${assigneeName} (${assignment.user.email})`);
+      const assigneeName = `${assignment.user.firstName || "Unknown"} ${
+        assignment.user.lastName || "User"
+      }`;
+      Logger.info(
+        `Audit cancellation email sent to ${assigneeName} (${assignment.user.email})`
+      );
     } catch (emailError) {
       Logger.error(
         new ShelfError({
