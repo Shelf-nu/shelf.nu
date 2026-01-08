@@ -1,6 +1,8 @@
 import type { AuditForEmail } from "~/emails/audit-updates-template";
 import { auditUpdatesTemplateString } from "~/emails/audit-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import type { ClientHint } from "~/utils/client-hints";
+import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -10,6 +12,8 @@ type BasicAuditEmailContentArgs = {
   assetsCount: number;
   creatorName: string;
   description?: string | null;
+  dueDate?: Date | null;
+  hints: ClientHint;
   auditId: string;
 };
 
@@ -22,22 +26,33 @@ export const baseAuditTextEmailContent = ({
   creatorName,
   assetsCount,
   description,
+  dueDate,
+  hints,
   auditId,
   emailContent,
-}: BasicAuditEmailContentArgs & { emailContent: string }) => `Howdy,
+}: BasicAuditEmailContentArgs & { emailContent: string }) => {
+  const dueDateText = dueDate
+    ? `Due date: ${getDateTimeFormatFromHints(hints, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(dueDate)}\n`
+    : "";
+
+  return `Howdy,
 
 ${emailContent}
 
 ${auditName} | ${assetsCount} ${assetsCount === 1 ? "asset" : "assets"}
 
 Created by: ${creatorName}
-${description ? `Description: ${description}\n` : ""}
+${dueDateText}${description ? `Description: ${description}\n` : ""}
 To view the audit, follow the link below:
 ${SERVER_URL}/audits/${auditId}
 
 Thanks,
 The Shelf Team
 `;
+};
 
 /**
  * Email content when an audit is assigned to a user
@@ -60,11 +75,39 @@ export const auditCancelledEmailContent = (args: BasicAuditEmailContentArgs) =>
 /**
  * Email content when an audit is completed
  */
-export const auditCompletedEmailContent = (args: BasicAuditEmailContentArgs) =>
-  baseAuditTextEmailContent({
+export const auditCompletedEmailContent = (
+  args: BasicAuditEmailContentArgs & {
+    completedAt: Date;
+    wasOverdue: boolean;
+  }
+) => {
+  const completedDateText = getDateTimeFormatFromHints(args.hints, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(args.completedAt);
+
+  const dueDateText = args.dueDate
+    ? getDateTimeFormatFromHints(args.hints, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(args.dueDate)
+    : null;
+
+  let statusMessage = `The audit "${args.auditName}" has been completed on ${completedDateText}.`;
+
+  if (dueDateText) {
+    if (args.wasOverdue) {
+      statusMessage += `\n\nThis audit was completed after the due date (${dueDateText}). ⚠️`;
+    } else {
+      statusMessage += `\n\nThis audit was completed before the due date (${dueDateText}). ✅`;
+    }
+  }
+
+  return baseAuditTextEmailContent({
     ...args,
-    emailContent: `The audit "${args.auditName}" has been completed.`,
+    emailContent: statusMessage,
   });
+};
 
 /**
  * Sends an email notification when a user is assigned to an audit
@@ -73,10 +116,12 @@ export async function sendAuditAssignedEmail({
   audit,
   assigneeEmail,
   assigneeName,
+  hints,
 }: {
   audit: AuditForEmail;
   assigneeEmail: string;
   assigneeName: string;
+  hints: ClientHint;
 }) {
   const creatorName = `${audit.createdBy.firstName} ${audit.createdBy.lastName}`;
   const assetCount = audit._count.assets;
@@ -85,6 +130,7 @@ export async function sendAuditAssignedEmail({
     const html = await auditUpdatesTemplateString({
       audit,
       heading: `🔍 You've been assigned to audit: "${audit.name}"`,
+      hints,
       assetCount,
     });
 
@@ -96,6 +142,8 @@ export async function sendAuditAssignedEmail({
         assetsCount: assetCount,
         creatorName,
         description: audit.description,
+        dueDate: audit.dueDate,
+        hints,
         auditId: audit.id,
       }),
       html,
@@ -126,12 +174,14 @@ export async function sendAuditAssignedEmail({
 export function sendAuditCancelledEmails({
   audit,
   assigneesToNotify,
+  hints,
 }: {
   audit: AuditForEmail;
   assigneesToNotify: Array<{
     userId: string;
     user: { email: string; firstName: string | null; lastName: string | null };
   }>;
+  hints: ClientHint;
 }) {
   const creatorName = `${audit.createdBy.firstName} ${audit.createdBy.lastName}`;
   const assetCount = audit._count.assets;
@@ -145,6 +195,7 @@ export function sendAuditCancelledEmails({
       const html = await auditUpdatesTemplateString({
         audit,
         heading: `❌ Audit cancelled: "${audit.name}"`,
+        hints,
         assetCount,
       });
 
@@ -156,6 +207,8 @@ export function sendAuditCancelledEmails({
           assetsCount: assetCount,
           creatorName,
           description: audit.description,
+          dueDate: audit.dueDate,
+          hints,
           auditId: audit.id,
         }),
         html,
@@ -172,6 +225,90 @@ export function sendAuditCancelledEmails({
         new ShelfError({
           cause: emailError,
           message: "Failed to send audit cancellation email",
+          additionalData: {
+            auditId: audit.id,
+            userId: assignment.userId,
+            email: assignment.user.email,
+          },
+          label: "Audit",
+        })
+      );
+    }
+  });
+}
+
+
+/**
+ * Send email notification to assignees when audit is completed
+ */
+export function sendAuditCompletedEmail({
+  audit,
+  assigneesToNotify,
+  hints,
+  completedAt,
+  wasOverdue,
+}: {
+  audit: AuditForEmail;
+  assigneesToNotify: Array<{
+    userId: string;
+    user: {
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+    };
+  }>;
+  hints: ClientHint;
+  completedAt: Date;
+  wasOverdue: boolean;
+}): void {
+  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
+    audit.createdBy.lastName || "User"
+  }`;
+  const assetCount = audit._count.assets;
+
+  if (assigneesToNotify.length === 0) {
+    return;
+  }
+
+  assigneesToNotify.forEach(async (assignment) => {
+    try {
+      const html = await auditUpdatesTemplateString({
+        audit,
+        heading: `✅ Audit completed: "${audit.name}"`,
+        hints,
+        assetCount,
+        completedAt,
+        wasOverdue,
+      });
+
+      sendEmail({
+        to: assignment.user.email,
+        subject: `✅ Audit completed: "${audit.name}" - shelf.nu`,
+        text: auditCompletedEmailContent({
+          auditName: audit.name,
+          assetsCount: assetCount,
+          creatorName,
+          description: audit.description,
+          dueDate: audit.dueDate,
+          hints,
+          auditId: audit.id,
+          completedAt,
+          wasOverdue,
+        }),
+        html,
+      });
+
+      const assigneeName = `${assignment.user.firstName || "Unknown"} ${
+        assignment.user.lastName || "User"
+      }`;
+      Logger.info(
+        `Audit completion email sent to ${assigneeName} (${assignment.user.email})`
+      );
+    } catch (emailError) {
+      Logger.error(
+        new ShelfError({
+          cause: emailError,
+          message: "Failed to send audit completion email",
           additionalData: {
             auditId: audit.id,
             userId: assignment.userId,

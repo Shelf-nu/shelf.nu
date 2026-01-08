@@ -39,6 +39,7 @@ import {
   requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -181,10 +182,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "cancel-audit") {
+      const hints = getClientHint(request);
       await cancelAuditSession({
         auditSessionId: auditId,
         organizationId,
         userId,
+        hints,
       });
 
       return redirect(`/audits/${auditId}/overview`);
@@ -278,6 +281,19 @@ export default function AuditOverview() {
                   />
                 </div>
               </li>
+              {session.dueDate && (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                    Due date
+                  </span>
+                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                    <DateS
+                      date={session.dueDate}
+                      options={{ dateStyle: "short", timeStyle: "short" }}
+                    />
+                  </div>
+                </li>
+              )}
               {session.startedAt && (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-2/5 text-[14px] font-medium text-gray-900">

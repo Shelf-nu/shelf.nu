@@ -18,6 +18,13 @@ export const BulkStartAuditSchema = z.object({
     .string()
     .max(1000, "Description must be 1000 characters or fewer")
     .optional(),
+  dueDate: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      return new Date(val);
+    }),
   assignee: z
     .string()
     .optional()
@@ -44,8 +51,10 @@ type StartAuditDialogContentProps = {
   fetcherData?: StartAuditFetcherData;
   nameField: string;
   descriptionField: string;
+  dueDateField: string;
   nameError?: string;
   descriptionError?: string;
+  dueDateError?: string;
   assigneeError?: string;
 };
 
@@ -56,8 +65,10 @@ function StartAuditDialogContent({
   fetcherData,
   nameField,
   descriptionField,
+  dueDateField,
   nameError,
   descriptionError,
+  dueDateError,
   assigneeError,
 }: StartAuditDialogContentProps) {
   const navigate = useNavigate();
@@ -95,6 +106,15 @@ function StartAuditDialogContent({
             error={fetcherError || descriptionError}
             disabled={disabled}
           />
+
+          <Input
+            name={dueDateField}
+            label="Due date"
+            type="datetime-local"
+            error={dueDateError}
+            disabled={disabled}
+            className="mt-4"
+          />
         </div>
 
         {/* Right column: Team member selector */}
@@ -129,8 +149,10 @@ export default function BulkStartAuditDialog() {
 
   const nameField = zo.fields.name();
   const descriptionField = zo.fields.description();
+  const dueDateField = zo.fields.dueDate();
   const nameError = zo.errors.name()?.message;
   const descriptionError = zo.errors.description()?.message;
+  const dueDateError = zo.errors.dueDate()?.message;
   const assigneeError = zo.errors.assignee()?.message;
 
   return (
@@ -154,8 +176,10 @@ export default function BulkStartAuditDialog() {
           fetcherData={fetcherData as StartAuditFetcherData}
           nameField={nameField}
           descriptionField={descriptionField}
+          dueDateField={dueDateField}
           nameError={nameError}
           descriptionError={descriptionError}
+          dueDateError={dueDateError}
           assigneeError={assigneeError}
         />
       )}

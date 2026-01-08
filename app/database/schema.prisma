@@ -1330,6 +1330,7 @@ model AuditSession {
   unexpectedAssetCount Int @default(0)
 
   startedAt   DateTime?
+  dueDate     DateTime?
   completedAt DateTime?
   cancelledAt DateTime?
 

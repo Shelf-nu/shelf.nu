@@ -6,6 +6,8 @@ import {
   Container,
   Heading,
 } from "@react-email/components";
+import type { ClientHint } from "~/utils/client-hints";
+import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
@@ -18,6 +20,7 @@ export interface AuditForEmail {
   id: string;
   name: string;
   description?: string | null;
+  dueDate?: Date | null;
   organizationId: string;
   organization: {
     name: string;
@@ -38,8 +41,11 @@ interface Props {
   heading: string;
   audit: AuditForEmail;
   assetCount: number;
+  hints: ClientHint;
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
+  completedAt?: Date;
+  wasOverdue?: boolean;
 }
 
 /**
@@ -49,13 +55,23 @@ interface Props {
 export function AuditUpdatesEmailTemplate({
   audit,
   heading,
+  hints,
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
+  completedAt,
+  wasOverdue,
 }: Props) {
   const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
     audit.createdBy.lastName || "User"
   }`;
+
+  const dueDateFormatted = audit.dueDate
+    ? getDateTimeFormatFromHints(hints, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(audit.dueDate as Date)
+    : null;
 
   return (
     <Html>
@@ -89,6 +105,31 @@ export function AuditUpdatesEmailTemplate({
             </span>{" "}
             {creatorName}
           </p>
+          {dueDateFormatted && (
+            <p style={{ ...styles.p }}>
+              <span style={{ color: "#101828", fontWeight: "600" }}>
+                Due date:
+              </span>{" "}
+              {dueDateFormatted}
+            </p>
+          )}
+          {completedAt && (
+            <p style={{ ...styles.p }}>
+              <span style={{ color: "#101828", fontWeight: "600" }}>
+                Completed on:
+              </span>{" "}
+              {getDateTimeFormatFromHints(hints, {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(completedAt)}
+              {wasOverdue && (
+                <span style={{ color: "#D92D20", marginLeft: "8px" }}>⚠️</span>
+              )}
+              {!wasOverdue && dueDateFormatted && (
+                <span style={{ color: "#12B76A", marginLeft: "8px" }}>✅</span>
+              )}
+            </p>
+          )}
           {audit.description && (
             <p style={{ ...styles.p }}>
               <span style={{ color: "#101828", fontWeight: "600" }}>
@@ -174,16 +215,22 @@ export function AuditUpdatesEmailTemplate({
 export const auditUpdatesTemplateString = ({
   audit,
   heading,
+  hints,
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
+  completedAt,
+  wasOverdue,
 }: Props) =>
   render(
     <AuditUpdatesEmailTemplate
       audit={audit}
       heading={heading}
+      hints={hints}
       assetCount={assetCount}
       hideViewButton={hideViewButton}
       isAdminEmail={isAdminEmail}
+      completedAt={completedAt}
+      wasOverdue={wasOverdue}
     />
   );

@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -32,6 +33,18 @@ export const AUDIT_LIST_INCLUDE = {
       profilePicture: true,
     },
   },
+  assignments: {
+    include: {
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+          profilePicture: true,
+        },
+      },
+    },
+  },
   _count: {
     select: {
       assets: true,
@@ -54,6 +67,7 @@ export type CreateAuditSessionInput = {
   createdById: string;
   assignee?: string;
   scopeMeta?: AuditScopeMeta | null;
+  dueDate?: Date;
 };
 
 export type AuditExpectedAsset = {
@@ -151,6 +165,7 @@ export async function createAuditSession(
     createdById,
     assignee,
     scopeMeta,
+    dueDate,
   } = input;
 
   const uniqueAssetIds = Array.from(new Set(assetIds));
@@ -201,6 +216,7 @@ export async function createAuditSession(
         expectedAssetCount: assets.length,
         missingAssetCount: assets.length,
         scopeMeta: scopeMeta ?? undefined,
+        dueDate,
       },
     });
 
@@ -917,11 +933,13 @@ export async function completeAuditSession({
   organizationId,
   userId,
   completionNote,
+  hints,
 }: {
   sessionId: string;
   organizationId: string;
   userId: string;
   completionNote?: string;
+  hints: ClientHint;
 }): Promise<void> {
   try {
     await db.$transaction(async (tx) => {
@@ -1014,6 +1032,71 @@ export async function completeAuditSession({
         tx,
       });
     });
+
+    // Fetch full audit details for email notification
+    const completedAudit = await db.auditSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        dueDate: true,
+        completedAt: true,
+        organizationId: true,
+        organization: {
+          select: {
+            name: true,
+            owner: {
+              select: { email: true },
+            },
+          },
+        },
+        _count: {
+          select: { assets: true },
+        },
+        createdBy: {
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        },
+        assignments: {
+          include: {
+            user: {
+              select: {
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (completedAudit && completedAudit.completedAt) {
+      // Calculate if audit was overdue
+      const wasOverdue =
+        completedAudit.dueDate &&
+        completedAudit.completedAt > completedAudit.dueDate;
+
+      // Get assignees to notify (exclude the user who completed it)
+      const assigneesToNotify = completedAudit.assignments.filter(
+        (assignment) => assignment.userId !== userId && assignment.user.email
+      );
+
+      // Send completion email
+      const { sendAuditCompletedEmail } = await import(
+        "./email-helpers"
+      );
+      sendAuditCompletedEmail({
+        audit: completedAudit,
+        assigneesToNotify,
+        hints,
+        completedAt: completedAudit.completedAt,
+        wasOverdue: Boolean(wasOverdue),
+      });
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1190,10 +1273,12 @@ export async function cancelAuditSession({
   auditSessionId,
   organizationId,
   userId,
+  hints,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
+  hints: ClientHint;
 }) {
   try {
     // Fetch audit session with creator and assignee info
@@ -1295,6 +1380,7 @@ export async function cancelAuditSession({
     sendAuditCancelledEmails({
       audit: auditSession,
       assigneesToNotify,
+      hints,
     });
 
     return updatedAudit;

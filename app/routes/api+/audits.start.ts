@@ -5,6 +5,7 @@ import { BulkStartAuditSchema } from "~/components/assets/bulk-start-audit-dialo
 import { db } from "~/database/db.server";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
 import { createAuditSession } from "~/modules/audit/service.server";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import {
@@ -28,7 +29,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { name, description, assetIds, assignee } = parseData(
+    const { name, description, assetIds, assignee, dueDate } = parseData(
       formData,
       BulkStartAuditSchema,
       {
@@ -45,6 +46,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       organizationId,
       createdById: userId,
       assignee,
+      dueDate,
     });
 
     // Send email notification if audit is assigned to someone other than the creator
@@ -93,11 +95,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
             assigneeUser.user.lastName || "User"
           }`;
 
+          const hints = getClientHint(request);
+
           // Send async email (don't await to avoid blocking response)
           void sendAuditAssignedEmail({
             audit: auditForEmail,
             assigneeEmail: assigneeUser.user.email,
             assigneeName,
+            hints,
           });
         }
       }

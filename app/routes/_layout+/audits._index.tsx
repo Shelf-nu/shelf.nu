@@ -153,6 +153,8 @@ export default function AuditsIndexPage() {
               <Th>Status</Th>
               <Th>Description</Th>
               <Th>Created by</Th>
+              <Th>Assignee</Th>
+              <Th className="whitespace-nowrap">Due date</Th>
               <Th>Created</Th>
               <Th>Started</Th>
               <Th>Completed</Th>
@@ -181,6 +183,19 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const creatorImg =
     createdBy?.profilePicture || "/static/images/default_pfp.jpg";
 
+  // Get the first assignee to display
+  const firstAssignment = item.assignments[0];
+  const assigneeName = firstAssignment?.user
+    ? `${firstAssignment.user.firstName || ""} ${
+        firstAssignment.user.lastName || ""
+      }`.trim() ||
+      firstAssignment.user.email ||
+      "Unknown"
+    : null;
+  const assigneeImg =
+    firstAssignment?.user?.profilePicture || "/static/images/default_pfp.jpg";
+  const hasMultipleAssignees = item.assignments.length > 1;
+
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -205,6 +220,32 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
 
       <Td>
         <UserBadge name={creatorName} img={creatorImg} />
+      </Td>
+
+      <Td>
+        {assigneeName ? (
+          <div className="flex items-center gap-1">
+            <UserBadge name={assigneeName} img={assigneeImg} />
+            {hasMultipleAssignees && (
+              <span className="text-xs text-gray-500">
+                +{item.assignments.length - 1}
+              </span>
+            )}
+          </div>
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
+
+      <Td>
+        {item.dueDate ? (
+          <DateS
+            date={item.dueDate}
+            options={{ dateStyle: "short", timeStyle: "short" }}
+          />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
 
       <Td>

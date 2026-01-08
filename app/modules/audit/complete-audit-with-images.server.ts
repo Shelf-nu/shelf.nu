@@ -1,6 +1,7 @@
 import type { AuditSession, Organization, User } from "@prisma/client";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { completeAuditSession } from "~/modules/audit/service.server";
+import { getClientHint } from "~/utils/client-hints";
 
 /**
  * Completes an audit session and uploads any attached images.
@@ -23,6 +24,7 @@ export async function completeAuditWithImages({
   organizationId: Organization["id"];
   userId: User["id"];
 }): Promise<void> {
+  const hints = getClientHint(request);
   // Clone the request to read formData without consuming the original
   const formData = await request.formData();
 
@@ -64,5 +66,6 @@ export async function completeAuditWithImages({
     organizationId,
     userId,
     completionNote,
+    hints,
   });
 }

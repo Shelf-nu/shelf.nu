@@ -25,6 +25,7 @@ import {
 import type { RouteHandleWithName } from "~/modules/types";
 import actionsCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import { parseData } from "~/utils/http.server";
@@ -84,21 +85,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         request,
       });
 
+      const hints = getClientHint(request);
       await completeAuditSession({
         sessionId: auditId,
         organizationId,
         userId,
         completionNote: typeof note === "string" && note ? note : undefined,
+        hints,
       });
 
       return payload({ success: true });
     }
 
     if (intent === "cancel-audit") {
+      const hints = getClientHint(request);
       await cancelAuditSession({
         auditSessionId: auditId,
         organizationId,
         userId,
+        hints,
       });
 
       return payload({ success: true });
