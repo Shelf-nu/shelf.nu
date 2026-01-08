@@ -23,6 +23,7 @@ import {
   uploadAuditImage,
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
+import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -87,15 +88,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         message: "Audit asset not found",
         additionalData: { auditAssetId, organizationId },
         label: "Audit",
-        status: 404,
-      });
-    }
+      status: 404,
+    });
+  }
 
-    const { requireAuditAssigneeForBaseSelfService } = await import(
-      "~/modules/audit/service.server"
-    );
-    requireAuditAssigneeForBaseSelfService({
-      audit: auditAsset.auditSession,
+  requireAuditAssigneeForBaseSelfService({
+    audit: auditAsset.auditSession,
       userId,
       isSelfServiceOrBase,
       auditId,

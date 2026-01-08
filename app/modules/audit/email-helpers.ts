@@ -237,7 +237,6 @@ export function sendAuditCancelledEmails({
   });
 }
 
-
 /**
  * Send email notification to assignees when audit is completed
  */

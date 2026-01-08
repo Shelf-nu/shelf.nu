@@ -8,7 +8,10 @@ import { NoPermissionsIcon } from "~/components/icons/library";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAuditNotes } from "~/modules/audit/note-service.server";
-import { getAuditSessionDetails } from "~/modules/audit/service.server";
+import {
+  getAuditSessionDetails,
+  requireAuditAssigneeForBaseSelfService,
+} from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -51,9 +54,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const { requireAuditAssigneeForBaseSelfService } = await import(
-      "~/modules/audit/service.server"
-    );
     requireAuditAssigneeForBaseSelfService({
       audit: session,
       userId,

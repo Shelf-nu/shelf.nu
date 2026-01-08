@@ -1,6 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
 import { exportAuditNotesToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
@@ -57,11 +58,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    const { requireAuditAssigneeForBaseSelfService } = await import(
-      "~/modules/audit/service.server"
-    );
-    requireAuditAssigneeForBaseSelfService({
-      audit,
+  requireAuditAssigneeForBaseSelfService({
+    audit,
       userId,
       isSelfServiceOrBase,
       auditId,

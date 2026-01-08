@@ -4,6 +4,7 @@ import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
 import { createAuditNote } from "~/modules/audit/note-service.server";
+import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -54,15 +55,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: "Audit not found or access denied",
         additionalData: { userId, auditId },
         label: "Audit",
-        status: 404,
-      });
-    }
+      status: 404,
+    });
+  }
 
-    const { requireAuditAssigneeForBaseSelfService } = await import(
-      "~/modules/audit/service.server"
-    );
-    requireAuditAssigneeForBaseSelfService({
-      audit,
+  requireAuditAssigneeForBaseSelfService({
+    audit,
       userId,
       isSelfServiceOrBase,
       auditId,
