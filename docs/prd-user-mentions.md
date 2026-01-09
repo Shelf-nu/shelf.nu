@@ -1114,6 +1114,244 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 
 ---
 
+## Phased Rollout Strategy
+
+### Overview
+
+To ship faster and get user feedback earlier, we recommend a **3-phase incremental rollout** starting with bookings only, then expanding to assets, and finally adding advanced features.
+
+---
+
+### Phase 1: Bookings Only (MVP - Ship First) ⚡
+
+**Goal**: Get @mentions into users' hands ASAP with core functionality on booking comments only.
+
+**Scope**:
+
+- ✅ Mention input component (FR-1) - Bookings only
+- ✅ Mention rendering (FR-2) - Bookings only
+- ✅ Mention parsing & storage (FR-3) - BookingNoteMention model only
+- ✅ In-app toast notifications (FR-4) - Basic implementation
+- ✅ Email notifications (FR-5) - Simple template, no batching
+- ✅ Basic permissions (FR-7) - Org-level validation only
+- ✅ User list API (FR-8.1) - Single endpoint
+
+**Database Changes**:
+
+```prisma
+// Add to schema.prisma - BOOKINGS ONLY
+model BookingNoteMention {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  bookingNoteId   String
+  bookingNote     BookingNote @relation(fields: [bookingNoteId], references: [id], onDelete: Cascade)
+
+  mentionedUserId String
+  mentionedUser   User   @relation("MentionedInBookingNote", fields: [mentionedUserId], references: [id], onDelete: Cascade)
+
+  mentionerId     String?
+  mentioner       User?  @relation("MentionerInBookingNote", fields: [mentionerId], references: [id], onDelete: SetNull)
+
+  bookingId       String
+  organizationId  String
+
+  @@unique([bookingNoteId, mentionedUserId])
+  @@index([mentionedUserId, createdAt])
+  @@index([bookingId])
+  @@index([organizationId])
+}
+```
+
+**Files to Modify**:
+
+1. `/app/modules/booking-note/service.server.ts` - Add mention parsing
+2. `/app/components/booking/notes/index.tsx` - Add mention input
+3. `/app/utils/markdoc-wrappers.ts` - Add `wrapMentionForNote()`
+4. `/app/components/markdown/mention-component.tsx` - New component
+5. `/app/emails/mention-notification-template.tsx` - New email template
+6. `/app/routes/api+/mentions.users.ts` - New user list endpoint
+
+**Out of Scope for Phase 1**:
+
+- ❌ Asset mentions (comes in Phase 2)
+- ❌ Notification center (comes in Phase 3)
+- ❌ Email batching (comes in Phase 2)
+- ❌ Advanced analytics (comes in Phase 3)
+- ❌ Mention notification preferences
+
+**Complexity**: ⚫ **Medium** (5-6 complexity items only)
+
+**Why Bookings First?**:
+
+- Bookings are collaborative by nature (multiple people involved)
+- Higher value - custodians, admins, coordinators all need to communicate
+- Smaller scope - only one model (BookingNote) vs two (Note + BookingNote)
+- Easier to test - more controlled environment
+
+---
+
+### Phase 2: Extend to Assets + Enhancements 🚀
+
+**Goal**: Add mentions to asset comments and improve notification experience.
+
+**Scope**:
+
+- ✅ Asset mention support (FR-1, FR-2, FR-3 for assets)
+- ✅ NoteMention model (parallel to BookingNoteMention)
+- ✅ Email batching (FR-5.6) - Reduce email spam
+- ✅ Improved toast notifications with offline queuing (FR-4.10)
+- ✅ Full permission matrix (FR-7) - All role-based rules
+- ✅ CSV export support (FR-2.7)
+- ✅ Enhanced API endpoints (FR-8.2, FR-8.3)
+
+**Database Changes**:
+
+```prisma
+// Add to schema.prisma - ASSETS
+model NoteMention {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  noteId          String
+  note            Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  mentionedUserId String
+  mentionedUser   User   @relation("MentionedInNote", fields: [mentionedUserId], references: [id], onDelete: Cascade)
+
+  mentionerId     String?
+  mentioner       User?  @relation("MentionerInNote", fields: [mentionerId], references: [id], onDelete: SetNull)
+
+  assetId         String
+  organizationId  String
+
+  @@unique([noteId, mentionedUserId])
+  @@index([mentionedUserId, createdAt])
+  @@index([assetId])
+  @@index([organizationId])
+}
+```
+
+**Files to Modify**:
+
+1. `/app/modules/note/service.server.ts` - Add mention parsing (copy from booking-note)
+2. `/app/components/assets/notes/index.tsx` - Add mention input (reuse component)
+3. `/app/utils/csv.server.ts` - Strip mention markdown
+4. `/app/modules/mention/service.server.ts` - Extract shared logic into service
+5. Email batching worker (5-min window for duplicate mentions)
+
+**Complexity**: ⚫ **Medium** (mostly copy-paste from Phase 1, plus batching logic)
+
+---
+
+### Phase 3: Advanced Features + Notification Center 🎯
+
+**Goal**: Complete the feature with persistent notifications and advanced capabilities.
+
+**Scope**:
+
+- ✅ Notification Center (FR-6) - Full implementation
+- ✅ MentionNotification model
+- ✅ Advanced analytics (FR-9)
+- ✅ Mention search and filtering
+- ✅ User notification preferences
+- ✅ Rate limiting (FR-9.7)
+- ✅ Enhanced hover tooltips with user cards
+
+**Database Changes**:
+
+```prisma
+// Add to schema.prisma - NOTIFICATION CENTER
+model MentionNotification {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipientId String
+  recipient   User   @relation("ReceivedMentions", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  senderId    String?
+  sender      User?   @relation("SentMentions", fields: [senderId], references: [id], onDelete: SetNull)
+
+  type        MentionNotificationType
+  status      NotificationStatus @default(UNREAD)
+
+  noteMentionId        String?  @unique
+  noteMention          NoteMention?  @relation(fields: [noteMentionId], references: [id], onDelete: Cascade)
+
+  bookingNoteMentionId String?  @unique
+  bookingNoteMention   BookingNoteMention?  @relation(fields: [bookingNoteMentionId], references: [id], onDelete: Cascade)
+
+  assetId    String?
+  bookingId  String?
+  readAt     DateTime?
+
+  @@index([recipientId, status, createdAt])
+  @@index([recipientId, status])
+}
+```
+
+**Files to Create**:
+
+1. `/app/components/layout/notification-center/` - Full UI component tree
+2. `/app/routes/api+/mentions.notifications.tsx` - Notification CRUD endpoints
+3. `/app/modules/mention/analytics.server.ts` - Analytics service
+4. `/app/components/user/user-card-popover.tsx` - Enhanced hover card
+
+**Complexity**: ⚫⚫⚫ **High** (new persistent model, complex UI, real-time updates)
+
+---
+
+### Comparison: Full Release vs Phased
+
+| Approach                                | Time to First Ship | User Feedback | Risk   | Learning   |
+| --------------------------------------- | ------------------ | ------------- | ------ | ---------- |
+| **Full Release** (all features at once) | High               | Late          | High   | Late       |
+| **Phase 1** (Bookings only)             | ⚡ Low             | Early         | Low    | Early      |
+| **Phase 2** (+ Assets)                  | Medium             | Continuous    | Medium | Continuous |
+| **Phase 3** (+ Advanced)                | High               | Informed      | Low    | Validated  |
+
+---
+
+### Phase 1 Implementation Checklist (Ship This First!)
+
+**Backend** (Priority Order):
+
+- [ ] Create Prisma migration for BookingNoteMention model
+- [ ] Add `extractMentionsFromMarkdown()` utility function
+- [ ] Update `createBookingNote()` to parse and store mentions
+- [ ] Create user list API endpoint (`GET /api/mentions/users`)
+- [ ] Add mention notification email template (simple version)
+- [ ] Wire up SSE notification for mentions
+- [ ] Add permission validation (basic org-level check)
+
+**Frontend** (Priority Order):
+
+- [ ] Create mention input component with dropdown
+- [ ] Add Markdoc mention tag component
+- [ ] Integrate mention input into booking notes textarea
+- [ ] Add mention rendering to booking activity feed
+- [ ] Wire up toast notifications
+- [ ] Add keyboard navigation (arrow keys, enter, escape)
+
+**Testing**:
+
+- [ ] Unit test: `extractMentionsFromMarkdown()`
+- [ ] Integration test: Create booking note with mention
+- [ ] E2E test: Full mention flow (input → notify → email)
+- [ ] Manual test: Booking comment with @mention
+
+**Deployment**:
+
+- [ ] Run migration in staging
+- [ ] Feature flag: `ENABLE_BOOKING_MENTIONS` (default: false)
+- [ ] Deploy to staging
+- [ ] Internal dogfooding (1 week)
+- [ ] Enable for all users
+- [ ] Monitor notification delivery rates
+
+---
+
 ## Complexity Rankings
 
 Features ranked from **least complex (1)** to **most complex (10)**, based on:
@@ -1124,18 +1362,18 @@ Features ranked from **least complex (1)** to **most complex (10)**, based on:
 - Potential for bugs
 - Time investment required
 
-| Rank | Feature                              | Complexity       | Reasoning                                                                          |
-| ---- | ------------------------------------ | ---------------- | ---------------------------------------------------------------------------------- |
-| 1    | **FR-2: Mention Rendering**          | ⚪ Low           | Leverages existing Markdoc infrastructure; add new component and wrapper function  |
-| 2    | **FR-8: API Endpoints (User List)**  | ⚪ Low           | Simple query for users in organization; standard Remix loader                      |
-| 3    | **FR-3: Mention Parsing & Storage**  | ⚪⚫ Low-Medium  | Regex parsing is straightforward; database operations standard                     |
-| 4    | **FR-9: Analytics & Audit**          | ⚪⚫ Low-Medium  | Logging is simple; mostly piggybacking on existing logs                            |
-| 5    | **FR-7: User Permissions & Privacy** | ⚫ Medium        | Requires validation at multiple points; permission system already exists           |
-| 6    | **FR-1: Mention Input Component**    | ⚫ Medium        | Complex UI state management; dropdown positioning; keyboard navigation             |
-| 7    | **FR-4: In-App Notifications**       | ⚫⚫ Medium-High | SSE infrastructure exists but needs mention-specific logic; handling offline users |
-| 8    | **FR-8: API Endpoints (Full Suite)** | ⚫⚫ Medium-High | Multiple endpoints with complex queries; pagination; permission checks             |
-| 9    | **FR-5: Email Notifications**        | ⚫⚫ Medium-High | Email template design; batching logic; queue integration; plain text version       |
-| 10   | **FR-6: Notification Center**        | ⚫⚫⚫ High      | New persistent model; complex UI; real-time updates; pagination; filtering         |
+| Rank | Feature                              | Complexity       | Phase | Reasoning                                                                          |
+| ---- | ------------------------------------ | ---------------- | ----- | ---------------------------------------------------------------------------------- |
+| 1    | **FR-2: Mention Rendering**          | ⚪ Low           | 1     | Leverages existing Markdoc infrastructure; add new component and wrapper function  |
+| 2    | **FR-8: API Endpoints (User List)**  | ⚪ Low           | 1     | Simple query for users in organization; standard Remix loader                      |
+| 3    | **FR-3: Mention Parsing & Storage**  | ⚪⚫ Low-Medium  | 1     | Regex parsing is straightforward; database operations standard                     |
+| 4    | **FR-9: Analytics & Audit**          | ⚪⚫ Low-Medium  | 3     | Logging is simple; mostly piggybacking on existing logs                            |
+| 5    | **FR-7: User Permissions & Privacy** | ⚫ Medium        | 1-2   | Requires validation at multiple points; permission system already exists           |
+| 6    | **FR-1: Mention Input Component**    | ⚫ Medium        | 1     | Complex UI state management; dropdown positioning; keyboard navigation             |
+| 7    | **FR-4: In-App Notifications**       | ⚫⚫ Medium-High | 1-2   | SSE infrastructure exists but needs mention-specific logic; handling offline users |
+| 8    | **FR-8: API Endpoints (Full Suite)** | ⚫⚫ Medium-High | 2-3   | Multiple endpoints with complex queries; pagination; permission checks             |
+| 9    | **FR-5: Email Notifications**        | ⚫⚫ Medium-High | 1-2   | Email template design; batching logic; queue integration; plain text version       |
+| 10   | **FR-6: Notification Center**        | ⚫⚫⚫ High      | 3     | New persistent model; complex UI; real-time updates; pagination; filtering         |
 
 ### Complexity Legend
 
