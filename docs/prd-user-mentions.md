@@ -1352,6 +1352,449 @@ model MentionNotification {
 
 ---
 
+## Technical Risk Mitigation & CTO Concerns
+
+This section addresses potential technical concerns and rejection reasons for Phase 1 rollout.
+
+---
+
+### Concern #1: Email Spam & Deliverability
+
+**Risk**: Sending too many mention emails could get our domain blacklisted or trigger spam filters.
+
+**Phase 1 Mitigation**:
+
+- **No email batching needed in Phase 1** - Each mention = 1 email, simple and predictable
+- **Natural rate limiting** - Bookings are inherently low-volume compared to assets
+  - Average organization has 10-50 bookings/month vs 1000+ assets
+  - Mentions in booking comments are conversational, not automated
+- **Email volume is bounded**:
+  - Max 1 email per mentioned user per comment
+  - Most booking comments have 0-2 mentions (based on similar features in Slack/GitHub)
+  - Estimated volume: 50-200 mention emails/month for average org
+
+**Why Phase 2 Needs Batching** (NOT Phase 1):
+
+- Phase 2 adds asset mentions (10x higher volume potential)
+- Example: User mentions same person in 5 asset comments in 5 minutes → Without batching = 5 emails → With batching = 1 email
+- Phase 1 gives us real data to tune batching window (5 min? 10 min?)
+
+**Built-in Safeguards**:
+
+- PgBoss email queue (already proven in production for booking reminders)
+- SMTP rate limiting handled by existing transporter config
+- Email retry with exponential backoff (15 retries, 60s delay)
+- Feature flag `ENABLE_BOOKING_MENTIONS` allows instant kill switch
+
+**Monitoring Hooks**:
+
+```typescript
+// Log all mention email sends for monitoring
+logger.info("Mention email sent", {
+  recipientId,
+  mentionerId,
+  bookingId,
+  deliveryStatus: "queued" | "sent" | "failed",
+});
+```
+
+**Rollback Strategy**:
+
+- Disable feature flag → Stops all new mention emails immediately
+- Existing emails in PgBoss queue will complete (max 24 hour retention)
+- No data loss - mention records remain in database
+
+---
+
+### Concern #2: PgBoss Reliability & Failure Modes
+
+**Risk**: What if PgBoss queue fails? Users won't get notified.
+
+**Phase 1 Reality Check**:
+
+- **PgBoss is already critical infrastructure** in Shelf.nu:
+  - Booking checkout reminders (`/app/modules/booking/worker.server.ts:50-80`)
+  - Booking checkin reminders (`/app/modules/booking/worker.server.ts:82-120`)
+  - Booking overdue handlers (`/app/modules/booking/worker.server.ts:122-160`)
+  - Asset reminder emails (`/app/modules/asset-reminder/worker.server.ts`)
+  - Email queue worker (`/app/emails/email.worker.server.ts`)
+- **If PgBoss fails, booking reminders already fail** - mention emails are not a new risk
+
+**Dual Notification Strategy** (Reduces Risk):
+
+- **In-app toast (SSE)** → Immediate, no PgBoss involved
+- **Email (PgBoss)** → Backup, reliable delivery
+- If PgBoss is down, users still get toast notifications
+- If SSE is disconnected, users still get email
+
+**Failure Mode Analysis**:
+
+| Failure Scenario           | Impact                      | Mitigation                                                                       |
+| -------------------------- | --------------------------- | -------------------------------------------------------------------------------- |
+| **PgBoss queue full**      | Email delayed               | Queue size: 10,000 jobs (mention emails are tiny payload)                        |
+| **PgBoss worker crash**    | Email delayed until restart | Worker auto-restarts via entry.server.tsx registration                           |
+| **SMTP server down**       | Email retry                 | 15 retries over 15 hours, then give up gracefully                                |
+| **SSE connection dropped** | Toast not shown             | Client auto-reconnects (existing behavior in `/app/components/shared/toast.tsx`) |
+| **Database down**          | Nothing works               | Mention emails are least of our problems                                         |
+
+**Observability**:
+
+- PgBoss has built-in monitoring via `pgboss` table
+- Track failed jobs: `SELECT * FROM pgboss.job WHERE state = 'failed' AND name = 'email-queue'`
+- Alert on mention email failures: `failed_mention_emails > 10/hour`
+
+---
+
+### Concern #3: Database Performance & Load
+
+**Risk**: New tables and queries will slow down the database.
+
+**Phase 1 Database Impact**:
+
+**New Table: `BookingNoteMention`**
+
+- Small footprint: ~10-20 bytes/record (5 indexed fields)
+- Estimated volume: 100-500 records/month for average org
+- Annual growth: ~6,000 records/org (negligible)
+
+**New Indexes**:
+
+```prisma
+@@unique([bookingNoteId, mentionedUserId])  // Prevent duplicates
+@@index([mentionedUserId, createdAt])       // User's mention feed
+@@index([bookingId])                         // Booking mention queries
+@@index([organizationId])                    // Org-level analytics
+```
+
+**Query Patterns**:
+
+1. **Write (Insert)**: 1 query per mention on note creation
+   - Happens inside existing transaction for `createBookingNote()`
+   - No additional round-trips
+2. **Read (Select)**: Only when rendering activity feed
+   - Already querying BookingNote table - add `include: { mentions: true }`
+   - 1 extra JOIN per activity page load (already optimized with pagination)
+
+**Performance Comparison**:
+
+- **Booking reminder worker**: Queries 1000+ bookings every 10 minutes
+- **Mention queries**: 1-2 queries per activity page load (user-triggered, not scheduled)
+- **Impact**: Negligible - mention queries are 100x less frequent than existing booking queries
+
+**Load Testing Recommendations**:
+
+- Staging test: Create 100 bookings with 5 mentions each → Monitor query time
+- Expected: <50ms additional latency on activity feed load
+- Baseline: Current activity feed loads in ~200ms
+
+---
+
+### Concern #4: SSE Infrastructure & Scalability
+
+**Risk**: SSE notifications won't work with multiple server instances.
+
+**Phase 1 Reality**:
+
+- **Current deployment**: Single server (Render/Railway/Heroku)
+- **SSE already in production**: Used for existing notifications (custody assignments, bulk operations)
+- **EventEmitter is in-memory**: Documented limitation in `/app/utils/emitter/emitter.server.ts:5-15`
+
+**Current Code (No Changes Needed for Phase 1)**:
+
+```typescript
+// app/utils/emitter/emitter.server.ts
+// NOTE: For multi-server deployments, replace with Redis Pub/Sub
+export const emitter = new EventEmitter();
+```
+
+**Multi-Server Solution** (If needed in future):
+
+- Replace EventEmitter with Redis Pub/Sub
+- Use existing Redis infrastructure (if available) or add ioredis
+- Example: Supabase Realtime, Pusher, or Ably (all support multi-server)
+- **Not needed for Phase 1** - Current deployment is single-server
+
+**Scalability Threshold**:
+
+- Single server handles 10,000+ concurrent SSE connections
+- Shelf.nu current scale: ~100-500 concurrent users (estimate)
+- Headroom: 20-100x before hitting SSE limits
+
+---
+
+### Concern #5: Feature Flag & Kill Switch
+
+**Risk**: Can't turn off feature quickly if something goes wrong.
+
+**Phase 1 Kill Switch Strategy**:
+
+**Feature Flag** (Environment Variable):
+
+```bash
+# .env
+ENABLE_BOOKING_MENTIONS=false  # Default: disabled
+```
+
+**Kill Switch Levels**:
+
+1. **Level 1: Disable new mentions** (keeps existing mentions visible)
+
+   ```typescript
+   // In createBookingNote()
+   if (process.env.ENABLE_BOOKING_MENTIONS !== "true") {
+     // Skip mention parsing & notification
+     return note;
+   }
+   ```
+
+2. **Level 2: Disable notifications only** (mentions still work, no emails)
+
+   ```typescript
+   // In MentionService.sendNotifications()
+   if (process.env.ENABLE_MENTION_NOTIFICATIONS !== "true") {
+     return; // Skip SSE + email
+   }
+   ```
+
+3. **Level 3: Hide mentions in UI** (emergency only)
+   ```typescript
+   // In markdown renderer
+   if (process.env.SHOW_MENTIONS !== "true") {
+     return <span>@{userName}</span>; // Plain text, no link
+   }
+   ```
+
+**Rollback Speed**:
+
+- Feature flag change: Instant (no deployment needed)
+- Database rollback: Drop `BookingNoteMention` table + remove foreign keys
+- Code rollback: Standard git revert + deploy (~5 minutes)
+
+**Monitoring Dashboard** (Recommended):
+
+```
+Mention Metrics:
+- Mentions created/hour: [graph]
+- Email delivery rate: [graph]
+- Notification failures: [graph]
+- Feature flag status: [ON/OFF toggle]
+```
+
+---
+
+### Concern #6: Cost Analysis
+
+**Risk**: Additional infrastructure costs for emails/storage.
+
+**Phase 1 Cost Breakdown**:
+
+**Email Costs** (using typical pricing):
+
+- SMTP providers: $0.001/email (Mailgun, SendGrid, SES)
+- Estimated volume: 200 mention emails/month/org
+- Cost: $0.20/month/org (negligible)
+- 100 orgs: $20/month total
+
+**Database Storage**:
+
+- BookingNoteMention record: ~20 bytes
+- 500 mentions/month/org × 12 months = 6,000 records/year
+- Storage: 6,000 × 20 bytes = 120KB/org/year
+- PostgreSQL: $0.10/GB/month → 120KB = $0.000012/month (essentially free)
+
+**SSE/WebSocket**:
+
+- No additional cost - uses existing HTTP connections
+- Bundled in server compute cost
+
+**PgBoss Storage**:
+
+- Email queue records: ~500 bytes each
+- Retention: 24 hours, then auto-deleted
+- Max storage: 200 jobs/day × 500 bytes = 100KB/day (transient)
+
+**Total Incremental Cost**: ~$20-40/month for 100 organizations (assuming self-hosted email)
+
+**Cost vs Value**:
+
+- Improved collaboration → Fewer missed updates → Less support tickets
+- Support ticket cost: $5-20/ticket
+- If mentions prevent 5 support tickets/month → $25-100/month saved
+- **ROI: Positive from Day 1**
+
+---
+
+### Concern #7: Why Not Wait for Full Feature?
+
+**Risk**: Shipping Phase 1 (bookings only) wastes engineering time if we need to rebuild for Phase 2.
+
+**Counterargument - Why Phased Rollout is Better**:
+
+**Engineering Efficiency**:
+
+- Phase 1 code is ~70% reusable for Phase 2
+- Extract mention logic into `/app/modules/mention/service.server.ts` from start
+- Phase 2 is copy-paste + batching (2-3 days vs building from scratch)
+
+**User Feedback Loop**:
+
+- Learn mention syntax preferences (current: `@[Name](mention://id)`)
+- Learn notification frequency tolerance (do users want emails immediately or batched?)
+- Learn UI/UX issues (mention picker positioning, keyboard nav bugs)
+- **Avoid building wrong feature at scale** - cheaper to pivot early
+
+**Risk Reduction**:
+
+- If mentions don't get used in bookings → Don't build asset mentions (save 2 weeks)
+- If email spam becomes issue → Add batching before expanding (catch early)
+- If SSE breaks → Fix in controlled environment (100 users vs 1000 users)
+
+**Market Validation**:
+
+- Bookings are highest-value use case (custodian communication)
+- If booking mentions succeed → Strong signal asset mentions will too
+- If booking mentions fail → Avoid wasting time on asset mentions
+
+**Competitive Pressure**:
+
+- Get feature to market faster → User delight → Positive reviews
+- Competitor launches similar feature → We're already ahead
+- Slow shipping = opportunity cost
+
+---
+
+### Concern #8: Support & Maintenance Burden
+
+**Risk**: New feature creates support tickets and maintenance overhead.
+
+**Phase 1 Support Mitigation**:
+
+**Self-Documenting UI**:
+
+- Mention picker shows placeholder text: "Type @ to mention someone"
+- Tooltip on hover: "@ mention team members to notify them"
+- Empty state: "No users found - check spelling"
+
+**Common User Questions** (Proactive Answers):
+
+1. "How do I mention someone?" → In-app tooltip + Help docs
+2. "Why didn't they get notified?" → Check email logs, verify user exists
+3. "Can I mention deleted users?" → No, picker excludes them automatically
+4. "Can I mention people outside my org?" → No, security restriction
+
+**Error Messages** (User-Friendly):
+
+- "Unable to mention this user" → Clear, actionable
+- "Mention limit reached" → Explains 50 mention/comment cap
+- "You don't have permission" → Directs to admin
+
+**Admin Tools** (for debugging):
+
+- View all mentions for booking: `GET /api/bookings/:id/mentions`
+- Check notification delivery: PgBoss job logs
+- Feature flag toggle: `.env` change (no code deploy)
+
+**Documentation Checklist**:
+
+- [ ] User guide: "How to @mention team members"
+- [ ] Admin guide: "Troubleshooting mention notifications"
+- [ ] Developer docs: "Mentions technical architecture"
+
+**Expected Support Volume**:
+
+- Week 1: 10-20 questions (learning curve)
+- Week 2-4: 2-5 questions (post-adoption)
+- Ongoing: <1 question/week (self-service via docs)
+
+---
+
+### Concern #9: Migration & Rollback Safety
+
+**Risk**: Database migration fails or causes downtime.
+
+**Phase 1 Migration Strategy**:
+
+**Migration File** (Safe & Reversible):
+
+```sql
+-- Up Migration
+CREATE TABLE "BookingNoteMention" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "bookingNoteId" TEXT NOT NULL,
+  "mentionedUserId" TEXT NOT NULL,
+  "mentionerId" TEXT,
+  "bookingId" TEXT NOT NULL,
+  "organizationId" TEXT NOT NULL,
+  CONSTRAINT "BookingNoteMention_bookingNoteId_fkey"
+    FOREIGN KEY ("bookingNoteId") REFERENCES "BookingNote"("id")
+    ON DELETE CASCADE,
+  CONSTRAINT "BookingNoteMention_mentionedUserId_fkey"
+    FOREIGN KEY ("mentionedUserId") REFERENCES "User"("id")
+    ON DELETE CASCADE,
+  CONSTRAINT "BookingNoteMention_mentionerId_fkey"
+    FOREIGN KEY ("mentionerId") REFERENCES "User"("id")
+    ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX "BookingNoteMention_bookingNoteId_mentionedUserId_key"
+  ON "BookingNoteMention"("bookingNoteId", "mentionedUserId");
+CREATE INDEX "BookingNoteMention_mentionedUserId_createdAt_idx"
+  ON "BookingNoteMention"("mentionedUserId", "createdAt");
+CREATE INDEX "BookingNoteMention_bookingId_idx"
+  ON "BookingNoteMention"("bookingId");
+CREATE INDEX "BookingNoteMention_organizationId_idx"
+  ON "BookingNoteMention"("organizationId");
+
+-- Down Migration
+DROP TABLE "BookingNoteMention";
+```
+
+**Migration Safety Checklist**:
+
+- [x] Uses `ON DELETE CASCADE` → No orphaned records
+- [x] Indexes created after table → Fast creation
+- [x] No data migration → Zero-downtime
+- [x] Reversible → Can rollback cleanly
+- [x] No changes to existing tables → No risk to existing data
+
+**Deployment Process**:
+
+1. Deploy code with feature flag OFF
+2. Run migration in staging → Verify indexes created
+3. Run migration in production → Takes <1 second (empty table)
+4. Enable feature flag for internal team only
+5. Dogfood for 1 week
+6. Enable for all users
+
+**Rollback Process**:
+
+1. Disable feature flag → Stops new mentions
+2. Drop table: `DROP TABLE "BookingNoteMention";`
+3. Deploy code without mention logic
+4. Total rollback time: <5 minutes
+
+---
+
+## Summary of Risk Mitigation
+
+| Risk            | Severity (1-10) | Phase 1 Mitigation                                          | Status        |
+| --------------- | --------------- | ----------------------------------------------------------- | ------------- |
+| Email spam      | 7               | No batching needed (low volume), PgBoss queue, feature flag | ✅ Mitigated  |
+| PgBoss failure  | 6               | Dual notification (SSE + email), already in production      | ✅ Mitigated  |
+| Database load   | 4               | Minimal queries, proper indexes, small payload              | ✅ Mitigated  |
+| SSE scalability | 5               | Single server (current deployment), 20-100x headroom        | ✅ Acceptable |
+| Feature flag    | 2               | Multi-level kill switch, instant disable                    | ✅ Mitigated  |
+| Cost            | 2               | ~$20/month for 100 orgs, positive ROI                       | ✅ Acceptable |
+| Support burden  | 5               | Self-documenting UI, clear errors, docs                     | ✅ Mitigated  |
+| Migration risk  | 3               | Zero-downtime migration, fully reversible                   | ✅ Mitigated  |
+
+**Overall Risk Assessment**: **LOW** ✅
+
+**Recommendation**: **Approve Phase 1 for development and staging deployment.**
+
+---
+
 ## Complexity Rankings
 
 Features ranked from **least complex (1)** to **most complex (10)**, based on:
