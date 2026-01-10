@@ -58,8 +58,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-  requireAuditAssigneeForBaseSelfService({
-    audit,
+    requireAuditAssigneeForBaseSelfService({
+      audit,
       userId,
       isSelfServiceOrBase,
       auditId,

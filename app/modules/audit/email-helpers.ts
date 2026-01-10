@@ -110,6 +110,27 @@ export const auditCompletedEmailContent = (
 };
 
 /**
+ * Generic email content for audit reminders
+ * @param timeframe - Human-readable timeframe (e.g., "24 hours", "4 hours", "1 hour")
+ */
+export const auditReminderEmailContent = (
+  args: BasicAuditEmailContentArgs & { timeframe: string }
+) =>
+  baseAuditTextEmailContent({
+    ...args,
+    emailContent: `Reminder: The audit "${args.auditName}" is due in ${args.timeframe}.`,
+  });
+
+/**
+ * Email content for overdue audits
+ */
+export const auditOverdueEmailContent = (args: BasicAuditEmailContentArgs) =>
+  baseAuditTextEmailContent({
+    ...args,
+    emailContent: `The audit "${args.auditName}" is now overdue. Please complete it as soon as possible.`,
+  });
+
+/**
  * Sends an email notification when a user is assigned to an audit
  */
 export async function sendAuditAssignedEmail({
@@ -312,6 +333,151 @@ export function sendAuditCompletedEmail({
             auditId: audit.id,
             userId: assignment.userId,
             email: assignment.user.email,
+          },
+          label: "Audit",
+        })
+      );
+    }
+  });
+}
+
+/**
+ * Send audit reminder email to assignees
+ * @param timeframe - Human-readable timeframe (e.g., "24 hours", "4 hours", "1 hour")
+ * @param heading - Email heading/subject prefix (e.g., "🔔 Audit due in 24 hours")
+ */
+export function sendAuditReminderEmail({
+  audit,
+  assignees,
+  hints,
+  timeframe,
+  heading,
+}: {
+  audit: AuditForEmail;
+  assignees: Array<{
+    userId: string;
+    user: {
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+    };
+  }>;
+  hints: ClientHint;
+  timeframe: string;
+  heading: string;
+}): void {
+  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
+    audit.createdBy.lastName || "User"
+  }`;
+  const assetCount = audit._count.assets;
+
+  assignees.forEach(async (assignment) => {
+    try {
+      const html = await auditUpdatesTemplateString({
+        audit,
+        heading,
+        hints,
+        assetCount,
+      });
+
+      sendEmail({
+        to: assignment.user.email,
+        subject: `${heading}: "${audit.name}" - shelf.nu`,
+        text: auditReminderEmailContent({
+          auditName: audit.name,
+          assetsCount: assetCount,
+          creatorName,
+          description: audit.description,
+          dueDate: audit.dueDate,
+          hints,
+          auditId: audit.id,
+          timeframe,
+        }),
+        html,
+      });
+
+      const assigneeName = `${assignment.user.firstName || "Unknown"} ${
+        assignment.user.lastName || "User"
+      }`;
+      Logger.info(
+        `${timeframe} reminder email sent to ${assigneeName} (${assignment.user.email})`
+      );
+    } catch (emailError) {
+      Logger.error(
+        new ShelfError({
+          cause: emailError,
+          message: `Failed to send ${timeframe} reminder email`,
+          additionalData: {
+            auditId: audit.id,
+            userId: assignment.userId,
+            email: assignment.user.email,
+          },
+          label: "Audit",
+        })
+      );
+    }
+  });
+}
+
+/**
+ * Send overdue notice email to both creator and assignees
+ */
+export function sendAuditOverdueEmail({
+  audit,
+  recipients,
+  hints,
+}: {
+  audit: AuditForEmail;
+  recipients: Array<{
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+  }>;
+  hints: ClientHint;
+}): void {
+  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
+    audit.createdBy.lastName || "User"
+  }`;
+  const assetCount = audit._count.assets;
+
+  recipients.forEach(async (recipient) => {
+    try {
+      const html = await auditUpdatesTemplateString({
+        audit,
+        heading: `⚠️ Audit overdue: "${audit.name}"`,
+        hints,
+        assetCount,
+      });
+
+      sendEmail({
+        to: recipient.email,
+        subject: `⚠️ Audit overdue: "${audit.name}" - shelf.nu`,
+        text: auditOverdueEmailContent({
+          auditName: audit.name,
+          assetsCount: assetCount,
+          creatorName,
+          description: audit.description,
+          dueDate: audit.dueDate,
+          hints,
+          auditId: audit.id,
+        }),
+        html,
+      });
+
+      const recipientName = `${recipient.firstName || "Unknown"} ${
+        recipient.lastName || "User"
+      }`;
+      Logger.info(
+        `Overdue notice email sent to ${recipientName} (${recipient.email})`
+      );
+    } catch (emailError) {
+      Logger.error(
+        new ShelfError({
+          cause: emailError,
+          message: "Failed to send overdue notice email",
+          additionalData: {
+            auditId: audit.id,
+            email: recipient.email,
           },
           label: "Audit",
         })

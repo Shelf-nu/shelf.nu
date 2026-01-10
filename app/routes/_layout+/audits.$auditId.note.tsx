@@ -55,12 +55,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: "Audit not found or access denied",
         additionalData: { userId, auditId },
         label: "Audit",
-      status: 404,
-    });
-  }
+        status: 404,
+      });
+    }
 
-  requireAuditAssigneeForBaseSelfService({
-    audit,
+    requireAuditAssigneeForBaseSelfService({
+      audit,
       userId,
       isSelfServiceOrBase,
       auditId,

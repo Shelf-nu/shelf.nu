@@ -3,8 +3,12 @@ import { data } from "react-router";
 
 import { BulkStartAuditSchema } from "~/components/assets/bulk-start-audit-dialog";
 import { db } from "~/database/db.server";
+import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
-import { createAuditSession } from "~/modules/audit/service.server";
+import {
+  createAuditSession,
+  scheduleNextAuditJob,
+} from "~/modules/audit/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
@@ -103,6 +107,60 @@ export async function action({ request, context }: ActionFunctionArgs) {
             assigneeEmail: assigneeUser.user.email,
             assigneeName,
             hints,
+          });
+        }
+      }
+    }
+
+    // Schedule reminders if due date is set
+    if (session.dueDate && session.dueDate > new Date()) {
+      const hints = getClientHint(request);
+
+      // Calculate when to send the first reminder (24h before due date)
+      const when24h = new Date(session.dueDate.getTime() - 24 * 60 * 60 * 1000);
+
+      // Only schedule if 24h reminder is in the future
+      if (when24h > new Date()) {
+        await scheduleNextAuditJob({
+          data: {
+            id: session.id,
+            hints,
+            eventType: AUDIT_SCHEDULER_EVENTS_ENUM.reminder24h,
+          },
+          when: when24h,
+        });
+      } else {
+        // If less than 24h until due date, start with appropriate reminder
+        const when4h = new Date(session.dueDate.getTime() - 4 * 60 * 60 * 1000);
+        const when1h = new Date(session.dueDate.getTime() - 1 * 60 * 60 * 1000);
+
+        if (when4h > new Date()) {
+          await scheduleNextAuditJob({
+            data: {
+              id: session.id,
+              hints,
+              eventType: AUDIT_SCHEDULER_EVENTS_ENUM.reminder4h,
+            },
+            when: when4h,
+          });
+        } else if (when1h > new Date()) {
+          await scheduleNextAuditJob({
+            data: {
+              id: session.id,
+              hints,
+              eventType: AUDIT_SCHEDULER_EVENTS_ENUM.reminder1h,
+            },
+            when: when1h,
+          });
+        } else {
+          // Already past all reminders, schedule overdue notice
+          await scheduleNextAuditJob({
+            data: {
+              id: session.id,
+              hints,
+              eventType: AUDIT_SCHEDULER_EVENTS_ENUM.overdueNotice,
+            },
+            when: session.dueDate,
           });
         }
       }

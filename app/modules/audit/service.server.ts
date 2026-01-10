@@ -11,7 +11,9 @@ import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { Logger } from "~/utils/logger";
 
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
   sendAuditCancelledEmails,
@@ -25,6 +27,7 @@ import {
   createAuditUpdateNote,
 } from "./helpers.server";
 
+import type { AuditSchedulerData } from "./types";
 const label: ErrorLabel = "Audit";
 
 export const AUDIT_LIST_INCLUDE = {
@@ -503,6 +506,61 @@ export async function getAuditSessionDetails({
       additionalData: { id, organizationId },
       label,
     });
+  }
+}
+
+/**
+ * Schedule the next audit reminder job using PgBoss scheduler
+ * This follows the same pattern as booking reminders
+ */
+export async function scheduleNextAuditJob({
+  data,
+  when,
+}: {
+  data: AuditSchedulerData;
+  when: Date;
+}) {
+  try {
+    const id = await scheduler.sendAfter(
+      QueueNames.auditQueue,
+      data,
+      {},
+      when
+    );
+    Logger.info(
+      `Scheduled audit job: ${data.eventType} for audit ${data.id} at ${when.toISOString()}`
+    );
+    return id;
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to schedule audit job",
+        additionalData: { data, when },
+        label: "Audit",
+      })
+    );
+    throw cause;
+  }
+}
+
+/**
+ * Cancel all scheduled reminder jobs for an audit
+ * Should be called when audit is completed or cancelled
+ */
+async function cancelAuditReminders(auditId: string) {
+  try {
+    await scheduler.cancel(auditId);
+    Logger.info(`Cancelled all reminder jobs for audit ${auditId}`);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to cancel audit reminder jobs",
+        additionalData: { auditId },
+        label: "Audit",
+      })
+    );
   }
 }
 
@@ -1097,6 +1155,9 @@ export async function completeAuditSession({
         wasOverdue: Boolean(wasOverdue),
       });
     }
+
+    // Cancel all scheduled reminder jobs
+    await cancelAuditReminders(sessionId);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1382,6 +1443,9 @@ export async function cancelAuditSession({
       assigneesToNotify,
       hints,
     });
+
+    // Cancel all scheduled reminder jobs
+    await cancelAuditReminders(auditSessionId);
 
     return updatedAudit;
   } catch (cause) {

@@ -88,12 +88,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         message: "Audit asset not found",
         additionalData: { auditAssetId, organizationId },
         label: "Audit",
-      status: 404,
-    });
-  }
+        status: 404,
+      });
+    }
 
-  requireAuditAssigneeForBaseSelfService({
-    audit: auditAsset.auditSession,
+    requireAuditAssigneeForBaseSelfService({
+      audit: auditAsset.auditSession,
       userId,
       isSelfServiceOrBase,
       auditId,
