@@ -27,11 +27,13 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: "test_tag",
+        color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
       expectTagToBeCreated({
         name: "test_tag",
         description: "my test tag",
+        color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
     });
@@ -42,11 +44,13 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         userId: USER_ID,
         name: " test_tag ",
+        color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
       expectTagToBeCreated({
         name: "test_tag",
         description: "my test tag",
+        color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
     });
@@ -59,12 +63,14 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         id: USER_ID,
         name: "test_tag",
+        color: "#ffffff",
       });
       expectTagToBeUpdated({
         name: "test_tag",
         description: "my test tag",
         organizationId: ORGANIZATION_ID,
         id: USER_ID,
+        color: "#ffffff",
       });
     });
 
@@ -74,12 +80,14 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         id: USER_ID,
         name: " test_tag ",
+        color: "#ffffff",
       });
       expectTagToBeUpdated({
         name: "test_tag",
         description: "my test tag",
         organizationId: ORGANIZATION_ID,
         id: USER_ID,
+        color: "#ffffff",
       });
     });
 
@@ -89,6 +97,7 @@ describe("tag service", () => {
         organizationId: ORGANIZATION_ID,
         id: USER_ID,
         name: "test_tag",
+        color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
       expectTagToBeUpdated({
@@ -96,6 +105,7 @@ describe("tag service", () => {
         description: "my test tag",
         organizationId: ORGANIZATION_ID,
         id: USER_ID,
+        color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
     });
@@ -105,16 +115,19 @@ describe("tag service", () => {
 function expectTagToBeCreated({
   name,
   description,
+  color,
   useFor,
 }: {
   name: string;
   description: string;
+  color: string;
   useFor: TagUseFor[];
 }): void {
   expect(db.tag.create).toHaveBeenCalledWith({
     data: {
       name,
       description,
+      color,
       useFor,
       user: {
         connect: {
@@ -135,12 +148,14 @@ function expectTagToBeUpdated({
   description,
   id,
   organizationId,
+  color,
   useFor,
 }: {
   name: string;
   description: string;
   id: string;
   organizationId: string;
+  color: string;
   useFor?: TagUseFor[];
 }): void {
   expect(db.tag.update).toHaveBeenCalledWith({
@@ -151,6 +166,7 @@ function expectTagToBeUpdated({
     data: {
       name,
       description,
+      color,
       useFor: {
         set: useFor,
       },

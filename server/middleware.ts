@@ -14,6 +14,47 @@ import type { FlashData, SessionData } from "./session";
 import { authSessionKey } from "./session";
 
 /**
+ * Ensure host headers for React Router CSRF protection
+ * React Router v7.12+ requires host or x-forwarded-host headers
+ * In dev mode, Vite dev server doesn't always preserve these headers
+ * Only applied in development - production environments have headers intact
+ */
+export function ensureHostHeaders() {
+  return createMiddleware(async (c, next) => {
+    // Only apply this fix in development mode
+    if (process.env.NODE_ENV === "production") {
+      return next();
+    }
+
+    const originalRequest = c.req.raw;
+    const host = originalRequest.headers.get("host");
+    const forwardedHost = originalRequest.headers.get("x-forwarded-host");
+
+    // If both headers are missing, create a new Request with host header
+    if (!host && !forwardedHost) {
+      const headers = new Headers(originalRequest.headers);
+      // Use the URL host from the request
+      const url = new URL(originalRequest.url);
+      headers.set("host", url.host);
+
+      // Create new Request with the updated headers
+      const newRequest = new Request(originalRequest.url, {
+        method: originalRequest.method,
+        headers,
+        body: originalRequest.body,
+        // @ts-expect-error - duplex is required for streaming bodies
+        duplex: "half",
+      });
+
+      // Replace the request in the context
+      c.req.raw = newRequest;
+    }
+
+    return next();
+  });
+}
+
+/**
  * Protected routes middleware
  *
  * @param options.publicPath - The public paths

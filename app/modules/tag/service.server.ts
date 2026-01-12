@@ -10,6 +10,7 @@ import loadash from "lodash";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
@@ -76,10 +77,11 @@ export async function getTags(params: {
 export async function createTag({
   name,
   description,
+  color,
   userId,
   organizationId,
   useFor,
-}: Pick<Tag, "description" | "name" | "organizationId"> & {
+}: Pick<Tag, "description" | "name" | "organizationId" | "color"> & {
   userId: User["id"];
   useFor: TagUseFor[];
 }) {
@@ -89,6 +91,7 @@ export async function createTag({
         name: loadash.trim(name),
         description,
         useFor,
+        color,
         user: {
           connect: {
             id: userId,
@@ -172,6 +175,7 @@ export async function createTagsIfNotExists({
         const newTag = await db.tag.create({
           data: {
             name: tag as string,
+            color: getRandomColor(),
             user: {
               connect: {
                 id: userId,
@@ -233,8 +237,9 @@ export async function updateTag({
   organizationId,
   name,
   description,
+  color,
   useFor,
-}: Pick<Tag, "id" | "organizationId" | "name" | "description"> & {
+}: Pick<Tag, "id" | "organizationId" | "name" | "description" | "color"> & {
   useFor?: TagUseFor[];
 }) {
   try {
@@ -246,6 +251,7 @@ export async function updateTag({
       data: {
         name: loadash.trim(name),
         description,
+        color,
         useFor: {
           set: useFor,
         },

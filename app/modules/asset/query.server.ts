@@ -1455,7 +1455,12 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHEN l.name IS NOT NULL THEN l.name
         ELSE NULL
       END AS "locationName",
-      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name)) FILTER (WHERE t.id IS NOT NULL), '[]'::jsonb) AS tags,
+      COALESCE(
+        jsonb_agg(
+          DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'color', t.color)
+        ) FILTER (WHERE t.id IS NOT NULL),
+        '[]'::jsonb
+      ) AS tags,
       COALESCE(
         CASE 
           WHEN cu.id IS NOT NULL THEN

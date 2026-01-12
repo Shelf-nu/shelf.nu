@@ -371,7 +371,12 @@ export default function AssetOverview() {
                   </span>
                   <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
                     {asset.tags.map((tag) => (
-                      <Tag key={tag.id} className="ml-2">
+                      <Tag
+                        key={tag.id}
+                        className="ml-2"
+                        color={tag.color ?? undefined}
+                        withDot={false}
+                      >
                         {tag.name}
                       </Tag>
                     ))}

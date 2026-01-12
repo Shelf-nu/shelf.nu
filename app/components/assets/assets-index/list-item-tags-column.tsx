@@ -6,7 +6,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 export const ListItemTagsColumn = ({
   tags,
 }: {
-  tags: Pick<Tag, "id" | "name">[] | undefined;
+  tags: Pick<Tag, "id" | "name" | "color">[] | undefined;
 }) => {
   if (!tags || tags.length === 0) {
     return <EmptyTableValue />;
@@ -17,7 +17,11 @@ export const ListItemTagsColumn = ({
       items={tags}
       showCount={2}
       className="justify-start text-left"
-      renderItem={(tag) => <TagBadge key={tag.id}>{tag.name}</TagBadge>}
+      renderItem={(tag) => (
+        <TagBadge key={tag.id} color={tag.color ?? undefined} withDot={false}>
+          {tag.name}
+        </TagBadge>
+      )}
       emptyMessage={null}
     />
   );
