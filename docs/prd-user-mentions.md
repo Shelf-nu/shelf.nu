@@ -27,12 +27,12 @@
 
 ## Executive Summary
 
-This PRD outlines the implementation of @mentions functionality in Shelf.nu activity logs, enabling users to tag team members in asset and booking comments. When mentioned, users will receive real-time in-app notifications and email alerts, fostering better collaboration and communication around asset management activities.
+This PRD outlines the implementation of @mentions functionality in Shelf.nu activity logs, enabling users to tag team members in asset and booking comments. When mentioned, users will receive email notifications and persistent in-app notifications via a bell icon badge, fostering better collaboration and communication around asset management activities.
 
 The feature integrates with Shelf's existing:
 
 - Activity log system (Note and BookingNote models)
-- Notification infrastructure (SSE-based toasts and email system)
+- Notification infrastructure (database-backed notifications and email system)
 - Permission system (organization-based access control)
 - Markdown rendering pipeline (Markdoc with custom tags)
 
@@ -58,9 +58,10 @@ The feature integrates with Shelf's existing:
 
 1. @channel or @all mentions (broadcast to entire team)
 2. Mentions in asset/booking descriptions or custom fields
-3. Mention analytics or reporting
-4. @mentions in system-generated UPDATE notes (only in COMMENT notes)
-5. Cross-organization mentions
+3. @mentions in system-generated UPDATE notes (only in COMMENT notes)
+4. Cross-organization mentions
+5. Real-time SSE toast notifications (using database-backed notifications instead)
+6. Email batching in Phase 1 (defer to Phase 2)
 
 ---
 
@@ -172,81 +173,87 @@ The feature integrates with Shelf's existing:
 
 ### FR-4: In-App Notifications
 
-**Description**: Real-time toast notifications when user is mentioned
+**Description**: Persistent notification center with bell icon badge when user is mentioned
 
 **Requirements**:
 
-- FR-4.1: Send real-time notification via SSE when user is mentioned
-- FR-4.2: Notification shows: mentioner name, asset/booking name, snippet of comment
-- FR-4.3: Notification is only sent to mentioned users
-- FR-4.4: Notification includes deep link to specific comment
-- FR-4.5: Do not send notification to user who authored the mention
-- FR-4.6: Support multiple notifications if mentioned in multiple comments
-- FR-4.7: Toast notification auto-dismisses after standard timeout (3 seconds)
-- FR-4.8: Clicking notification navigates to asset/booking activity tab
-- FR-4.9: Show mention icon in toast notification
-- FR-4.10: Queue notifications if user is offline (show on next login)
+- FR-4.1: Create persistent notification record in database when user is mentioned
+- FR-4.2: Show bell icon in header with unread count badge
+- FR-4.3: Badge displays number of unread mentions (max "9+" for 10 or more)
+- FR-4.4: Clicking bell opens dropdown with recent mentions
+- FR-4.5: Each notification shows: mentioner name, asset/booking name, timestamp
+- FR-4.6: Notification includes deep link to specific comment
+- FR-4.7: Do not create notification for user who authored the mention
+- FR-4.8: Support multiple notifications if mentioned in multiple comments
+- FR-4.9: Clicking notification navigates to asset/booking activity tab and marks as read
+- FR-4.10: Notifications persist across sessions (database-backed)
+- FR-4.11: Show unread indicator (blue dot) for unread mentions
 
 **Dependencies**:
 
-- SSE notification system
-- EventEmitter service
-- Toast component
+- MentionNotification database model
+- Header component updates
+- Notification dropdown component
 
 ---
 
 ### FR-5: Email Notifications
 
-**Description**: Email alert when user is mentioned
+**Description**: Email alert when user is mentioned (via Resend SDK)
 
 **Requirements**:
 
-- FR-5.1: Send email to mentioned user's registered email address
-- FR-5.2: Email subject: "[Workspace Name] [Mentioner] mentioned you in [Asset/Booking Name]"
+- FR-5.1: Send email to mentioned user's registered email address via Resend SDK
+- FR-5.2: Email subject: "[Shelf.nu] [Mentioner] mentioned you in [Asset/Booking Name]"
 - FR-5.3: Email body includes:
   - Who mentioned you
   - Where (asset/booking name with link)
   - Comment content (with mentions highlighted)
   - CTA button to view full context
 - FR-5.4: Email includes both HTML and plain text versions
-- FR-5.5: Use existing email template design system
-- FR-5.6: Batch mentions if same user mentioned multiple times in short period (5 min window)
-- FR-5.7: Respect user notification preferences (if they exist)
-- FR-5.8: Queue email via PgBoss for reliability
-- FR-5.9: Include organization branding in email (if configured)
-- FR-5.10: Do not send email if user has viewed the mention in-app within 2 minutes
+- FR-5.5: Use simple, clean email template (no complex design system needed)
+- FR-5.6: Best-effort delivery (log failures, but don't retry - user still gets database notification)
+- FR-5.7: Include organization name in email footer
+- FR-5.8: Track email delivery success/failure in analytics table
+- FR-5.9: Send immediately on mention creation (no batching in Phase 1)
 
 **Dependencies**:
 
-- Email service
-- Email template system
-- User preferences (future)
-- PgBoss queue
+- Resend SDK (`resend` npm package)
+- RESEND_API_KEY environment variable
+- Email template component
+- MentionAnalytics table for tracking
 
 ---
 
-### FR-6: Notification Center (Optional Enhancement)
+### FR-6: Notification Center (Phase 1 - Core Feature)
 
-**Description**: Persistent list of mentions and notifications
+**Description**: Persistent list of mentions with bell icon badge
 
 **Requirements**:
 
-- FR-6.1: Show notification icon in header with unread count badge
-- FR-6.2: Dropdown panel shows recent mentions
-- FR-6.3: Each notification shows: timestamp, mentioner, context link
-- FR-6.4: Mark individual notifications as read
-- FR-6.5: "Mark all as read" action
-- FR-6.6: Paginated list of all historical mentions
-- FR-6.7: Filter by read/unread status
-- FR-6.8: Filter by asset vs booking mentions
-- FR-6.9: Clear old read notifications after 30 days
-- FR-6.10: Real-time updates via SSE
+- FR-6.1: Show bell icon in header with unread count badge (included in FR-4)
+- FR-6.2: Dropdown panel shows recent 10-20 mentions
+- FR-6.3: Each notification shows: timestamp, mentioner, context link, read/unread status
+- FR-6.4: Mark individual notifications as read (automatically on click)
+- FR-6.5: Notifications load on page load (no real-time SSE updates)
+- FR-6.6: Show blue dot indicator for unread mentions
+- FR-6.7: Clicking notification navigates to booking activity and marks as read
+- FR-6.8: Track notification views in analytics table
+
+**Out of Scope for Phase 1** (defer to Phase 3):
+
+- "Mark all as read" action
+- Paginated list of all historical mentions
+- Filter by read/unread status
+- Filter by asset vs booking mentions
+- Auto-cleanup of old notifications
 
 **Dependencies**:
 
-- New Notification model
-- Header component
-- Notification panel component
+- MentionNotification model (database-backed)
+- Header component modification
+- Notification dropdown component
 
 ---
 
@@ -312,22 +319,25 @@ The feature integrates with Shelf's existing:
 
 ### FR-9: Analytics & Audit
 
-**Description**: Track mention usage for insights and debugging
+**Description**: Track mention usage for insights and learning (per-organization metrics)
 
 **Requirements**:
 
-- FR-9.1: Log all mention creations to system logs
-- FR-9.2: Track mention delivery success/failure
-- FR-9.3: Track email open rates for mention emails (optional)
-- FR-9.4: Track click-through rates on mention notifications
-- FR-9.5: Store metadata: mentioner, mentioned user, timestamp, context
-- FR-9.6: Admin can view mention activity for their organization
-- FR-9.7: Mention counts visible in team member profile (optional)
+- FR-9.1: Store daily aggregated analytics per organization in MentionAnalytics table
+- FR-9.2: Track mention count (total mentions created per org per day)
+- FR-9.3: Track email sent count (successful email deliveries per org per day)
+- FR-9.4: Track email failed count (failed email deliveries per org per day)
+- FR-9.5: Track notification view count (times users viewed their notification badge per org per day)
+- FR-9.6: Track booking mention count vs asset mention count (separate counters for context)
+- FR-9.7: Provide API to query org analytics (last 30 days, last 90 days, etc.)
+- FR-9.8: Calculate email success rate (sent / (sent + failed) \* 100)
+- FR-9.9: Support learning which notification channel is more effective (email vs badge engagement)
 
 **Dependencies**:
 
-- Logging infrastructure
-- Analytics service (if exists)
+- MentionAnalytics database model
+- Analytics tracking functions (upsert pattern for daily aggregation)
+- Logging infrastructure for errors
 
 ---
 
@@ -340,8 +350,8 @@ The feature integrates with Shelf's existing:
 │                         User Interface                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
-│  │ Mention Input    │  │ Mention Renderer │  │ Notification  │ │
-│  │ Component        │  │ (Markdoc)        │  │ Center        │ │
+│  │ Mention Input    │  │ Mention Renderer │  │ Bell Icon +   │ │
+│  │ Component        │  │ (Markdoc)        │  │ Badge         │ │
 │  └──────────────────┘  └──────────────────┘  └───────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -361,19 +371,20 @@ The feature integrates with Shelf's existing:
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
 │  │ Note Service     │  │ Mention Service  │  │ Notification  │ │
-│  │ (Create/Delete)  │  │ (Parse/Extract)  │  │ Service       │ │
+│  │ (Create/Delete)  │  │ (Parse/Extract)  │  │ Service (DB)  │ │
 │  └──────────────────┘  └──────────────────┘  └───────────────┘ │
 │                              │                                   │
 │  ┌──────────────────────────┴────────────────┐                 │
 │  │         Mention Event Handler              │                 │
+│  │  (Create DB notification + Send email)     │                 │
 │  └──────────────────────────────────────────┘                  │
 └─────────────────────────────────────────────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
 ┌──────────────┐    ┌──────────────┐      ┌──────────────┐
-│   Database   │    │ SSE Stream   │      │ Email Queue  │
-│  (Prisma)    │    │ (In-App)     │      │  (PgBoss)    │
+│   Database   │    │ Resend SDK   │      │  Analytics   │
+│  (Prisma)    │    │ (Email API)  │      │   Tracking   │
 └──────────────┘    └──────────────┘      └──────────────┘
 ```
 
@@ -395,23 +406,31 @@ The feature integrates with Shelf's existing:
 5. Backend: Parse mentions from markdown
    │
    ▼
-6. Create Note record (content includes mention markdown)
+6. Create BookingNote record (content includes mention markdown)
    │
    ▼
-7. Create NoteMention records (junction table)
+7. Create BookingNoteMention records (junction table)
    │
    ▼
-8. Trigger mention event → MentionEventHandler
-   │
-   ├─→ Send SSE notification (real-time)
-   │
-   └─→ Queue email notification (PgBoss)
+8. Create MentionNotification record (status: UNREAD)
    │
    ▼
-9. Frontend: Toast notification appears for mentioned users
+9. Track analytics → Increment mention count in MentionAnalytics
    │
    ▼
-10. Email worker: Send mention email (retry on failure)
+10. Send email via Resend SDK → Direct API call (<1s)
+   │
+   ▼
+11. Track email delivery → Increment email sent/failed count
+   │
+   ▼
+12. Next page load: Bell icon shows unread count badge
+   │
+   ▼
+13. User clicks bell → Dropdown shows recent mentions
+   │
+   ▼
+14. User clicks notification → Navigate + mark as read
 ```
 
 ---
@@ -476,14 +495,9 @@ model BookingNoteMention {
 }
 ```
 
-#### MentionNotification (Optional - for Notification Center)
+#### MentionNotification (Phase 1 - Database-Backed Notifications)
 
 ```prisma
-enum MentionNotificationType {
-  ASSET_COMMENT
-  BOOKING_COMMENT
-}
-
 enum NotificationStatus {
   UNREAD
   READ
@@ -497,30 +511,72 @@ model MentionNotification {
 
   // Core fields
   recipientId String
-  recipient   User   @relation("ReceivedMentions", fields: [recipientId], references: [id], onDelete: Cascade)
+  recipient   User   @relation("ReceivedMentionNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
 
   senderId    String?
-  sender      User?   @relation("SentMentions", fields: [senderId], references: [id], onDelete: SetNull)
+  sender      User?   @relation("SentMentionNotifications", fields: [senderId], references: [id], onDelete: SetNull)
 
-  type        MentionNotificationType
   status      NotificationStatus @default(UNREAD)
+  readAt      DateTime?
 
-  // Context
-  noteMentionId        String?  @unique
-  noteMention          NoteMention?  @relation(fields: [noteMentionId], references: [id], onDelete: Cascade)
+  // Reference to mention (Phase 1: bookings only)
+  bookingNoteMentionId String  @unique
+  bookingNoteMention   BookingNoteMention @relation(fields: [bookingNoteMentionId], references: [id], onDelete: Cascade)
 
-  bookingNoteMentionId String?  @unique
-  bookingNoteMention   BookingNoteMention?  @relation(fields: [bookingNoteMentionId], references: [id], onDelete: Cascade)
-
-  // Metadata
-  assetId    String?
-  bookingId  String?
-  readAt     DateTime?
+  // Denormalized for quick queries
+  bookingId       String
+  organizationId  String
 
   @@index([recipientId, status, createdAt]) // For notification feed
   @@index([recipientId, status]) // For unread count
+  @@index([organizationId, createdAt]) // For org-level analytics
 }
 ```
+
+**Why This Model**:
+
+- Persistent notification records (not ephemeral like SSE toasts)
+- Per-user read/unread status tracking
+- Efficient unread count queries via indexed fields
+- Supports notification history and dropdown UI
+- No dependency on SSE/EventEmitter
+- Reuses pattern from Updates feature
+
+#### MentionAnalytics (Phase 1 - Usage Tracking)
+
+```prisma
+model MentionAnalytics {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  date      DateTime @default(now()) @db.Date // Aggregation by date
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Metrics
+  mentionCount          Int @default(0) // Total mentions created
+  emailSentCount        Int @default(0) // Emails successfully sent
+  emailFailedCount      Int @default(0) // Emails that failed
+  notificationViewCount Int @default(0) // Times notifications were viewed
+
+  // Context breakdown
+  bookingMentionCount Int @default(0) // Phase 1: bookings only
+  assetMentionCount   Int @default(0) // Phase 2: assets (always 0 in Phase 1)
+
+  @@unique([organizationId, date]) // One record per org per day
+  @@index([organizationId, date])
+  @@index([date]) // For global analytics
+}
+```
+
+**Why This Schema**:
+
+- Daily aggregation (not per-mention) - keeps table small and queries fast
+- Supports "per org" analytics (user requirement)
+- Tracks email success/failure rates for learning
+- Separates booking vs asset mentions for Phase 2 comparison
+- Can query total usage: `SUM(mentionCount) WHERE organizationId = X`
+- Enables answering: "Is email or badge notification more effective?"
 
 ### Updated Models
 
@@ -540,14 +596,26 @@ model BookingNote {
 // Add to User model
 model User {
   // ... existing fields
-  mentionedInNotes        NoteMention[]        @relation("MentionedInNote")
+
+  // Phase 1: Booking mentions only
   mentionedInBookingNotes BookingNoteMention[] @relation("MentionedInBookingNote")
-  noteMentionsCreated     NoteMention[]        @relation("MentionerInNote")
   bookingMentionsCreated  BookingNoteMention[] @relation("MentionerInBookingNote")
 
-  // Optional: for notification center
-  mentionNotificationsReceived MentionNotification[] @relation("ReceivedMentions")
-  mentionNotificationsSent     MentionNotification[] @relation("SentMentions")
+  // Phase 1: Database-backed notifications
+  mentionNotificationsReceived MentionNotification[] @relation("ReceivedMentionNotifications")
+  mentionNotificationsSent     MentionNotification[] @relation("SentMentionNotifications")
+
+  // Phase 2: Asset mentions (not in Phase 1)
+  // mentionedInNotes        NoteMention[]        @relation("MentionedInNote")
+  // noteMentionsCreated     NoteMention[]        @relation("MentionerInNote")
+}
+
+// Add to Organization model
+model Organization {
+  // ... existing fields
+
+  // New relation for analytics
+  mentionAnalytics MentionAnalytics[]
 }
 ```
 
@@ -637,28 +705,49 @@ model User {
 
 ---
 
-### Toast Notification
+### Bell Icon + Badge Notification
 
 **Visual Design**:
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│ 🔔 John Smith mentioned you                               │
-│                                                            │
-│ In: "MacBook Pro 2023"                                    │
-│ "Hey @You, can you confirm this is available?"            │
-│                                                            │
-│ [View Asset →]                               [Dismiss ×]  │
-└───────────────────────────────────────────────────────────┘
+Header:
+┌──────────────────────────────────────┐
+│  [Logo] Assets  Bookings  🔔(3) ⚙️  │  ← Badge shows unread count
+└──────────────────────────────────────┘
+```
+
+**Dropdown Panel** (when bell clicked):
+
+```
+┌─────────────────────────────────────────────────┐
+│ Mentions                                         │
+├─────────────────────────────────────────────────┤
+│ ● John Smith mentioned you                      │
+│   "Equipment Booking #123" • 5 min ago          │
+│                                                  │
+│ ● Sarah Jones mentioned you                     │
+│   "Conference Room Booking" • 1 hour ago        │
+│                                                  │
+│ ○ Mike Lee mentioned you                        │
+│   "Office Setup" • Yesterday                    │
+│                                                  │
+│ [No more mentions]                               │
+└─────────────────────────────────────────────────┘
+
+Legend:
+● = Unread (blue dot)
+○ = Read (no dot)
 ```
 
 **Behavior**:
 
-- Appears in top-right corner
-- Auto-dismiss after 3 seconds (or existing default)
-- Click "View Asset" → Navigate to asset activity tab
-- Click "Dismiss" → Close immediately
-- Multiple mentions → Stack notifications
+- Bell icon permanently visible in header
+- Badge shows unread count (1-9, or "9+" for ≥10)
+- Click bell → Open dropdown with recent 10-20 mentions
+- Click notification → Navigate to booking activity + mark as read
+- Badge updates on next page load (not real-time)
+- No auto-dismiss - persistent until user clicks
+- Dropdown closes when clicking outside or pressing Escape
 
 ---
 
@@ -835,32 +924,89 @@ export function MentionComponent({
 
 ---
 
-### 3. SSE Notification Integration
+### 3. Database Notification Integration
 
-**File**: `/app/utils/emitter/send-notification.server.ts`
+**New File**: `/app/modules/mention/notification.server.ts`
 
-**Enhancement**:
+**Functions**:
 
 ```typescript
-export async function sendMentionNotification({
-  mentionedUserId,
-  mentionerName,
-  contextType, // "asset" | "booking"
-  contextName,
-  contextId,
-  commentSnippet,
-}: MentionNotificationParams) {
-  return sendNotification({
-    userId: mentionedUserId,
-    title: `${mentionerName} mentioned you`,
-    message: `In "${contextName}": ${commentSnippet}`,
-    icon: { name: "mention", variant: "primary" },
-    variant: "primary",
-    metadata: {
-      type: "mention",
-      contextType,
-      contextId,
-      url: `/${contextType}s/${contextId}/activity`,
+import { db } from "~/database/db.server";
+
+// Create persistent notification record
+export async function createMentionNotification({
+  bookingNoteMentionId,
+  recipientId,
+  senderId,
+  bookingId,
+  organizationId,
+}: {
+  bookingNoteMentionId: string;
+  recipientId: string;
+  senderId: string | null;
+  bookingId: string;
+  organizationId: string;
+}) {
+  return await db.mentionNotification.create({
+    data: {
+      bookingNoteMentionId,
+      recipientId,
+      senderId,
+      bookingId,
+      organizationId,
+      status: "UNREAD",
+    },
+  });
+}
+
+// Get unread count for badge
+export async function getUnreadMentionCount(userId: string) {
+  return await db.mentionNotification.count({
+    where: {
+      recipientId: userId,
+      status: "UNREAD",
+    },
+  });
+}
+
+// Get recent notifications for dropdown
+export async function getUserMentionNotifications(
+  userId: string,
+  limit: number = 20
+) {
+  return await db.mentionNotification.findMany({
+    where: { recipientId: userId },
+    include: {
+      sender: {
+        select: {
+          firstName: true,
+          lastName: true,
+          profilePicture: true,
+        },
+      },
+      bookingNoteMention: {
+        include: {
+          bookingNote: {
+            select: {
+              content: true,
+              createdAt: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+}
+
+// Mark notification as read
+export async function markMentionAsRead(notificationId: string) {
+  return await db.mentionNotification.update({
+    where: { id: notificationId },
+    data: {
+      status: "READ",
+      readAt: new Date(),
     },
   });
 }
@@ -868,39 +1014,122 @@ export async function sendMentionNotification({
 
 ---
 
-### 4. Email Template Integration
+### 4. Resend SDK Email Integration
 
-**New File**: `/app/emails/mention-notification-template.tsx`
+**Install Dependency**:
 
-**Template Structure**:
+```bash
+npm install resend
+```
+
+**Environment Variable**:
+
+```bash
+RESEND_API_KEY="re_xxxxxxxxxxxxx"
+```
+
+**New File**: `/app/emails/resend.server.ts`
+
+**Resend SDK Wrapper**:
 
 ```typescript
-import { Html, Text, Link, Container } from "@react-email/components";
+import { Resend } from "resend";
+import { RESEND_API_KEY, SMTP_FROM } from "~/utils/env";
+import { Logger } from "~/utils/logger";
 
-interface MentionEmailProps {
+const resend = new Resend(RESEND_API_KEY);
+
+export interface MentionEmailPayload {
+  to: string;
   recipientName: string;
   mentionerName: string;
-  contextType: "asset" | "booking";
+  contextType: "booking";
   contextName: string;
+  contextUrl: string;
   commentContent: string;
-  viewUrl: string;
 }
 
-export function MentionEmail(props: MentionEmailProps) {
-  return (
-    <Html>
-      <Container>
-        <Text>Hi {props.recipientName},</Text>
-        <Text>
-          {props.mentionerName} mentioned you in a comment on {props.contextName}
-        </Text>
-        {/* Comment content with mentions highlighted */}
-        <Link href={props.viewUrl}>View Activity</Link>
-      </Container>
-    </Html>
-  );
+export async function sendMentionEmail(payload: MentionEmailPayload) {
+  const {
+    to,
+    recipientName,
+    mentionerName,
+    contextName,
+    contextUrl,
+    commentContent,
+  } = payload;
+
+  const subject = `[Shelf.nu] ${mentionerName} mentioned you in "${contextName}"`;
+
+  const html = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>Hi ${recipientName},</h2>
+      <p>${mentionerName} mentioned you in a comment on <strong>${contextName}</strong>:</p>
+      <blockquote style="border-left: 3px solid #0066cc; padding-left: 16px; color: #666;">
+        ${commentContent}
+      </blockquote>
+      <p>
+        <a href="${contextUrl}" style="background: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+          View Activity
+        </a>
+      </p>
+      <hr style="margin: 32px 0; border: none; border-top: 1px solid #eee;">
+      <p style="color: #999; font-size: 12px;">
+        This is an automated notification from Shelf.nu.
+      </p>
+    </div>
+  `;
+
+  const text = `
+Hi ${recipientName},
+
+${mentionerName} mentioned you in a comment on ${contextName}:
+
+"${commentContent}"
+
+View the full activity here: ${contextUrl}
+
+---
+This is an automated notification from Shelf.nu.
+  `.trim();
+
+  try {
+    const result = await resend.emails.send({
+      from: SMTP_FROM || "Shelf.nu <noreply@shelf.nu>",
+      to,
+      subject,
+      html,
+      text,
+    });
+
+    Logger.info("Mention email sent successfully", {
+      to,
+      mentionerName,
+      contextName,
+      resendId: result.data?.id,
+    });
+
+    return { success: true, resendId: result.data?.id };
+  } catch (cause) {
+    Logger.error("Failed to send mention email via Resend", {
+      cause,
+      to,
+      mentionerName,
+      contextName,
+    });
+
+    return { success: false, error: cause };
+  }
 }
 ```
+
+**Why Resend SDK (not Nodemailer/PgBoss)**:
+
+- Direct API call (<1s delivery)
+- No PgBoss complexity for Phase 1
+- Best-effort delivery (user still gets database notification)
+- Built-in analytics via Resend dashboard
+- Can add batching in Phase 2 if needed
 
 ---
 
@@ -992,21 +1221,21 @@ const cleanContent = content
 
 ### Edge Cases
 
-| Edge Case                                | Handling Strategy                                                                |
-| ---------------------------------------- | -------------------------------------------------------------------------------- |
-| **User deleted after mention**           | Show mention in gray, non-clickable, indicate "[deleted user]"                   |
-| **Asset/Booking deleted**                | Notification links to 404 page with helpful message                              |
-| **Mentioned user loses access**          | Still notify, but show warning in notification: "You may not have access"        |
-| **Email delivery fails**                 | Retry via PgBoss queue (15 attempts), log failure, show in-app notification only |
-| **Duplicate mentions in same comment**   | De-duplicate before creating NoteMention records                                 |
-| **Mention syntax error**                 | Treat as regular text, don't create mention record                               |
-| **Very long comment with many mentions** | Limit to 50 mentions per comment, truncate if exceeded                           |
-| **Offline user**                         | Queue notification, show on next login                                           |
-| **User mentions themselves**             | Allow or block (configurable), no notification sent if allowed                   |
-| **Rapid mentions (spam)**                | Rate limit: max 100 mentions per user per hour                                   |
-| **Organization disabled**                | Mentions still rendered, but notifications not sent                              |
-| **SSE connection dropped**               | Client reconnects automatically, missed notifications shown on reconnect         |
-| **Email preferences not set**            | Default to sending email, provide opt-out in future                              |
+| Edge Case                                | Handling Strategy                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| **User deleted after mention**           | Show mention in gray, non-clickable, indicate "[deleted user]"            |
+| **Asset/Booking deleted**                | Notification links to 404 page with helpful message                       |
+| **Mentioned user loses access**          | Still notify, but show warning in notification: "You may not have access" |
+| **Email delivery fails**                 | Log failure, user still gets database notification (email is best-effort) |
+| **Duplicate mentions in same comment**   | De-duplicate before creating NoteMention records                          |
+| **Mention syntax error**                 | Treat as regular text, don't create mention record                        |
+| **Very long comment with many mentions** | Limit to 50 mentions per comment, truncate if exceeded                    |
+| **Offline user**                         | Database notification persists, user sees on next login                   |
+| **User mentions themselves**             | Allow or block (configurable), no notification sent if allowed            |
+| **Rapid mentions (spam)**                | Rate limit: max 100 mentions per user per hour                            |
+| **Organization disabled**                | Mentions still rendered, but notifications not sent                       |
+| **Badge doesn't update immediately**     | Expected behavior - badge updates on next page load (not real-time)       |
+| **Email preferences not set**            | Default to sending email, provide opt-out in future                       |
 
 ### Error Messages
 
