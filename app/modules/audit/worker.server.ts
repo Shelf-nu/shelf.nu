@@ -9,10 +9,7 @@ import {
   AUDIT_INCLUDE_FOR_EMAIL,
   AUDIT_SCHEDULER_EVENTS_ENUM,
 } from "./constants";
-import {
-  sendAuditReminderEmail,
-  sendAuditOverdueEmail,
-} from "./email-helpers";
+import { sendAuditReminderEmail, sendAuditOverdueEmail } from "./email-helpers";
 import { scheduleNextAuditJob } from "./service.server";
 import type { AuditSchedulerData } from "./types";
 
@@ -220,30 +217,33 @@ const event2HandlerMap: Record<
  * This should be called once during server initialization
  */
 export const registerAuditWorkers = async () => {
-  await scheduler.work<AuditSchedulerData>(QueueNames.auditQueue, async (job) => {
-    const handler = event2HandlerMap[job.data.eventType];
-    if (typeof handler !== "function") {
-      Logger.error(
-        new ShelfError({
-          cause: null,
-          message: "Wrong event type received for the scheduled worker",
-          additionalData: { job },
-          label: "Audit",
-        })
-      );
-      return;
+  await scheduler.work<AuditSchedulerData>(
+    QueueNames.auditQueue,
+    async (job) => {
+      const handler = event2HandlerMap[job.data.eventType];
+      if (typeof handler !== "function") {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message: "Wrong event type received for the scheduled worker",
+            additionalData: { job },
+            label: "Audit",
+          })
+        );
+        return;
+      }
+      try {
+        await handler(job);
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Something went wrong while executing scheduled work.",
+            additionalData: { data: job.data, work: job.data.eventType },
+            label: "Audit",
+          })
+        );
+      }
     }
-    try {
-      await handler(job);
-    } catch (cause) {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while executing scheduled work.",
-          additionalData: { data: job.data, work: job.data.eventType },
-          label: "Audit",
-        })
-      );
-    }
-  });
+  );
 };

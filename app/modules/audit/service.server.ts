@@ -521,14 +521,11 @@ export async function scheduleNextAuditJob({
   when: Date;
 }) {
   try {
-    const id = await scheduler.sendAfter(
-      QueueNames.auditQueue,
-      data,
-      {},
-      when
-    );
+    const id = await scheduler.sendAfter(QueueNames.auditQueue, data, {}, when);
     Logger.info(
-      `Scheduled audit job: ${data.eventType} for audit ${data.id} at ${when.toISOString()}`
+      `Scheduled audit job: ${data.eventType} for audit ${
+        data.id
+      } at ${when.toISOString()}`
     );
     return id;
   } catch (cause) {

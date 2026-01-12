@@ -260,14 +260,13 @@ export default function AuditSessionRoute() {
   /**
    * Handles successful QR code/barcode detection from the scanner.
    *
-   * Note: This currently only adds items to local state via atoms.
-   * TODO: In the future, this should call an API endpoint to persist
-   * the scan to the audit session, allowing audits to be resumed
-   * across sessions (e.g., start today, continue tomorrow).
+   * Scans are persisted to the database via useAuditScanPersistence hook,
+   * allowing audits to be resumed across sessions.
    *
-   * @param {string} qrId - The scanned QR code, barcode, or SAM ID
-   * @param {string} [error] - Optional error message if the code couldn't be processed
-   * @param {"qr" | "barcode" | "samId"} [type] - The type of code that was scanned
+   * @param props - Detection result containing scanned code value, error, and type
+   * @param props.value - The scanned QR code, barcode, or SAM ID
+   * @param props.error - Optional error message if the code couldn't be processed
+   * @param props.type - The type of code that was scanned
    */
   function handleCodeDetectionSuccess({
     value: qrId,

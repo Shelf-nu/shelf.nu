@@ -226,15 +226,6 @@ export default function AuditDetailsPage() {
   const items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
-
-    // TODO: Add activity tab once permission entity is defined
-    // ...(userHasPermission({
-    //   roles,
-    //   entity: PermissionEntity.note,
-    //   action: PermissionAction.read,
-    // })
-    //   ? [{ to: "activity", content: "Activity" }]
-    //   : []),
   ];
 
   const matches = useMatches();
