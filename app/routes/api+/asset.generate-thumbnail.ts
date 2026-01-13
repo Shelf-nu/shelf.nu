@@ -49,12 +49,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // If asset doesn't exist, return early with error information
     if (!asset) {
-      Logger.error(
+      Logger.warn(
         new ShelfError({
           cause: null,
           message: `Asset not found for thumbnail generation: ${assetId}`,
           additionalData: { assetId, userId },
           label: "Assets",
+          shouldBeCaptured: false,
         })
       );
 
