@@ -27,6 +27,10 @@ describe("completeAuditWithImages", () => {
     const mockRequest = {
       url: "http://localhost:3000/audits/test-audit/complete",
       formData: () => Promise.resolve(formData),
+      headers: new Headers({
+        "accept-language": "en-US",
+        "user-agent": "test",
+      }),
     } as any;
 
     vi.mocked(completeAuditSession).mockResolvedValue(undefined);
@@ -43,6 +47,10 @@ describe("completeAuditWithImages", () => {
       sessionId: "audit-1",
       organizationId: "org-1",
       userId: "user-1",
+      hints: expect.objectContaining({
+        locale: "en-US",
+        timeZone: "UTC",
+      }),
       completionNote: "Test completion note",
     });
   });
@@ -56,6 +64,10 @@ describe("completeAuditWithImages", () => {
     const mockRequest = {
       url: "http://localhost:3000/audits/test-audit/complete",
       formData: () => Promise.resolve(formData),
+      headers: new Headers({
+        "accept-language": "en-US",
+        "user-agent": "test",
+      }),
     } as any;
 
     vi.mocked(uploadAuditImage).mockResolvedValue({
@@ -89,6 +101,10 @@ describe("completeAuditWithImages", () => {
       sessionId: "audit-1",
       organizationId: "org-1",
       userId: "user-1",
+      hints: expect.objectContaining({
+        locale: "en-US",
+        timeZone: "UTC",
+      }),
       completionNote: "Completion with image",
     });
   });
@@ -106,6 +122,10 @@ describe("completeAuditWithImages", () => {
     const mockRequest = {
       url: "http://localhost:3000/audits/test-audit/complete",
       formData: () => Promise.resolve(formData),
+      headers: new Headers({
+        "accept-language": "en-US",
+        "user-agent": "test",
+      }),
     } as any;
 
     vi.mocked(uploadAuditImage).mockResolvedValue({
@@ -128,6 +148,10 @@ describe("completeAuditWithImages", () => {
       sessionId: "audit-1",
       organizationId: "org-1",
       userId: "user-1",
+      hints: expect.objectContaining({
+        locale: "en-US",
+        timeZone: "UTC",
+      }),
       completionNote: "Multiple images",
     });
   });
@@ -142,6 +166,10 @@ describe("completeAuditWithImages", () => {
     const mockRequest = {
       url: "http://localhost:3000/audits/test-audit/complete",
       formData: () => Promise.resolve(formData),
+      headers: new Headers({
+        "accept-language": "en-US",
+        "user-agent": "test",
+      }),
     } as any;
 
     vi.mocked(completeAuditSession).mockResolvedValue(undefined);
@@ -165,6 +193,10 @@ describe("completeAuditWithImages", () => {
     const mockRequest = {
       url: "http://localhost:3000/audits/test-audit/complete",
       formData: () => Promise.resolve(formData),
+      headers: new Headers({
+        "accept-language": "en-US",
+        "user-agent": "test",
+      }),
     } as any;
 
     vi.mocked(completeAuditSession).mockResolvedValue(undefined);
@@ -180,6 +212,10 @@ describe("completeAuditWithImages", () => {
       sessionId: "audit-1",
       organizationId: "org-1",
       userId: "user-1",
+      hints: expect.objectContaining({
+        locale: "en-US",
+        timeZone: "UTC",
+      }),
       completionNote: undefined,
     });
   });
@@ -195,6 +231,10 @@ describe("completeAuditWithImages", () => {
     const mockRequest = {
       url: "http://localhost:3000/audits/test-audit/complete",
       formData: () => Promise.resolve(formData),
+      headers: new Headers({
+        "accept-language": "en-US",
+        "user-agent": "test",
+      }),
     } as any;
 
     let uploadCount = 0;

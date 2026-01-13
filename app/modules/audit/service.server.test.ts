@@ -1,4 +1,3 @@
-import { AuditAssignmentRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
@@ -122,14 +121,6 @@ describe("audit service", () => {
         {
           id: "assignment-1",
           auditSessionId: "audit-1",
-          userId: "user-1",
-          role: AuditAssignmentRole.LEAD,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: "assignment-2",
-          auditSessionId: "audit-1",
           userId: "user-2",
           role: null,
           createdAt: new Date(),
@@ -139,7 +130,7 @@ describe("audit service", () => {
       assets: [],
     });
     mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
-    mockDb.auditAssignment.createMany.mockResolvedValue({ count: 2 });
+    mockDb.auditAssignment.createMany.mockResolvedValue({ count: 1 });
     mockDb.auditAsset.findMany.mockResolvedValue([
       {
         id: "audit-asset-1",
@@ -187,21 +178,14 @@ describe("audit service", () => {
     });
 
     expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
-      data: [
-        {
-          auditSessionId: "audit-1",
-          userId: "user-1",
-          role: AuditAssignmentRole.LEAD,
-        },
-        { auditSessionId: "audit-1", userId: "user-2", role: undefined },
-      ],
+      data: [{ auditSessionId: "audit-1", userId: "user-2", role: undefined }],
     });
 
     expect(result.expectedAssets).toEqual([
       { id: "asset-1", name: "Camera A", auditAssetId: "audit-asset-1" },
       { id: "asset-2", name: "Camera B", auditAssetId: "audit-asset-2" },
     ]);
-    expect(result.session.assignments).toHaveLength(2);
+    expect(result.session.assignments).toHaveLength(1);
   });
 
   it("throws when no assets are provided", async () => {
@@ -242,14 +226,7 @@ describe("audit service", () => {
     });
 
     expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
-      data: [
-        {
-          auditSessionId: "audit-1",
-          userId: "user-1",
-          role: AuditAssignmentRole.LEAD,
-        },
-        { auditSessionId: "audit-1", userId: "user-2", role: undefined },
-      ],
+      data: [{ auditSessionId: "audit-1", userId: "user-2", role: undefined }],
     });
   });
 });
