@@ -209,11 +209,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   value={bookingStatus?.isDraft ? "no" : "yes"}
                   key={id}
                 />
-                <input
-                  type="hidden"
-                  name="intent"
-                  value="save"
-                />
+                <input type="hidden" name="intent" value="save" />
                 {/* 
                   Keep a default intent in the form so implicit submits (Enter key / Mobile Safari without a submitter)
                   still include an intent. When a submit button has its own name/value, the browser appends that entry
