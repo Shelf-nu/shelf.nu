@@ -18,13 +18,7 @@ export const BulkStartAuditSchema = z.object({
     .string()
     .max(1000, "Description must be 1000 characters or fewer")
     .optional(),
-  dueDate: z
-    .string()
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      return new Date(val);
-    }),
+  dueDate: z.string().optional(),
   assignee: z
     .string()
     .optional()

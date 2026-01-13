@@ -199,7 +199,7 @@ export function AuditUpdatesEmailTemplate({
               color: "#344054",
             }}
           >
-            © 2024 Shelf.nu
+            © 2026 Shelf.nu
           </p>
         </div>
       </Container>

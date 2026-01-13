@@ -1,3 +1,4 @@
+import { DateTime } from "luxon";
 import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 
@@ -10,6 +11,7 @@ import {
   scheduleNextAuditJob,
 } from "~/modules/audit/service.server";
 import { getClientHint } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import {
@@ -32,8 +34,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
+    const hints = getClientHint(request);
 
-    const { name, description, assetIds, assignee, dueDate } = parseData(
+    const { name, description, assetIds, assignee } = parseData(
       formData,
       BulkStartAuditSchema,
       {
@@ -43,6 +46,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const sanitizedDescription = description?.trim() || undefined;
 
+    // Convert dueDate from user's local timezone to UTC
+    // Get raw value from formData (not parsed Zod value) to ensure proper timezone handling
+    const dueDateString = formData.get("dueDate")?.toString();
+    const dueDateUTC = dueDateString
+      ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
+          zone: hints.timeZone,
+        }).toJSDate()
+      : undefined;
+
     const { session } = await createAuditSession({
       name,
       description: sanitizedDescription,
@@ -50,7 +62,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       organizationId,
       createdById: userId,
       assignee,
-      dueDate,
+      dueDate: dueDateUTC,
     });
 
     // Send email notification if audit is assigned to someone other than the creator
@@ -99,8 +111,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
             assigneeUser.user.lastName || "User"
           }`;
 
-          const hints = getClientHint(request);
-
           // Send async email (don't await to avoid blocking response)
           void sendAuditAssignedEmail({
             audit: auditForEmail,
@@ -114,8 +124,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     // Schedule reminders if due date is set
     if (session.dueDate && session.dueDate > new Date()) {
-      const hints = getClientHint(request);
-
       // Calculate when to send the first reminder (24h before due date)
       const when24h = new Date(session.dueDate.getTime() - 24 * 60 * 60 * 1000);
 

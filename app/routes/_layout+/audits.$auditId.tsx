@@ -185,6 +185,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       if (!isAssignee) {
         throw new ShelfError({
           cause: null,
+          title: "Access denied",
           message: "You are not assigned to this audit.",
           additionalData: { auditId, userId },
           status: 403,
