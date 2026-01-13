@@ -199,7 +199,7 @@ export function AuditUpdatesEmailTemplate({
               color: "#344054",
             }}
           >
-            © 2026 Shelf.nu
+            © {new Date().getFullYear()} Shelf.nu
           </p>
         </div>
       </Container>
