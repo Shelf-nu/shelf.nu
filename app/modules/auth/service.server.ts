@@ -65,11 +65,19 @@ export async function signUpWithEmailPass(email: string, password: string) {
 
     return user;
   } catch (cause) {
+    const isRateLimitError =
+      isAuthApiError(cause) &&
+      (cause.status === 429 ||
+        cause.message.includes("request this after 5 seconds"));
+    const message = isRateLimitError
+      ? "You're trying too fast. Please wait a few seconds and try again."
+      : "Something went wrong, refresh page and try to signup again.";
     throw new ShelfError({
       cause,
-      message: "Something went wrong, refresh page and try to signup again.",
+      message,
       additionalData: { email },
       label,
+      shouldBeCaptured: !isRateLimitError,
     });
   }
 }
