@@ -15,10 +15,10 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
   updateAuditSession,
-  completeAuditSession,
   cancelAuditSession,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
@@ -55,7 +55,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formData = await request.formData();
+    const formData = await request.clone().formData();
     const intent = formData.get("intent");
 
     if (intent === "edit-audit") {
@@ -75,8 +75,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "complete-audit") {
-      const note = formData.get("note");
-
       // Only assignees can complete the audit
       await requireAuditAssignee({
         auditSessionId: auditId,
@@ -85,13 +83,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         request,
       });
 
-      const hints = getClientHint(request);
-      await completeAuditSession({
-        sessionId: auditId,
+      await completeAuditWithImages({
+        request,
+        auditSessionId: auditId,
         organizationId,
         userId,
-        completionNote: typeof note === "string" && note ? note : undefined,
-        hints,
       });
 
       return payload({ success: true });
@@ -266,7 +262,7 @@ export default function AuditDetailsPage() {
             </Button>
           )}
 
-          {!isCompleted && isAdminOrOwner && isAssignee && (
+          {!isCompleted && isAssignee && (
             <CompleteAuditDialog
               disabled={!hasScans}
               auditName={session.name}

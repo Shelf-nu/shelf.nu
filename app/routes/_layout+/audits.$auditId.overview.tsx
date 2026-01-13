@@ -21,6 +21,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { useSearchParams } from "~/hooks/search-params";
@@ -376,16 +377,19 @@ export default function AuditOverview() {
 
         {/* Right Column: Audit Images */}
         <div className="flex-1">
-          <h2 className="mb-4 text-lg font-semibold">Audit Images</h2>
-
-          {/* Info text to explain image types */}
-          {(generalImages.length > 0 || assetImages.length > 0) && (
-            <p className="mb-3 text-sm text-gray-600">
-              Images captured during the audit. General images are associated
-              with the audit itself, while asset images are linked to specific
-              assets.
-            </p>
-          )}
+          <h2 className="mb-4 text-lg font-semibold">
+            Audit Images{" "}
+            <InfoTooltip
+              iconClassName="size-4"
+              content={
+                <p className="mb-3 text-sm text-gray-600">
+                  Images captured during the audit. General images are
+                  associated with the audit itself, while asset images are
+                  linked to specific assets.
+                </p>
+              }
+            />
+          </h2>
 
           {/* General Audit Images */}
           {generalImages.length > 0 && (
