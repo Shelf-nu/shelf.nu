@@ -11,7 +11,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
-import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
+import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
@@ -268,7 +268,10 @@ export default function AuditOverview() {
                   Status
                 </span>
                 <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                  <AuditStatusBadge status={session.status} />
+                  <AuditStatusBadgeWithOverdue
+                    status={session.status}
+                    dueDate={session.dueDate}
+                  />
                 </div>
               </li>
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">

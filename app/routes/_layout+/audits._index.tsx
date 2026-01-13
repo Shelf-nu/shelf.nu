@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
-import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
+import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { StatusFilter } from "~/components/booking/status-filter";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -213,7 +213,10 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
       </Td>
 
       <Td>
-        <AuditStatusBadge status={item.status} />
+        <AuditStatusBadgeWithOverdue
+          status={item.status}
+          dueDate={item.dueDate}
+        />
       </Td>
 
       <DescriptionColumn value={item.description || ""} />
