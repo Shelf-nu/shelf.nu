@@ -140,9 +140,7 @@ describe("formatValueForCsv", () => {
   });
 
   it("escapes quotes and trims whitespace", () => {
-    expect(formatValueForCsv('  He said "hi"  ')).toBe(
-      '"He said ""hi"""'
-    );
+    expect(formatValueForCsv('  He said "hi"  ')).toBe('"He said ""hi"""');
   });
 
   it("formats dates and strips markdown when requested", () => {
@@ -394,11 +392,9 @@ describe("buildCsvExportDataFromTeamMembers", () => {
     });
 
     expect(csv).toBe(
-      [
-        "Id,Name,Custodies",
-        '"tm-1","Alex","3"',
-        '"tm-2","Riley","0"',
-      ].join("\r\n")
+      ["Id,Name,Custodies", '"tm-1","Alex","3"', '"tm-2","Riley","0"'].join(
+        "\r\n"
+      )
     );
   });
 });
