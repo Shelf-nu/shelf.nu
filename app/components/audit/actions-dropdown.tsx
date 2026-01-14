@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { AuditStatus } from "@prisma/client";
 import {
   Popover,
@@ -13,6 +13,7 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader, action } from "~/routes/_layout+/audits.$auditId";
 import { tw } from "~/utils/tw";
+import { AuditReceiptPDF, type AuditReceiptPDFRef } from "./audit-receipt-pdf";
 import { CancelAuditDialog } from "./cancel-audit-dialog";
 import { EditAuditDialog } from "./edit-audit-dialog";
 import { Button } from "../shared/button";
@@ -25,6 +26,10 @@ const ConditionalActionsDropdown = () => {
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  // PDF generation state - tracks loading state for button feedback
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  // Ref to imperatively trigger PDF generation
+  const pdfRef = useRef<AuditReceiptPDFRef>(null);
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -138,6 +143,29 @@ const ConditionalActionsDropdown = () => {
                 </div>
               </When>
 
+              {/* PDF Download Button - Always visible for all users with audit read permission */}
+              <div className="border-b px-0 py-1 md:p-0">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                  width="full"
+                  disabled={isGeneratingPdf}
+                  onClick={() => {
+                    handleMenuClose();
+                    // Trigger PDF generation via ref API
+                    pdfRef.current?.generatePdf();
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    {/* Show loading text while PDF is being generated */}
+                    {isGeneratingPdf
+                      ? "Generating receipt..."
+                      : "Download Receipt"}
+                  </span>
+                </Button>
+              </div>
+
               <div className="border-t p-4 md:hidden md:p-0">
                 <Button
                   role="button"
@@ -169,6 +197,14 @@ const ConditionalActionsDropdown = () => {
           onClose={() => setIsCancelDialogOpen(false)}
         />
       </When>
+
+      {/* Hidden PDF component - always mounted but only renders when triggered */}
+      <AuditReceiptPDF
+        ref={pdfRef}
+        audit={{ id: session.id, name: session.name, status: session.status }}
+        onGenerateStart={() => setIsGeneratingPdf(true)}
+        onGenerateEnd={() => setIsGeneratingPdf(false)}
+      />
     </>
   );
 };

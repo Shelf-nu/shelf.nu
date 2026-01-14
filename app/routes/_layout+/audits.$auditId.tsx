@@ -212,7 +212,6 @@ export default function AuditDetailsPage() {
     useLoaderData<typeof loader>();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
-  const isCancelled = session.status === AuditStatus.CANCELLED;
   const isCreator = session.createdById === userId;
 
   // Check if current user is assigned to this audit
@@ -248,9 +247,8 @@ export default function AuditDetailsPage() {
       >
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-2">
-          {!isCompleted && !isCancelled && (isAdminOrOwner || isCreator) && (
-            <ActionsDropdown />
-          )}
+          {/* Show actions dropdown to anyone who can view the audit (for PDF download) */}
+          {(isAdminOrOwner || isCreator || isAssignee) && <ActionsDropdown />}
 
           {!isCompleted && isAssignee && (
             <Button
