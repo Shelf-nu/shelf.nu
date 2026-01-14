@@ -83,19 +83,23 @@ export async function createTeamMemberIfNotExists({
      * Important note: The field in the csv is called "custodian" for making it easy for the user
      * However in the app it works a bit different due to how the relationships are
      */
-    const teamMembers = new Map(
-      data
-        .filter((asset) => asset.custodian !== "")
-        .map((asset) => [asset.custodian, {}])
+    // Normalize custodian names so whitespace-only or padded values don't create phantom keys.
+    const teamMemberNames = Array.from(
+      new Set(
+        data
+          .map((asset) => asset.custodian?.trim())
+          .filter((custodian): custodian is string => !!custodian)
+      )
     );
 
     // Handle the case where there are no teamMembers
-    if (teamMembers.has(undefined)) {
+    if (teamMemberNames.length === 0) {
       return {};
     }
 
     // Process each team member with case-insensitive matching
-    for (const [teamMember, _] of teamMembers) {
+    const teamMembers = new Map<string, TeamMember>();
+    for (const teamMember of teamMemberNames) {
       const existingTeamMember = await db.teamMember.findFirst({
         where: {
           deletedAt: null,
@@ -111,7 +115,7 @@ export async function createTeamMemberIfNotExists({
       if (!existingTeamMember) {
         // if the teamMember doesn't exist, we create a new one
         const newTeamMember = await createTeamMember({
-          name: teamMember as string,
+          name: teamMember,
           organizationId,
         });
         teamMembers.set(teamMember, newTeamMember);

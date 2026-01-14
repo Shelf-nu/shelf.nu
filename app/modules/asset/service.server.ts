@@ -2458,6 +2458,39 @@ export async function createAssetsFromContentImport({
       const assetBarcodes =
         barcodesPerAsset.find((item) => item.key === asset.key)?.barcodes || [];
 
+      // Resolve kit/custodian IDs from normalized CSV values to avoid undefined lookups.
+      const kitKey = asset.kit?.trim();
+      const kitId = kitKey ? kits?.[kitKey]?.id : undefined;
+      // Surface a clear import error instead of a TypeError when a kit value can't be resolved.
+      if (kitKey && !kitId) {
+        throw new ShelfError({
+          cause: null,
+          message: `Kit "${kitKey}" could not be resolved for asset "${asset.title}". Please verify the kit column values in your CSV.`,
+          additionalData: { assetKey: asset.key, assetTitle: asset.title, kit: kitKey },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
+      const custodianKey = asset.custodian?.trim();
+      const custodianId = custodianKey
+        ? teamMembers?.[custodianKey]?.id
+        : undefined;
+      // Surface a clear import error instead of a TypeError when a custodian value can't be resolved.
+      if (custodianKey && !custodianId) {
+        throw new ShelfError({
+          cause: null,
+          message: `Custodian "${custodianKey}" could not be resolved for asset "${asset.title}". Please verify the custodian column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            custodian: custodianKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -2465,12 +2498,10 @@ export async function createAssetsFromContentImport({
         title: asset.title,
         description: asset.description || "",
         userId,
-        kitId: asset.kit ? kits?.[asset.kit].id : undefined,
+        kitId,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: asset.custodian
-          ? teamMembers?.[asset.custodian].id
-          : undefined,
+        custodian: custodianId,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
