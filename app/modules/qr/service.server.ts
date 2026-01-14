@@ -569,6 +569,7 @@ export async function parseQrCodesFromImportData({
         message: "Some of the QR codes you are trying to import do not exist",
         additionalData: { nonExistentCodes },
         label,
+        shouldBeCaptured: false,
       });
     }
 
