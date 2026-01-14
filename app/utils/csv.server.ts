@@ -118,6 +118,7 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
           ? cause.message
           : "Something went wrong while parsing the CSV file.",
       label: "CSV",
+      shouldBeCaptured: !(cause instanceof CsvError),
     });
   }
 };
