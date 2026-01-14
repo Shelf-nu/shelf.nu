@@ -1330,17 +1330,23 @@ export async function createKitsIfNotExists({
 }): Promise<Record<string, Kit>> {
   try {
     // first we get all the kits from the assets and make then into an object where the category is the key and the value is an empty string
-    const kits = new Map(
-      data.filter((asset) => asset.kit !== "").map((asset) => [asset.kit, {}])
+    // Normalize kit names so whitespace-only or padded values don't create phantom keys.
+    const kitNames = Array.from(
+      new Set(
+        data
+          .map((asset) => asset.kit?.trim())
+          .filter((kit): kit is string => !!kit)
+      )
     );
 
-    // Handle the case where there are no teamMembers
-    if (kits.has(undefined)) {
+    // Handle the case where there are no kits
+    if (kitNames.length === 0) {
       return {};
     }
 
     // now we loop through the kits and check if they exist
-    for (const [kit, _] of kits) {
+    const kits = new Map<string, Kit>();
+    for (const kit of kitNames) {
       const existingKit = await db.kit.findFirst({
         where: {
           name: { equals: kit, mode: "insensitive" },
@@ -1352,7 +1358,7 @@ export async function createKitsIfNotExists({
         // if the location doesn't exist, we create a new one
         const newKit = await db.kit.create({
           data: {
-            name: (kit as string).trim(),
+            name: kit.trim(),
             createdBy: {
               connect: {
                 id: userId,

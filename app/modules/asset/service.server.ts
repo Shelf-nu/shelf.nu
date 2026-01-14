@@ -202,10 +202,13 @@ async function setKitCustodyAfterAssetImport({
   kits: Record<string, Kit>;
   teamMembers: Record<string, TeamMember>;
 }) {
-  // Find assets that have both kit and custodian
-  const assetsWithKitAndCustodian = data.filter(
-    (asset) => asset.kit && asset.custodian
-  );
+  // Normalize kit/custodian names so padded CSV values still map to created records.
+  const assetsWithKitAndCustodian = data
+    .map((asset) => ({
+      kit: asset.kit?.trim(),
+      custodian: asset.custodian?.trim(),
+    }))
+    .filter((asset) => asset.kit && asset.custodian);
 
   if (assetsWithKitAndCustodian.length === 0) {
     return; // Nothing to do
@@ -214,8 +217,10 @@ async function setKitCustodyAfterAssetImport({
   // Group by kit name and get the custodian for each kit
   const kitToCustodianMap = new Map<string, string>();
   for (const asset of assetsWithKitAndCustodian) {
-    if (!kitToCustodianMap.has(asset.kit!)) {
-      kitToCustodianMap.set(asset.kit!, asset.custodian!);
+    const kitName = asset.kit!;
+    const custodianName = asset.custodian!;
+    if (!kitToCustodianMap.has(kitName)) {
+      kitToCustodianMap.set(kitName, custodianName);
     }
   }
 
@@ -255,9 +260,14 @@ async function validateKitCustodyConflicts({
   organizationId: Organization["id"];
 }) {
   // Extract assets that have both a kit and a custodian
-  const conflictCandidates = data.filter(
-    (asset) => asset.kit && asset.custodian
-  );
+  // Normalize kit/custodian names so padded CSV values don't bypass conflict checks.
+  const conflictCandidates = data
+    .map((asset) => ({
+      title: asset.title,
+      kit: asset.kit?.trim(),
+      custodian: asset.custodian?.trim(),
+    }))
+    .filter((asset) => asset.kit && asset.custodian);
 
   if (conflictCandidates.length === 0) {
     return; // No conflicts possible
@@ -2458,6 +2468,43 @@ export async function createAssetsFromContentImport({
       const assetBarcodes =
         barcodesPerAsset.find((item) => item.key === asset.key)?.barcodes || [];
 
+      // Resolve kit/custodian IDs from normalized CSV values to avoid undefined lookups.
+      const kitKey = asset.kit?.trim();
+      const kitId = kitKey ? kits?.[kitKey]?.id : undefined;
+      // Surface a clear import error instead of a TypeError when a kit value can't be resolved.
+      if (kitKey && !kitId) {
+        throw new ShelfError({
+          cause: null,
+          message: `Kit "${kitKey}" could not be resolved for asset "${asset.title}". Please verify the kit column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            kit: kitKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
+      const custodianKey = asset.custodian?.trim();
+      const custodianId = custodianKey
+        ? teamMembers?.[custodianKey]?.id
+        : undefined;
+      // Surface a clear import error instead of a TypeError when a custodian value can't be resolved.
+      if (custodianKey && !custodianId) {
+        throw new ShelfError({
+          cause: null,
+          message: `Custodian "${custodianKey}" could not be resolved for asset "${asset.title}". Please verify the custodian column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            custodian: custodianKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -2465,12 +2512,10 @@ export async function createAssetsFromContentImport({
         title: asset.title,
         description: asset.description || "",
         userId,
-        kitId: asset.kit ? kits?.[asset.kit].id : undefined,
+        kitId,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: asset.custodian
-          ? teamMembers?.[asset.custodian].id
-          : undefined,
+        custodian: custodianId,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
