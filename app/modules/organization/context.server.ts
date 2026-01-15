@@ -24,6 +24,21 @@ const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
 
 type SelectedOrganizationId = string;
 
+// Shape returned by getSelectedOrganisation for cache typing.
+type SelectedOrganisation = {
+  organizationId: string;
+  organizations: OrganizationFromUser[];
+  userOrganizations: Awaited<ReturnType<typeof getUserOrganizations>>;
+  currentOrganization: OrganizationFromUser;
+};
+
+// Cache per incoming Request so parallel loaders/actions can share the same
+// in-flight DB work for a given user and avoid duplicate connection usage.
+const selectedOrganisationCache = new WeakMap<
+  Request,
+  Map<string, Promise<SelectedOrganisation>>
+>();
+
 async function getSelectedOrganizationIdCookie(request: Request) {
   return parseCookie<SelectedOrganizationId>(
     selectedOrganizationIdCookie,
@@ -47,7 +62,8 @@ export function destroySelectedOrganizationIdCookie() {
  * It always defaults to the personal organization if the user is not part of the current selected organization.
  * @throws If the user is not part of any organization
  */
-export async function getSelectedOrganisation({
+// Uncached implementation used as the single source of truth.
+async function getSelectedOrganisationUncached({
   userId,
   request,
 }: {
@@ -96,4 +112,34 @@ export async function getSelectedOrganisation({
     userOrganizations,
     currentOrganization: nonNullCurrentOrganization,
   };
+}
+
+/**
+ * Returns the selected organization for the user and caches the result per
+ * incoming request to avoid duplicate DB queries when loaders run in parallel.
+ */
+export async function getSelectedOrganisation({
+  userId,
+  request,
+}: {
+  userId: string;
+  request: Request;
+}) {
+  // Create a per-request cache bucket keyed by userId.
+  let requestCache = selectedOrganisationCache.get(request);
+  if (!requestCache) {
+    requestCache = new Map();
+    selectedOrganisationCache.set(request, requestCache);
+  }
+
+  // Reuse the same promise during this request to avoid duplicate queries.
+  const cached = requestCache.get(userId);
+  if (cached) {
+    return cached;
+  }
+
+  // Store the in-flight promise so concurrent callers share it.
+  const pending = getSelectedOrganisationUncached({ userId, request });
+  requestCache.set(userId, pending);
+  return pending;
 }
