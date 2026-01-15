@@ -8,6 +8,7 @@ import { NODE_ENV, SESSION_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
+import { getRequestCache } from "~/utils/request-cache.server";
 import type { OrganizationFromUser } from "./service.server";
 import { getUserOrganizations } from "./service.server";
 
@@ -32,12 +33,7 @@ type SelectedOrganisation = {
   currentOrganization: OrganizationFromUser;
 };
 
-// Cache per incoming Request so parallel loaders/actions can share the same
-// in-flight DB work for a given user and avoid duplicate connection usage.
-const selectedOrganisationCache = new WeakMap<
-  Request,
-  Map<string, Promise<SelectedOrganisation>>
->();
+type SelectedOrganisationCache = Map<string, Promise<SelectedOrganisation>>;
 
 async function getSelectedOrganizationIdCookie(request: Request) {
   return parseCookie<SelectedOrganizationId>(
@@ -126,10 +122,11 @@ export async function getSelectedOrganisation({
   request: Request;
 }) {
   // Create a per-request cache bucket keyed by userId.
-  let requestCache = selectedOrganisationCache.get(request);
+  const requestCache = getRequestCache<SelectedOrganisationCache>(
+    "selected-organisation"
+  );
   if (!requestCache) {
-    requestCache = new Map();
-    selectedOrganisationCache.set(request, requestCache);
+    return getSelectedOrganisationUncached({ userId, request });
   }
 
   // Reuse the same promise during this request to avoid duplicate queries.
@@ -139,7 +136,13 @@ export async function getSelectedOrganisation({
   }
 
   // Store the in-flight promise so concurrent callers share it.
-  const pending = getSelectedOrganisationUncached({ userId, request });
+  const pending = getSelectedOrganisationUncached({ userId, request }).catch(
+    (error) => {
+      // Evict failed promises so later calls in this request can retry.
+      requestCache.delete(userId);
+      throw error;
+    }
+  );
   requestCache.set(userId, pending);
   return pending;
 }
