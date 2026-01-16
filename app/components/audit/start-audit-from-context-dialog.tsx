@@ -112,7 +112,9 @@ export function StartAuditFromContextDialog({
   );
   const isSubmitting =
     // Need both states: fetcher submission + route navigation (redirect).
-    useDisabled(fetcher) || isFormProcessing(navigation.state) || shouldRedirect;
+    useDisabled(fetcher) ||
+    isFormProcessing(navigation.state) ||
+    shouldRedirect;
 
   // Navigate to audit on successful creation
   useEffect(() => {
