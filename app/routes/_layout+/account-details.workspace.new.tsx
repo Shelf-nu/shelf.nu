@@ -21,7 +21,7 @@ import {
 } from "~/components/workspace/form";
 
 import {
-  getSelectedOrganisation,
+  getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
@@ -38,7 +38,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await getSelectedOrganisation({
+    const { organizationId } = await getSelectedOrganization({
       userId,
       request,
     });

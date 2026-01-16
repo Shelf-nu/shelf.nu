@@ -2,7 +2,7 @@ import { TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 
@@ -57,7 +57,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await getSelectedOrganisation({
+    const { organizationId } = await getSelectedOrganization({
       userId,
       request,
     });

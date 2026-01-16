@@ -14,7 +14,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import {
-  getSelectedOrganisation,
+  getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
@@ -82,7 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Setting the auth session and redirecting user to assets page
         context.setSession(authSession);
 
-        const { organizationId } = await getSelectedOrganisation({
+        const { organizationId } = await getSelectedOrganization({
           userId: authSession.userId,
           request,
         });

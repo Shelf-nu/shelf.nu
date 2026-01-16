@@ -40,7 +40,7 @@ import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
@@ -129,7 +129,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      * In this case what we do is we set the current organization to the first one in the list
      */
     const { organizationId, organizations, currentOrganization } =
-      await getSelectedOrganisation({ userId: authSession.userId, request });
+      await getSelectedOrganization({ userId: authSession.userId, request });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
     // Get current user's organization role for updates filtering
