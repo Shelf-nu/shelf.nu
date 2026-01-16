@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { generateBulkSequentialIdsEfficient } from "~/modules/asset/sequential-id.server";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { updateOrganization } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -14,7 +14,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
   try {
     // Get the current organization
-    const { organizationId } = await getSelectedOrganisation({
+    const { organizationId } = await getSelectedOrganization({
       userId,
       request,
     });

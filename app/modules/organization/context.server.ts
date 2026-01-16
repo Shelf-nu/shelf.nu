@@ -25,15 +25,15 @@ const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
 
 type SelectedOrganizationId = string;
 
-// Shape returned by getSelectedOrganisation for cache typing.
-type SelectedOrganisation = {
+// Shape returned by getSelectedOrganization for cache typing.
+type SelectedOrganization = {
   organizationId: string;
   organizations: OrganizationFromUser[];
   userOrganizations: Awaited<ReturnType<typeof getUserOrganizations>>;
   currentOrganization: OrganizationFromUser;
 };
 
-type SelectedOrganisationCache = Map<string, Promise<SelectedOrganisation>>;
+type SelectedOrganizationCache = Map<string, Promise<SelectedOrganization>>;
 
 async function getSelectedOrganizationIdCookie(request: Request) {
   return parseCookie<SelectedOrganizationId>(
@@ -59,7 +59,7 @@ export function destroySelectedOrganizationIdCookie() {
  * @throws If the user is not part of any organization
  */
 // Uncached implementation used as the single source of truth.
-async function getSelectedOrganisationUncached({
+async function getSelectedOrganizationUncached({
   userId,
   request,
 }: {
@@ -114,7 +114,7 @@ async function getSelectedOrganisationUncached({
  * Returns the selected organization for the user and caches the result per
  * incoming request to avoid duplicate DB queries when loaders run in parallel.
  */
-export async function getSelectedOrganisation({
+export async function getSelectedOrganization({
   userId,
   request,
 }: {
@@ -122,11 +122,11 @@ export async function getSelectedOrganisation({
   request: Request;
 }) {
   // Create a per-request cache bucket keyed by userId.
-  const requestCache = getRequestCache<SelectedOrganisationCache>(
-    "selected-organisation"
+  const requestCache = getRequestCache<SelectedOrganizationCache>(
+    "selected-organization"
   );
   if (!requestCache) {
-    return getSelectedOrganisationUncached({ userId, request });
+    return getSelectedOrganizationUncached({ userId, request });
   }
 
   // Reuse the same promise during this request to avoid duplicate queries.
@@ -136,7 +136,7 @@ export async function getSelectedOrganisation({
   }
 
   // Store the in-flight promise so concurrent callers share it.
-  const pending = getSelectedOrganisationUncached({ userId, request }).catch(
+  const pending = getSelectedOrganizationUncached({ userId, request }).catch(
     (error) => {
       // Evict failed promises so later calls in this request can retry.
       requestCache.delete(userId);

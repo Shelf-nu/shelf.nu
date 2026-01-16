@@ -18,7 +18,7 @@ import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -33,7 +33,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     // Every user can see this view for themseleves, so we dont have to manage any permissions here
-    const { organizationId } = await getSelectedOrganisation({
+    const { organizationId } = await getSelectedOrganization({
       userId: authSession.userId,
       request,
     });
