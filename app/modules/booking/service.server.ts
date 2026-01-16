@@ -786,7 +786,9 @@ export async function reserveBooking({
         throw new ShelfError({
           cause: null,
           label,
+          title: "Booking conflict",
           message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          shouldBeCaptured: false,
         });
       }
     }
