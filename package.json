@@ -138,7 +138,7 @@
     "react-dropzone": "^14.3.8",
     "react-microsoft-clarity": "^1.2.0",
     "react-router": "7.12.0",
-    "react-router-hono-server": "^2.22.0",
+    "react-router-hono-server": "^2.23.0",
     "react-tag-autocomplete": "^7.1.0",
     "react-to-print": "^3.2.0",
     "react-webcam": "^7.2.0",
