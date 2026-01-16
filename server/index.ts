@@ -8,7 +8,6 @@ import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
 import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
-import { runWithRequestCache } from "~/utils/request-cache.server";
 
 import { logger } from "./logger";
 import {
@@ -17,6 +16,7 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
+import { runWithRequestCache } from "./request-cache.server";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 

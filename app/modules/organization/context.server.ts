@@ -1,4 +1,5 @@
 import { createCookie } from "react-router";
+import { getRequestCache } from "@server/request-cache.server";
 import {
   destroyCookie,
   parseCookie,
@@ -8,7 +9,6 @@ import { NODE_ENV, SESSION_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
-import { getRequestCache } from "~/utils/request-cache.server";
 import type { OrganizationFromUser } from "./service.server";
 import { getUserOrganizations } from "./service.server";
 
@@ -122,9 +122,9 @@ export async function getSelectedOrganization({
   request: Request;
 }) {
   // Create a per-request cache bucket keyed by userId.
-  const requestCache = getRequestCache("selected-organization") as
-    | SelectedOrganizationCache
-    | null;
+  const requestCache = getRequestCache(
+    "selected-organization"
+  ) as SelectedOrganizationCache | null;
   if (!requestCache) {
     return getSelectedOrganizationUncached({ userId, request });
   }
