@@ -879,8 +879,14 @@ function isSupabaseHtmlError(error: unknown) {
 
   // Detect JSON parse failures that typically show up when HTML is returned instead of JSON
   const lowerMessage = message.toLowerCase();
+  const isJsonParseFailure =
+    lowerMessage.includes("unexpected token") && lowerMessage.includes("json");
+  const mentionsHtml =
+    lowerMessage.includes("<html") ||
+    lowerMessage.includes("html>") ||
+    lowerMessage.includes("text/html");
   const isUnexpectedHtml =
-    message.includes("Unexpected token <") && lowerMessage.includes("json");
+    isJsonParseFailure && (mentionsHtml || lowerMessage.includes("<"));
   const isStorageUnknown =
     name === "StorageUnknownError" ||
     ("__isStorageError" in error &&
