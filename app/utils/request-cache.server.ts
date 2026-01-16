@@ -13,7 +13,7 @@ export function runWithRequestCache<T>(fn: () => T) {
  * runWithRequestCache context; otherwise returns null so callers can
  * fall back to uncached behavior.
  */
-export function getRequestCache<T extends Map<string, unknown>>(key: string) {
+export function getRequestCache(key: string) {
   const store = requestCacheStorage.getStore();
   if (!store) {
     return null;
@@ -25,5 +25,5 @@ export function getRequestCache<T extends Map<string, unknown>>(key: string) {
     store.set(key, cache);
   }
 
-  return cache as T;
+  return cache;
 }

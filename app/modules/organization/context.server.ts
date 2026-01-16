@@ -122,9 +122,9 @@ export async function getSelectedOrganization({
   request: Request;
 }) {
   // Create a per-request cache bucket keyed by userId.
-  const requestCache = getRequestCache<SelectedOrganizationCache>(
-    "selected-organization"
-  );
+  const requestCache = getRequestCache("selected-organization") as
+    | SelectedOrganizationCache
+    | null;
   if (!requestCache) {
     return getSelectedOrganizationUncached({ userId, request });
   }
