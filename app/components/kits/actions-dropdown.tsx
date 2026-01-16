@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { MapPinIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
+import { StartAuditFromContextDialog } from "~/components/audit/start-audit-from-context-dialog";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -75,6 +76,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   } = useControlledDropdownMenu();
 
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
+  const [isStartAuditOpen, setIsStartAuditOpen] = useState(false);
 
   const disableReleaseForSelfService =
     isSelfService && kitCustody?.custodian?.userId !== user?.id;
@@ -190,6 +192,31 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
               </DropdownMenuItem>
             </When>
 
+            {/* Start Audit - only visible to users with audit create permission */}
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.audit,
+                action: PermissionAction.create,
+              })}
+            >
+              <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
+                <Button
+                  variant="link"
+                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  width="full"
+                  onClick={() => {
+                    setOpen(false);
+                    setIsStartAuditOpen(true);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="start-audit" /> Start audit
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+            </When>
+
             <When
               truthy={userHasPermission({
                 roles,
@@ -273,6 +300,16 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
           onClose={() => setIsRelinkQrDialogOpen(false)}
         />
       </When>
+
+      <StartAuditFromContextDialog
+        contextType="kit"
+        contextId={kit.id}
+        contextName={kit.name}
+        assetCount={kit.assets.length}
+        open={isStartAuditOpen}
+        onClose={() => setIsStartAuditOpen(false)}
+        showTrigger={false}
+      />
     </>
   );
 }
