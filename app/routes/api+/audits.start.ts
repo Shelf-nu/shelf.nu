@@ -1,10 +1,11 @@
 import { DateTime } from "luxon";
 import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
+import { z } from "zod";
 
-import { BulkStartAuditSchema } from "~/components/assets/bulk-start-audit-dialog";
 import { db } from "~/database/db.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
+import { resolveAssetIdsForAudit } from "~/modules/audit/context-helpers.server";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
 import {
   createAuditSession,
@@ -12,13 +13,63 @@ import {
 } from "~/modules/audit/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
-import { makeShelfError } from "~/utils/error";
+import { badRequest, makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+
+/**
+ * Base schema with common audit fields shared across different entry points.
+ * Used by both bulk selection (asset index) and context-based (location/kit/user) flows.
+ */
+export const BaseAuditSchema = z.object({
+  name: z.string().trim().min(1, "Audit name is required"),
+  description: z
+    .string()
+    .max(1000, "Description must be 1000 characters or fewer")
+    .optional(),
+  dueDate: z.string().optional(),
+  assignee: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      try {
+        const parsed = JSON.parse(val);
+        return parsed.userId;
+      } catch {
+        return val;
+      }
+    }),
+});
+
+/**
+ * Extended schema for the API endpoint. Supports two modes:
+ * 1. Direct asset IDs - pass assetIds array (from asset index bulk selection)
+ * 2. Context-based - pass contextType/contextId to fetch assets server-side
+ */
+export const StartAuditSchema = BaseAuditSchema.extend({
+  // Asset IDs - required for bulk selection mode, optional for context mode
+  assetIds: z.array(z.string()).optional(),
+  // Context parameters - for starting audit from location/kit/user pages
+  contextType: z.enum(["location", "kit", "user"]).optional(),
+  contextId: z.string().optional(),
+  contextName: z.string().optional(),
+  includeChildLocations: z.coerce.boolean().default(false),
+}).refine(
+  (data) => {
+    // Must have either assetIds OR context params
+    const hasAssetIds = data.assetIds && data.assetIds.length > 0;
+    const hasContext = data.contextType && data.contextId;
+    return hasAssetIds || hasContext;
+  },
+  {
+    message: "Either assetIds or context parameters must be provided",
+  }
+);
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -36,13 +87,28 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const formData = await request.formData();
     const hints = getClientHint(request);
 
-    const { name, description, assetIds, assignee } = parseData(
-      formData,
-      BulkStartAuditSchema,
-      {
-        additionalData: { organizationId, userId },
-      }
-    );
+    const {
+      name,
+      description,
+      assetIds: directAssetIds,
+      assignee,
+      contextType,
+      contextId,
+      contextName,
+      includeChildLocations,
+    } = parseData(formData, StartAuditSchema, {
+      additionalData: { organizationId, userId },
+    });
+
+    // Resolve asset IDs from either direct input or context
+    const assetIds = await resolveAssetIdsForAudit({
+      organizationId,
+      directAssetIds,
+      contextType,
+      contextId,
+      contextName,
+      includeChildLocations,
+    });
 
     const sanitizedDescription = description?.trim() || undefined;
 
@@ -54,6 +120,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
           zone: hints.timeZone,
         }).toJSDate()
       : undefined;
+    if (dueDateUTC && dueDateUTC <= new Date()) {
+      throw badRequest("Due date must be in the future.", {
+        additionalData: {
+          validationErrors: {
+            dueDate: { message: "Due date must be in the future" },
+          },
+        },
+      });
+    }
 
     const { session } = await createAuditSession({
       name,

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
+import { DateTime } from "luxon";
 import { useNavigate } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -10,28 +11,27 @@ import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-up
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
+import { useDisabled } from "~/hooks/use-disabled";
+import { BaseAuditSchema } from "~/routes/api+/audits.start";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 
-export const BulkStartAuditSchema = z.object({
+/**
+ * Schema for bulk audit creation from asset index.
+ * Extends the base audit schema with required assetIds array.
+ */
+export const BulkStartAuditSchema = BaseAuditSchema.extend({
   assetIds: z.array(z.string()).min(1),
-  name: z.string().trim().min(1, "Audit name is required"),
-  description: z
-    .string()
-    .max(1000, "Description must be 1000 characters or fewer")
-    .optional(),
-  dueDate: z.string().optional(),
-  assignee: z
-    .string()
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      try {
-        const parsed = JSON.parse(val);
-        return parsed.userId;
-      } catch {
-        return val;
-      }
-    }),
-});
+}).refine(
+  (data) => {
+    if (!data.dueDate) return true;
+    const parsed = DateTime.fromFormat(data.dueDate, DATE_TIME_FORMAT);
+    return parsed.isValid && parsed > DateTime.now();
+  },
+  {
+    message: "Due date must be in the future",
+    path: ["dueDate"],
+  }
+);
 
 type StartAuditFetcherData = {
   success?: boolean;
@@ -66,15 +66,16 @@ function StartAuditDialogContent({
   assigneeError,
 }: StartAuditDialogContentProps) {
   const navigate = useNavigate();
+  const isNavigating = useDisabled();
+  const formDisabled = disabled || isNavigating;
 
   useEffect(() => {
     if (!fetcherData?.success || !fetcherData.redirectTo) {
       return;
     }
 
-    handleCloseDialog();
     void navigate(fetcherData.redirectTo);
-  }, [fetcherData, handleCloseDialog, navigate]);
+  }, [fetcherData, navigate]);
 
   return (
     <>
@@ -87,7 +88,7 @@ function StartAuditDialogContent({
             placeholder="Quarterly warehouse audit"
             error={nameError}
             required
-            disabled={disabled}
+            disabled={formDisabled}
             className="mb-4"
           />
 
@@ -98,7 +99,7 @@ function StartAuditDialogContent({
             inputType="textarea"
             rows={5}
             error={fetcherError || descriptionError}
-            disabled={disabled}
+            disabled={formDisabled}
           />
 
           <Input
@@ -106,7 +107,7 @@ function StartAuditDialogContent({
             label="Due date"
             type="datetime-local"
             error={dueDateError}
-            disabled={disabled}
+            disabled={formDisabled}
             className="mt-4"
           />
         </div>
@@ -124,12 +125,12 @@ function StartAuditDialogContent({
         <Button
           type="button"
           variant="secondary"
-          disabled={disabled}
+          disabled={formDisabled}
           onClick={handleCloseDialog}
         >
           Cancel
         </Button>
-        <Button type="submit" variant="primary" disabled={disabled}>
+        <Button type="submit" variant="primary" disabled={formDisabled}>
           Start audit
         </Button>
       </div>

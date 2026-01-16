@@ -79,7 +79,7 @@ p {
 }
 
 .dialog-backdrop {
-  @apply fixed inset-0 z-50 flex items-center justify-center bg-black/50;
+  @apply fixed inset-0 z-[200] backdrop-blur-sm flex items-center justify-center bg-black/50;
 }
 dialog {
   @apply fixed m-0 h-full w-full bg-transparent p-0 md:relative   md:m-auto md:h-auto md:w-[600px]  md:py-8;
