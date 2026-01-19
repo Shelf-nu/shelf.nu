@@ -67,15 +67,12 @@ vi.mock("~/modules/auth/service.server", () => ({
 }));
 
 const { action } = await import("../../app/routes/_welcome+/onboarding");
-const { getUserByID, updateUser } = await import(
-  "~/modules/user/service.server"
-);
-const { getOrganizationById } = await import(
-  "~/modules/organization/service.server"
-);
-const { upsertBusinessIntel } = await import(
-  "~/modules/business-intel/service.server"
-);
+const { getUserByID, updateUser } =
+  await import("~/modules/user/service.server");
+const { getOrganizationById } =
+  await import("~/modules/organization/service.server");
+const { upsertBusinessIntel } =
+  await import("~/modules/business-intel/service.server");
 const { createStripeCustomer } = await import("~/utils/stripe.server");
 const { signInWithEmail } = await import("~/modules/auth/service.server");
 

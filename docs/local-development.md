@@ -183,14 +183,12 @@ npm run test:e2e:install   # Install Playwright browsers
 ### Adding New Features
 
 1. **Create your feature files** in appropriate directories:
-
    - `app/routes/` - New pages/routes
    - `app/components/` - Reusable components
    - `app/utils/` - Utility functions
    - `app/modules/` - Business logic modules
 
 2. **Follow the established patterns**:
-
    - Use TypeScript for type safety
    - Follow Remix conventions for data loading
    - Use Tailwind for styling
