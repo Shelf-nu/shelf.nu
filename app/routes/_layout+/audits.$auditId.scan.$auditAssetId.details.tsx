@@ -5,7 +5,13 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, useLoaderData, Form, useFetcher } from "react-router";
+import {
+  data,
+  Form,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+} from "react-router";
 import { z } from "zod";
 import {
   AuditAssetNoteItem,
@@ -18,6 +24,7 @@ import {
 import { AuditImageUploadDialog } from "~/components/audit/audit-image-upload-dialog";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import {
   uploadAuditImage,
@@ -475,6 +482,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AuditAssetDetails() {
   const { notes: initialNotes, images } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
   const imageUploadFetcher = useFetcher<typeof action>();
 
@@ -489,9 +497,11 @@ export default function AuditAssetDetails() {
     ((currentSelectedCount?: number) => void) | null
   >(null);
   const imageRemovalRef = useRef<((id: string) => void) | null>(null);
+  const noteFormRef = useRef<HTMLFormElement | null>(null);
   const [attachingToNoteId, setAttachingToNoteId] = useState<string | null>(
     null
   );
+  const disabled = useDisabled();
 
   // Set portal container on mount
   useEffect(() => {
@@ -561,6 +571,12 @@ export default function AuditAssetDetails() {
       }
     }
   }, [imageUploadFetcher.state, imageUploadFetcher.data]);
+
+  useEffect(() => {
+    if (actionData && "note" in actionData) {
+      noteFormRef.current?.reset();
+    }
+  }, [actionData]);
 
   /**
    * Called when images are selected.
@@ -691,7 +707,7 @@ export default function AuditAssetDetails() {
     <div className="flex h-full flex-col">
       {/* Add note form */}
       <div className="shrink-0 border-b border-gray-200 px-6 py-4">
-        <Form method="post">
+        <Form method="post" ref={noteFormRef}>
           <input type="hidden" name="intent" value="create-note" />
           <div className="space-y-2">
             <textarea
@@ -701,8 +717,8 @@ export default function AuditAssetDetails() {
               className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
             />
             <div className="flex justify-end">
-              <Button type="submit" size="sm">
-                Add Note
+              <Button type="submit" size="sm" disabled={disabled}>
+                {disabled ? "Adding Note..." : "Add Note"}
               </Button>
             </div>
           </div>
