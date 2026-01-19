@@ -153,7 +153,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -165,11 +165,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     if (intent === "complete-audit") {
       // Only assignees can complete the audit
+      // Exception: if audit has no assignees, admins/owners can complete
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
         request,
+        isSelfServiceOrBase,
       });
 
       await completeAuditWithImages({

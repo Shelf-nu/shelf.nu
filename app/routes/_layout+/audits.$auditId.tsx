@@ -48,7 +48,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -76,11 +76,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     if (intent === "complete-audit") {
       // Only assignees can complete the audit
+      // Exception: if audit has no assignees, admins/owners can complete
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
         request,
+        isSelfServiceOrBase,
       });
 
       await completeAuditWithImages({
@@ -219,6 +221,10 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
+  // Allow admin/owner to scan/complete if audit has no assignees
+  const hasNoAssignees = session.assignments.length === 0;
+  const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
+
   const items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
@@ -250,7 +256,7 @@ export default function AuditDetailsPage() {
           {/* Show actions dropdown to anyone who can view the audit (for PDF download) */}
           {(isAdminOrOwner || isCreator || isAssignee) && <ActionsDropdown />}
 
-          {!isCompleted && isAssignee && (
+          {!isCompleted && canScanAndComplete && (
             <Button
               to={`/audits/${session.id}/scan`}
               variant={"secondary"}
@@ -260,7 +266,7 @@ export default function AuditDetailsPage() {
             </Button>
           )}
 
-          {!isCompleted && isAssignee && (
+          {!isCompleted && canScanAndComplete && (
             <CompleteAuditDialog
               disabled={!hasScans}
               auditName={session.name}

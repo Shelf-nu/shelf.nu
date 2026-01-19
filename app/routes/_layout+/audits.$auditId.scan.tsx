@@ -82,7 +82,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -90,11 +90,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // Only assignees can complete the audit via scan route
+    // Exception: if audit has no assignees, admins/owners can complete
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId,
       request,
+      isSelfServiceOrBase,
     });
 
     const formData = await request.clone().formData();
@@ -138,7 +140,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { organizationId, userOrganizations } = permissionResult;
+    const { organizationId, userOrganizations, isSelfServiceOrBase } =
+      permissionResult;
 
     const { session, expectedAssets } = await getAuditSessionDetails({
       id: auditId,
@@ -147,12 +150,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // Only assignees can scan, even admins/owners
-    // This check applies to ALL users, including admins/owners
+    // Permission logic for scan access:
+    // - If audit has assignees: only assignees can scan
+    // - If audit has NO assignees: admins/owners can scan, BASE/SELF_SERVICE cannot
+    const hasNoAssignees = session.assignments.length === 0;
+    const shouldForceAssigneeCheck = isSelfServiceOrBase || !hasNoAssignees;
+
     requireAuditAssigneeForBaseSelfService({
       audit: session,
       userId,
-      isSelfServiceOrBase: true, // Force assignee check for scan route
+      isSelfServiceOrBase: shouldForceAssigneeCheck,
       auditId,
     });
 

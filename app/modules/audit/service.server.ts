@@ -1251,6 +1251,9 @@ export async function getAuditsForOrganization(params: {
  * Validates that the user is assigned to the audit session.
  * Throws a 403 ShelfError if the user is not an assignee.
  *
+ * When isSelfServiceOrBase is false (admin/owner), allows the user to perform
+ * actions if the audit has no assignees.
+ *
  * @throws {ShelfError} 403 error if user is not an assignee
  */
 export async function requireAuditAssignee({
@@ -1258,11 +1261,14 @@ export async function requireAuditAssignee({
   organizationId,
   userId,
   request,
+  isSelfServiceOrBase = true,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
   request?: Request;
+  /** When true, always require assignee. When false (admin/owner), allow if no assignees. */
+  isSelfServiceOrBase?: boolean;
 }): Promise<void> {
   const { session } = await getAuditSessionDetails({
     id: auditSessionId,
@@ -1270,6 +1276,14 @@ export async function requireAuditAssignee({
     userOrganizations: [],
     request,
   });
+
+  const hasNoAssignees = session.assignments.length === 0;
+  const isAdminOrOwner = !isSelfServiceOrBase;
+
+  // Allow admin/owner to perform actions if audit has no assignees
+  if (isAdminOrOwner && hasNoAssignees) {
+    return;
+  }
 
   const isAssignee = session.assignments.some(
     (assignment) => assignment.userId === userId
