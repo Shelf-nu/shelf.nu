@@ -1,19 +1,24 @@
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
-import { useNavigate } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 
-import { selectedBulkItemsCountAtom } from "~/atoms/list";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+} from "~/atoms/list";
 import AuditTeamMemberSelector from "~/components/audit/audit-team-member-selector";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import Input from "~/components/forms/input";
+import type { IndexResponse } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
 import { BaseAuditSchema } from "~/routes/api+/audits.start";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { isSelectingAllItems } from "~/utils/list";
 
 /**
  * Schema for bulk audit creation from asset index.
@@ -139,7 +144,14 @@ function StartAuditDialogContent({
 }
 
 export default function BulkStartAuditDialog() {
+  const { totalItems } = useLoaderData<IndexResponse>();
+  const selectedItems = useAtomValue(selectedBulkItemsAtom);
   const selectedCount = useAtomValue(selectedBulkItemsCountAtom);
+
+  // Show totalItems when "Select All" is used, otherwise show selected count
+  const allSelected = isSelectingAllItems(selectedItems);
+  const displayCount = allSelected ? totalItems : selectedCount;
+
   const zo = useZorm("BulkStartAudit", BulkStartAuditSchema);
 
   const nameField = zo.fields.name();
@@ -156,8 +168,8 @@ export default function BulkStartAuditDialog() {
       type="start-audit"
       className="md:w-[800px]"
       title="Start an audit"
-      description={`You're about to start an audit for ${selectedCount} asset${
-        selectedCount === 1 ? "" : "s"
+      description={`You're about to start an audit for ${displayCount} asset${
+        displayCount === 1 ? "" : "s"
       }.`}
       actionUrl="/api/audits/start"
       arrayFieldId="assetIds"

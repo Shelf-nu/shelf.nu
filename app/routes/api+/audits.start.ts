@@ -4,6 +4,9 @@ import { data } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
 import { resolveAssetIdsForAudit } from "~/modules/audit/context-helpers.server";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
@@ -15,6 +18,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { badRequest, makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -77,7 +81,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -96,19 +100,44 @@ export async function action({ request, context }: ActionFunctionArgs) {
       contextId,
       contextName,
       includeChildLocations,
-    } = parseData(formData, StartAuditSchema, {
+      currentSearchParams,
+    } = parseData(formData, StartAuditSchema.and(CurrentSearchParamsSchema), {
       additionalData: { organizationId, userId },
     });
 
-    // Resolve asset IDs from either direct input or context
-    const assetIds = await resolveAssetIdsForAudit({
-      organizationId,
-      directAssetIds,
-      contextType,
-      contextId,
-      contextName,
-      includeChildLocations,
-    });
+    // Determine if we're selecting all items across multiple pages
+    const isSelectingAll =
+      directAssetIds && directAssetIds.includes(ALL_SELECTED_KEY);
+
+    let assetIds: string[];
+
+    if (isSelectingAll) {
+      // When "Select All" is used, resolve IDs using bulk operation helper
+      // which handles both simple and advanced filter modes
+      const settings = await getAssetIndexSettings({
+        userId,
+        organizationId,
+        canUseBarcodes,
+        role,
+      });
+
+      assetIds = await resolveAssetIdsForBulkOperation({
+        assetIds: directAssetIds,
+        organizationId,
+        currentSearchParams,
+        settings,
+      });
+    } else {
+      // Resolve asset IDs from either direct input or context
+      assetIds = await resolveAssetIdsForAudit({
+        organizationId,
+        directAssetIds,
+        contextType,
+        contextId,
+        contextName,
+        includeChildLocations,
+      });
+    }
 
     const sanitizedDescription = description?.trim() || undefined;
 
