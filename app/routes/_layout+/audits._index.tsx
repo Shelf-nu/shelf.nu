@@ -37,6 +37,7 @@ import { requirePermission } from "~/utils/roles.server";
 const AUDIT_SORTING_OPTIONS = {
   name: "Name",
   createdAt: "Creation Date",
+  dueDate: "Due date",
 } as const;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -101,6 +102,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        searchFieldTooltip: {
+          title: "Search audits",
+          text: "Search audits by name or description.",
+        },
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -119,11 +124,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function AuditsIndexPage() {
   return (
     <>
-      <Header>
-        <Button to="new" role="link" aria-label="new audit">
-          New audit
-        </Button>
-      </Header>
+      <Header />
       <ListContentWrapper>
         <Filters
           slots={{

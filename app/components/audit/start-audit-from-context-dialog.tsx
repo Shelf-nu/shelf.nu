@@ -1,3 +1,4 @@
+import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DateTime } from "luxon";
 import { useNavigate, useNavigation } from "react-router";
@@ -46,6 +47,8 @@ const StartAuditFromContextFormSchema = z.object({
   assignee: z.string().optional(),
 });
 
+const AUDIT_DESCRIPTION_MAX_LENGTH = 1000;
+
 type StartAuditResponse = {
   success?: boolean;
   redirectTo?: string;
@@ -92,6 +95,7 @@ export function StartAuditFromContextDialog({
   const fetcher = useFetcherWithReset<StartAuditResponse>();
   const zo = useZorm("StartAuditFromContext", StartAuditFromContextFormSchema);
   const hasNavigatedRef = useRef(false);
+  const [descriptionLength, setDescriptionLength] = useState(0);
 
   const isOpen = open ?? isUncontrolledOpen;
   const closeDialog = useCallback(() => {
@@ -115,6 +119,19 @@ export function StartAuditFromContextDialog({
     useDisabled(fetcher) ||
     isFormProcessing(navigation.state) ||
     shouldRedirect;
+
+  const handleDescriptionChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setDescriptionLength(event.currentTarget.value.length);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      setDescriptionLength(0);
+    }
+  }, [isOpen]);
 
   // Navigate to audit on successful creation
   useEffect(() => {
@@ -204,12 +221,18 @@ export function StartAuditFromContextDialog({
                   placeholder="Add context that will help auditors (optional)."
                   inputType="textarea"
                   rows={5}
+                  maxLength={AUDIT_DESCRIPTION_MAX_LENGTH}
                   error={
                     fetcher.data?.error?.message ||
                     zo.errors.description()?.message
                   }
                   disabled={isSubmitting}
+                  className="mb-1"
+                  onChange={handleDescriptionChange}
                 />
+                <div className="text-right text-xs text-gray-500">
+                  {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
+                </div>
 
                 <Input
                   name={zo.fields.dueDate()}

@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import type { ChangeEvent } from "react";
+import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { useLoaderData, useNavigate } from "react-router";
@@ -38,6 +39,8 @@ export const BulkStartAuditSchema = BaseAuditSchema.extend({
   }
 );
 
+const AUDIT_DESCRIPTION_MAX_LENGTH = 1000;
+
 type StartAuditFetcherData = {
   success?: boolean;
   redirectTo?: string;
@@ -73,6 +76,13 @@ function StartAuditDialogContent({
   const navigate = useNavigate();
   const isNavigating = useDisabled();
   const formDisabled = disabled || isNavigating;
+  const [descriptionLength, setDescriptionLength] = useState(0);
+
+  const handleDescriptionChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    setDescriptionLength(event.currentTarget.value.length);
+  };
 
   useEffect(() => {
     if (!fetcherData?.success || !fetcherData.redirectTo) {
@@ -103,9 +113,15 @@ function StartAuditDialogContent({
             placeholder="Add context that will help auditors (optional)."
             inputType="textarea"
             rows={5}
+            maxLength={AUDIT_DESCRIPTION_MAX_LENGTH}
             error={fetcherError || descriptionError}
             disabled={formDisabled}
+            className="mb-1"
+            onChange={handleDescriptionChange}
           />
+          <div className="text-right text-xs text-gray-500">
+            {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
+          </div>
 
           <Input
             name={dueDateField}
