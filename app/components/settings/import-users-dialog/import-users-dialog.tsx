@@ -6,13 +6,13 @@ import type { z } from "zod";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
+import ImportUsersSuccessContent from "./import-users-success-content";
 import Input from "../../forms/input";
 import { Dialog, DialogPortal } from "../../layout/dialog";
 import { Button } from "../../shared/button";
 import { WarningBox } from "../../shared/warning-box";
 import When from "../../when/when";
 import type { InviteUserFormSchema } from "../invite-user-dialog";
-import ImportUsersSuccessContent from "./import-users-success-content";
 
 type ImportUsersDialogProps = {
   className?: string;
