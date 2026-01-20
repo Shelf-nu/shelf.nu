@@ -322,12 +322,16 @@ export function AuditDrawer({
         const isUnexpected =
           isAsset && data?.id && !expectedAssetIds.has(data.id);
         const auditAssetId =
-          typeof data?.auditAssetId === "string" ? data.auditAssetId : undefined;
+          typeof data?.auditAssetId === "string"
+            ? data.auditAssetId
+            : undefined;
         // Prefer live meta counts over loader data for instant UI feedback.
         const meta = auditAssetId ? auditAssetMeta[auditAssetId] : undefined;
         const notesCount =
           meta?.notesCount ??
-          (typeof data?.auditNotesCount === "number" ? data.auditNotesCount : 0);
+          (typeof data?.auditNotesCount === "number"
+            ? data.auditNotesCount
+            : 0);
         const imagesCount =
           meta?.imagesCount ??
           (typeof data?.auditImagesCount === "number"

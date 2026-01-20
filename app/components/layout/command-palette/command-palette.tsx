@@ -374,9 +374,11 @@ export function getKitCommandValue(kit: KitSearchResult) {
 }
 
 export function getAuditCommandValue(audit: AuditSearchResult) {
-  const searchableFields = [audit.name, audit.description ?? "", audit.id].filter(
-    Boolean
-  );
+  const searchableFields = [
+    audit.name,
+    audit.description ?? "",
+    audit.id,
+  ].filter(Boolean);
 
   return [`audit-${audit.id}`, ...searchableFields].join(" ").trim();
 }
@@ -715,9 +717,7 @@ export function CommandPalette() {
                   <span className="truncate text-xs text-gray-500">
                     {audit.status}
                     {audit.dueDate
-                      ? ` • Due ${new Date(
-                          audit.dueDate
-                        ).toLocaleDateString()}`
+                      ? ` • Due ${new Date(audit.dueDate).toLocaleDateString()}`
                       : ""}
                     {audit.description ? ` • ${audit.description}` : ""}
                   </span>
