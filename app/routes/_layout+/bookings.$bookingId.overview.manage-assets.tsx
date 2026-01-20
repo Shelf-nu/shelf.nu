@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Asset, Booking, Category, Custody, Prisma } from "@prisma/client";
+import type {
+  Asset,
+  Booking,
+  Category,
+  Custody,
+  Prisma,
+  Tag,
+} from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
@@ -90,6 +97,7 @@ export type AssetWithBooking = Asset & {
   bookings: Booking[];
   custody: Custody | null;
   category: Category;
+  tags: Pick<Tag, "id" | "name" | "color">[];
   kitId?: string | null;
   qrScanned: string;
 };

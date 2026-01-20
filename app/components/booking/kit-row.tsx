@@ -8,17 +8,18 @@ import type { PartialCheckinDetailsType } from "~/modules/booking/service.server
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { getBookingContextKitStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
-import KitImage from "../kits/kit-image";
-import { ListItem } from "../list/list-item";
-import { Button } from "../shared/button";
-import { Td } from "../table";
 import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
 import { CategoryBadge } from "../assets/category-badge";
+import KitImage from "../kits/kit-image";
 import { KitStatusBadge } from "../kits/kit-status-badge";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
+import { ListItem } from "../list/list-item";
+import { Button } from "../shared/button";
+import { EmptyTableValue } from "../shared/empty-table-value";
 import { ReturnedBadge } from "../shared/returned-badge";
+import { Td } from "../table";
 import When from "../when/when";
 
 type KitRowProps = {
@@ -125,16 +126,19 @@ export default function KitRow({
         <Td>
           <CategoryBadge category={kit.category} />
         </Td>
+        <Td>
+          <EmptyTableValue />
+        </Td>
         {shouldShowCheckinColumns && (
           <>
             {/* Checked in on - for kits we don't show specific dates */}
             <Td>
-              <span className="text-sm text-gray-400">-</span>
+              <EmptyTableValue />
             </Td>
 
             {/* Checked in by - for kits we don't show specific users */}
             <Td>
-              <span className="text-sm text-gray-400">-</span>
+              <EmptyTableValue />
             </Td>
           </>
         )}
@@ -188,7 +192,7 @@ export default function KitRow({
 
       {/* Add a separator row after the kit assets */}
       <tr className="kit-separator h-1 bg-gray-100">
-        <td colSpan={shouldShowCheckinColumns ? 7 : 5} className="h-1 p-0"></td>
+        <td colSpan={shouldShowCheckinColumns ? 8 : 6} className="h-1 p-0"></td>
       </tr>
     </React.Fragment>
   );

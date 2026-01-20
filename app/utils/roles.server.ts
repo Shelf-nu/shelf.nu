@@ -1,7 +1,7 @@
 import type { SsoDetails } from "@prisma/client";
 import { OrganizationRoles, Roles } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { ShelfError } from "./error";
 import type {
   PermissionAction,
@@ -68,7 +68,7 @@ export async function requirePermission({
     userOrganizations,
     organizations,
     currentOrganization,
-  } = await getSelectedOrganisation({ userId, request });
+  } = await getSelectedOrganization({ userId, request });
 
   const roles = userOrganizations.find(
     (o) => o.organization.id === organizationId

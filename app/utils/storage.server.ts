@@ -85,13 +85,18 @@ export async function createSignedUrl({
       // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
       // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
       // transient CDN hiccups from bubbling up as user-facing ShelfErrors.
-      if (isSupabaseHtmlError(error)) {
+      const isHtmlError = isSupabaseHtmlError(error);
+      const isFetchFailed = isSupabaseFetchFailedError(error);
+
+      if (isHtmlError || isFetchFailed) {
         if (attempt < maxAttempts) {
           Logger.warn(
             new ShelfError({
               cause: error,
               message:
-                "Supabase returned a non-JSON response while creating a signed URL. Retrying.",
+                isHtmlError
+                  ? "Supabase returned a non-JSON response while creating a signed URL. Retrying."
+                  : "Supabase request failed while creating a signed URL. Retrying.",
               additionalData: {
                 filename: normalizedFilename,
                 bucketName,
@@ -115,7 +120,9 @@ export async function createSignedUrl({
             filename: normalizedFilename,
             bucketName,
             attempts: maxAttempts,
-            errorType: "persistent_html_error",
+            errorType: isHtmlError
+              ? "persistent_html_error"
+              : "persistent_fetch_failed",
           },
           label,
           shouldBeCaptured: false,
@@ -879,8 +886,14 @@ function isSupabaseHtmlError(error: unknown) {
 
   // Detect JSON parse failures that typically show up when HTML is returned instead of JSON
   const lowerMessage = message.toLowerCase();
+  const isJsonParseFailure =
+    lowerMessage.includes("unexpected token") && lowerMessage.includes("json");
+  const mentionsHtml =
+    lowerMessage.includes("<html") ||
+    lowerMessage.includes("html>") ||
+    lowerMessage.includes("text/html");
   const isUnexpectedHtml =
-    message.includes("Unexpected token <") && lowerMessage.includes("json");
+    isJsonParseFailure && (mentionsHtml || lowerMessage.includes("<"));
   const isStorageUnknown =
     name === "StorageUnknownError" ||
     ("__isStorageError" in error &&
@@ -888,4 +901,31 @@ function isSupabaseHtmlError(error: unknown) {
       error.__isStorageError === true);
 
   return isUnexpectedHtml && isStorageUnknown;
+}
+
+/**
+ * Supabase can also surface network failures as StorageUnknownError with a
+ * generic "fetch failed" message. Treat those as transient for retries.
+ */
+function isSupabaseFetchFailedError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+
+  const lowerMessage = message.toLowerCase();
+  const isFetchFailed = lowerMessage.includes("fetch failed");
+  const isStorageUnknown =
+    name === "StorageUnknownError" ||
+    ("__isStorageError" in error &&
+      typeof error.__isStorageError === "boolean" &&
+      error.__isStorageError === true);
+
+  return isFetchFailed && isStorageUnknown;
 }

@@ -181,6 +181,7 @@ export function BookingAssetsColumn() {
                     <Th>Name</Th>
                     <Th> </Th>
                     <Th>Category</Th>
+                    <Th>Tags</Th>
                     {shouldShowCheckinColumns && (
                       <>
                         <Th className="whitespace-nowrap">
