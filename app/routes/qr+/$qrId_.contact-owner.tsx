@@ -1,4 +1,9 @@
-import { data, type ActionFunctionArgs } from "react-router";
+import {
+  data,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -8,6 +13,7 @@ import { SuccessIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
+import { getQrOrganizationLookup } from "~/modules/qr/service.server";
 import {
   createReport,
   sendReportEmails,
@@ -58,6 +64,23 @@ export const QR_SELECT_FOR_REPORT = {
   kit: true,
 };
 
+export async function loader({ params }: LoaderFunctionArgs) {
+  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
+
+  try {
+    const qr = await getQrOrganizationLookup({ qrId });
+
+    if (!qr.organizationId) {
+      return redirect(`/qr/${qrId}`);
+    }
+
+    return null;
+  } catch (cause) {
+    const reason = makeShelfError(cause, { qrId });
+    throw data(error(reason), { status: reason.status });
+  }
+}
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
@@ -83,15 +106,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
 
     /**
-     * This should not happen as the user will be redirected to claim the code before they ever land on this page.
-     * We still handle it just in case also to keep TS happy.
+     * This should not happen, as QRs should be claimed by an organization before this page is accessed.
+     * We still handle the unclaimed case defensively, and to keep TS happy.
      */
-    if (!qr.organizationId || !qr?.userId) {
+    if (!qr.organizationId) {
       throw new ShelfError({
         cause: null,
         title: "Unclaimed QR code",
         message:
-          "This QR doesn't belong to any user or organization so it cannot be reported as found. If you think this is a mistake, please contact support.",
+          "This QR isn't claimed by an organization so it cannot be reported as found. If you think this is a mistake, please contact support.",
         label: "QR",
       });
     }

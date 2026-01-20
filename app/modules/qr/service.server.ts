@@ -85,6 +85,26 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
   }
 }
 
+export async function getQrOrganizationLookup({ qrId }: { qrId: Qr["id"] }) {
+  const qr = await db.qr.findUnique({
+    where: { id: qrId },
+    select: { organizationId: true },
+  });
+
+  if (!qr) {
+    throw new ShelfError({
+      cause: null,
+      message: "This code doesn't exist.",
+      title: "QR code not found",
+      status: 404,
+      additionalData: { qrId },
+      label,
+    });
+  }
+
+  return qr;
+}
+
 export async function createQr({
   userId,
   assetId,
