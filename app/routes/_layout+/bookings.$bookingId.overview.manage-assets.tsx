@@ -179,8 +179,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         message: isNotAllowedStatus
           ? "Changing of assets is not allowed for current status of booking."
           : isSelfServiceOrBase
-          ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of assets is not allowed for current status of booking.",
+            ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+            : "Changing of assets is not allowed for current status of booking.",
         additionalData: {
           booking,
           userId,

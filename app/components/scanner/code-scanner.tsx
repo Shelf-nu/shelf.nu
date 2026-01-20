@@ -429,8 +429,8 @@ function ScannerMode({
             paused
               ? "Scanner paused"
               : inputIsFocused
-              ? "Waiting for scan..."
-              : "Please click on the text field before scanning"
+                ? "Waiting for scan..."
+                : "Please click on the text field before scanning"
           }
           icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
           iconClassName={tw(
@@ -532,8 +532,9 @@ function CameraMode({
         cameraError instanceof Error
           ? cameraError.message
           : typeof cameraError === "object" && cameraError !== null
-          ? (cameraError as { message?: string }).message ?? String(cameraError)
-          : String(cameraError);
+            ? ((cameraError as { message?: string }).message ??
+              String(cameraError))
+            : String(cameraError);
 
       setError(`Camera error: ${errorMessage}`);
       setIsLoading(false);

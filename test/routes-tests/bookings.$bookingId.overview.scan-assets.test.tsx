@@ -81,9 +81,8 @@ const addScannedAssetsToBookingMock = vi.mocked(addScannedAssetsToBooking);
 let action: typeof scanAssetsAction;
 
 beforeAll(async () => {
-  ({ action } = await import(
-    "~/routes/_layout+/bookings.$bookingId.overview.scan-assets"
-  ));
+  ({ action } =
+    await import("~/routes/_layout+/bookings.$bookingId.overview.scan-assets"));
 });
 
 function createActionArgs(

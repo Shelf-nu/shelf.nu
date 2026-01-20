@@ -11,22 +11,18 @@ Each field in your asset database can be filtered in different ways depending on
 ### Available Operators:
 
 - **is**: Exact match (case-insensitive)
-
   - Use when: You know the exact text you're looking for
   - Example: `Name is "Ultrasound Machine 3"`
 
 - **is not**: Excludes exact match
-
   - Use when: You want to exclude a specific item
   - Example: `Name is not "Broken Scanner"`
 
 - **contains**: Partial match
-
   - Use when: You remember part of the text
   - Example: `Description contains "calibrated"`
 
 - **matches any**: Multiple exact matches
-
   - Use when: You want to find items that match any of several exact terms
   - Example: `Name matches any "Scanner A, Scanner B, Scanner C"`
 
@@ -39,22 +35,18 @@ Each field in your asset database can be filtered in different ways depending on
 ### Available Operators:
 
 - **is**: Exact match
-
   - Use when: You know the exact value
   - Example: `Value is 5000`
 
 - **is not**: Excludes exact match
-
   - Use when: You want to exclude a specific value
   - Example: `Value is not 0`
 
 - **greater than**: Above value
-
   - Use when: You want items above a certain value
   - Example: `Value greater than 1000`
 
 - **less than**: Below value
-
   - Use when: You want items below a certain value
   - Example: `Value less than 5000`
 
@@ -67,27 +59,22 @@ Each field in your asset database can be filtered in different ways depending on
 ### Available Operators:
 
 - **is**: Specific date
-
   - Use when: You want items from a specific date
   - Example: `Created At is 2024-01-15`
 
 - **is not**: Exclude specific date
-
   - Use when: You want to exclude a specific date
   - Example: `Created At is not 2024-01-15`
 
 - **before**: Before date
-
   - Use when: You want items before a certain date
   - Example: `Created At before 2024-01-15`
 
 - **after**: After date
-
   - Use when: You want items after a certain date
   - Example: `Created At after 2024-01-15`
 
 - **between**: Date range
-
   - Use when: You want items within a specific date range
   - Example: `Created At between 2024-01-01 and 2024-01-31`
 
@@ -108,12 +95,10 @@ Each field in your asset database can be filtered in different ways depending on
 ### Available Operators:
 
 - **is**: Exact match
-
   - Use when: You want items from a specific category/location/kit
   - Example: `Category is "Imaging Equipment"`
 
 - **is not**: Exclude match
-
   - Use when: You want to exclude a specific category/location/kit
   - Example: `Location is not "Storage Room A"`
 
@@ -132,12 +117,10 @@ Special Options:
 ### Available Operators:
 
 - **contains**: Has specific tag
-
   - Use when: You want items with a specific tag
   - Example: `Tags contains "needs-calibration"`
 
 - **contains all**: Has all specified tags
-
   - Use when: You want items that have all of several tags
   - Example: `Tags contains all "maintenance-due, high-priority"`
 
@@ -150,12 +133,10 @@ Special Options:
 ### Available Operators:
 
 - **is**: Assigned to specific custodian
-
   - Use when: You want items assigned to a specific person
   - Example: `Custody is "Dr. Smith"`
 
 - **is not**: Not assigned to specific custodian
-
   - Use when: You want items not assigned to a specific person
   - Example: `Custody is not "Dr. Smith"`
 
@@ -170,7 +151,6 @@ Special Option:
 ## Tips for Effective Filtering
 
 1. **Combine Filters**: You can add multiple filters to narrow down your search
-
    - Example: Find all high-value imaging equipment in a specific location
      - `Category is "Imaging Equipment"`
      - `Value greater than 10000`
@@ -185,7 +165,6 @@ Special Option:
 ## Troubleshooting Common Issues
 
 - **No Results**: If you're getting no results, try:
-
   1. Checking for typos in your filter values
   2. Using broader filters or fewer filters
   3. Using "contains" instead of "is" for partial matches

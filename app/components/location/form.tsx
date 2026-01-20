@@ -109,10 +109,10 @@ export const LocationForm = ({
 
   const imageError =
     (hasOnSuccessFunc
-      ? fetcherData?.errors?.image?.message ??
+      ? (fetcherData?.errors?.image?.message ??
         (fetcherData?.error?.additionalData?.field === "image"
           ? fetcherData?.error?.message
-          : undefined)
+          : undefined))
       : undefined) ??
     (actionData as any)?.errors?.image?.message ??
     ((actionData as any)?.error?.additionalData?.field === "image"
