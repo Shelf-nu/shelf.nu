@@ -95,7 +95,15 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
   { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
 ];
 
-type UserWithSubscription = Awaited<ReturnType<typeof loader>>["items"][number];
+// Type for users returned from the service with organization data
+type UserFromService = Awaited<
+  ReturnType<typeof getPaginatedAndFilterableUsers>
+>["users"][number];
+
+// Type for users with subscription data added
+type UserWithSubscription = UserFromService & {
+  subscription: Stripe.Subscription | null;
+};
 
 /**
  * Determines account status prioritizing team workspaces over personal ones.
