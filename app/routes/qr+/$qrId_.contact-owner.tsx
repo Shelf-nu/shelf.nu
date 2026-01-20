@@ -119,8 +119,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
 
     /**
-     * This should not happen as the user will be redirected to claim the code before they ever land on this page.
-     * We still handle it just in case also to keep TS happy.
+     * This should not happen, as QRs should be claimed by an organization before this page is accessed.
+     * We still handle the unclaimed case defensively, and to keep TS happy.
      */
     if (!qr.organizationId) {
       throw new ShelfError({
