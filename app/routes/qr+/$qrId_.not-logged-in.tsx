@@ -3,22 +3,47 @@ import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { payload, getParams } from "~/utils/http.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { error, payload, getParams } from "~/utils/http.server";
 
 export const meta = () => [{ title: appendToMetaTitle("QR not logged in") }];
 
-export function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  return data(payload({ qrId }));
+  try {
+    const qr = await db.qr.findUnique({
+      where: { id: qrId },
+      select: { organizationId: true },
+    });
+
+    if (!qr) {
+      throw new ShelfError({
+        cause: null,
+        message: "This code doesn't exist.",
+        title: "QR code not found",
+        status: 404,
+        additionalData: { qrId },
+        label: "QR",
+      });
+    }
+
+    return data(
+      payload({ qrId, canContactOwner: Boolean(qr.organizationId) })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { qrId });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function QrNotLoggedIn() {
   const [searchParams] = useSearchParams();
-  const { qrId } = useLoaderData<typeof loader>();
+  const { qrId, canContactOwner } = useLoaderData<typeof loader>();
   usePosition();
 
   return (
@@ -33,8 +58,9 @@ export default function QrNotLoggedIn() {
               Thank you for scanning
             </h1>
             <p className="text-gray-600">
-              Log in if you own this item. Contact the owner to report it found
-              if it's lost.
+              {canContactOwner
+                ? "Log in if you own this item. Contact the owner to report it found if it's lost."
+                : "Log in if you own this item. This code hasn't been claimed yet."}
             </p>
           </div>
           <div className="flex flex-col">
@@ -47,13 +73,15 @@ export default function QrNotLoggedIn() {
             >
               Log In
             </Button>
-            <Button
-              variant="secondary"
-              to={`/qr/${qrId}/contact-owner`}
-              className="max-w-full"
-            >
-              Contact Owner
-            </Button>
+            {canContactOwner ? (
+              <Button
+                variant="secondary"
+                to={`/qr/${qrId}/contact-owner`}
+                className="max-w-full"
+              >
+                Contact Owner
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>
