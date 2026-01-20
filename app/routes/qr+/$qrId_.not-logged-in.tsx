@@ -32,9 +32,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
       });
     }
 
-    return data(
-      payload({ qrId, canContactOwner: Boolean(qr.organizationId) })
-    );
+    return data(payload({ qrId, canContactOwner: Boolean(qr.organizationId) }));
   } catch (cause) {
     const reason = makeShelfError(cause, { qrId });
     throw data(error(reason), { status: reason.status });
