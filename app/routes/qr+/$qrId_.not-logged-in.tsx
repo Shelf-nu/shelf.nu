@@ -3,11 +3,11 @@ import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
+import { getQrOrganizationLookup } from "~/modules/qr/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { error, payload, getParams } from "~/utils/http.server";
 
 export const meta = () => [{ title: appendToMetaTitle("QR not logged in") }];
@@ -16,21 +16,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
   try {
-    const qr = await db.qr.findUnique({
-      where: { id: qrId },
-      select: { organizationId: true },
-    });
-
-    if (!qr) {
-      throw new ShelfError({
-        cause: null,
-        message: "This code doesn't exist.",
-        title: "QR code not found",
-        status: 404,
-        additionalData: { qrId },
-        label: "QR",
-      });
-    }
+    const qr = await getQrOrganizationLookup({ qrId });
 
     return data(payload({ qrId, canContactOwner: Boolean(qr.organizationId) }));
   } catch (cause) {

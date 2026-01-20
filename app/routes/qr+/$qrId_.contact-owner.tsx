@@ -13,6 +13,7 @@ import { SuccessIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
+import { getQrOrganizationLookup } from "~/modules/qr/service.server";
 import {
   createReport,
   sendReportEmails,
@@ -67,21 +68,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
   try {
-    const qr = await db.qr.findUnique({
-      where: { id: qrId },
-      select: { organizationId: true },
-    });
-
-    if (!qr) {
-      throw new ShelfError({
-        cause: null,
-        message: "This code doesn't exist.",
-        title: "QR code not found",
-        status: 404,
-        additionalData: { qrId },
-        label: "QR",
-      });
-    }
+    const qr = await getQrOrganizationLookup({ qrId });
 
     if (!qr.organizationId) {
       return redirect(`/qr/${qrId}`);
