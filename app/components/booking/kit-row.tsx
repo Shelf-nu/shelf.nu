@@ -133,12 +133,12 @@ export default function KitRow({
           <>
             {/* Checked in on - for kits we don't show specific dates */}
             <Td>
-              <span className="text-sm text-gray-400">-</span>
+              <EmptyTableValue />
             </Td>
 
             {/* Checked in by - for kits we don't show specific users */}
             <Td>
-              <span className="text-sm text-gray-400">-</span>
+              <EmptyTableValue />
             </Td>
           </>
         )}

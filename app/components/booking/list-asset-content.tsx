@@ -21,6 +21,7 @@ import { CategoryBadge } from "../assets/category-badge";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
+import { EmptyTableValue } from "../shared/empty-table-value";
 import { ReturnedBadge } from "../shared/returned-badge";
 import { UserBadge } from "../shared/user-badge";
 import { Td } from "../table";
@@ -214,7 +215,7 @@ export default function ListAssetContent({
                 />
               </span>
             ) : (
-              <span className="text-sm text-gray-400">-</span>
+              <EmptyTableValue />
             )}
           </Td>
 
@@ -240,7 +241,7 @@ export default function ListAssetContent({
                 })()}
               </span>
             ) : (
-              <span className="text-sm text-gray-400">-</span>
+              <EmptyTableValue />
             )}
           </Td>
         </>
