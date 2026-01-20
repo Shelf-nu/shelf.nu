@@ -60,12 +60,12 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
-import AssetQuickActions from "./asset-quick-actions";
-import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
