@@ -93,10 +93,9 @@ export async function createSignedUrl({
           Logger.warn(
             new ShelfError({
               cause: error,
-              message:
-                isHtmlError
-                  ? "Supabase returned a non-JSON response while creating a signed URL. Retrying."
-                  : "Supabase request failed while creating a signed URL. Retrying.",
+              message: isHtmlError
+                ? "Supabase returned a non-JSON response while creating a signed URL. Retrying."
+                : "Supabase request failed while creating a signed URL. Retrying.",
               additionalData: {
                 filename: normalizedFilename,
                 bucketName,

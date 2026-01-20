@@ -1,4 +1,3 @@
-import type { User } from "@prisma/client";
 import { TierId, OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useNavigate, useLoaderData } from "react-router";
@@ -17,10 +16,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
-import {
-  getStripeCustomer,
-  getOrCreateCustomerId,
-} from "~/utils/stripe.server";
+import { getStripeCustomer } from "~/utils/stripe.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -48,7 +44,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
             try {
               const customer = await getStripeCustomer(user.customerId);
-              const subscription = customer?.subscriptions?.data?.[0] || null;
+              // Check if customer is not deleted before accessing subscriptions
+              // (DeletedCustomer type doesn't have subscriptions property)
+              const subscription =
+                customer && "subscriptions" in customer
+                  ? customer.subscriptions?.data?.[0] || null
+                  : null;
               return { ...user, subscription };
             } catch {
               return { ...user, subscription: null };
