@@ -37,6 +37,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const premiumIsEnabled = config.enablePremiumFeatures;
 
     // Fetch Stripe subscription data for users with customerId
+    // Note: This takes the first subscription which may not always be the
+    // active/relevant one if a user has multiple subscriptions
     const usersWithSubscriptions = premiumIsEnabled
       ? await Promise.all(
           users.map(async (user) => {
@@ -123,11 +125,17 @@ function getAccountStatus(user: UserWithSubscription): string {
     return formatMemberStatus(user);
   }
 
-  // Priority 3: Personal workspace only
+  // Priority 3: Personal workspace only - check if they're on Plus
+  if (user.tierId === TierId.tier_1) {
+    return "Owner (Paid - Plus)";
+  }
+
   return "Owner (Free)";
 }
 
 function formatOwnerStatus(user: UserWithSubscription): string {
+  // Note: This function is only called for team workspace owners
+
   // Check if on trial
   const isTrial =
     user.subscription?.status === "trialing" && !!user.subscription?.trial_end;
@@ -141,12 +149,12 @@ function formatOwnerStatus(user: UserWithSubscription): string {
     return `Owner (Trial - ends ${formattedDate})`;
   }
 
-  // Paid tiers
+  // Paid tiers (typical for team workspace owners)
   if (user.tierId === TierId.tier_1) return "Owner (Paid - Plus)";
   if (user.tierId === TierId.tier_2) return "Owner (Paid - Team)";
   if (user.tierId === TierId.custom) return "Owner (Paid - Custom)";
 
-  // Fallback
+  // Fallback for edge cases (team workspace created but not yet paid)
   return "Owner (Free)";
 }
 
