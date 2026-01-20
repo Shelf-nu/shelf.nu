@@ -48,6 +48,7 @@ import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server"
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -299,6 +300,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         include: {
           category: true,
           custody: true,
+          tags: TAG_WITH_COLOR_SELECT,
           kit: true,
           bookings: {
             where: {

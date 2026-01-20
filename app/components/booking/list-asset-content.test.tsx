@@ -32,6 +32,15 @@ vi.mock("../assets/category-badge", () => ({
   CategoryBadge: () => <div data-testid="category-badge" />,
 }));
 
+// why: simplifying tags column rendering to verify tag data flows from list item
+vi.mock("../assets/assets-index/list-item-tags-column", () => ({
+  ListItemTagsColumn: ({ tags }: { tags?: { name: string }[] }) => (
+    <div data-testid="tags-column">
+      {tags?.map((tag) => tag.name).join(",")}
+    </div>
+  ),
+}));
+
 // why: avoiding button component complexity during unit tests
 vi.mock("../shared/button", () => ({
   Button: ({ children }: { children: ReactNode }) => (
@@ -127,6 +136,7 @@ describe("ListAssetContent", () => {
     bookings: [],
     availableToBook: true,
     category: { id: "category-1", name: "Cameras" },
+    tags: [{ id: "tag-1", name: "Fragile", color: "blue" }],
   } as unknown as AssetWithBooking;
 
   beforeEach(() => {
@@ -215,5 +225,32 @@ describe("ListAssetContent", () => {
 
     expect(assetStatusBadgeMock).toHaveBeenCalled();
     expect(screen.getByTestId("asset-status-badge")).toBeInTheDocument();
+  });
+
+  it("renders asset tags in the tags column", () => {
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-3",
+        status: "ONGOING",
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListAssetContent
+              item={baseAsset}
+              partialCheckinDetails={basePartialDetails}
+              shouldShowCheckinColumns={false}
+            />
+          </tr>
+        </tbody>
+      </table>
+    );
+
+    expect(screen.getByTestId("tags-column")).toHaveTextContent("Fragile");
   });
 });

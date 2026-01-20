@@ -12,17 +12,18 @@ import {
   isAssetPartiallyCheckedIn,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
+import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
+import { AvailabilityLabel } from "./availability-label";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
+import { ListItemTagsColumn } from "../assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "../assets/category-badge";
+import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { ReturnedBadge } from "../shared/returned-badge";
 import { UserBadge } from "../shared/user-badge";
 import { Td } from "../table";
-import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
-import { AvailabilityLabel } from "./availability-label";
-import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import When from "../when/when";
 
 type ListAssetContentProps = {
@@ -38,7 +39,7 @@ export default function ListAssetContent({
   partialCheckinDetails,
   shouldShowCheckinColumns,
 }: ListAssetContentProps) {
-  const { category } = item;
+  const { category, tags } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
   const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
@@ -188,6 +189,13 @@ export default function ListAssetContent({
         )}
       >
         <CategoryBadge category={category} />
+      </Td>
+      <Td
+        className={tw(
+          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+        )}
+      >
+        <ListItemTagsColumn tags={tags} />
       </Td>
 
       {shouldShowCheckinColumns && (
