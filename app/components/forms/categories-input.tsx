@@ -45,7 +45,7 @@ export default function CategoriesInput({
                 countKey="totalCategories"
                 placeholder="Select Category"
                 className="flex-1"
-                excludeItems={categories}
+                excludeItems={categories.filter((_, index) => index !== i)}
                 onChange={(value) => {
                   if (value !== undefined) {
                     categories[i] = value;
