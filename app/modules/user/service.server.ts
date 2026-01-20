@@ -98,8 +98,8 @@ export async function getUserByID(
       ...(select
         ? { select }
         : include
-        ? { include }
-        : { select: { id: true } }),
+          ? { include }
+          : { select: { id: true } }),
     });
 
     return user;
@@ -1027,6 +1027,18 @@ async function getUsers({
         orderBy: { createdAt: "desc" },
         include: {
           tier: true,
+          userOrganizations: {
+            select: {
+              roles: true,
+              organization: {
+                select: {
+                  id: true,
+                  type: true,
+                  userId: true,
+                },
+              },
+            },
+          },
         },
       }),
 
