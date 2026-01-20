@@ -1,10 +1,12 @@
 import type React from "react";
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useFetcher } from "react-router";
 import { z } from "zod";
 import {
   auditSessionAtom,
   clearScannedItemsAtom,
+  auditAssetMetaAtom,
   removeMultipleScannedItemsAtom,
   removeScannedItemAtom,
   scannedItemsAtom,
@@ -26,7 +28,6 @@ import {
   GenericItemRow,
   Tr,
 } from "~/components/scanner/drawer/generic-item-row";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
@@ -64,6 +65,7 @@ type AuditDrawerProps = {
   style?: React.CSSProperties;
   headerContent?: React.ReactNode;
   portalContainer?: HTMLElement;
+  onScanRemoved?: (assetId: string) => void;
   getAdditionalBlockers?: (
     args: AdditionalBlockerFactoryArgs
   ) => BlockerConfig[];
@@ -97,9 +99,9 @@ function AuditDrawerFooter({
 }) {
   return (
     <div className="sticky bottom-0 flex w-full gap-2 border-t border-gray-200 bg-white p-3">
-      {/* Cancel button */}
+      {/* Close button */}
       <Button type="button" variant="secondary" to=".." className="ml-auto">
-        Cancel
+        Close
       </Button>
       {/* Complete Audit dialog trigger */}
       <CompleteAuditDialog
@@ -122,18 +124,26 @@ export function AuditDrawer({
   style,
   headerContent,
   portalContainer,
+  onScanRemoved,
   getAdditionalBlockers,
   emptyStateContent,
 }: AuditDrawerProps) {
   const items = useAtomValue(scannedItemsAtom);
   const auditSession = useAtomValue(auditSessionAtom);
+  const auditAssetMeta = useAtomValue(auditAssetMetaAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+  const removeScanFetcher = useFetcher();
 
   const expectedAssetIds = useMemo(
     () => new Set(expectedAssets.map((asset) => asset.id)),
     [expectedAssets]
+  );
+  const assetTypeBadgeClass = tw(
+    "inline-block bg-gray-50 px-[6px] py-[2px]",
+    "rounded-md border border-gray-200",
+    "text-xs text-gray-700"
   );
 
   const scannedAssets = useMemo(
@@ -268,12 +278,38 @@ export function AuditDrawer({
   /**
    * Render a scanned item using GenericItemRow
    */
+  const handleRemove = useCallback(
+    (qrId: string) => {
+      const scannedItem = items[qrId];
+      if (
+        auditSession &&
+        scannedItem?.type === "asset" &&
+        scannedItem.data?.id
+      ) {
+        const formData = new FormData();
+        formData.append("intent", "remove-scan");
+        formData.append("assetId", scannedItem.data.id);
+        formData.append("qrId", qrId);
+
+        void removeScanFetcher.submit(formData, {
+          method: "post",
+          action: `/audits/${auditSession.id}/scan`,
+        });
+
+        onScanRemoved?.(scannedItem.data.id);
+      }
+
+      removeItem(qrId);
+    },
+    [auditSession, items, onScanRemoved, removeItem, removeScanFetcher]
+  );
+
   const renderItem = (qrId: string, item: any) => (
     <GenericItemRow
       key={qrId}
       qrId={qrId}
       item={item}
-      onRemove={removeItem}
+      onRemove={handleRemove}
       searchParams={
         auditSession ? { auditSessionId: auditSession.id } : undefined
       }
@@ -285,6 +321,18 @@ export function AuditDrawer({
         const isExpected = isAsset && data?.id && expectedAssetIds.has(data.id);
         const isUnexpected =
           isAsset && data?.id && !expectedAssetIds.has(data.id);
+        const auditAssetId =
+          typeof data?.auditAssetId === "string" ? data.auditAssetId : undefined;
+        // Prefer live meta counts over loader data for instant UI feedback.
+        const meta = auditAssetId ? auditAssetMeta[auditAssetId] : undefined;
+        const notesCount =
+          meta?.notesCount ??
+          (typeof data?.auditNotesCount === "number" ? data.auditNotesCount : 0);
+        const imagesCount =
+          meta?.imagesCount ??
+          (typeof data?.auditImagesCount === "number"
+            ? data.auditImagesCount
+            : 0);
 
         const availabilityConfigs = [
           {
@@ -315,13 +363,7 @@ export function AuditDrawer({
               {"title" in data ? data.title : data.name}
             </p>
             <div className="flex flex-wrap items-center gap-1">
-              <span
-                className={tw(
-                  "inline-block bg-gray-50 px-[6px] py-[2px]",
-                  "rounded-md border border-gray-200",
-                  "text-xs text-gray-700"
-                )}
-              >
+              <span className={assetTypeBadgeClass}>
                 {item.type === "asset" ? "asset" : "kit"}
               </span>
               <AuditLabels />
@@ -334,6 +376,8 @@ export function AuditDrawer({
                     ("title" in data ? data.title : data.name) || "Asset"
                   }
                   isPending={false}
+                  notesCount={notesCount}
+                  imagesCount={imagesCount}
                 />
               )}
             </div>
@@ -349,13 +393,13 @@ export function AuditDrawer({
   const renderPendingAsset = (asset: AuditScannedItem) => (
     <Tr key={`pending-${asset.id}`}>
       <td className="w-full p-0 md:p-0">
-        <div className="flex items-center justify-between gap-3 p-4 opacity-60 md:px-6">
+        <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           <div className="flex flex-col gap-1">
             <p className="word-break whitespace-break-spaces font-medium text-gray-600">
               {asset.name}
             </p>
             <div className="flex flex-wrap items-center gap-1">
-              <Badge color="#6B7280">asset</Badge>
+              <span className={assetTypeBadgeClass}>asset</span>
               <AvailabilityBadge
                 badgeText="Pending"
                 tooltipTitle="Pending scan"
@@ -369,6 +413,20 @@ export function AuditDrawer({
                   auditSessionId={auditSession.id}
                   assetName={asset.name}
                   isPending={true}
+                  notesCount={
+                    asset.auditAssetId
+                      ? auditAssetMeta[asset.auditAssetId]?.notesCount ??
+                        asset.auditNotesCount ??
+                        0
+                      : asset.auditNotesCount ?? 0
+                  }
+                  imagesCount={
+                    asset.auditAssetId
+                      ? auditAssetMeta[asset.auditAssetId]?.imagesCount ??
+                        asset.auditImagesCount ??
+                        0
+                      : asset.auditImagesCount ?? 0
+                  }
                 />
               )}
             </div>
@@ -450,6 +508,8 @@ export function AuditDrawer({
       className={className}
       style={style}
       emptyStateContent={resolvedEmptyState}
+      // Render pending assets list even when no scans exist yet.
+      renderWhenEmpty
       headerContent={headerContent}
       form={
         <AuditDrawerFooter

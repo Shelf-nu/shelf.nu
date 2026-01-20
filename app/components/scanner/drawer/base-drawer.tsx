@@ -19,6 +19,7 @@ type BaseDrawerProps = {
   title?: string | ReactNode;
   onClear?: () => void;
   hasItems: boolean;
+  renderWhenEmpty?: boolean;
   emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
   headerContent?: ReactNode;
 };
@@ -40,6 +41,7 @@ export default function BaseDrawer({
   title,
   onClear,
   hasItems,
+  renderWhenEmpty = false,
   emptyStateContent,
   headerContent,
 }: BaseDrawerProps) {
@@ -107,6 +109,9 @@ export default function BaseDrawer({
     };
   }, [headerContent, title, hasItems, onClear]);
 
+  // Allow callers to show a non-empty body even when there are no items.
+  const shouldRenderBody = hasItems || renderWhenEmpty;
+
   return (
     <Portal>
       <div
@@ -122,7 +127,7 @@ export default function BaseDrawer({
               : vh - TOP_GAP
             : headerContent
             ? headerHeight // Use dynamic height when custom header content exists
-            : hasItems
+            : shouldRenderBody
             ? 170 // Original logic: show first item when there are items
             : 148, // Original logic: minimal height when no items
         }}
@@ -173,7 +178,7 @@ export default function BaseDrawer({
             </div>
 
             {/* Body */}
-            {!hasItems ? (
+            {!shouldRenderBody ? (
               <div className="flex flex-col items-center px-3 py-6 text-center">
                 {typeof emptyStateContent === "function"
                   ? emptyStateContent(expanded)

@@ -4,7 +4,7 @@ import { Badge } from "../shared/badge";
 
 const auditStatusColorMap: Record<AuditStatus, BadgeColorScheme> = {
   PENDING: BADGE_COLORS.gray,
-  ACTIVE: BADGE_COLORS.blue,
+  ACTIVE: BADGE_COLORS.violet,
   COMPLETED: BADGE_COLORS.green,
   CANCELLED: BADGE_COLORS.gray,
 };

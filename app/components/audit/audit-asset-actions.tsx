@@ -1,8 +1,10 @@
 import type React from "react";
 import { useRef, useEffect } from "react";
 import type { AuditAsset } from "@prisma/client";
-import { Camera, MessageSquare, Loader } from "lucide-react";
-import { useFetcher, Link } from "react-router";
+import { useSetAtom } from "jotai";
+import { ImagePlus, Loader, MessageSquarePlus } from "lucide-react";
+import { useFetcher } from "react-router";
+import { incrementAuditAssetMetaAtom } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
@@ -30,6 +32,7 @@ export function AuditAssetActions({
 }: AuditAssetActionsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fetcher = useFetcher({ key: `quick-image-upload-${auditAssetId}` });
+  const incrementMeta = useSetAtom(incrementAuditAssetMetaAtom);
   // Check if fetcher is uploading
   const isUploading = useDisabled(fetcher);
   const hasError = fetcher.state === "idle" && fetcher.data?.error;
@@ -63,10 +66,21 @@ export function AuditAssetActions({
     }
   }, [fetcher.state, fetcher.data]);
 
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data || fetcher.data.error) {
+      return;
+    }
+
+    if (fetcher.data?.success && fetcher.data?.image && auditAssetId) {
+      // Update local count so the scan list reflects the new image immediately.
+      incrementMeta({ auditAssetId, imagesDelta: 1 });
+    }
+  }, [fetcher.state, fetcher.data, auditAssetId, incrementMeta]);
+
   const totalCount = notesCount + imagesCount;
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2">
       <input
         ref={fileInputRef}
         type="file"
@@ -80,42 +94,44 @@ export function AuditAssetActions({
       <Button
         asChild
         type="button"
-        variant="ghost"
+        variant="secondary"
         size="xs"
-        className="relative size-8 p-0"
-        title="View notes and images"
+        className="relative"
+        title="Add comment"
+        to={`${auditAssetId}/details`}
       >
-        <Link to={`${auditAssetId}/details`}>
-          <MessageSquare className="size-4" />
+        <span className="flex items-center gap-1">
+          <MessageSquarePlus className="inline-block size-4" />
+          <span>Add comment</span>
           {totalCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-medium text-white">
+            <span className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-gray-300 text-[10px] font-medium text-gray-800">
               {totalCount}
             </span>
           )}
-        </Link>
+        </span>
       </Button>
 
       {/* Quick camera/image picker - especially useful on mobile */}
       <Button
         type="button"
-        variant="ghost"
+        variant="secondary"
         size="xs"
         disabled={isUploading}
         onClick={handleQuickImageUpload}
-        className={tw(
-          "relative size-8 p-0",
-          hasError && "border border-error-500"
-        )}
-        title="Quick image upload"
+        className={tw("relative", hasError && "border border-error-500")}
+        title="Add image"
       >
-        {isUploading ? (
-          <Loader
-            className="size-4"
-            style={{ animation: "spinner 2s linear infinite" }}
-          />
-        ) : (
-          <Camera className="size-4" />
-        )}
+        <span className="flex items-center gap-1">
+          {isUploading ? (
+            <Loader
+              className="size-4"
+              style={{ animation: "spinner 2s linear infinite" }}
+            />
+          ) : (
+            <ImagePlus className="size-4" />
+          )}
+          Add image
+        </span>
       </Button>
     </div>
   );

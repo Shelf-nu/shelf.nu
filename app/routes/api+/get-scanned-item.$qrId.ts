@@ -117,8 +117,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
-      // If audit session ID provided, fetch the auditAssetId
+      // If audit session ID provided, fetch the auditAssetId and counts
       let auditAssetId: string | undefined;
+      let auditNotesCount = 0;
+      let auditImagesCount = 0;
       if (auditSessionId && asset.id) {
         const auditAsset = await db.auditAsset.findFirst({
           where: {
@@ -128,13 +130,36 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           select: { id: true },
         });
         auditAssetId = auditAsset?.id;
+        if (auditAssetId) {
+          const [notesCount, imagesCount] = await Promise.all([
+            db.auditNote.count({
+              where: {
+                auditSessionId,
+                auditAssetId,
+              },
+            }),
+            db.auditImage.count({
+              where: {
+                auditSessionId,
+                auditAssetId,
+              },
+            }),
+          ]);
+          auditNotesCount = notesCount;
+          auditImagesCount = imagesCount;
+        }
       }
 
       return data(
         payload({
           qr: {
             type: "asset" as const,
-            asset: { ...asset, auditAssetId },
+            asset: {
+              ...asset,
+              auditAssetId,
+              auditNotesCount,
+              auditImagesCount,
+            },
           },
         })
       );
@@ -172,8 +197,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    // If audit session ID provided, fetch the auditAssetId
+    // If audit session ID provided, fetch the auditAssetId and counts
     let auditAssetId: string | undefined;
+    let auditNotesCount = 0;
+    let auditImagesCount = 0;
     if (auditSessionId && qr.asset?.id) {
       const auditAsset = await db.auditAsset.findFirst({
         where: {
@@ -183,6 +210,24 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         select: { id: true },
       });
       auditAssetId = auditAsset?.id;
+      if (auditAssetId) {
+        const [notesCount, imagesCount] = await Promise.all([
+          db.auditNote.count({
+            where: {
+              auditSessionId,
+              auditAssetId,
+            },
+          }),
+          db.auditImage.count({
+            where: {
+              auditSessionId,
+              auditAssetId,
+            },
+          }),
+        ]);
+        auditNotesCount = notesCount;
+        auditImagesCount = imagesCount;
+      }
     }
 
     return data(
@@ -190,7 +235,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
-          asset: qr.asset ? { ...qr.asset, auditAssetId } : undefined,
+          asset: qr.asset
+            ? {
+                ...qr.asset,
+                auditAssetId,
+                auditNotesCount,
+                auditImagesCount,
+              }
+            : undefined,
         },
       })
     );

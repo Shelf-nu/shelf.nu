@@ -2,6 +2,7 @@ import { data } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams, payload, error } from "~/utils/http.server";
 import {
@@ -36,6 +37,13 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       organizationId,
       uploadedById: userId,
       auditAssetId: auditAssetId || undefined,
+    });
+
+    sendNotification({
+      title: "Image uploaded",
+      message: "Your audit image has been uploaded",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
     });
 
     return data(payload({ success: true, image: result }));

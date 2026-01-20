@@ -28,6 +28,7 @@ import {
 } from "./helpers.server";
 
 import type { AuditSchedulerData } from "./types";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
 export const AUDIT_LIST_INCLUDE = {
@@ -80,6 +81,8 @@ export type AuditExpectedAsset = {
   id: string;
   name: string;
   auditAssetId: string;
+  auditNotesCount?: number;
+  auditImagesCount?: number;
 };
 
 export type CreateAuditSessionResult = {
@@ -325,6 +328,7 @@ export async function updateAuditSession({
     select: {
       name: true,
       description: true,
+      status: true,
     },
   });
 
@@ -335,6 +339,16 @@ export async function updateAuditSession({
       additionalData: { id, organizationId },
       label: "Audit",
       status: 404,
+    });
+  }
+
+  if (currentAudit.status === AuditStatus.CANCELLED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Cancelled audits cannot be edited.",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 400,
     });
   }
 
@@ -438,6 +452,12 @@ export async function getAuditSessionDetails({
                 title: true,
               },
             },
+            _count: {
+              select: {
+                notes: true,
+                images: true,
+              },
+            },
           },
         },
       },
@@ -488,6 +508,8 @@ export async function getAuditSessionDetails({
         id: auditAsset.assetId,
         name: auditAsset.asset?.title ?? "",
         auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
+        auditNotesCount: auditAsset._count?.notes ?? 0,
+        auditImagesCount: auditAsset._count?.images ?? 0,
       }));
 
     return {
@@ -522,6 +544,12 @@ export async function scheduleNextAuditJob({
 }) {
   try {
     const id = await scheduler.sendAfter(QueueNames.auditQueue, data, {}, when);
+    if (id) {
+      await db.auditSession.update({
+        where: { id: data.id },
+        data: { activeSchedulerReference: id },
+      });
+    }
     Logger.info(
       `Scheduled audit job: ${data.eventType} for audit ${
         data.id
@@ -547,7 +575,23 @@ export async function scheduleNextAuditJob({
  */
 async function cancelAuditReminders(auditId: string) {
   try {
-    await scheduler.cancel(auditId);
+    const auditSession = await db.auditSession.findUnique({
+      where: { id: auditId },
+      select: { activeSchedulerReference: true },
+    });
+
+    if (!auditSession?.activeSchedulerReference) {
+      Logger.info(
+        `Skipping audit reminder cancellation for audit ${auditId} because no activeSchedulerReference was found.`
+      );
+      return;
+    }
+
+    await scheduler.cancel(auditSession.activeSchedulerReference);
+    await db.auditSession.update({
+      where: { id: auditId },
+      data: { activeSchedulerReference: null },
+    });
     Logger.info(`Cancelled all reminder jobs for audit ${auditId}`);
   } catch (cause) {
     Logger.error(
@@ -595,7 +639,7 @@ export async function getAssetsForAuditSession({
   });
 
   const { auditStatus } = auditStatusSchema.parse({
-    auditStatus: searchParams.get("auditStatus") || undefined,
+    auditStatus: searchParams.get("auditStatus") || "EXPECTED",
   });
 
   try {
@@ -694,8 +738,6 @@ export async function getAssetsForAuditSession({
         mainImage: true,
         thumbnailImage: true,
         mainImageExpiration: true,
-        status: true,
-        availableToBook: true,
         category: {
           select: {
             id: true,
@@ -703,6 +745,7 @@ export async function getAssetsForAuditSession({
             color: true,
           },
         },
+        tags: TAG_WITH_COLOR_SELECT,
         location: {
           select: {
             id: true,
@@ -1430,7 +1473,7 @@ export async function cancelAuditSession({
     // Update audit status to CANCELLED
     const updatedAudit = await db.auditSession.update({
       where: { id: auditSessionId },
-      data: { status: AuditStatus.CANCELLED },
+      data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
     });
 
     // Create activity note for cancellation

@@ -102,6 +102,55 @@ export async function createAssetScanNote({
 }
 
 /**
+ * Creates an automatic note when a scanned asset is removed from an audit.
+ */
+export async function createAssetScanRemovedNote({
+  auditSessionId,
+  assetId,
+  userId,
+  tx,
+}: {
+  auditSessionId: string;
+  assetId: string;
+  userId: string;
+  tx: any; // Prisma transaction client
+}) {
+  const [asset, remover] = await Promise.all([
+    tx.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true, title: true },
+    }),
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+  ]);
+
+  if (!asset || !remover) {
+    return; // Skip note creation if asset or user not found
+  }
+
+  const assetLink = wrapAssetsWithDataForNote(asset, "removed");
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: remover.id,
+      type: "UPDATE",
+      content: `${wrapUserLinkForNote({
+        id: remover.id,
+        firstName: remover.firstName,
+        lastName: remover.lastName,
+      })} removed scanned asset ${assetLink}.`,
+    },
+  });
+}
+
+/**
  * Creates an automatic note when an audit is started (activated from PENDING status).
  * This note records who performed the first scan that activated the audit.
  */

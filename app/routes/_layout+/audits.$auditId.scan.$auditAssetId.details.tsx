@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import { useSetAtom } from "jotai";
 import { MessageSquare, Paperclip } from "lucide-react";
 import type {
   LoaderFunctionArgs,
@@ -13,6 +14,7 @@ import {
   useLoaderData,
 } from "react-router";
 import { z } from "zod";
+import { incrementAuditAssetMetaAtom } from "~/atoms/qr-scanner";
 import {
   AuditAssetNoteItem,
   type NoteData,
@@ -481,10 +483,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AuditAssetDetails() {
-  const { notes: initialNotes, images } = useLoaderData<typeof loader>();
+  const {
+    notes: initialNotes,
+    images,
+    auditAsset,
+  } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   const imageUploadFetcher = useFetcher<typeof action>();
+  const incrementMeta = useSetAtom(incrementAuditAssetMetaAtom);
 
   const [isUploadInProgress, setIsUploadInProgress] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -568,15 +575,31 @@ export default function AuditAssetDetails() {
           );
           return [...newImages, ...prev];
         });
+        // Sync list counters so scan view reflects new image counts.
+        if (auditAsset?.id) {
+          incrementMeta({
+            auditAssetId: auditAsset.id,
+            imagesDelta: data.images.length,
+          });
+        }
       }
     }
-  }, [imageUploadFetcher.state, imageUploadFetcher.data]);
+  }, [
+    imageUploadFetcher.state,
+    imageUploadFetcher.data,
+    auditAsset?.id,
+    incrementMeta,
+  ]);
 
   useEffect(() => {
     if (actionData && "note" in actionData) {
       noteFormRef.current?.reset();
+      // Update local counts for the scan list without waiting for reload.
+      if (auditAsset?.id) {
+        incrementMeta({ auditAssetId: auditAsset.id, notesDelta: 1 });
+      }
     }
-  }, [actionData]);
+  }, [actionData, auditAsset?.id, incrementMeta]);
 
   /**
    * Called when images are selected.

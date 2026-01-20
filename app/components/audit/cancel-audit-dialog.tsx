@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -17,15 +18,22 @@ type CancelAuditDialogProps = {
   auditName: string;
   open: boolean;
   onClose: () => void;
+  actionData?: any;
 };
 
 export function CancelAuditDialog({
   auditName,
   open,
   onClose,
+  actionData,
 }: CancelAuditDialogProps) {
   const disabled = useDisabled();
-
+  // Close dialog on success (redirect happens in action)
+  useEffect(() => {
+    if (actionData?.success) {
+      onClose();
+    }
+  }, [actionData, onClose]);
   return (
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <AlertDialogContent>

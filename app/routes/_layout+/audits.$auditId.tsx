@@ -214,6 +214,7 @@ export default function AuditDetailsPage() {
     useLoaderData<typeof loader>();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
+  const isCancelled = session.status === AuditStatus.CANCELLED;
   const isCreator = session.createdById === userId;
 
   // Check if current user is assigned to this audit
@@ -256,7 +257,7 @@ export default function AuditDetailsPage() {
           {/* Show actions dropdown to anyone who can view the audit (for PDF download) */}
           {(isAdminOrOwner || isCreator || isAssignee) && <ActionsDropdown />}
 
-          {!isCompleted && canScanAndComplete && (
+          {!isCompleted && !isCancelled && canScanAndComplete && (
             <Button
               to={`/audits/${session.id}/scan`}
               variant={"secondary"}
@@ -266,7 +267,7 @@ export default function AuditDetailsPage() {
             </Button>
           )}
 
-          {!isCompleted && canScanAndComplete && (
+          {!isCompleted && !isCancelled && canScanAndComplete && (
             <CompleteAuditDialog
               disabled={!hasScans}
               auditName={session.name}

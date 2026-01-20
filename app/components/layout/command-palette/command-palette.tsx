@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
+  ClipboardListIcon,
   CompassIcon,
   FilePlus2Icon,
   LayoutDashboardIcon,
@@ -39,6 +40,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 export type CommandPaletteSearchResponse = DataOrErrorResponse<{
   query: string;
   assets: AssetSearchResult[];
+  audits: AuditSearchResult[];
   kits: KitSearchResult[];
   bookings: BookingSearchResult[];
   locations: LocationSearchResult[];
@@ -60,6 +62,14 @@ export type AssetSearchResult = {
   custodianUserName: string | null;
   barcodes: string[];
   customFieldValues: string[];
+};
+
+export type AuditSearchResult = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  dueDate: string | null;
 };
 
 export type KitSearchResult = {
@@ -363,6 +373,14 @@ export function getKitCommandValue(kit: KitSearchResult) {
   return [`kit-${kit.id}`, ...searchableFields].join(" ").trim();
 }
 
+export function getAuditCommandValue(audit: AuditSearchResult) {
+  const searchableFields = [audit.name, audit.description ?? "", audit.id].filter(
+    Boolean
+  );
+
+  return [`audit-${audit.id}`, ...searchableFields].join(" ").trim();
+}
+
 export function getBookingCommandValue(booking: BookingSearchResult) {
   const searchableFields = [
     booking.name,
@@ -583,6 +601,13 @@ export function CommandPalette() {
     return searchData.kits || [];
   }, [searchData]);
 
+  const auditResults = useMemo(() => {
+    if (!searchData || searchData.error) {
+      return [];
+    }
+    return searchData.audits || [];
+  }, [searchData]);
+
   const bookingResults = useMemo(() => {
     if (!searchData || searchData.error) {
       return [];
@@ -624,7 +649,7 @@ export function CommandPalette() {
       <CommandInput
         value={query}
         onValueChange={setQuery}
-        placeholder="Search assets, kits, bookings, locations, team members..."
+        placeholder="Search assets, audits, kits, bookings, locations, team members..."
         autoFocus
         className="my-4 rounded border-gray-100"
       />
@@ -666,6 +691,35 @@ export function CommandPalette() {
                   </span>
                   <span className="truncate text-xs text-gray-500">
                     {getAssetSubtitle(asset, debouncedQuery)}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+
+        {auditResults.length > 0 ? (
+          <CommandGroup heading="Audits">
+            {auditResults.map((audit) => (
+              <CommandItem
+                key={audit.id}
+                value={getAuditCommandValue(audit)}
+                onSelect={() => handleSelect(`/audits/${audit.id}/overview`)}
+                className="gap-3"
+              >
+                <ClipboardListIcon className="size-4 text-gray-500" />
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium text-gray-900">
+                    {audit.name}
+                  </span>
+                  <span className="truncate text-xs text-gray-500">
+                    {audit.status}
+                    {audit.dueDate
+                      ? ` • Due ${new Date(
+                          audit.dueDate
+                        ).toLocaleDateString()}`
+                      : ""}
+                    {audit.description ? ` • ${audit.description}` : ""}
                   </span>
                 </div>
               </CommandItem>
@@ -843,8 +897,8 @@ export function CommandPalette() {
         <div className="flex items-center gap-2">
           <SearchIcon className="size-4" />
           {isPersonalOrg(layoutData?.currentOrganization)
-            ? "Search across all assets, kits, and locations"
-            : "Search across all assets, kits, bookings, locations, and team members"}
+            ? "Search across all assets, audits, kits, and locations"
+            : "Search across all assets, audits, kits, bookings, locations, and team members"}
         </div>
         <CommandShortcut className={tw("bg-white")}>
           {shortcutLabel}

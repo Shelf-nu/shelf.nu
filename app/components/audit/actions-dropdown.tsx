@@ -194,6 +194,7 @@ const ConditionalActionsDropdown = () => {
         <CancelAuditDialog
           auditName={session.name}
           open={isCancelDialogOpen}
+          actionData={actionData}
           onClose={() => setIsCancelDialogOpen(false)}
         />
       </When>

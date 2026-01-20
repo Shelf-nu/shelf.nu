@@ -198,6 +198,13 @@ export type AuditScannedItem = {
   expectedLocation?: string;
   currentLocation?: string;
   auditAssetId?: string; // Link to AuditAsset record for notes/images
+  auditNotesCount?: number;
+  auditImagesCount?: number;
+};
+
+export type AuditAssetMeta = {
+  notesCount?: number;
+  imagesCount?: number;
 };
 
 // Stores current audit session information
@@ -205,6 +212,8 @@ export const auditSessionAtom = atom<AuditSessionInfo>(null);
 
 // Stores expected assets for the current audit target (location/kit)
 export const auditExpectedAssetsAtom = atom<AuditScannedItem[]>([]);
+// Local, client-side overrides for live note/image counts per audit asset.
+export const auditAssetMetaAtom = atom<Record<string, AuditAssetMeta>>({});
 
 // Derived atom that categorizes scanned items by audit status
 export const auditResultsAtom = atom((get) => {
@@ -258,6 +267,49 @@ export const setAuditExpectedAssetsAtom = atom(
   null,
   (_get, set, assets: AuditScannedItem[]) => {
     set(auditExpectedAssetsAtom, assets);
+    // Seed meta counts from loader data so UI starts with server values.
+    set(
+      auditAssetMetaAtom,
+      assets.reduce<Record<string, AuditAssetMeta>>((acc, asset) => {
+        if (!asset.auditAssetId) return acc;
+        acc[asset.auditAssetId] = {
+          notesCount: asset.auditNotesCount ?? 0,
+          imagesCount: asset.auditImagesCount ?? 0,
+        };
+        return acc;
+      }, {})
+    );
+  }
+);
+
+export const incrementAuditAssetMetaAtom = atom(
+  null,
+  (
+    get,
+    set,
+    {
+      auditAssetId,
+      notesDelta = 0,
+      imagesDelta = 0,
+    }: {
+      auditAssetId: string;
+      notesDelta?: number;
+      imagesDelta?: number;
+    }
+  ) => {
+    const current = get(auditAssetMetaAtom);
+    const existing = current[auditAssetId] ?? {};
+    // Keep counts in sync with local optimistic actions.
+    const nextNotes = (existing.notesCount ?? 0) + notesDelta;
+    const nextImages = (existing.imagesCount ?? 0) + imagesDelta;
+    set(auditAssetMetaAtom, {
+      ...current,
+      [auditAssetId]: {
+        ...existing,
+        notesCount: Math.max(0, nextNotes),
+        imagesCount: Math.max(0, nextImages),
+      },
+    });
   }
 );
 
@@ -268,6 +320,7 @@ export const startAuditSessionAtom = atom(
     set(auditSessionAtom, sessionInfo);
     // Clear any existing scanned items when starting a new audit
     set(scannedItemsAtom, {});
+    set(auditAssetMetaAtom, {});
   }
 );
 
@@ -276,4 +329,5 @@ export const endAuditSessionAtom = atom(null, (_get, set) => {
   set(auditSessionAtom, null);
   set(auditExpectedAssetsAtom, []);
   set(scannedItemsAtom, {});
+  set(auditAssetMetaAtom, {});
 });

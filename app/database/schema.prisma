@@ -1335,6 +1335,7 @@ model AuditSession {
   dueDate     DateTime?
   completedAt DateTime?
   cancelledAt DateTime?
+  activeSchedulerReference String?
 
   createdBy      User         @relation(fields: [createdById], references: [id])
   createdById    String

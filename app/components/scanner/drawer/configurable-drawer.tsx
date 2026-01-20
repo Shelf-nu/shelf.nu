@@ -29,6 +29,8 @@ type ConfigurableDrawerProps<T> = {
   title: string | ReactNode;
   // Custom empty state content
   emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
+  // Whether to render content even when the list is empty
+  renderWhenEmpty?: boolean;
   // Loading state
   isLoading?: boolean;
   // Item rendering function
@@ -75,6 +77,7 @@ export default function ConfigurableDrawer<T>({
   onClearItems,
   title,
   emptyStateContent,
+  renderWhenEmpty = false,
   isLoading,
   renderItem,
   Blockers,
@@ -126,6 +129,7 @@ export default function ConfigurableDrawer<T>({
       title={drawerTitle}
       onClear={onClearItems}
       hasItems={hasItems}
+      renderWhenEmpty={renderWhenEmpty}
       emptyStateContent={emptyStateContent || defaultEmptyState}
       headerContent={headerContent}
     >

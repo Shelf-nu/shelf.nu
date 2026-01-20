@@ -8,7 +8,7 @@ import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import { AssetImage } from "~/components/assets/asset-image";
-import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
@@ -217,6 +217,9 @@ export default function AuditOverview() {
     "auditStatus"
   ) as AuditFilterType | null;
   const showAuditStatusColumn = currentFilter === "ALL";
+  const assignedUsers = session.assignments.filter(
+    (assignment) => assignment.userId !== session.createdById
+  );
 
   const expectedCount = session.expectedAssetCount || 0;
   const foundCount = session.foundAssetCount || 0;
@@ -345,37 +348,34 @@ export default function AuditOverview() {
                   />
                 </div>
               </li>
-              {session.assignments.length > 0 && (
-                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
-                    Assigned to
-                  </span>
-                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
-                    <div className="flex flex-col gap-2">
-                      {session.assignments
-                        .filter(
-                          (assignment) =>
-                            assignment.userId !== session.createdById
-                        )
-                        .map((assignment) => (
-                          <UserBadge
-                            key={assignment.id}
-                            name={
-                              assignment.user?.firstName &&
-                              assignment.user?.lastName
-                                ? `${assignment.user.firstName} ${assignment.user.lastName}`
-                                : assignment.user?.email || "Unknown"
-                            }
-                            img={
-                              assignment.user?.profilePicture ||
-                              "/static/images/default_pfp.jpg"
-                            }
-                          />
-                        ))}
-                    </div>
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  Assigned to
+                </span>
+                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                  <div className="flex flex-col gap-2">
+                    {assignedUsers.length > 0 ? (
+                      assignedUsers.map((assignment) => (
+                        <UserBadge
+                          key={assignment.id}
+                          name={
+                            assignment.user?.firstName &&
+                            assignment.user?.lastName
+                              ? `${assignment.user.firstName} ${assignment.user.lastName}`
+                              : assignment.user?.email || "Unknown"
+                          }
+                          img={
+                            assignment.user?.profilePicture ||
+                            "/static/images/default_pfp.jpg"
+                          }
+                        />
+                      ))
+                    ) : (
+                      <span>Not assigned </span>
+                    )}
                   </div>
-                </li>
-              )}
+                </div>
+              </li>
             </ul>
           </Card>
         </div>
@@ -494,6 +494,7 @@ export default function AuditOverview() {
               {showAuditStatusColumn && (
                 <Th className="whitespace-nowrap">Audit Status</Th>
               )}
+              <Th>Tags</Th>
               <Th>Category</Th>
               <Th>Location</Th>
             </>
@@ -524,7 +525,7 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="relative flex size-14 shrink-0 items-center justify-center">
+            <div className="relative flex size-10 shrink-0  justify-center">
               <AssetImage
                 asset={{
                   id: item.id,
@@ -549,11 +550,6 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
                   {item.title}
                 </Button>
               </span>
-              <AssetStatusBadge
-                id={item.id}
-                status={item.status}
-                availableToBook={item.availableToBook}
-              />
             </div>
           </div>
         </div>
@@ -567,6 +563,9 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
           )}
         </Td>
       )}
+      <Td>
+        <ListItemTagsColumn tags={item.tags} />
+      </Td>
       <Td>
         {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
       </Td>

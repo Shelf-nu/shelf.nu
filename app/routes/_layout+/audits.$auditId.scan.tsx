@@ -17,17 +17,18 @@ import {
 } from "~/atoms/qr-scanner";
 import { scannedItemsAtom } from "~/atoms/qr-scanner";
 import AuditDrawer from "~/components/audit/audit-drawer";
-import { ExpectedAssetsList } from "~/components/audit/expected-assets-list";
 import { ErrorContent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { db } from "~/database/db.server";
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
+import { createAssetScanRemovedNote } from "~/modules/audit/helpers.server";
 import {
   getAuditSessionDetails,
   getAuditScans,
@@ -89,6 +90,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    const auditSession = await db.auditSession.findFirst({
+      where: { id: auditId, organizationId },
+      select: { status: true },
+    });
+
+    if (!auditSession) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session not found",
+        additionalData: { auditId, organizationId },
+        label: "Audit",
+        status: 404,
+      });
+    }
+
+    if (auditSession.status === "CANCELLED") {
+      throw new ShelfError({
+        cause: null,
+        message: "This audit has been cancelled and can no longer be modified.",
+        additionalData: { auditId },
+        label: "Audit",
+        status: 400,
+      });
+    }
+
     // Only assignees can complete the audit via scan route
     // Exception: if audit has no assignees, admins/owners can complete
     await requireAuditAssignee({
@@ -111,6 +137,113 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       return redirect(`/audits/${auditId}/overview`);
+    }
+
+    if (intent === "remove-scan") {
+      const assetId = formData.get("assetId");
+
+      if (!assetId || typeof assetId !== "string") {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset ID is required",
+          additionalData: { auditId },
+          label: "Audit",
+          status: 400,
+        });
+      }
+
+      await db.$transaction(async (tx) => {
+        const existingScan = await tx.auditScan.findFirst({
+          where: { auditSessionId: auditId, assetId },
+          include: {
+            auditAsset: {
+              select: { id: true, expected: true },
+            },
+          },
+        });
+
+        if (!existingScan) {
+          return;
+        }
+
+        // Keep audit asset state aligned with removal before recalculating counts.
+        if (existingScan.auditAsset?.expected) {
+          await tx.auditAsset.update({
+            where: { id: existingScan.auditAsset.id },
+            data: {
+              status: "MISSING",
+              scannedAt: null,
+              scannedById: null,
+            },
+          });
+
+          await tx.auditSession.update({
+            where: { id: auditId },
+            data: {
+              foundAssetCount: { decrement: 1 },
+              missingAssetCount: { increment: 1 },
+            },
+          });
+        } else if (existingScan.auditAsset?.id) {
+          await tx.auditAsset.delete({
+            where: { id: existingScan.auditAsset.id },
+          });
+
+          await tx.auditSession.update({
+            where: { id: auditId },
+            data: {
+              unexpectedAssetCount: { decrement: 1 },
+            },
+          });
+        }
+
+        await tx.auditScan.delete({
+          where: { id: existingScan.id },
+        });
+
+        // Recalculate counts to ensure overview stats reflect current state.
+        const [foundCount, missingCount, unexpectedCount] = await Promise.all([
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: auditId,
+              expected: true,
+              status: "FOUND",
+            },
+          }),
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: auditId,
+              expected: true,
+              status: "MISSING",
+            },
+          }),
+          tx.auditAsset.count({
+            where: {
+              auditSessionId: auditId,
+              expected: false,
+              status: "UNEXPECTED",
+            },
+          }),
+        ]);
+
+        await tx.auditSession.update({
+          where: { id: auditId },
+          data: {
+            foundAssetCount: foundCount,
+            missingAssetCount: missingCount,
+            unexpectedAssetCount: unexpectedCount,
+          },
+        });
+
+        await createAssetScanRemovedNote({
+          auditSessionId: auditId,
+          assetId,
+          userId,
+          tx,
+        });
+      });
+
+      return payload({ success: true });
     }
 
     throw new ShelfError({
@@ -149,6 +282,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    if (session.status === "CANCELLED") {
+      return redirect(`/audits/${auditId}/overview`);
+    }
 
     // Permission logic for scan access:
     // - If audit has assignees: only assignees can scan
@@ -212,6 +349,8 @@ export default function AuditSessionRoute() {
             type: "asset",
             auditStatus: "missing",
             auditAssetId: asset.auditAssetId,
+            auditNotesCount: asset.auditNotesCount ?? 0,
+            auditImagesCount: asset.auditImagesCount ?? 0,
           }) as AuditScannedItem
       ),
     [expectedAssets]
@@ -296,22 +435,10 @@ export default function AuditSessionRoute() {
           typeof document !== "undefined" ? document.body : undefined
         }
         defaultExpanded
-        emptyStateContent={({ expanded, stats }) =>
-          expanded ? (
-            <ExpectedAssetsList
-              expectedAssets={expectedItems}
-              stats={stats}
-              contextLabel={contextLabel}
-              contextName={contextName}
-            />
-          ) : (
-            <div className="py-4 text-center">
-              <p className="text-sm text-gray-500">
-                Scan assets to audit this {contextLabel.toLowerCase()}...
-              </p>
-            </div>
-          )
-        }
+        onScanRemoved={(assetId) => {
+          persistedItemsRef.current.delete(assetId);
+          pendingPersistsRef.current.delete(assetId);
+        }}
       />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
