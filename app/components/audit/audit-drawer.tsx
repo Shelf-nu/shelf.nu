@@ -395,7 +395,7 @@ export function AuditDrawer({
    * Render a pending (expected but not yet scanned) asset
    */
   const renderPendingAsset = (asset: AuditScannedItem) => (
-    <Tr key={`pending-${asset.id}`}>
+    <Tr key={`pending-${asset.id}`} skipEntrance>
       <td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           <div className="flex flex-col gap-1">

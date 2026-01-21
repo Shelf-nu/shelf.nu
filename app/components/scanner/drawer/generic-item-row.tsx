@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Prisma } from "@prisma/client";
 import { motion } from "framer-motion";
 import { useSetAtom } from "jotai";
@@ -89,6 +89,10 @@ export function GenericItemRow<T>({
   searchParams: additionalSearchParams,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
+
+  // Track if item had data on initial mount (restored from DB)
+  // to skip entrance animation and prevent list jumping on route changes
+  const hadDataOnMountRef = useRef(!!item?.data);
 
   // Determine if we should fetch - only if we don't already have data or error
   const shouldFetch = !(item && (item.data || item.error));
@@ -187,7 +191,7 @@ export function GenericItemRow<T>({
     item?.error || (fetchError ? "Failed to fetch item" : undefined);
 
   return (
-    <Tr>
+    <Tr skipEntrance={hadDataOnMountRef.current}>
       <Td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           {shouldShowItem
@@ -215,10 +219,17 @@ export function GenericItemRow<T>({
 }
 
 // Animation wrapper for rows
-export function Tr({ children }: { children: ReactNode }) {
+export function Tr({
+  children,
+  skipEntrance = false,
+}: {
+  children: ReactNode;
+  /** Skip entrance animation for items restored from DB to prevent jumping on route changes */
+  skipEntrance?: boolean;
+}) {
   return (
     <motion.tr
-      initial={{ opacity: 0, y: -80 }}
+      initial={skipEntrance ? false : { opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       exit={{ opacity: 0 }}
