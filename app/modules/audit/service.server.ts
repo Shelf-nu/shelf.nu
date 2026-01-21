@@ -161,6 +161,14 @@ export type AuditScanData = {
   scannedAt: Date;
   /** Whether this asset was expected in the audit */
   isExpected: boolean;
+  /** Asset title for display */
+  assetTitle: string;
+  /** The audit asset ID for notes/images */
+  auditAssetId: string | null;
+  /** Number of notes on this audit asset */
+  auditNotesCount: number;
+  /** Number of images on this audit asset */
+  auditImagesCount: number;
 };
 
 export async function createAuditSession(
@@ -828,13 +836,17 @@ export async function recordAuditScan(
         auditSessionId,
         assetId,
       },
+      select: {
+        id: true,
+        auditAssetId: true,
+      },
     });
 
     if (existingScan) {
       // Already scanned, just return current counts
       return {
         scanId: existingScan.id,
-        auditAssetId: null,
+        auditAssetId: existingScan.auditAssetId,
         foundAssetCount: session.foundAssetCount,
         unexpectedAssetCount: session.unexpectedAssetCount,
       };
@@ -913,6 +925,14 @@ export async function recordAuditScan(
           },
         });
         auditAssetId = auditAsset.id;
+      }
+
+      // Link the scan to the audit asset so we can query it later
+      if (auditAssetId) {
+        await tx.auditScan.update({
+          where: { id: scan.id },
+          data: { auditAssetId },
+        });
       }
 
       // Update the audit session counts
@@ -996,22 +1016,91 @@ export async function getAuditScans({
     const scans = await db.auditScan.findMany({
       where: { auditSessionId },
       include: {
+        asset: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
         auditAsset: {
           select: {
+            id: true,
             expected: true,
+            _count: {
+              select: {
+                notes: true,
+                images: true,
+              },
+            },
           },
         },
       },
       orderBy: { scannedAt: "asc" },
     });
 
-    return scans.map((scan) => ({
-      code: scan.code ?? "",
-      assetId: scan.assetId ?? "",
-      type: "asset" as const,
-      scannedAt: scan.scannedAt,
-      isExpected: scan.auditAsset?.expected ?? false,
-    }));
+    // For scans without auditAsset relation (created before the fix that links them),
+    // look up AuditAsset by assetId
+    const assetIdsWithoutLink = scans
+      .filter((s) => !s.auditAsset && s.assetId)
+      .map((s) => s.assetId as string);
+
+    const auditAssetsByAssetId = new Map<
+      string,
+      {
+        id: string;
+        expected: boolean;
+        _count: { notes: number; images: number };
+      }
+    >();
+
+    if (assetIdsWithoutLink.length > 0) {
+      const auditAssets = await db.auditAsset.findMany({
+        where: {
+          auditSessionId,
+          assetId: { in: assetIdsWithoutLink },
+        },
+        select: {
+          id: true,
+          assetId: true,
+          expected: true,
+          _count: {
+            select: {
+              notes: true,
+              images: true,
+            },
+          },
+        },
+      });
+
+      for (const aa of auditAssets) {
+        if (aa.assetId) {
+          auditAssetsByAssetId.set(aa.assetId, {
+            id: aa.id,
+            expected: aa.expected,
+            _count: aa._count,
+          });
+        }
+      }
+    }
+
+    return scans.map((scan) => {
+      // Use direct relation if available, otherwise fall back to lookup by assetId
+      const auditAsset =
+        scan.auditAsset ??
+        (scan.assetId ? auditAssetsByAssetId.get(scan.assetId) : undefined);
+
+      return {
+        code: scan.code ?? "",
+        assetId: scan.assetId ?? "",
+        type: "asset" as const,
+        scannedAt: scan.scannedAt,
+        isExpected: auditAsset?.expected ?? false,
+        assetTitle: scan.asset?.title ?? "",
+        auditAssetId: auditAsset?.id ?? null,
+        auditNotesCount: auditAsset?._count?.notes ?? 0,
+        auditImagesCount: auditAsset?._count?.images ?? 0,
+      };
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import {
   startAuditSessionAtom,
@@ -70,13 +70,29 @@ export function useAuditSessionInitialization({
   const endAuditSession = useSetAtom(endAuditSessionAtom);
   const setScannedItems = useSetAtom(scannedItemsAtom);
 
+  // Track if we've initialized for this session to avoid re-initializing
+  // This is crucial because startAuditSession clears scannedItemsAtom
+  const initializedSessionIdRef = useRef<string | null>(null);
+
+  // Initialize audit session ONLY ONCE per session
+  // startAuditSession clears scannedItemsAtom, so we must not call it on re-renders
   useEffect(() => {
+    // Skip if already initialized for this session
+    if (initializedSessionIdRef.current === session.id) {
+      // Only update expected assets on re-renders (this doesn't clear scanned items)
+      setExpectedAssets(expectedItems);
+      return;
+    }
+
+    // Mark as initialized BEFORE calling startAuditSession
+    initializedSessionIdRef.current = session.id;
+
     const scopeMeta =
       typeof session.scopeMeta === "object" && session.scopeMeta
         ? (session.scopeMeta as Record<string, unknown>)
         : null;
 
-    // Initialize audit session in atoms
+    // Initialize audit session in atoms (this clears scannedItemsAtom)
     startAuditSession({
       id: session.id,
       name: session.name,
@@ -94,28 +110,30 @@ export function useAuditSessionInitialization({
     setExpectedAssets(expectedItems);
 
     // Restore existing scans by directly setting scanned items atom
-    // We bypass the addItem validation by directly setting the atom
+    // We include full asset data to avoid re-fetching via GenericItemRow
     if (existingScans.length > 0) {
       const restoredItems: any = {};
       existingScans.forEach((scan) => {
-        // Add QR codes to the atom with minimal data - GenericItemRow will fetch full details
+        // Add QR codes to the atom with full data so GenericItemRow doesn't re-fetch
         restoredItems[scan.code] = {
           codeType: "qr",
           type: "asset",
+          data: {
+            id: scan.assetId,
+            title: scan.assetTitle,
+            auditAssetId: scan.auditAssetId,
+            auditNotesCount: scan.auditNotesCount,
+            auditImagesCount: scan.auditImagesCount,
+          },
         };
         // Mark them as already persisted so we don't try to persist again
         persistedItemsRef.current.add(scan.assetId);
       });
       setScannedItems(restoredItems);
     }
-
-    return () => {
-      endAuditSession();
-    };
   }, [
-    endAuditSession,
-    existingScans,
     expectedItems,
+    existingScans,
     session.expectedAssetCount,
     session.foundAssetCount,
     session.id,
@@ -124,9 +142,22 @@ export function useAuditSessionInitialization({
     session.targetId,
     session.unexpectedAssetCount,
     session.scopeMeta,
-    setScannedItems,
     setExpectedAssets,
+    setScannedItems,
     startAuditSession,
     persistedItemsRef,
   ]);
+
+  // Cleanup only when session changes or component unmounts
+  useEffect(() => {
+    const currentSessionId = session.id;
+
+    return () => {
+      // Only cleanup if we're actually leaving this session
+      if (initializedSessionIdRef.current === currentSessionId) {
+        initializedSessionIdRef.current = null;
+        endAuditSession();
+      }
+    };
+  }, [session.id, endAuditSession]);
 }
