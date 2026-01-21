@@ -1917,20 +1917,36 @@ export async function duplicateAsset({
       });
 
       if (asset.mainImage) {
-        const imagePath = await uploadDuplicateAssetMainImage(
-          asset.mainImage,
-          duplicatedAsset.id,
-          userId
-        );
+        try {
+          const imagePath = await uploadDuplicateAssetMainImage(
+            asset.mainImage,
+            duplicatedAsset.id,
+            userId
+          );
 
-        if (typeof imagePath === "string") {
-          await db.asset.update({
-            where: { id: duplicatedAsset.id },
-            data: {
-              mainImage: imagePath,
-              mainImageExpiration: oneDayFromNow(),
-            },
-          });
+          if (typeof imagePath === "string") {
+            await db.asset.update({
+              where: { id: duplicatedAsset.id },
+              data: {
+                mainImage: imagePath,
+                mainImageExpiration: oneDayFromNow(),
+              },
+            });
+          }
+        } catch (cause) {
+          Logger.warn(
+            new ShelfError({
+              cause,
+              message: "Skipping duplicate asset image due to upload failure",
+              additionalData: {
+                assetId: duplicatedAsset.id,
+                originalAssetId: asset.id,
+                userId,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
         }
       }
 
