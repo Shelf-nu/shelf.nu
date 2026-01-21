@@ -24,6 +24,7 @@ import {
 } from "@prisma/client";
 import { LRUCache } from "lru-cache";
 import { redirect, type LoaderFunctionArgs } from "react-router";
+import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type {
   SortingDirection,
   SortingOptions,
@@ -84,6 +85,7 @@ import {
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import { detectImageFormat } from "~/utils/image-format.server";
 import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
@@ -1769,26 +1771,57 @@ export async function deleteOtherImages({
   }
 }
 
-async function uploadDuplicateAssetMainImage(
+export async function uploadDuplicateAssetMainImage(
   mainImageUrl: string,
   assetId: string,
   userId: string
 ) {
   try {
-    /**
-     * Getting the blob from asset mainImage signed url so
-     * that we can upload it into duplicated assets as well
-     * */
-    const imageFile = await fetch(mainImageUrl);
-    const imageFileBlob = await imageFile.blob();
+    const originalPath = extractStoragePath(mainImageUrl, "assets");
+
+    if (!originalPath) {
+      throw new ShelfError({
+        cause: null,
+        message: "Failed to extract asset image path for duplication",
+        additionalData: { mainImageUrl, assetId, userId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { data: originalFile, error: downloadError } =
+      await getSupabaseAdmin().storage.from("assets").download(originalPath);
+
+    if (downloadError) {
+      throw new ShelfError({
+        cause: downloadError,
+        message: "Failed to download asset image for duplication",
+        additionalData: { originalPath, assetId, userId },
+        label,
+      });
+    }
+
+    const arrayBuffer = await originalFile.arrayBuffer();
+    const imageBuffer = Buffer.from(arrayBuffer);
+    const detectedFormat = detectImageFormat(imageBuffer);
+
+    if (!detectedFormat) {
+      throw new ShelfError({
+        cause: null,
+        message: "Unsupported image format for asset duplication",
+        additionalData: { originalPath, assetId, userId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
 
     /** Uploading the Blob to supabase */
     const { data, error } = await getSupabaseAdmin()
       .storage.from("assets")
       .upload(
         `${userId}/${assetId}/main-image-${dateTimeInUnix(Date.now())}`,
-        imageFileBlob,
-        { contentType: imageFileBlob.type, upsert: true }
+        imageBuffer,
+        { contentType: detectedFormat, upsert: true }
       );
 
     if (error) {
