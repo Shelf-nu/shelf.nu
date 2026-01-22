@@ -35,4 +35,19 @@ describe("detectImageFormat", () => {
     const buffer = Buffer.from([0x00, 0x01, 0x02, 0x03]);
     expect(detectImageFormat(buffer)).toBeNull();
   });
+
+  it("returns null for empty buffers", () => {
+    const buffer = Buffer.from([]);
+    expect(detectImageFormat(buffer)).toBeNull();
+  });
+
+  it("returns null for buffers shorter than 4 bytes", () => {
+    const buffer = Buffer.from([0x89, 0x50, 0x4e]);
+    expect(detectImageFormat(buffer)).toBeNull();
+  });
+
+  it("returns null for incomplete WebP headers", () => {
+    const buffer = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00]);
+    expect(detectImageFormat(buffer)).toBeNull();
+  });
 });

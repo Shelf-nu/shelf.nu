@@ -1,3 +1,11 @@
+/**
+ * Detect the image MIME type from magic bytes.
+ *
+ * Returns a MIME type string for supported formats or null when the buffer
+ * is too short or does not match a known image signature.
+ *
+ * Supported formats: PNG, JPEG, GIF, WebP, BMP.
+ */
 export function detectImageFormat(buffer: Buffer): string | null {
   if (buffer.length < 4) return null;
 
