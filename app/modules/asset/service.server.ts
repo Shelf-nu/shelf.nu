@@ -1934,7 +1934,8 @@ export async function duplicateAsset({
             });
           }
         } catch (cause) {
-          Logger.warn(
+          // Log the error so we are aware there is an issue anc can check if it is on our side
+          Logger.error(
             new ShelfError({
               cause,
               message: "Skipping duplicate asset image due to upload failure",
