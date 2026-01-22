@@ -144,7 +144,7 @@ export default function GenerateLocations() {
           name={zo.fields.image()}
           error={zo.errors.image()?.message}
           onChange={validateFile}
-          accept="image/png, image/jpeg, image/jpg"
+          accept="image/png, image/jpeg, image/jpg, image/webp"
         />
 
         <Button disabled={disabled}>Create</Button>

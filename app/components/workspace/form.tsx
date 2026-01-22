@@ -105,7 +105,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
         >
           <div>
             <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
             <Input
               // disabled={disabled}
@@ -120,7 +120,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
           </div>
         </FormRow>
