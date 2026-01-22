@@ -51,6 +51,7 @@ export const InviteUserFormSchema = z.object({
       { message: "Please select a role" }
     )
   ),
+  inviteMessage: z.string().max(1000).optional(),
 });
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
@@ -217,6 +218,48 @@ export default function InviteUserDialog({
                   placeholder="zaans@huisje.com"
                   required
                 />
+              </div>
+
+              <div className="pt-1.5">
+                <label
+                  htmlFor="inviteMessage"
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                >
+                  Personal Message (Optional)
+                </label>
+                <textarea
+                  id="inviteMessage"
+                  name={zo.fields.inviteMessage()}
+                  rows={4}
+                  maxLength={1000}
+                  disabled={disabled}
+                  className="block w-full rounded-md border border-gray-300 px-3.5 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50"
+                  placeholder="Add a personal note to help them understand why you're inviting them to this workspace..."
+                  onChange={(e) => {
+                    const charCount = e.target.value.length;
+                    const counter = document.getElementById(
+                      "inviteMessageCounter"
+                    );
+                    if (counter) {
+                      counter.textContent = `${charCount} / 1000 characters`;
+                      counter.className =
+                        charCount > 1000
+                          ? "text-xs text-error-500"
+                          : "text-xs text-gray-500";
+                    }
+                  }}
+                />
+                <div
+                  id="inviteMessageCounter"
+                  className="mt-1 text-xs text-gray-500"
+                >
+                  0 / 1000 characters
+                </div>
+                <When truthy={!!zo.errors.inviteMessage()}>
+                  <p className="mt-1 text-sm text-error-500">
+                    {zo.errors.inviteMessage()?.message}
+                  </p>
+                </When>
               </div>
 
               <When truthy={!!fetcher?.data?.error}>

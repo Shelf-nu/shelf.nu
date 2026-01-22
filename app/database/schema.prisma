@@ -929,10 +929,11 @@ model Invite {
   inviteeTeamMember TeamMember   @relation(fields: [teamMemberId], references: [id])
   teamMemberId      String
 
-  inviteeEmail String
-  status       InviteStatuses      @default(PENDING)
-  inviteCode   String
-  roles        OrganizationRoles[]
+  inviteeEmail  String
+  status        InviteStatuses      @default(PENDING)
+  inviteCode    String
+  roles         OrganizationRoles[]
+  inviteMessage String?             @db.VarChar(1000)
 
   // Datetime
   expiresAt DateTime

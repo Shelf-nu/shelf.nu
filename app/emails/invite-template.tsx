@@ -47,35 +47,32 @@ export function InvitationEmailTemplate({
           {extraMessage ? (
             <Section
               style={{
-                padding: "10px",
-                borderRadius: "12px",
-                border: "1px solid #FEC84B",
-                backgroundColor: "#FFFCF5",
+                padding: "16px",
+                borderRadius: "8px",
+                border: "1px solid #E5E7EB",
+                backgroundColor: "#F9FAFB",
                 marginBottom: "24px",
               }}
             >
-              <Img
-                src={`${SERVER_URL}/static/images/circle-alert.png`}
-                alt="alert-icon"
-                style={{ width: "16px", height: "16px", marginBottom: "10px" }}
-              />
-
               <Text
                 style={{
-                  fontSize: "16px",
-                  fontWeight: "bold",
-                  color: "#B54708",
-                  margin: "0px",
+                  fontSize: "14px",
+                  fontWeight: "600",
+                  color: "#6B7280",
+                  margin: "0 0 8px 0",
                 }}
               >
-                Message from sender, please read carefully.
+                Message from {invite.inviter.firstName}{" "}
+                {invite.inviter.lastName}:
               </Text>
 
               <Text
                 style={{
-                  fontSize: "16px",
-                  color: "#B54708",
+                  fontSize: "15px",
+                  color: "#111827",
                   margin: "0px",
+                  whiteSpace: "pre-wrap",
+                  lineHeight: "1.5",
                 }}
               >
                 {extraMessage}
