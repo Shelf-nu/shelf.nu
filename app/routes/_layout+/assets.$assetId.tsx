@@ -331,6 +331,7 @@ export default function AssetDetailsPage() {
         slots={{
           "left-of-title": (
             <AssetImage
+              key={asset.id}
               asset={{
                 id: asset.id,
                 mainImage: asset.mainImage,

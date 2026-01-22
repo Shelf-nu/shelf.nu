@@ -1,5 +1,6 @@
 import type { ResizeOptions } from "sharp";
-import { ShelfError } from "./error";
+import { isLikeShelfError, ShelfError } from "./error";
+import { detectImageFormat } from "./image-format.server";
 
 export const cropImage = async (
   data: AsyncIterable<Uint8Array>,
@@ -11,9 +12,22 @@ export const cropImage = async (
       chunks.push(chunk);
     }
 
+    const buffer = Buffer.concat(chunks);
+    const detectedFormat = detectImageFormat(buffer);
+
+    if (!detectedFormat) {
+      throw new ShelfError({
+        cause: null,
+        message: "Unsupported image format",
+        additionalData: { size: buffer.length },
+        label: "Crop image",
+        shouldBeCaptured: false,
+      });
+    }
+
     const sharp = (await import("sharp")).default;
 
-    return await sharp(Buffer.concat(chunks))
+    return await sharp(buffer)
       .rotate()
       .resize(
         options || {
@@ -26,6 +40,10 @@ export const cropImage = async (
       .webp({ quality: 80 })
       .toBuffer();
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:
