@@ -144,7 +144,7 @@ const WorkspaceGeneralEditForms = ({
         <FormRow rowLabel={"Main image"} className="border-b-0">
           <div>
             <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
             <Input
               // disabled={disabled}
@@ -159,7 +159,7 @@ const WorkspaceGeneralEditForms = ({
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
           </div>
         </FormRow>

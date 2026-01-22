@@ -303,7 +303,7 @@ export const AssetForm = ({
               <p className="hidden lg:block">
                 <HoverCard openDelay={50} closeDelay={50}>
                   <HoverCardTrigger className={tw("inline-flex w-full  ")}>
-                    Accepts PNG, JPG or JPEG (max.8 MB)
+                    Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
                   </HoverCardTrigger>
                   <HoverCardContent side="left">
                     Images will be automatically resized on upload. Width will
@@ -325,7 +325,7 @@ export const AssetForm = ({
                 inputClassName="border-0 shadow-none p-0 rounded-none"
               />
               <p className="mt-2 lg:hidden">
-                Accepts PNG, JPG or JPEG (max.8 MB)
+                Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
               </p>
             </div>
           </div>

@@ -54,12 +54,12 @@ export const createValidateFileAtom = (options: {
 export const defaultValidateFileAtom = createValidateFileAtom({
   maxSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE, // 4MB
   sizeErrorMessage: "Max file size is 4MB",
-  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
+  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG, JPEG, or WebP",
 });
 
 // For asset image uploads we allow 8MB
 export const assetImageValidateFileAtom = createValidateFileAtom({
   maxSize: ASSET_MAX_IMAGE_UPLOAD_SIZE, // 8MB
   sizeErrorMessage: "Max file size is 8MB",
-  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
+  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG, JPEG, or WebP",
 });

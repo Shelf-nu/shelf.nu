@@ -10,7 +10,7 @@ export const LEGACY_CUID_LENGTH = 25;
 
 //Android 14 camera workaround https://stackoverflow.com/a/79163998/1894472
 export const ACCEPT_SUPPORTED_IMAGES =
-  "image/png,.png,image/jpeg,.jpg,.jpeg,android/force-camera-workaround";
+  "image/png,.png,image/jpeg,.jpg,.jpeg,image/webp,.webp,android/force-camera-workaround";
 
 /** For image uploads */
 export const DEFAULT_MAX_IMAGE_UPLOAD_SIZE = 4 * 1024 * 1024; // 4MB in bytes

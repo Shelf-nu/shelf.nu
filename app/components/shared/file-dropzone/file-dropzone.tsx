@@ -79,6 +79,7 @@ export function FileDropzone({
     accept: {
       "image/png": [".png"],
       "image/jpeg": [".jpg", ".jpeg"],
+      "image/webp": [".webp"],
     },
     ...dropzoneOptions,
   };
@@ -116,7 +117,7 @@ export function FileDropzone({
           drop
         </p>
         <p>
-          PNG, JPG or JPEG (max.{" "}
+          PNG, JPG, JPEG, or WebP (max.{" "}
           {formatBytes(mergedDropzoneOptions?.maxSize as number)})
         </p>
       </div>
