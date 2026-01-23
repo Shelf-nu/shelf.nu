@@ -211,7 +211,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   }}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="start-audit" /> Start audit
+                    <Icon icon="start-audit" /> Create audit
                   </span>
                 </Button>
               </DropdownMenuItem>

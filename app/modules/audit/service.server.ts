@@ -1246,6 +1246,8 @@ export async function completeAuditSession({
         },
         createdBy: {
           select: {
+            id: true,
+            email: true,
             firstName: true,
             lastName: true,
           },
@@ -1271,9 +1273,30 @@ export async function completeAuditSession({
         completedAudit.completedAt > completedAudit.dueDate;
 
       // Get assignees to notify (exclude the user who completed it)
-      const assigneesToNotify = completedAudit.assignments.filter(
-        (assignment) => assignment.userId !== userId && assignment.user.email
-      );
+      // Normalize assignments to email payload shape to allow creator injection.
+      const assigneesToNotify = completedAudit.assignments
+        .filter((assignment) => assignment.user.email)
+        .map((assignment) => ({
+          userId: assignment.userId,
+          user: assignment.user,
+        }));
+
+      // Always notify the audit creator even if they are not an assignee.
+      if (
+        completedAudit.createdBy.email &&
+        !assigneesToNotify.some(
+          (assignment) => assignment.userId === completedAudit.createdBy.id
+        )
+      ) {
+        assigneesToNotify.push({
+          userId: completedAudit.createdBy.id,
+          user: {
+            email: completedAudit.createdBy.email,
+            firstName: completedAudit.createdBy.firstName,
+            lastName: completedAudit.createdBy.lastName,
+          },
+        });
+      }
 
       // Send completion email
       sendAuditCompletedEmail({

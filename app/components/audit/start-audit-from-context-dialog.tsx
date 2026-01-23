@@ -176,7 +176,7 @@ export function StartAuditFromContextDialog({
           onClick={openDialog}
         >
           <span className="flex items-center gap-2">
-            <Icon icon="start-audit" /> Start audit
+            <Icon icon="start-audit" /> Create audit
           </span>
         </Button>
       ) : null}
@@ -188,7 +188,7 @@ export function StartAuditFromContextDialog({
           onClose={closeDialog}
           title={
             <div className="-mb-3 w-full pb-6">
-              <h3>Start audit</h3>
+              <h3>Create audit</h3>
               <p className="text-gray-600">{getDescriptionText()}</p>
             </div>
           }
@@ -266,8 +266,13 @@ export function StartAuditFromContextDialog({
               {/* Right column: Team member selector */}
               <div className="!border-r">
                 <Separator className="md:hidden" />
-                <p className="border-b p-3 font-medium">
-                  Select assignee (optional)
+                <p className="p-3 pb-0 font-medium">
+                  Select assignee (optional).
+                </p>
+                <p className="border-b p-3 ">
+                  If no assignee is selected, any admin user can perform the
+                  audit. This can also be done by multiple users at different
+                  times.
                 </p>
                 <AuditTeamMemberSelector />
               </div>
@@ -284,7 +289,7 @@ export function StartAuditFromContextDialog({
                 Cancel
               </Button>
               <Button type="submit" variant="primary" disabled={isSubmitting}>
-                {isSubmitting ? "Starting..." : "Start audit"}
+                {isSubmitting ? "Creating..." : "Create audit"}
               </Button>
             </div>
           </fetcher.Form>

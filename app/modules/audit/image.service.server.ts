@@ -287,7 +287,30 @@ export async function getAuditImages({
   auditSessionId: AuditSession["id"];
   organizationId: Organization["id"];
   auditAssetId?: AuditAsset["id"] | null;
-}): Promise<AuditImage[]> {
+}): Promise<
+  Prisma.AuditImageGetPayload<{
+    include: {
+      uploadedBy: {
+        select: {
+          id: true;
+          firstName: true;
+          lastName: true;
+          profilePicture: true;
+        };
+      };
+      auditAsset: {
+        include: {
+          asset: {
+            select: {
+              id: true;
+              title: true;
+            };
+          };
+        };
+      };
+    };
+  }>[]
+> {
   try {
     const where: Prisma.AuditImageWhereInput = {
       auditSessionId,
@@ -312,6 +335,16 @@ export async function getAuditImages({
             firstName: true,
             lastName: true,
             profilePicture: true,
+          },
+        },
+        auditAsset: {
+          include: {
+            asset: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
           },
         },
       },

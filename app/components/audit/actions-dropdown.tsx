@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AuditStatus } from "@prisma/client";
 import {
   Popover,
@@ -9,15 +9,18 @@ import {
 import { useActionData, useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
+import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader, action } from "~/routes/_layout+/audits.$auditId";
 import { tw } from "~/utils/tw";
-import { AuditReceiptPDF, type AuditReceiptPDFRef } from "./audit-receipt-pdf";
+import { AuditReceiptPDF } from "./audit-receipt-pdf";
 import { CancelAuditDialog } from "./cancel-audit-dialog";
 import { EditAuditDialog } from "./edit-audit-dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
+
+const receiptAutoOpenKey = "auditReceiptAutoOpen";
 
 const ConditionalActionsDropdown = () => {
   const { session, isAdminOrOwner } = useLoaderData<typeof loader>();
@@ -26,14 +29,15 @@ const ConditionalActionsDropdown = () => {
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
-  // PDF generation state - tracks loading state for button feedback
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  // Ref to imperatively trigger PDF generation
-  const pdfRef = useRef<AuditReceiptPDFRef>(null);
+  const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
+  // Track auto-open so the email deep link only triggers once.
+  const hasAutoOpenedReceiptRef = useRef(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
   const isCreator = session.createdById === user?.id;
+  const receiptRequested = searchParams.get("receipt") === "1";
 
   // Only admin/owner can edit audit details
   const canEditAudit = isAdminOrOwner && !isCompleted && !isCancelled;
@@ -44,6 +48,27 @@ const ConditionalActionsDropdown = () => {
   function handleMenuClose() {
     setOpen(false);
   }
+
+  useEffect(() => {
+    if (receiptRequested && !hasAutoOpenedReceiptRef.current) {
+      // Prevent duplicate auto-opens when multiple dropdown instances exist.
+      if (typeof window !== "undefined") {
+        const existing = window.sessionStorage.getItem(receiptAutoOpenKey);
+        if (existing === session.id) {
+          return;
+        }
+        window.sessionStorage.setItem(receiptAutoOpenKey, session.id);
+      }
+      // Open receipt preview when coming from the email link.
+      setIsReceiptDialogOpen(true);
+      hasAutoOpenedReceiptRef.current = true;
+      // Remove receipt flag so closing the dialog doesn't re-trigger.
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("receipt");
+      setSearchParams(nextParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiptRequested, searchParams, setSearchParams]);
 
   return (
     <>
@@ -150,18 +175,13 @@ const ConditionalActionsDropdown = () => {
                   variant="link"
                   className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                   width="full"
-                  disabled={isGeneratingPdf}
                   onClick={() => {
                     handleMenuClose();
-                    // Trigger PDF generation via ref API
-                    pdfRef.current?.generatePdf();
+                    setIsReceiptDialogOpen(true);
                   }}
                 >
                   <span className="flex items-center gap-2">
-                    {/* Show loading text while PDF is being generated */}
-                    {isGeneratingPdf
-                      ? "Generating receipt..."
-                      : "Download Receipt"}
+                    Download Receipt
                   </span>
                 </Button>
               </div>
@@ -199,12 +219,11 @@ const ConditionalActionsDropdown = () => {
         />
       </When>
 
-      {/* Hidden PDF component - always mounted but only renders when triggered */}
+      {/* Receipt dialog */}
       <AuditReceiptPDF
-        ref={pdfRef}
         audit={{ id: session.id, name: session.name, status: session.status }}
-        onGenerateStart={() => setIsGeneratingPdf(true)}
-        onGenerateEnd={() => setIsGeneratingPdf(false)}
+        open={isReceiptDialogOpen}
+        onClose={() => setIsReceiptDialogOpen(false)}
       />
     </>
   );

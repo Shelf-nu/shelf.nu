@@ -15,6 +15,7 @@ type BasicAuditEmailContentArgs = {
   dueDate?: Date | null;
   hints: ClientHint;
   auditId: string;
+  organizationId?: string;
 };
 
 /**
@@ -29,6 +30,7 @@ export const baseAuditTextEmailContent = ({
   dueDate,
   hints,
   auditId,
+  organizationId,
   emailContent,
 }: BasicAuditEmailContentArgs & { emailContent: string }) => {
   const dueDateText = dueDate
@@ -37,6 +39,7 @@ export const baseAuditTextEmailContent = ({
         timeStyle: "short",
       }).format(dueDate)}\n`
     : "";
+  const orgQuery = organizationId ? `?orgId=${organizationId}` : "";
 
   return `Howdy,
 
@@ -47,7 +50,7 @@ ${auditName} | ${assetsCount} ${assetsCount === 1 ? "asset" : "assets"}
 Created by: ${creatorName}
 ${dueDateText}${description ? `Description: ${description}\n` : ""}
 To view the audit, follow the link below:
-${SERVER_URL}/audits/${auditId}
+${SERVER_URL}/audits/${auditId}/overview${orgQuery}
 
 Thanks,
 The Shelf Team
@@ -81,6 +84,8 @@ export const auditCompletedEmailContent = (
     wasOverdue: boolean;
   }
 ) => {
+  const orgQuery = args.organizationId ? `?orgId=${args.organizationId}` : "";
+  const receiptQuery = orgQuery ? `${orgQuery}&receipt=1` : "?receipt=1";
   const completedDateText = getDateTimeFormatFromHints(args.hints, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -102,6 +107,9 @@ export const auditCompletedEmailContent = (
       statusMessage += `\n\nThis audit was completed before the due date (${dueDateText}). ✅`;
     }
   }
+
+  // Include a direct receipt link for the completion email.
+  statusMessage += `\n\nDownload receipt:\n${SERVER_URL}/audits/${args.auditId}/overview${receiptQuery}`;
 
   return baseAuditTextEmailContent({
     ...args,
@@ -312,6 +320,7 @@ export function sendAuditCompletedEmail({
           dueDate: audit.dueDate,
           hints,
           auditId: audit.id,
+          organizationId: audit.organizationId,
           completedAt,
           wasOverdue,
         }),

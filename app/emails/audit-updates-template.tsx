@@ -72,6 +72,11 @@ export function AuditUpdatesEmailTemplate({
         timeStyle: "short",
       }).format(audit.dueDate as Date)
     : null;
+  // Receipt link is only relevant for completion emails.
+  const receiptUrl = completedAt
+    ? `${SERVER_URL}/audits/${audit.id}/overview?orgId=${audit.organizationId}&receipt=1`
+    : null;
+  const viewUrl = `${SERVER_URL}/audits/${audit.id}/overview?orgId=${audit.organizationId}`;
 
   return (
     <Html>
@@ -141,16 +146,37 @@ export function AuditUpdatesEmailTemplate({
         </div>
 
         {!hideViewButton && (
-          <Button
-            href={`${SERVER_URL}/audits/${audit.id}?orgId=${audit.organizationId}`}
-            style={{
-              ...styles.button,
-              textAlign: "center",
-              marginBottom: "32px",
-            }}
-          >
-            View audit in app
-          </Button>
+          <div style={{ textAlign: "center", marginBottom: "32px" }}>
+            <Button
+              href={viewUrl}
+              style={{
+                ...styles.button,
+                textAlign: "center",
+                display: "inline-block",
+                marginRight: receiptUrl ? "12px" : "0",
+                marginBottom: "12px",
+                width: "100%",
+                maxWidth: "240px",
+              }}
+            >
+              View audit in app
+            </Button>
+            {receiptUrl && (
+              <Button
+                href={receiptUrl}
+                style={{
+                  ...styles.button,
+                  textAlign: "center",
+                  display: "inline-block",
+                  marginBottom: "12px",
+                  width: "100%",
+                  maxWidth: "240px",
+                }}
+              >
+                Download receipt
+              </Button>
+            )}
+          </div>
         )}
 
         <div

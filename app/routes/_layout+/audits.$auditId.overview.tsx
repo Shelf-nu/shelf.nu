@@ -445,14 +445,21 @@ export default function AuditOverview() {
                       key={image.id}
                       imageUrl={image.imageUrl}
                       thumbnailUrl={image.thumbnailUrl}
-                      alt={image.description || "Asset image"}
+                      // Show asset title in the preview header for context.
+                      alt={
+                        image.auditAsset?.asset?.title
+                          ? `Asset: ${image.auditAsset.asset.title}`
+                          : image.description || "Asset image"
+                      }
                       withPreview
                       className="size-24 rounded border"
                       images={assetImages.map((img) => ({
                         id: img.id,
                         imageUrl: img.imageUrl,
                         thumbnailUrl: img.thumbnailUrl,
-                        alt: img.description || "Asset image",
+                        alt: img.auditAsset?.asset?.title
+                          ? `Asset: ${img.auditAsset.asset.title}`
+                          : img.description || "Asset image",
                       }))}
                       currentImageId={image.id}
                     />

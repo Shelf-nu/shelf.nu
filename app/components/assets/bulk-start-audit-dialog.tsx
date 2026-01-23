@@ -136,7 +136,11 @@ function StartAuditDialogContent({
         {/* Right column: Team member selector */}
         <div className="!border-r">
           <Separator className="md:hidden" />
-          <p className="border-b p-3 font-medium">Select assignee (optional)</p>
+          <p className="p-3 pb-0 font-medium">Select assignee (optional).</p>
+          <p className="border-b p-3 ">
+            If no assignee is selected, any admin user can perform the audit.
+            This can also be done by multiple users at different times.
+          </p>
           <AuditTeamMemberSelector error={assigneeError} />
         </div>
       </div>
@@ -152,7 +156,7 @@ function StartAuditDialogContent({
           Cancel
         </Button>
         <Button type="submit" variant="primary" disabled={formDisabled}>
-          Start audit
+          Create audit
         </Button>
       </div>
     </>

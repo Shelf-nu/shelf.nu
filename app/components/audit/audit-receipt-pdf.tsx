@@ -1,12 +1,5 @@
 import type React from "react";
-import {
-  forwardRef,
-  Fragment,
-  useCallback,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { AuditStatus, AuditAssetStatus } from "@prisma/client";
 import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
@@ -17,17 +10,13 @@ import { tw } from "~/utils/tw";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
 import { CategoryBadge } from "../assets/category-badge";
+import { Dialog, DialogPortal } from "../layout/dialog";
+import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
 import { Image } from "../shared/image";
+import { Spinner } from "../shared/spinner";
 import When from "../when/when";
-
-/**
- * Ref interface exposed to parent components for imperative PDF generation
- */
-export interface AuditReceiptPDFRef {
-  generatePdf: () => void;
-}
 
 /**
  * Props for the AuditReceiptPDF component
@@ -38,23 +27,22 @@ interface AuditReceiptPDFProps {
     name: string;
     status: AuditStatus;
   };
-  onGenerateStart?: () => void;
-  onGenerateEnd?: () => void;
+  open: boolean;
+  onClose: () => void;
 }
 
 /**
  * Component that generates and downloads an audit receipt PDF.
- * Renders hidden PDF content and auto-triggers browser print dialog when data is loaded.
- *
- * Usage: Call generatePdf() via ref to initiate PDF generation
+ * Renders a preview dialog with a manual "Download PDF" action.
  */
-export const AuditReceiptPDF = forwardRef<
-  AuditReceiptPDFRef,
-  AuditReceiptPDFProps
->(({ audit, onGenerateStart, onGenerateEnd }, ref) => {
+export const AuditReceiptPDF = ({
+  audit,
+  open,
+  onClose,
+}: AuditReceiptPDFProps) => {
   const componentRef = useRef<HTMLDivElement>(null);
-  // Controls when to fetch PDF data via useApiQuery
-  const [shouldFetch, setShouldFetch] = useState(false);
+  const [pdfMeta, setPdfMeta] = useState<AuditPdfDbResult | null>(null);
+  const [isFetchingReceipt, setIsFetchingReceipt] = useState(false);
 
   // Configure print handler with sanitized filename
   const handlePrint = useReactToPrint({
@@ -62,55 +50,96 @@ export const AuditReceiptPDF = forwardRef<
     documentTitle: `audit-receipt-${sanitizeFilename(
       audit.name
     )}-${Date.now()}`,
-    onAfterPrint: () => {
-      // Clean up after print dialog closes
-      setShouldFetch(false);
-      onGenerateEnd?.();
-    },
   });
 
-  // Fetch PDF data using standard useApiQuery hook
-  const { data } = useApiQuery<{ pdfMeta: AuditPdfDbResult }>({
+  const { data, error } = useApiQuery<{ pdfMeta?: AuditPdfDbResult }>({
     api: `/api/audits/${audit.id}/generate-pdf`,
-    enabled: shouldFetch,
-    onSuccess: () => {
-      // Auto-trigger print dialog when data is loaded
-      // Timeout ensures DOM is fully updated before print
-      setTimeout(() => {
-        handlePrint();
-      }, 100);
+    // Avoid refetching on re-renders once the preview data is loaded.
+    enabled: open && !pdfMeta,
+    onSuccess: (payload) => {
+      setPdfMeta(payload?.pdfMeta ?? null);
     },
-    onError: (error) => {
-      // eslint-disable-next-line no-console
-      console.error("Error generating PDF:", error);
-      setShouldFetch(false);
-      onGenerateEnd?.();
+    onError: () => {
+      setPdfMeta(null);
     },
   });
 
-  // Expose generatePdf method to parent via ref
-  const generatePdf = useCallback(() => {
-    onGenerateStart?.();
-    setShouldFetch(true);
-  }, [onGenerateStart]);
+  useEffect(() => {
+    if (open) {
+      // Track loading state for dialog feedback while the query runs.
+      setIsFetchingReceipt(true);
+    } else {
+      setPdfMeta(null);
+      setIsFetchingReceipt(false);
+    }
+  }, [open]);
 
-  useImperativeHandle(ref, () => ({
-    generatePdf,
-  }));
+  useEffect(() => {
+    if (data || error) {
+      setIsFetchingReceipt(false);
+    }
+  }, [data, error]);
 
-  // Only render PDF content when data is available
-  if (!data?.pdfMeta) {
-    return null;
-  }
-
-  return <AuditPDFContent componentRef={componentRef} pdfMeta={data.pdfMeta} />;
-});
-
-AuditReceiptPDF.displayName = "AuditReceiptPDF";
+  return (
+    <DialogPortal>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        className="h-[90vh] w-full py-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+        title={
+          <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
+            <h3>Generate audit receipt for "{audit.name}"</h3>
+            <p>You can preview the receipt and then download the PDF.</p>
+            {!isFetchingReceipt && (
+              <div className="mt-4">
+                <Button onClick={handlePrint}>Download PDF</Button>
+              </div>
+            )}
+          </div>
+        }
+      >
+        <div className="flex h-full flex-col px-6">
+          <div className="grow">
+            {isFetchingReceipt ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2">
+                <div>Generating receipt preview...</div>
+                <div>
+                  <Spinner />
+                </div>
+              </div>
+            ) : error ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                <div className="text-sm text-gray-600">
+                  We couldn't load the receipt preview.
+                </div>
+                <div className="text-xs text-gray-500">
+                  Please close the dialog and try again.
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <div className="border bg-gray-200 py-4">
+                  <AuditPDFContent
+                    componentRef={componentRef}
+                    pdfMeta={pdfMeta}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 py-4">
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </DialogPortal>
+  );
+};
 
 /**
  * PDF content component that renders the actual audit receipt layout.
- * Positioned off-screen until print dialog opens.
  *
  * @param componentRef - Ref to the printable content container
  * @param pdfMeta - All audit data needed for the PDF (note content is already sanitized server-side)
@@ -175,7 +204,6 @@ const AuditPDFContent = ({
     <div
       className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
       ref={componentRef}
-      style={{ position: "absolute", left: "-9999px" }}
     >
       {/* Print-specific styles for A4 layout */}
       <style>

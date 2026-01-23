@@ -256,7 +256,7 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="start-audit"
-                  label="Start audit"
+                  label="Create audit"
                   onClick={closeMenu}
                   disabled={isLoading}
                 />
