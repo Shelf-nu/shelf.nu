@@ -191,9 +191,9 @@ export async function createAuditStartedNote({
 }
 
 /**
- * Creates an automatic note when an audit is completed.
- * This note records who completed the audit, shows statistics, and includes
- * the optional completion message provided by the user.
+ * Creates a COMMENT note when an audit is completed.
+ * The note includes completion stats, receipt link, and any user-provided note/images.
+ * Using COMMENT type for better layout (header with user info, content below without indentation).
  */
 export async function createAuditCompletedNote({
   auditSessionId,
@@ -231,12 +231,8 @@ export async function createAuditCompletedNote({
   const percentage =
     expectedCount > 0 ? Math.round((foundCount / expectedCount) * 100) : 0;
 
-  // Build the note content
-  let content = `${wrapUserLinkForNote({
-    id: completer.id,
-    firstName: completer.firstName,
-    lastName: completer.lastName,
-  })} completed the audit. Found **${foundCount}/${expectedCount}** expected assets (**${percentage}%**), **${missingCount}** missing, **${unexpectedCount}** unexpected.`;
+  // Build the note content starting with completion stats
+  let content = `Audit completed. Found **${foundCount}/${expectedCount}** expected assets (**${percentage}%**), **${missingCount}** missing, **${unexpectedCount}** unexpected. [View receipt](/audits/${auditSessionId}/overview?receipt=1)`;
 
   // Append user's completion note if provided
   if (completionNote && completionNote.trim()) {
@@ -260,11 +256,12 @@ export async function createAuditCompletedNote({
     content += `\n\n{% audit_images count=${auditImages.length} ids="${imageIds}" /%}`;
   }
 
+  // Create a single COMMENT note for better layout
   await tx.auditNote.create({
     data: {
       auditSessionId,
       userId: completer.id,
-      type: "UPDATE",
+      type: "COMMENT",
       content,
     },
   });

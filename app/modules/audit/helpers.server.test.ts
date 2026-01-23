@@ -477,8 +477,8 @@ describe("audit helpers", () => {
         data: {
           auditSessionId: "audit-1",
           userId: "user-1",
-          type: "UPDATE",
-          content: expect.stringContaining("completed the audit"),
+          type: "COMMENT",
+          content: expect.stringContaining("Audit completed"),
         },
       });
     });

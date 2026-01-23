@@ -258,6 +258,16 @@ describe("audit image service", () => {
               profilePicture: true,
             },
           },
+          auditAsset: {
+            include: {
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                },
+              },
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
       });
