@@ -22,6 +22,37 @@ const subscriptionTiersPriority: Record<TierId, number> = {
   custom: 3, // Custom
 };
 
+/**
+ * Checks if the subscription is an add-on product that should be acknowledged but not processed.
+ * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
+ *
+ * @returns true if it's an add-on (caller should return early with 200)
+ * @returns false if tierId exists (caller should continue processing)
+ * @throws ShelfError if no tierId and not an add-on product
+ */
+function isAddonSubscription({
+  tierId,
+  productType,
+  event,
+  additionalData,
+}: {
+  tierId: string | undefined;
+  productType: string | undefined;
+  event: Stripe.Event;
+  additionalData?: Record<string, unknown>;
+}): boolean {
+  if (tierId) return false;
+  if (productType === "addon") return true;
+
+  throw new ShelfError({
+    cause: null,
+    message: "No tier ID found for non-addon product",
+    additionalData: { event, productType, ...additionalData },
+    label: "Stripe webhook",
+    status: 500,
+  });
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const payload = await request.text();
@@ -96,22 +127,15 @@ export async function action({ request }: ActionFunctionArgs) {
         const tierId = product?.metadata?.shelf_tier;
         const productType = product?.metadata?.product_type;
 
-        /** If no tier ID is found, check if it's an add-on product.
-         * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
-         * We acknowledge add-on webhooks but don't process them as they don't affect user tiers.
-         */
-        if (!tierId) {
-          if (productType === "addon") {
-            return new Response(null, { status: 200 });
-          }
-          // If it's not an add-on, this is an error - we need to know about it
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found for non-addon product",
-            additionalData: { event, subscription, productType },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
 
         /** Update the user's tier in the database */
@@ -140,22 +164,15 @@ export async function action({ request }: ActionFunctionArgs) {
         const { subscription, customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        /** If no tier ID is found, check if it's an add-on product.
-         * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
-         * We acknowledge add-on webhooks but don't process them as they don't affect user tiers.
-         */
-        if (!tierId) {
-          if (productType === "addon") {
-            return new Response(null, { status: 200 });
-          }
-          // If it's not an add-on, this is an error - we need to know about it
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found for non-addon product",
-            additionalData: { event, subscription, productType },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
 
         /** Check if its a trial subscription */
@@ -197,23 +214,17 @@ export async function action({ request }: ActionFunctionArgs) {
         const { subscription, customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        /** If no tier ID is found, check if it's an add-on product.
-         * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
-         * We acknowledge add-on webhooks but don't process them as they don't affect user tiers.
-         */
-        if (!tierId) {
-          if (productType === "addon") {
-            return new Response(null, { status: 200 });
-          }
-          // If it's not an add-on, this is an error - we need to know about it
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found for non-addon product",
-            additionalData: { event, subscription, productType },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
+
         /** Check whether the paused subscription is higher tier or equal tier and the current one and only then cancel */
         const pausedSubscriptionIsHigherTier =
           subscriptionTiersPriority[tierId as TierId] >=
@@ -257,22 +268,15 @@ export async function action({ request }: ActionFunctionArgs) {
         const { subscription, customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        /** If no tier ID is found, check if it's an add-on product.
-         * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
-         * We acknowledge add-on webhooks but don't process them as they don't affect user tiers.
-         */
-        if (!tierId) {
-          if (productType === "addon") {
-            return new Response(null, { status: 200 });
-          }
-          // If it's not an add-on, this is an error - we need to know about it
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found for non-addon product",
-            additionalData: { event, subscription, productType },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
 
         /** Update the user's tier in the database
@@ -315,22 +319,8 @@ export async function action({ request }: ActionFunctionArgs) {
         const { customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        /** If no tier ID is found, check if it's an add-on product.
-         * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
-         * We acknowledge add-on webhooks but don't process them as they don't affect user tiers.
-         */
-        if (!tierId) {
-          if (productType === "addon") {
-            return new Response(null, { status: 200 });
-          }
-          // If it's not an add-on, this is an error - we need to know about it
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found for non-addon product",
-            additionalData: { event, productType },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (isAddonSubscription({ tierId, productType, event })) {
+          return new Response(null, { status: 200 });
         }
 
         /** Check whether the deleted subscription is higher tier or equal tier and the current one and only then cancel */
@@ -371,23 +361,17 @@ export async function action({ request }: ActionFunctionArgs) {
         const { tierId, subscription, productType } =
           await getDataFromStripeEvent(event);
 
-        /** If no tier ID is found, check if it's an add-on product.
-         * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
-         * We acknowledge add-on webhooks but don't process them as they don't affect user tiers.
-         */
-        if (!tierId) {
-          if (productType === "addon") {
-            return new Response(null, { status: 200 });
-          }
-          // If it's not an add-on, this is an error - we need to know about it
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found for non-addon product",
-            additionalData: { event, subscription, productType },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
+
         /** Check if its a trial subscription */
         const isTrialSubscription =
           subscription.trial_end && subscription.trial_start;
