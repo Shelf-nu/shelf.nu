@@ -92,6 +92,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       totalPages,
       modelName,
       organization,
+      searchFieldLabel: "Search by name or email",
+      searchFieldTooltip: {
+        title: "Search team members",
+        text: "Search team members by first name, last name, or email address.",
+      },
     };
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
