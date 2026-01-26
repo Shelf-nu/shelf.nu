@@ -1056,6 +1056,30 @@ export async function checkoutBooking({
       }
     }
 
+    /** Server-side validation: Block checkout if any assets are in custody */
+    const assetsInCustody = bookingFound.assets.filter(
+      (asset) => asset.status === AssetStatus.IN_CUSTODY
+    );
+
+    if (assetsInCustody.length > 0) {
+      const assetNames = assetsInCustody
+        .slice(0, 3)
+        .map((asset) => asset.title)
+        .join(", ");
+      const additionalCount =
+        assetsInCustody.length > 3 ? assetsInCustody.length - 3 : 0;
+      const additionalText =
+        additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Assets in custody",
+        message: `Cannot check out booking. Some assets are currently in custody: ${assetNames}${additionalText}. Please release custody first or remove these assets from the booking.`,
+        shouldBeCaptured: false,
+      });
+    }
+
     /**
      * This checks if the booking end date is in the past
      * We need this because sometimes the user can checkout a booking
