@@ -68,14 +68,14 @@ describe("audit filter utils", () => {
       });
     });
 
-    it("defaults to EXPECTED when null is provided", () => {
+    it("defaults to ALL when null is provided", () => {
       const metadata = getAuditFilterMetadata(null);
 
       expect(metadata).toEqual({
-        label: "Expected Assets",
+        label: "All Assets",
         emptyState: {
-          title: "No expected assets",
-          text: "This audit has no assets assigned to it.",
+          title: "No assets",
+          text: "This audit has no assets.",
         },
       });
     });
@@ -96,61 +96,115 @@ describe("audit filter utils", () => {
   });
 
   describe("getAuditStatusLabel", () => {
-    it("returns Expected when audit data is null", () => {
-      const status = getAuditStatusLabel(null);
-      expect(status).toBe("Expected");
+    describe("on active/pending audit (isAuditCompleted = false)", () => {
+      it("returns Expected when audit data is null", () => {
+        const status = getAuditStatusLabel(null);
+        expect(status).toBe("Expected");
+      });
+
+      it("returns Found for expected asset that was scanned", () => {
+        const status = getAuditStatusLabel({
+          expected: true,
+          auditStatus: "FOUND",
+        });
+        expect(status).toBe("Found");
+      });
+
+      it("returns Missing for expected asset that wasn't scanned", () => {
+        const status = getAuditStatusLabel({
+          expected: true,
+          auditStatus: "MISSING",
+        });
+        expect(status).toBe("Missing");
+      });
+
+      it("returns Unexpected for non-expected asset that was scanned", () => {
+        const status = getAuditStatusLabel({
+          expected: false,
+          auditStatus: "UNEXPECTED",
+        });
+        expect(status).toBe("Unexpected");
+      });
+
+      it("returns Expected for expected asset with PENDING status", () => {
+        const status = getAuditStatusLabel({
+          expected: true,
+          auditStatus: "PENDING",
+        });
+        expect(status).toBe("Expected");
+      });
+
+      it("returns Expected for edge case of non-expected FOUND", () => {
+        // Edge case: asset marked as found but not expected
+        // This shouldn't happen in practice, but tests defensive behavior
+        const status = getAuditStatusLabel({
+          expected: false,
+          auditStatus: "FOUND",
+        });
+        expect(status).toBe("Expected");
+      });
+
+      it("returns Expected for edge case of non-expected MISSING", () => {
+        // Edge case: asset marked as missing but not expected
+        // This shouldn't happen in practice, but tests defensive behavior
+        const status = getAuditStatusLabel({
+          expected: false,
+          auditStatus: "MISSING",
+        });
+        expect(status).toBe("Expected");
+      });
     });
 
-    it("returns Found for expected asset that was scanned", () => {
-      const status = getAuditStatusLabel({
-        expected: true,
-        auditStatus: "FOUND",
+    describe("on completed audit (isAuditCompleted = true)", () => {
+      it("returns Missing when audit data is null", () => {
+        const status = getAuditStatusLabel(null, true);
+        expect(status).toBe("Missing");
       });
-      expect(status).toBe("Found");
-    });
 
-    it("returns Missing for expected asset that wasn't scanned", () => {
-      const status = getAuditStatusLabel({
-        expected: true,
-        auditStatus: "MISSING",
+      it("returns Found for expected asset that was scanned", () => {
+        const status = getAuditStatusLabel(
+          {
+            expected: true,
+            auditStatus: "FOUND",
+          },
+          true
+        );
+        expect(status).toBe("Found");
       });
-      expect(status).toBe("Missing");
-    });
 
-    it("returns Unexpected for non-expected asset that was scanned", () => {
-      const status = getAuditStatusLabel({
-        expected: false,
-        auditStatus: "UNEXPECTED",
+      it("returns Missing for expected asset with PENDING status", () => {
+        // Assets that weren't scanned during the audit are Missing in completed audits
+        const status = getAuditStatusLabel(
+          {
+            expected: true,
+            auditStatus: "PENDING",
+          },
+          true
+        );
+        expect(status).toBe("Missing");
       });
-      expect(status).toBe("Unexpected");
-    });
 
-    it("returns Expected for expected asset with PENDING status", () => {
-      const status = getAuditStatusLabel({
-        expected: true,
-        auditStatus: "PENDING",
+      it("returns Missing for expected asset with MISSING status", () => {
+        const status = getAuditStatusLabel(
+          {
+            expected: true,
+            auditStatus: "MISSING",
+          },
+          true
+        );
+        expect(status).toBe("Missing");
       });
-      expect(status).toBe("Expected");
-    });
 
-    it("returns Expected for edge case of non-expected FOUND", () => {
-      // Edge case: asset marked as found but not expected
-      // This shouldn't happen in practice, but tests defensive behavior
-      const status = getAuditStatusLabel({
-        expected: false,
-        auditStatus: "FOUND",
+      it("returns Unexpected for non-expected asset that was scanned", () => {
+        const status = getAuditStatusLabel(
+          {
+            expected: false,
+            auditStatus: "UNEXPECTED",
+          },
+          true
+        );
+        expect(status).toBe("Unexpected");
       });
-      expect(status).toBe("Expected");
-    });
-
-    it("returns Expected for edge case of non-expected MISSING", () => {
-      // Edge case: asset marked as missing but not expected
-      // This shouldn't happen in practice, but tests defensive behavior
-      const status = getAuditStatusLabel({
-        expected: false,
-        auditStatus: "MISSING",
-      });
-      expect(status).toBe("Expected");
     });
   });
 });

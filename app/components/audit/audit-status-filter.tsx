@@ -17,7 +17,7 @@ type AuditStatusFilterProps = {
 /**
  * Status filter specifically for audit pages.
  * Includes an "ALL" option to view all assets (expected + unexpected) in one list.
- * Default filter is EXPECTED.
+ * Default filter is ALL (shows all assets).
  */
 export function AuditStatusFilter(props: AuditStatusFilterProps) {
   const { statusItems, name = "auditStatus" } = props;
@@ -28,7 +28,12 @@ export function AuditStatusFilter(props: AuditStatusFilterProps) {
 
   function handleValueChange(value: string) {
     setSearchParams((prev) => {
-      prev.set(name, value);
+      if (value === "ALL") {
+        // Remove the param when selecting ALL (clean URL)
+        prev.delete(name);
+      } else {
+        prev.set(name, value);
+      }
       return prev;
     });
   }
@@ -37,7 +42,7 @@ export function AuditStatusFilter(props: AuditStatusFilterProps) {
     <div className="w-full md:w-auto">
       <Select
         name={name}
-        defaultValue={status || "EXPECTED"}
+        value={status || "ALL"}
         onValueChange={handleValueChange}
         disabled={disabled}
       >

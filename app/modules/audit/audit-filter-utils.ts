@@ -60,8 +60,8 @@ const FILTER_METADATA: Record<AuditFilterType, AuditFilterMetadata> = {
 export function getAuditFilterMetadata(
   filterType: string | null
 ): AuditFilterMetadata {
-  // If no filter is provided, default to "EXPECTED" (show expected assets)
-  const normalizedFilter = (filterType || "EXPECTED") as AuditFilterType;
+  // If no filter is provided, default to "ALL" (show all assets)
+  const normalizedFilter = (filterType || "ALL") as AuditFilterType;
   return FILTER_METADATA[normalizedFilter] || FILTER_METADATA.ALL;
 }
 
@@ -72,18 +72,26 @@ export type AuditStatusLabel = "Expected" | "Found" | "Missing" | "Unexpected";
 /**
  * Determine the audit status label for an asset based on its audit data.
  * Used to display status badges in the "ALL" filter view.
+ *
+ * The label changes based on audit completion state:
+ * - Active/Pending audit: Expected assets show "Expected" or "Found"
+ * - Completed audit: Expected assets that weren't scanned show "Missing" instead of "Expected"
+ *
+ * @param auditData - The asset's audit status data
+ * @param isAuditCompleted - Whether the audit has been completed (default: false)
  */
 export function getAuditStatusLabel(
-  auditData: { expected: boolean; auditStatus: AuditAssetStatus } | null
+  auditData: { expected: boolean; auditStatus: AuditAssetStatus } | null,
+  isAuditCompleted: boolean = false
 ): AuditStatusLabel {
-  if (!auditData) return "Expected";
+  if (!auditData) return isAuditCompleted ? "Missing" : "Expected";
 
   // Found: Expected asset that was scanned
   if (auditData.expected && auditData.auditStatus === "FOUND") {
     return "Found";
   }
 
-  // Missing: Expected asset that wasn't scanned
+  // Missing: Expected asset that wasn't scanned (always shows as Missing)
   if (auditData.expected && auditData.auditStatus === "MISSING") {
     return "Missing";
   }
@@ -93,6 +101,13 @@ export function getAuditStatusLabel(
     return "Unexpected";
   }
 
-  // Default: Expected (covers PENDING status)
-  return "Expected";
+  // Expected assets with PENDING status:
+  // - On completed audit: Show as "Missing" (they weren't scanned)
+  // - On active/pending audit: Show as "Expected" (still waiting to be scanned)
+  if (auditData.expected && auditData.auditStatus === "PENDING") {
+    return isAuditCompleted ? "Missing" : "Expected";
+  }
+
+  // Default fallback
+  return isAuditCompleted ? "Missing" : "Expected";
 }

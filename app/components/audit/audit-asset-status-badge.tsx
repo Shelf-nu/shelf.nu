@@ -28,7 +28,7 @@ export function AuditAssetStatusBadge({ status }: AuditAssetStatusBadgeProps) {
   const colors = auditStatusColorMap(status);
 
   return (
-    <Badge color={colors.bg} textColor={colors.text}>
+    <Badge color={colors.bg} textColor={colors.text} withDot={false}>
       {status}
     </Badge>
   );

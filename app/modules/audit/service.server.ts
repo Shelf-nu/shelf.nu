@@ -647,7 +647,7 @@ export async function getAssetsForAuditSession({
   });
 
   const { auditStatus } = auditStatusSchema.parse({
-    auditStatus: searchParams.get("auditStatus") || "EXPECTED",
+    auditStatus: searchParams.get("auditStatus") || "ALL",
   });
 
   try {
@@ -762,6 +762,25 @@ export async function getAssetsForAuditSession({
             _count: {
               select: {
                 children: true,
+              },
+            },
+          },
+        },
+        custody: {
+          select: {
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    profilePicture: true,
+                  },
+                },
               },
             },
           },

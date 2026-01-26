@@ -24,7 +24,9 @@ import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
+import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getAuditFilterMetadata,
   getAuditStatusLabel,
@@ -47,6 +49,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -216,7 +219,9 @@ export default function AuditOverview() {
   const currentFilter = searchParams.get(
     "auditStatus"
   ) as AuditFilterType | null;
-  const showAuditStatusColumn = currentFilter === "ALL";
+  // Show audit status column when "ALL" is selected (default, no param in URL)
+  const showAuditStatusColumn =
+    currentFilter === null || currentFilter === "ALL";
   const assignedUsers = session.assignments.filter(
     (assignment) => assignment.userId !== session.createdById
   );
@@ -234,13 +239,16 @@ export default function AuditOverview() {
       <div className="flex flex-col gap-6 lg:flex-row">
         {/* Left Column: Stats Cards */}
         <div className="flex-1">
-          <h2 className="mb-4 text-lg font-semibold">Statistics</h2>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Statistics</h2>
+            {currentFilter && currentFilter !== "ALL" && <ClearFilterButton />}
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <StatCard
               label="Expected"
               value={expectedCount}
               filterType="EXPECTED"
-              isActive={currentFilter === "EXPECTED" || !currentFilter}
+              isActive={currentFilter === "EXPECTED"}
             />
             <StatCard
               label="Found"
@@ -501,9 +509,10 @@ export default function AuditOverview() {
               {showAuditStatusColumn && (
                 <Th className="whitespace-nowrap">Audit Status</Th>
               )}
-              <Th>Tags</Th>
-              <Th>Category</Th>
               <Th>Location</Th>
+              <CustodianHeader />
+              <Th>Category</Th>
+              <Th>Tags</Th>
             </>
           }
           className="overflow-x-visible md:overflow-x-auto"
@@ -517,15 +526,24 @@ type LoaderData = Awaited<ReturnType<typeof loader>>;
 type AuditAssetItem = LoaderData["data"]["items"][number];
 
 function AssetListItem({ item }: { item: AuditAssetItem }) {
-  const { category, location } = item;
+  const { session } = useLoaderData<typeof loader>();
+  const { category, location, custody } = item;
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
+  const { roles } = useUserRoleHelper();
 
-  // Show audit status column when "ALL" filter is active
-  const showAuditStatus = currentFilter === "ALL";
+  // Show audit status column when "ALL" filter is active (default, no param in URL)
+  const showAuditStatus = currentFilter === null || currentFilter === "ALL";
+  const isAuditCompleted = session.status === "COMPLETED";
   const auditStatusLabel = item.auditData
-    ? getAuditStatusLabel(item.auditData)
+    ? getAuditStatusLabel(item.auditData, isAuditCompleted)
     : null;
+
+  const canReadCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.custody,
+    action: PermissionAction.read,
+  });
 
   return (
     <>
@@ -571,13 +589,6 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
         </Td>
       )}
       <Td>
-        <ListItemTagsColumn tags={item.tags} />
-      </Td>
-      <Td>
-        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
-      </Td>
-
-      <Td>
         {location ? (
           <LocationBadge
             location={{
@@ -591,7 +602,62 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
           <EmptyTableValue />
         )}
       </Td>
+      {canReadCustody && (
+        <Td>
+          {custody?.custodian ? (
+            <TeamMemberBadge teamMember={custody.custodian} />
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      )}
+      <Td>
+        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
+      </Td>
+      <Td>
+        <ListItemTagsColumn tags={item.tags} />
+      </Td>
     </>
+  );
+}
+
+function ClearFilterButton() {
+  const [, setSearchParams] = useSearchParams();
+
+  const handleClick = () => {
+    setSearchParams((prev) => {
+      prev.delete("auditStatus");
+      return prev;
+    });
+  };
+
+  return (
+    <Button variant="link-gray" className="text-sm " onClick={handleClick}>
+      View all
+    </Button>
+  );
+}
+
+function CustodianHeader() {
+  const { roles } = useUserRoleHelper();
+  const canReadCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.custody,
+    action: PermissionAction.read,
+  });
+
+  if (!canReadCustody) return null;
+
+  return (
+    <Th>
+      <div className="flex items-center gap-1">
+        Custodian
+        <InfoTooltip
+          iconClassName="size-4"
+          content="The team member currently in custody of this asset."
+        />
+      </div>
+    </Th>
   );
 }
 

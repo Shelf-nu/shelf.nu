@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
+  ClipboardCheckIcon,
   ClipboardListIcon,
   CompassIcon,
   FilePlus2Icon,
@@ -154,6 +155,15 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     icon: CalendarIcon,
     isVisible: ({ canCreateBookings, isPersonalWorkspace }) =>
       canCreateBookings && !isPersonalWorkspace,
+  },
+  {
+    id: "audits",
+    label: "Audits",
+    description: "View and manage inventory audits",
+    href: "/audits",
+    keywords: ["audits", "audit", "inventory", "check", "verify"],
+    icon: ClipboardCheckIcon,
+    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
   },
   {
     id: "team",
