@@ -26,7 +26,7 @@ describe("generateWhereClause - special filter values", () => {
   const orgId = "test-org-id";
 
   describe("custody filter with special values", () => {
-    it("handles 'in-custody' with is operator", () => {
+    it("handles 'in-custody' with is operator (includes active bookings)", () => {
       const filter: Filter = {
         name: "custody",
         type: "enum",
@@ -37,10 +37,13 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
+      // Should check both direct custody AND active bookings
       expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("Booking");
+      expect(sql).toContain("ONGOING");
     });
 
-    it("handles 'in-custody' with isNot operator (inverts to no custody)", () => {
+    it("handles 'in-custody' with isNot operator (excludes both direct and booking custody)", () => {
       const filter: Filter = {
         name: "custody",
         type: "enum",
@@ -51,10 +54,13 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
+      // Should exclude both direct custody AND active bookings
       expect(sql).toContain("cu.id IS NULL");
+      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("Booking");
     });
 
-    it("handles 'without-custody' with is operator", () => {
+    it("handles 'without-custody' with is operator (excludes active bookings too)", () => {
       const filter: Filter = {
         name: "custody",
         type: "enum",
@@ -65,10 +71,13 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
+      // Should exclude both direct custody AND active bookings
       expect(sql).toContain("cu.id IS NULL");
+      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("Booking");
     });
 
-    it("handles containsAny with only 'in-custody'", () => {
+    it("handles containsAny with only 'in-custody' (includes active bookings)", () => {
       const filter: Filter = {
         name: "custody",
         type: "enum",
@@ -79,7 +88,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
+      // Should check both direct custody AND active bookings
       expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("Booking");
     });
 
     it("handles containsAny with 'in-custody' + specific IDs (subsumes to in-custody)", () => {
@@ -93,8 +104,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      // "in-custody" subsumes specific IDs - just checks for any custody
+      // "in-custody" subsumes specific IDs - checks for any custody (direct or booking)
       expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("Booking");
       // Should NOT contain specific ID matching since in-custody covers all
       expect(sql).not.toContain("specific-team-member-id");
     });

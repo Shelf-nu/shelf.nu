@@ -859,10 +859,23 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   switch (filter.operator) {
     case "is":
       if (filter.value === "in-custody") {
-        return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+        // Include both direct custody and active booking custody
+        return Prisma.sql`${whereClause} AND (
+          cu.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM "Booking" b
+            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            WHERE b.status IN ('ONGOING', 'OVERDUE')
+          )
+        )`;
       }
       if (filter.value === "without-custody") {
-        return Prisma.sql`${whereClause} AND cu.id IS NULL`;
+        // Exclude both direct custody and active booking custody
+        return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT EXISTS (
+          SELECT 1 FROM "Booking" b
+          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          WHERE b.status IN ('ONGOING', 'OVERDUE')
+        )`;
       }
       return Prisma.sql`${whereClause} AND (
         EXISTS (
@@ -885,10 +898,23 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
     case "isNot":
       if (filter.value === "in-custody") {
-        return Prisma.sql`${whereClause} AND cu.id IS NULL`;
+        // Exclude both direct custody and active booking custody
+        return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT EXISTS (
+          SELECT 1 FROM "Booking" b
+          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          WHERE b.status IN ('ONGOING', 'OVERDUE')
+        )`;
       }
       if (filter.value === "without-custody") {
-        return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+        // Include both direct custody and active booking custody
+        return Prisma.sql`${whereClause} AND (
+          cu.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM "Booking" b
+            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            WHERE b.status IN ('ONGOING', 'OVERDUE')
+          )
+        )`;
       }
       return Prisma.sql`${whereClause} AND NOT (
         EXISTS (
@@ -926,19 +952,17 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         return whereClause;
       }
 
-      // Handle "in-custody" - assets that have a custodian
+      // Handle "in-custody" - assets that have a custodian (direct or via booking)
       if (hasInCustody) {
-        const custodianIds = values.filter(
-          (v) => v !== "in-custody" && v !== "without-custody"
-        );
-
-        if (custodianIds.length === 0) {
-          return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
-        }
-
-        // "in-custody" combined with specific custodians: any asset with custody
-        // (the specific IDs are subsumed by the general "in-custody")
-        return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+        // "in-custody" subsumes specific custodian IDs - just check for any custody
+        return Prisma.sql`${whereClause} AND (
+          cu.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM "Booking" b
+            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            WHERE b.status IN ('ONGOING', 'OVERDUE')
+          )
+        )`;
       }
 
       // Handle "without-custody" - assets that don't have a custodian
@@ -946,7 +970,11 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         const custodianIds = values.filter((v) => v !== "without-custody");
 
         if (custodianIds.length === 0) {
-          return Prisma.sql`${whereClause} AND cu.id IS NULL`;
+          return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT EXISTS (
+            SELECT 1 FROM "Booking" b
+            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            WHERE b.status IN ('ONGOING', 'OVERDUE')
+          )`;
         }
 
         const custodianIdsArray = Prisma.join(
@@ -954,7 +982,11 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NULL
+          (cu.id IS NULL AND NOT EXISTS (
+            SELECT 1 FROM "Booking" b
+            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            WHERE b.status IN ('ONGOING', 'OVERDUE')
+          ))
           OR EXISTS (
             SELECT 1 FROM "Custody" cu
             WHERE cu."assetId" = a.id
