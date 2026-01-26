@@ -782,30 +782,37 @@ export async function releaseCustody({
       : "**Unknown Custodian**";
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
-    await Promise.all([
-      db.kit.update({
+    // Use transaction for atomicity - prevents orphaned custody records on partial failure
+    await db.$transaction(async (tx) => {
+      // Delete kit custody and update kit status
+      await tx.kit.update({
         where: { id: kitId, organizationId },
         data: {
           status: KitStatus.AVAILABLE,
           custody: { delete: true },
         },
-      }),
-      ...kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id, organizationId },
-          data: {
-            status: AssetStatus.AVAILABLE,
-            custody: { delete: true },
-          },
-        })
-      ),
-      createNotes({
-        content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
-        type: "UPDATE",
-        userId,
-        assetIds: kit.assets.map((asset) => asset.id),
-      }),
-    ]);
+      });
+
+      // Delete asset custody records first, then update asset status
+      const assetIds = kit.assets.map((a) => a.id);
+
+      await tx.custody.deleteMany({
+        where: { assetId: { in: assetIds } },
+      });
+
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds }, organizationId },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+
+    // Notes can be created outside transaction (not critical for consistency)
+    await createNotes({
+      content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
+      type: "UPDATE",
+      userId,
+      assetIds: kit.assets.map((asset) => asset.id),
+    });
 
     return kit;
   } catch (cause) {
@@ -2158,21 +2165,26 @@ export async function updateKitAssets({
     if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       const assetIds = removedAssets.map((a) => a.id);
-      await Promise.all([
-        db.custody.deleteMany({
+
+      // Use transaction for atomicity - prevents orphaned custody records
+      await db.$transaction(async (tx) => {
+        await tx.custody.deleteMany({
           where: { assetId: { in: assetIds } },
-        }),
-        db.asset.updateMany({
+        });
+
+        await tx.asset.updateMany({
           where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
-        }),
-        createNotes({
-          content: `${actor} released ${custodianDisplay}'s custody.`,
-          type: NoteType.UPDATE,
-          userId,
-          assetIds,
-        }),
-      ]);
+        });
+      });
+
+      // Notes can be created outside transaction (not critical for consistency)
+      await createNotes({
+        content: `${actor} released ${custodianDisplay}'s custody.`,
+        type: NoteType.UPDATE,
+        userId,
+        assetIds,
+      });
     }
 
     /**
@@ -2290,14 +2302,9 @@ export async function bulkRemoveAssetsFromKits({
     });
 
     await db.$transaction(async (tx) => {
-      /** Removing assets from kits */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((a) => a.id) } },
-        data: { kitId: null, status: AssetStatus.AVAILABLE },
-      });
-
       /**
-       * If there are assets whose kits were in custody, then we have to remove the custody
+       * If there are assets whose kits were in custody, then we have to remove the custody FIRST
+       * to avoid orphaned custody records when status is set to AVAILABLE
        */
       const assetsWhoseKitsInCustody = assets.filter(
         (asset) => !!asset.kit?.custody && asset.custody
@@ -2313,6 +2320,12 @@ export async function bulkRemoveAssetsFromKits({
           where: { id: { in: custodyIdsToDelete } },
         });
       }
+
+      /** Removing assets from kits - AFTER custody is deleted */
+      await tx.asset.updateMany({
+        where: { id: { in: assets.map((a) => a.id) } },
+        data: { kitId: null, status: AssetStatus.AVAILABLE },
+      });
 
       /** Create notes for assets released from custody */
       if (assetsWhoseKitsInCustody.length > 0) {
