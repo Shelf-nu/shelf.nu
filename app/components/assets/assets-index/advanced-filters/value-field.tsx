@@ -1095,7 +1095,7 @@ function LocationEnumField({
     placeholder: "Search locations",
     withValueItem: {
       id: "has-location",
-      name: "Has location",
+      name: "In a location",
     },
     withoutValueItem: {
       id: "without-location",
@@ -1128,7 +1128,7 @@ function LocationEnumField({
                   ? selectedIds
                       .map((id) => {
                         if (id === "has-location") {
-                          return "Has location";
+                          return "In a location";
                         }
                         if (id === "without-location") {
                           return "Without location";

@@ -207,7 +207,7 @@ function formatSingleValue(
   const specialValues: Record<string, string> = {
     "in-custody": "In custody",
     "without-custody": "Without custody",
-    "has-location": "Has location",
+    "has-location": "In a location",
     "without-location": "Without location",
     "in-kit": "In a kit",
     "without-kit": "Without kit",
