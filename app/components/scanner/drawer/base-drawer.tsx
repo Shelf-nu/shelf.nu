@@ -22,6 +22,8 @@ type BaseDrawerProps = {
   renderWhenEmpty?: boolean;
   emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
   headerContent?: ReactNode;
+  /** Custom height for the collapsed state when items are present (default: 170) */
+  collapsedHeight?: number;
 };
 
 /** Used for calculating expanded size */
@@ -44,6 +46,7 @@ export default function BaseDrawer({
   renderWhenEmpty = false,
   emptyStateContent,
   headerContent,
+  collapsedHeight = 170,
 }: BaseDrawerProps) {
   const [expanded, setExpanded] = useState(
     defaultExpanded !== undefined ? defaultExpanded : false
@@ -128,7 +131,7 @@ export default function BaseDrawer({
             : headerContent
             ? headerHeight // Use dynamic height when custom header content exists
             : shouldRenderBody
-            ? 170 // Original logic: show first item when there are items
+            ? collapsedHeight // Show first item when there are items
             : 148, // Original logic: minimal height when no items
         }}
       >

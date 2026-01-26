@@ -86,6 +86,7 @@ function AuditDrawerFooter({
   auditName,
   portalContainer,
   stats,
+  expanded,
 }: {
   disabled: boolean;
   auditName: string;
@@ -96,9 +97,15 @@ function AuditDrawerFooter({
     missingCount: number;
     unexpectedCount: number;
   };
+  expanded: boolean;
 }) {
   return (
-    <div className="sticky bottom-0 flex w-full gap-2 border-t border-gray-200 bg-white p-3">
+    <div
+      className={tw(
+        "flex w-full gap-2 border-t border-gray-200 bg-white p-3",
+        expanded && "sticky bottom-0"
+      )}
+    >
       {/* Close button */}
       <Button type="button" variant="secondary" to=".." className="ml-auto">
         Close
@@ -515,7 +522,9 @@ export function AuditDrawer({
       // Render pending assets list even when no scans exist yet.
       renderWhenEmpty
       headerContent={headerContent}
-      form={
+      // Larger collapsed height to fit first item with larger header
+      collapsedHeight={193}
+      form={(expanded) => (
         <AuditDrawerFooter
           disabled={shouldDisableSubmit}
           auditName={auditSession?.name || ""}
@@ -526,8 +535,9 @@ export function AuditDrawer({
             missingCount: stats.missingCount,
             unexpectedCount: stats.unexpectedCount,
           }}
+          expanded={expanded}
         />
-      }
+      )}
     />
   );
 }
