@@ -383,3 +383,201 @@ export async function createAuditAssetImagesAddedNote({
     },
   });
 }
+
+/**
+ * Creates an automatic note when the audit due date is changed.
+ */
+export async function createDueDateChangedNote({
+  auditSessionId,
+  userId,
+  oldDate,
+  newDate,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  oldDate: Date | null;
+  newDate: Date | null;
+  tx: any; // Prisma transaction client
+}) {
+  const updater = await tx.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!updater) {
+    return; // Skip note creation if user not found
+  }
+
+  let content: string;
+
+  if (!oldDate && newDate) {
+    // Due date was set for the first time
+    content = `${wrapUserLinkForNote({
+      id: updater.id,
+      firstName: updater.firstName,
+      lastName: updater.lastName,
+    })} set due date to **${newDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}**.`;
+  } else if (oldDate && !newDate) {
+    // Due date was cleared
+    content = `${wrapUserLinkForNote({
+      id: updater.id,
+      firstName: updater.firstName,
+      lastName: updater.lastName,
+    })} cleared the due date.`;
+  } else if (oldDate && newDate) {
+    // Due date was changed
+    content = `${wrapUserLinkForNote({
+      id: updater.id,
+      firstName: updater.firstName,
+      lastName: updater.lastName,
+    })} changed due date from **${oldDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}** to **${newDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}**.`;
+  } else {
+    return; // No change, skip note creation
+  }
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: updater.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
+
+/**
+ * Creates an automatic note when an assignee is added to an audit.
+ */
+export async function createAssigneeAddedNote({
+  auditSessionId,
+  userId,
+  assigneeUserId,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  assigneeUserId: string;
+  tx: any; // Prisma transaction client
+}) {
+  const [updater, assignee] = await Promise.all([
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+    tx.user.findUnique({
+      where: { id: assigneeUserId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+  ]);
+
+  if (!updater || !assignee) {
+    return; // Skip note creation if users not found
+  }
+
+  const content = `${wrapUserLinkForNote({
+    id: updater.id,
+    firstName: updater.firstName,
+    lastName: updater.lastName,
+  })} added assignee: ${wrapUserLinkForNote({
+    id: assignee.id,
+    firstName: assignee.firstName,
+    lastName: assignee.lastName,
+  })}.`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: updater.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
+
+/**
+ * Creates an automatic note when an assignee is removed from an audit.
+ */
+export async function createAssigneeRemovedNote({
+  auditSessionId,
+  userId,
+  assigneeUserId,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  assigneeUserId: string;
+  tx: any; // Prisma transaction client
+}) {
+  const [updater, assignee] = await Promise.all([
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+    tx.user.findUnique({
+      where: { id: assigneeUserId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+  ]);
+
+  if (!updater || !assignee) {
+    return; // Skip note creation if users not found
+  }
+
+  const content = `${wrapUserLinkForNote({
+    id: updater.id,
+    firstName: updater.firstName,
+    lastName: updater.lastName,
+  })} removed assignee: ${wrapUserLinkForNote({
+    id: assignee.id,
+    firstName: assignee.firstName,
+    lastName: assignee.lastName,
+  })}.`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: updater.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}

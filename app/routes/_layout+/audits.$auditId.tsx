@@ -1,4 +1,5 @@
 import { AuditStatus, OrganizationRoles } from "@prisma/client";
+import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -26,6 +27,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import actionsCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import { parseData } from "~/utils/http.server";
@@ -60,6 +62,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     if (intent === "edit-audit") {
       const parsedData = parseData(formData, EditAuditSchema);
+      const hints = getClientHint(request);
+
+      // Parse due date using Luxon (same pattern as create audit)
+      const dueDateString = formData.get("dueDate")?.toString();
+      const dueDateUTC = dueDateString
+        ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
+            zone: hints.timeZone,
+          }).toJSDate()
+        : null;
+
+      // Parse assignee from JSON (same pattern as create audit)
+      let assigneeUserId: string | null = null;
+      if (parsedData.assignee) {
+        try {
+          const parsed = JSON.parse(parsedData.assignee);
+          assigneeUserId = parsed.userId || null;
+        } catch {
+          assigneeUserId = parsedData.assignee || null;
+        }
+      }
 
       await updateAuditSession({
         id: auditId,
@@ -68,6 +90,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         data: {
           name: parsedData.name,
           description: parsedData.description || null,
+          dueDate: dueDateUTC,
+          assigneeUserId,
         },
       });
 
@@ -193,6 +217,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
     const header = { title: `${session.name} · Overview` };
 
+    // Fetch team members for audit assignment (used in edit dialog)
+    const teamMembers = await db.teamMember.findMany({
+      where: {
+        organizationId,
+        deletedAt: null,
+        userId: { not: null }, // Only team members with user accounts
+      },
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+      },
+      orderBy: { name: "asc" },
+    });
+
     return data(
       payload({
         header,
@@ -201,6 +240,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         hasScans,
         stats,
         userId,
+        teamMembers,
       })
     );
   } catch (cause) {

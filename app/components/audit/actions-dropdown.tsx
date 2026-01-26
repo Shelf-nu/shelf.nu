@@ -23,7 +23,8 @@ import When from "../when/when";
 const receiptAutoOpenKey = "auditReceiptAutoOpen";
 
 const ConditionalActionsDropdown = () => {
-  const { session, isAdminOrOwner } = useLoaderData<typeof loader>();
+  const { session, isAdminOrOwner, teamMembers } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const user = useUserData();
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
@@ -205,6 +206,7 @@ const ConditionalActionsDropdown = () => {
       <When truthy={isEditDialogOpen}>
         <EditAuditDialog
           audit={session}
+          teamMembers={teamMembers}
           open={isEditDialogOpen}
           onClose={() => setIsEditDialogOpen(false)}
           actionData={actionData}

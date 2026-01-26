@@ -25,6 +25,9 @@ import {
   createAuditStartedNote,
   createAuditCompletedNote,
   createAuditUpdateNote,
+  createDueDateChangedNote,
+  createAssigneeAddedNote,
+  createAssigneeRemovedNote,
 } from "./helpers.server";
 
 import type { AuditSchedulerData } from "./types";
@@ -313,8 +316,9 @@ export async function createAuditSession(
 }
 
 /**
- * Updates an audit session's details (name and/or description).
+ * Updates an audit session's details (name, description, due date, and/or assignee).
  * Creates automatic notes for tracked changes.
+ * Optimized to perform minimal database queries.
  */
 export async function updateAuditSession({
   id,
@@ -328,80 +332,184 @@ export async function updateAuditSession({
   data: {
     name?: string;
     description?: string | null;
+    dueDate?: Date | null;
+    assigneeUserId?: string | null;
   };
 }) {
-  // Fetch the current audit to track changes
-  const currentAudit = await db.auditSession.findUnique({
-    where: { id, organizationId },
-    select: {
-      name: true,
-      description: true,
-      status: true,
-    },
+  // Use transaction to ensure atomicity
+  return db.$transaction(async (tx) => {
+    // Fetch the current audit to track changes
+    const currentAudit = await tx.auditSession.findUnique({
+      where: { id, organizationId },
+      select: {
+        name: true,
+        description: true,
+        status: true,
+        dueDate: true,
+        assignments: {
+          select: {
+            userId: true,
+          },
+        },
+      },
+    });
+
+    if (!currentAudit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found",
+        additionalData: { id, organizationId },
+        label: "Audit",
+        status: 404,
+      });
+    }
+
+    if (currentAudit.status === AuditStatus.CANCELLED) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cancelled audits cannot be edited.",
+        additionalData: { id, organizationId },
+        label: "Audit",
+        status: 400,
+      });
+    }
+
+    if (currentAudit.status === AuditStatus.COMPLETED) {
+      throw new ShelfError({
+        cause: null,
+        message: "Completed audits cannot be edited.",
+        additionalData: { id, organizationId },
+        label: "Audit",
+        status: 400,
+      });
+    }
+
+    // Track what changed for activity logging
+    const changes: Array<{ field: string; from: string; to: string }> = [];
+    const currentAssignee = currentAudit.assignments[0]?.userId || null;
+    const newAssignee =
+      data.assigneeUserId === undefined
+        ? undefined
+        : data.assigneeUserId || null;
+
+    // Track basic field changes
+    if (data.name !== undefined && data.name !== currentAudit.name) {
+      changes.push({
+        field: "name",
+        from: currentAudit.name,
+        to: data.name,
+      });
+    }
+
+    if (
+      data.description !== undefined &&
+      data.description !== currentAudit.description
+    ) {
+      changes.push({
+        field: "description",
+        from: currentAudit.description || "(empty)",
+        to: data.description || "(empty)",
+      });
+    }
+
+    // Check if due date changed
+    const dueDateChanged =
+      data.dueDate !== undefined &&
+      ((currentAudit.dueDate === null && data.dueDate !== null) ||
+        (currentAudit.dueDate !== null && data.dueDate === null) ||
+        (currentAudit.dueDate !== null &&
+          data.dueDate !== null &&
+          currentAudit.dueDate.getTime() !== data.dueDate.getTime()));
+
+    // Check if assignee changed
+    const assigneeChanged =
+      newAssignee !== undefined && newAssignee !== currentAssignee;
+
+    // Single update for all audit session fields
+    const updatedAudit = await tx.auditSession.update({
+      where: { id, organizationId },
+      data: {
+        name: data.name,
+        description: data.description,
+        dueDate: data.dueDate,
+      },
+    });
+
+    // Single batch operation for assignee changes
+    if (assigneeChanged) {
+      // Remove old assignee if exists
+      if (currentAssignee) {
+        await tx.auditAssignment.deleteMany({
+          where: { auditSessionId: id, userId: currentAssignee },
+        });
+      }
+      // Add new assignee if provided
+      if (newAssignee) {
+        await tx.auditAssignment.create({
+          data: { auditSessionId: id, userId: newAssignee },
+        });
+      }
+    }
+
+    // Create all activity notes in batch (minimize DB round trips)
+    const notePromises: Promise<any>[] = [];
+
+    // Basic field changes note
+    if (changes.length > 0) {
+      notePromises.push(
+        createAuditUpdateNote({
+          auditSessionId: id,
+          userId,
+          changes,
+          tx,
+        })
+      );
+    }
+
+    // Due date change note
+    if (dueDateChanged) {
+      notePromises.push(
+        createDueDateChangedNote({
+          auditSessionId: id,
+          userId,
+          oldDate: currentAudit.dueDate,
+          newDate: data.dueDate!,
+          tx,
+        })
+      );
+    }
+
+    // Assignee change notes
+    if (assigneeChanged) {
+      if (currentAssignee) {
+        notePromises.push(
+          createAssigneeRemovedNote({
+            auditSessionId: id,
+            userId,
+            assigneeUserId: currentAssignee,
+            tx,
+          })
+        );
+      }
+      if (newAssignee) {
+        notePromises.push(
+          createAssigneeAddedNote({
+            auditSessionId: id,
+            userId,
+            assigneeUserId: newAssignee,
+            tx,
+          })
+        );
+      }
+    }
+
+    // Execute all note creations in parallel
+    if (notePromises.length > 0) {
+      await Promise.all(notePromises);
+    }
+
+    return updatedAudit;
   });
-
-  if (!currentAudit) {
-    throw new ShelfError({
-      cause: null,
-      message: "Audit not found",
-      additionalData: { id, organizationId },
-      label: "Audit",
-      status: 404,
-    });
-  }
-
-  if (currentAudit.status === AuditStatus.CANCELLED) {
-    throw new ShelfError({
-      cause: null,
-      message: "Cancelled audits cannot be edited.",
-      additionalData: { id, organizationId },
-      label: "Audit",
-      status: 400,
-    });
-  }
-
-  // Track what changed
-  const changes: Array<{ field: string; from: string; to: string }> = [];
-
-  if (data.name !== undefined && data.name !== currentAudit.name) {
-    changes.push({
-      field: "name",
-      from: currentAudit.name,
-      to: data.name,
-    });
-  }
-
-  if (
-    data.description !== undefined &&
-    data.description !== currentAudit.description
-  ) {
-    changes.push({
-      field: "description",
-      from: currentAudit.description || "(empty)",
-      to: data.description || "(empty)",
-    });
-  }
-
-  // Update the audit
-  const updatedAudit = await db.auditSession.update({
-    where: { id, organizationId },
-    data: {
-      name: data.name,
-      description: data.description,
-    },
-  });
-
-  // Create automatic note for changes
-  if (changes.length > 0) {
-    await createAuditUpdateNote({
-      auditSessionId: id,
-      userId,
-      changes,
-      tx: db,
-    });
-  }
-
-  return updatedAudit;
 }
 
 export async function getAuditSessionDetails({
