@@ -27,6 +27,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
+import { processInvitationMessage } from "./message-validator.server";
 import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
@@ -139,6 +140,19 @@ export async function createInvite(
     // Add SSO validation before proceeding with invite
     await validateInvite(inviteeEmail, organizationId);
 
+    // Validate and sanitize invitation message
+    const messageResult = processInvitationMessage(extraMessage);
+    if (!messageResult.success) {
+      sendNotification({
+        title: "Invalid invitation message",
+        message: messageResult.error || "The invitation message is invalid",
+        icon: { name: "x", variant: "error" },
+        senderId: userId,
+      });
+      return null;
+    }
+    const sanitizedMessage = messageResult.message;
+
     const existingUser = await db.user.findFirst({
       where: {
         email: inviteeEmail,
@@ -236,6 +250,7 @@ export async function createInvite(
       inviteeEmail,
       expiresAt,
       inviteCode: generateRandomCode(6),
+      ...(sanitizedMessage && { inviteMessage: sanitizedMessage }),
     };
 
     if (roles.length) {
@@ -273,8 +288,12 @@ export async function createInvite(
     sendEmail({
       to: inviteeEmail,
       subject: `✉️ You have been invited to ${invite.organization.name}`,
-      text: inviteEmailText({ invite, token, extraMessage }),
-      html: await invitationTemplateString({ invite, token, extraMessage }),
+      text: inviteEmailText({ invite, token, extraMessage: sanitizedMessage }),
+      html: await invitationTemplateString({
+        invite,
+        token,
+        extraMessage: sanitizedMessage,
+      }),
     });
 
     return invite;
@@ -567,6 +586,24 @@ export async function bulkInviteUsers({
   extraMessage?: string | null;
 }) {
   try {
+    // Validate and sanitize invitation message
+    const messageResult = processInvitationMessage(extraMessage);
+    if (!messageResult.success) {
+      sendNotification({
+        title: "Invalid invitation message",
+        message: messageResult.error || "The invitation message is invalid",
+        icon: { name: "x", variant: "error" },
+        senderId: userId,
+      });
+      throw new ShelfError({
+        cause: null,
+        message: messageResult.error || "Invalid invitation message",
+        additionalData: { extraMessage },
+        label,
+      });
+    }
+    const sanitizedMessage = messageResult.message;
+
     // Filter out entries with missing or invalid email/role
     const validUsers = users.filter(
       (user) =>
@@ -804,6 +841,7 @@ export async function bulkInviteUsers({
         expiresAt,
         inviteCode: generateRandomCode(6),
         status: InviteStatuses.PENDING,
+        ...(sanitizedMessage && { inviteMessage: sanitizedMessage }),
       }));
 
       // Bulk create invites
@@ -814,7 +852,7 @@ export async function bulkInviteUsers({
     });
 
     if (createdInvites.length > 0) {
-      scheduleInviteEmailSending(createdInvites, extraMessage);
+      scheduleInviteEmailSending(createdInvites, sanitizedMessage);
     }
 
     sendNotification({
