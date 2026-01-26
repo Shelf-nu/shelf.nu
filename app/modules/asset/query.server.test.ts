@@ -1,13 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
+import { generateWhereClause, parseSortingOptions } from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
-
-// eslint-disable-next-line import/first
-import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
-// eslint-disable-next-line import/first
-import { generateWhereClause, parseSortingOptions } from "./query.server";
 
 describe("parseSortingOptions", () => {
   it("allows sorting by updatedAt", () => {

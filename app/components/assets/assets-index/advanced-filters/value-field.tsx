@@ -40,6 +40,44 @@ import { extractQrIdFromValue } from "./helpers";
 import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
+/**
+ * Helper to filter out conflicting special values in multi-select.
+ * When user selects a positive option (e.g., "in-custody"), automatically
+ * removes the negative option (e.g., "without-custody") and vice versa.
+ *
+ * @param newSelection - The new selection array from the dropdown
+ * @param previousSelection - The previous selection array
+ * @param positiveId - The ID of the positive option (e.g., "in-custody")
+ * @param negativeId - The ID of the negative option (e.g., "without-custody")
+ * @returns Filtered selection with conflicting options removed
+ */
+function filterConflictingSelections(
+  newSelection: string[],
+  previousSelection: string[],
+  positiveId: string,
+  negativeId: string
+): string[] {
+  const hasPositive = newSelection.includes(positiveId);
+  const hasNegative = newSelection.includes(negativeId);
+
+  // No conflict
+  if (!hasPositive || !hasNegative) {
+    return newSelection;
+  }
+
+  // Both selected - remove the one that was already selected (keep newly added)
+  const hadPositive = previousSelection.includes(positiveId);
+  const hadNegative = previousSelection.includes(negativeId);
+
+  if (hadPositive && !hadNegative) {
+    // User just added negative, remove positive
+    return newSelection.filter((id) => id !== positiveId);
+  } else {
+    // User just added positive (or both are new), remove negative
+    return newSelection.filter((id) => id !== negativeId);
+  }
+}
+
 export function ValueField({
   filter,
   setFilter,
@@ -910,27 +948,12 @@ function CustodyEnumField({
         selectionMode="none"
         defaultValues={selectedIds}
         onSelectionChange={(selectedTeamMemberIds) => {
-          // Prevent selecting both "in-custody" and "without-custody"
-          // If both are in the selection, keep only the most recently added one
-          const hasInCustody = selectedTeamMemberIds.includes("in-custody");
-          const hasWithoutCustody =
-            selectedTeamMemberIds.includes("without-custody");
-          const hadInCustody = selectedIds.includes("in-custody");
-          const hadWithoutCustody = selectedIds.includes("without-custody");
-
-          let filteredIds = selectedTeamMemberIds;
-          if (hasInCustody && hasWithoutCustody) {
-            // Remove the one that was already selected (keep the newly added one)
-            if (hadInCustody && !hadWithoutCustody) {
-              filteredIds = selectedTeamMemberIds.filter(
-                (id) => id !== "in-custody"
-              );
-            } else {
-              filteredIds = selectedTeamMemberIds.filter(
-                (id) => id !== "without-custody"
-              );
-            }
-          }
+          const filteredIds = filterConflictingSelections(
+            selectedTeamMemberIds,
+            selectedIds,
+            "in-custody",
+            "without-custody"
+          );
           handleChange(filteredIds.join(","));
         }}
       />
@@ -1171,25 +1194,12 @@ function LocationEnumField({
         selectionMode="none"
         defaultValues={selectedIds}
         onSelectionChange={(selectedLocationsIds) => {
-          // Prevent selecting both "has-location" and "without-location"
-          const hasLocation = selectedLocationsIds.includes("has-location");
-          const hasWithoutLocation =
-            selectedLocationsIds.includes("without-location");
-          const hadLocation = selectedIds.includes("has-location");
-          const hadWithoutLocation = selectedIds.includes("without-location");
-
-          let filteredIds = selectedLocationsIds;
-          if (hasLocation && hasWithoutLocation) {
-            if (hadLocation && !hadWithoutLocation) {
-              filteredIds = selectedLocationsIds.filter(
-                (id) => id !== "has-location"
-              );
-            } else {
-              filteredIds = selectedLocationsIds.filter(
-                (id) => id !== "without-location"
-              );
-            }
-          }
+          const filteredIds = filterConflictingSelections(
+            selectedLocationsIds,
+            selectedIds,
+            "has-location",
+            "without-location"
+          );
           handleChange(filteredIds.join(","));
         }}
       />
@@ -1308,22 +1318,12 @@ function KitEnumField({
         selectionMode="none"
         defaultValues={selectedIds}
         onSelectionChange={(selectedKitsIds) => {
-          // Prevent selecting both "in-kit" and "without-kit"
-          const hasInKit = selectedKitsIds.includes("in-kit");
-          const hasWithoutKit = selectedKitsIds.includes("without-kit");
-          const hadInKit = selectedIds.includes("in-kit");
-          const hadWithoutKit = selectedIds.includes("without-kit");
-
-          let filteredIds = selectedKitsIds;
-          if (hasInKit && hasWithoutKit) {
-            if (hadInKit && !hadWithoutKit) {
-              filteredIds = selectedKitsIds.filter((id) => id !== "in-kit");
-            } else {
-              filteredIds = selectedKitsIds.filter(
-                (id) => id !== "without-kit"
-              );
-            }
-          }
+          const filteredIds = filterConflictingSelections(
+            selectedKitsIds,
+            selectedIds,
+            "in-kit",
+            "without-kit"
+          );
           handleChange(filteredIds.join(","));
         }}
       />
