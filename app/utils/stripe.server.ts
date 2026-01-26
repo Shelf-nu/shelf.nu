@@ -438,11 +438,13 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
     const product = await stripe.products.retrieve(productId);
     const customerId = subscription.customer as string;
     const tierId = product?.metadata?.shelf_tier;
+    const productType = product?.metadata?.product_type;
 
     return {
       subscription,
       customerId,
       tierId,
+      productType,
     };
   } catch (cause) {
     throw new ShelfError({

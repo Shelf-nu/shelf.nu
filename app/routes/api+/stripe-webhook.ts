@@ -22,6 +22,37 @@ const subscriptionTiersPriority: Record<TierId, number> = {
   custom: 3, // Custom
 };
 
+/**
+ * Checks if the subscription is an add-on product that should be acknowledged but not processed.
+ * Add-ons are explicitly marked with product_type='addon' metadata in Stripe.
+ *
+ * @returns true if it's an add-on (caller should return early with 200)
+ * @returns false if tierId exists (caller should continue processing)
+ * @throws ShelfError if no tierId and not an add-on product
+ */
+function isAddonSubscription({
+  tierId,
+  productType,
+  event,
+  additionalData,
+}: {
+  tierId: string | undefined;
+  productType: string | undefined;
+  event: Stripe.Event;
+  additionalData?: Record<string, unknown>;
+}): boolean {
+  if (tierId) return false;
+  if (productType === "addon") return true;
+
+  throw new ShelfError({
+    cause: null,
+    message: "No tier ID found for non-addon product",
+    additionalData: { event, productType, ...additionalData },
+    label: "Stripe webhook",
+    status: 500,
+  });
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const payload = await request.text();
@@ -94,15 +125,17 @@ export async function action({ request }: ActionFunctionArgs) {
         const customerId = subscription.customer as string;
 
         const tierId = product?.metadata?.shelf_tier;
+        const productType = product?.metadata?.product_type;
 
-        if (!tierId) {
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found",
-            additionalData: { event, subscription },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
 
         /** Update the user's tier in the database */
@@ -128,17 +161,18 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.created": {
-        const { subscription, customerId, tierId } =
+        const { subscription, customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) {
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found",
-            additionalData: { event, subscription },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
 
         /** Check if its a trial subscription */
@@ -177,18 +211,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "customer.subscription.paused": {
         /** THis typically handles expiring of subscription */
-        const { subscription, customerId, tierId } =
+        const { subscription, customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) {
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found",
-            additionalData: { event, subscription },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
+
         /** Check whether the paused subscription is higher tier or equal tier and the current one and only then cancel */
         const pausedSubscriptionIsHigherTier =
           subscriptionTiersPriority[tierId as TierId] >=
@@ -229,17 +265,18 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.updated": {
-        const { subscription, customerId, tierId } =
+        const { subscription, customerId, tierId, productType } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) {
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found",
-            additionalData: { event },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
 
         /** Update the user's tier in the database
@@ -278,8 +315,13 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.deleted": {
-        // Occurs whenever a customer’s subscription ends.
-        const { customerId, tierId } = await getDataFromStripeEvent(event);
+        // Occurs whenever a customer's subscription ends.
+        const { customerId, tierId, productType } =
+          await getDataFromStripeEvent(event);
+
+        if (isAddonSubscription({ tierId, productType, event })) {
+          return new Response(null, { status: 200 });
+        }
 
         /** Check whether the deleted subscription is higher tier or equal tier and the current one and only then cancel */
         const deletedSubscriptionIsHigherTier =
@@ -316,17 +358,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "customer.subscription.trial_will_end": {
         // Occurs three days before the trial period of a subscription is scheduled to end.
-        const { tierId, subscription } = await getDataFromStripeEvent(event);
+        const { tierId, subscription, productType } =
+          await getDataFromStripeEvent(event);
 
-        if (!tierId) {
-          throw new ShelfError({
-            cause: null,
-            message: "No tier ID found",
-            additionalData: { event, subscription },
-            label: "Stripe webhook",
-            status: 500,
-          });
+        if (
+          isAddonSubscription({
+            tierId,
+            productType,
+            event,
+            additionalData: { subscription },
+          })
+        ) {
+          return new Response(null, { status: 200 });
         }
+
         /** Check if its a trial subscription */
         const isTrialSubscription =
           subscription.trial_end && subscription.trial_start;
