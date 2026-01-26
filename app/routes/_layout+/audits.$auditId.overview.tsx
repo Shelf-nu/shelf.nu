@@ -219,9 +219,13 @@ export default function AuditOverview() {
   const currentFilter = searchParams.get(
     "auditStatus"
   ) as AuditFilterType | null;
-  // Show audit status column when "ALL" is selected (default, no param in URL)
+  // Show audit status column when "ALL" or "EXPECTED" filter is selected
+  // - ALL: Shows status for all assets (Expected/Found/Missing/Unexpected)
+  // - EXPECTED: Shows status for expected assets (Expected/Found or Missing/Found based on audit state)
   const showAuditStatusColumn =
-    currentFilter === null || currentFilter === "ALL";
+    currentFilter === null ||
+    currentFilter === "ALL" ||
+    currentFilter === "EXPECTED";
   const assignedUsers = session.assignments.filter(
     (assignment) => assignment.userId !== session.createdById
   );
@@ -532,12 +536,16 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
   const currentFilter = searchParams.get("auditStatus");
   const { roles } = useUserRoleHelper();
 
-  // Show audit status column when "ALL" filter is active (default, no param in URL)
-  const showAuditStatus = currentFilter === null || currentFilter === "ALL";
+  // Show audit status column when "ALL" or "EXPECTED" filter is active
+  const showAuditStatus =
+    currentFilter === null ||
+    currentFilter === "ALL" ||
+    currentFilter === "EXPECTED";
   const isAuditCompleted = session.status === "COMPLETED";
-  const auditStatusLabel = item.auditData
-    ? getAuditStatusLabel(item.auditData, isAuditCompleted)
-    : null;
+  const auditStatusLabel = getAuditStatusLabel(
+    item.auditData,
+    isAuditCompleted
+  );
 
   const canReadCustody = userHasPermission({
     roles,
@@ -581,11 +589,7 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
       </Td>
       {showAuditStatus && (
         <Td>
-          {auditStatusLabel ? (
-            <AuditAssetStatusBadge status={auditStatusLabel} />
-          ) : (
-            <EmptyTableValue />
-          )}
+          <AuditAssetStatusBadge status={auditStatusLabel} />
         </Td>
       )}
       <Td>
