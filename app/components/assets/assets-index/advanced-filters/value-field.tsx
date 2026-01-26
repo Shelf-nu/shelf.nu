@@ -1138,7 +1138,7 @@ function LocationEnumField({
     hideCounter: true,
     placeholder: "Search locations",
     withValueItem: {
-      id: "has-location",
+      id: "in-location",
       name: "In a location",
     },
     withoutValueItem: {
@@ -1171,7 +1171,7 @@ function LocationEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
-                        if (id === "has-location") {
+                        if (id === "in-location") {
                           return "In a location";
                         }
                         if (id === "without-location") {
@@ -1197,7 +1197,7 @@ function LocationEnumField({
           const filteredIds = filterConflictingSelections(
             selectedLocationsIds,
             selectedIds,
-            "has-location",
+            "in-location",
             "without-location"
           );
           handleChange(filteredIds.join(","));

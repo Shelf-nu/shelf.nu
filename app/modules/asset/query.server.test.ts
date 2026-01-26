@@ -133,12 +133,12 @@ describe("generateWhereClause - special filter values", () => {
   });
 
   describe("location filter with special values", () => {
-    it("handles 'has-location' with is operator", () => {
+    it("handles 'in-location' with is operator", () => {
       const filter: Filter = {
         name: "location",
         type: "enum",
         operator: "is",
-        value: "has-location",
+        value: "in-location",
       };
 
       const result = generateWhereClause(orgId, null, [filter]);
@@ -147,12 +147,12 @@ describe("generateWhereClause - special filter values", () => {
       expect(sql).toContain('"locationId" IS NOT NULL');
     });
 
-    it("handles 'has-location' with isNot operator (inverts to no location)", () => {
+    it("handles 'in-location' with isNot operator (inverts to no location)", () => {
       const filter: Filter = {
         name: "location",
         type: "enum",
         operator: "isNot",
-        value: "has-location",
+        value: "in-location",
       };
 
       const result = generateWhereClause(orgId, null, [filter]);
@@ -175,12 +175,12 @@ describe("generateWhereClause - special filter values", () => {
       expect(sql).toContain('"locationId" IS NULL');
     });
 
-    it("handles containsAny with only 'has-location'", () => {
+    it("handles containsAny with only 'in-location'", () => {
       const filter: Filter = {
         name: "location",
         type: "enum",
         operator: "containsAny",
-        value: "has-location",
+        value: "in-location",
       };
 
       const result = generateWhereClause(orgId, null, [filter]);
@@ -189,12 +189,12 @@ describe("generateWhereClause - special filter values", () => {
       expect(sql).toContain('"locationId" IS NOT NULL');
     });
 
-    it("handles containsAny with both 'has-location' and 'without-location' (matches all)", () => {
+    it("handles containsAny with both 'in-location' and 'without-location' (matches all)", () => {
       const filter: Filter = {
         name: "location",
         type: "enum",
         operator: "containsAny",
-        value: "has-location,without-location",
+        value: "in-location,without-location",
       };
 
       const result = generateWhereClause(orgId, null, [filter]);

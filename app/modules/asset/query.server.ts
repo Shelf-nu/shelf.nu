@@ -548,7 +548,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "location") {
     switch (filter.operator) {
       case "is":
-        if (filter.value === "has-location") {
+        if (filter.value === "in-location") {
           return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
         }
         if (filter.value === "without-location") {
@@ -561,7 +561,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )`;
 
       case "isNot":
-        if (filter.value === "has-location") {
+        if (filter.value === "in-location") {
           return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
         }
         if (filter.value === "without-location") {
@@ -583,7 +583,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             : [filter.value]
         ).filter(Boolean);
 
-        const hasLocation = values.includes("has-location");
+        const hasLocation = values.includes("in-location");
         const hasWithoutLocation = values.includes("without-location");
 
         // If both are selected, match all assets
@@ -591,7 +591,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           return whereClause;
         }
 
-        // Handle "has-location" - assets that have a location
+        // Handle "in-location" - assets that have a location
         if (hasLocation) {
           return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
         }
