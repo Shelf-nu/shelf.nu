@@ -910,7 +910,28 @@ function CustodyEnumField({
         selectionMode="none"
         defaultValues={selectedIds}
         onSelectionChange={(selectedTeamMemberIds) => {
-          handleChange(selectedTeamMemberIds.join(","));
+          // Prevent selecting both "in-custody" and "without-custody"
+          // If both are in the selection, keep only the most recently added one
+          const hasInCustody = selectedTeamMemberIds.includes("in-custody");
+          const hasWithoutCustody =
+            selectedTeamMemberIds.includes("without-custody");
+          const hadInCustody = selectedIds.includes("in-custody");
+          const hadWithoutCustody = selectedIds.includes("without-custody");
+
+          let filteredIds = selectedTeamMemberIds;
+          if (hasInCustody && hasWithoutCustody) {
+            // Remove the one that was already selected (keep the newly added one)
+            if (hadInCustody && !hadWithoutCustody) {
+              filteredIds = selectedTeamMemberIds.filter(
+                (id) => id !== "in-custody"
+              );
+            } else {
+              filteredIds = selectedTeamMemberIds.filter(
+                (id) => id !== "without-custody"
+              );
+            }
+          }
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1150,7 +1171,26 @@ function LocationEnumField({
         selectionMode="none"
         defaultValues={selectedIds}
         onSelectionChange={(selectedLocationsIds) => {
-          handleChange(selectedLocationsIds.join(","));
+          // Prevent selecting both "has-location" and "without-location"
+          const hasLocation = selectedLocationsIds.includes("has-location");
+          const hasWithoutLocation =
+            selectedLocationsIds.includes("without-location");
+          const hadLocation = selectedIds.includes("has-location");
+          const hadWithoutLocation = selectedIds.includes("without-location");
+
+          let filteredIds = selectedLocationsIds;
+          if (hasLocation && hasWithoutLocation) {
+            if (hadLocation && !hadWithoutLocation) {
+              filteredIds = selectedLocationsIds.filter(
+                (id) => id !== "has-location"
+              );
+            } else {
+              filteredIds = selectedLocationsIds.filter(
+                (id) => id !== "without-location"
+              );
+            }
+          }
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1268,7 +1308,23 @@ function KitEnumField({
         selectionMode="none"
         defaultValues={selectedIds}
         onSelectionChange={(selectedKitsIds) => {
-          handleChange(selectedKitsIds.join(","));
+          // Prevent selecting both "in-kit" and "without-kit"
+          const hasInKit = selectedKitsIds.includes("in-kit");
+          const hasWithoutKit = selectedKitsIds.includes("without-kit");
+          const hadInKit = selectedIds.includes("in-kit");
+          const hadWithoutKit = selectedIds.includes("without-kit");
+
+          let filteredIds = selectedKitsIds;
+          if (hasInKit && hasWithoutKit) {
+            if (hadInKit && !hadWithoutKit) {
+              filteredIds = selectedKitsIds.filter((id) => id !== "in-kit");
+            } else {
+              filteredIds = selectedKitsIds.filter(
+                (id) => id !== "without-kit"
+              );
+            }
+          }
+          handleChange(filteredIds.join(","));
         }}
       />
     );
