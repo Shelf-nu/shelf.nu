@@ -444,8 +444,8 @@ export function ValueField({
             Array.isArray(filter.value)
               ? filter.value.join(", ")
               : typeof filter.value === "boolean"
-              ? "yes"
-              : filter.value
+                ? "yes"
+                : filter.value
           }
           onChange={(e) => {
             const newValue = e.target.value
@@ -621,12 +621,12 @@ function EnumField({
   const displayValue = disabled
     ? "Select a column first"
     : multiSelect
-    ? selectedValues
-        .map((v) => options.find((opt) => opt.id === v)?.label ?? v)
-        .join(", ")
-    : value === ""
-    ? options[0]?.label
-    : options.find((opt) => opt.id === value)?.label ?? value;
+      ? selectedValues
+          .map((v) => options.find((opt) => opt.id === v)?.label ?? v)
+          .join(", ")
+      : value === ""
+        ? options[0]?.label
+        : (options.find((opt) => opt.id === value)?.label ?? value);
 
   function handleOptionClick(optionId: string) {
     let newValue: string;
@@ -853,6 +853,10 @@ function CustodyEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search team members",
+    withValueItem: {
+      id: "in-custody",
+      name: "In custody",
+    },
     withoutValueItem: {
       id: "without-custody",
       name: "Without custody",
@@ -881,6 +885,9 @@ function CustodyEnumField({
                 {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-custody") {
+                          return "In custody";
+                        }
                         if (id === "without-custody") {
                           return "Without custody";
                         }
@@ -1001,18 +1008,18 @@ function CategoryEnumField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "uncategorized") {
-                          return "Uncategorized";
-                        }
-                        const category = data.categories?.find(
-                          (cat) => cat.id === id
-                        );
-                        return category?.name || "";
-                      })
-                      .join(", ")
-                  : "Select category"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "uncategorized") {
+                            return "Uncategorized";
+                          }
+                          const category = data.categories?.find(
+                            (cat) => cat.id === id
+                          );
+                          return category?.name || "";
+                        })
+                        .join(", ")
+                    : "Select category"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1086,6 +1093,10 @@ function LocationEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search locations",
+    withValueItem: {
+      id: "has-location",
+      name: "Has location",
+    },
     withoutValueItem: {
       id: "without-location",
       name: "Without location",
@@ -1114,18 +1125,21 @@ function LocationEnumField({
                 {disabled
                   ? "Select column first"
                   : selectedIds.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "without-location") {
-                          return "Without location";
-                        }
-                        const location = data.locations?.find(
-                          (loc) => loc.id === id
-                        );
-                        return location?.name || "";
-                      })
-                      .join(", ")
-                  : "Select location"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "has-location") {
+                            return "Has location";
+                          }
+                          if (id === "without-location") {
+                            return "Without location";
+                          }
+                          const location = data.locations?.find(
+                            (loc) => loc.id === id
+                          );
+                          return location?.name || "";
+                        })
+                        .join(", ")
+                    : "Select location"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1199,6 +1213,10 @@ function KitEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search kits",
+    withValueItem: {
+      id: "in-kit",
+      name: "In a kit",
+    },
     withoutValueItem: {
       id: "without-kit",
       name: "Without kit",
@@ -1227,16 +1245,19 @@ function KitEnumField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0 && data.kits && data.kits.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "without-kit") {
-                          return "Without kit";
-                        }
-                        const kit = data.kits?.find((kit) => kit.id === id);
-                        return kit?.name || "";
-                      })
-                      .join(", ")
-                  : "Select kit"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "in-kit") {
+                            return "In a kit";
+                          }
+                          if (id === "without-kit") {
+                            return "Without kit";
+                          }
+                          const kit = data.kits?.find((kit) => kit.id === id);
+                          return kit?.name || "";
+                        })
+                        .join(", ")
+                    : "Select kit"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1334,16 +1355,16 @@ function TagsField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "untagged") {
-                          return "Untagged";
-                        }
-                        const tag = data.tags?.find((t) => t.id === id);
-                        return tag?.name || "";
-                      })
-                      .join(", ")
-                  : "Select Tag"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "untagged") {
+                            return "Untagged";
+                          }
+                          const tag = data.tags?.find((t) => t.id === id);
+                          return tag?.name || "";
+                        })
+                        .join(", ")
+                    : "Select Tag"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>

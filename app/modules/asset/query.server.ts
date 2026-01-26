@@ -504,8 +504,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+              ? filter.value
+              : [filter.value]
         ).filter(Boolean);
 
         if (values.includes("uncategorized")) {
@@ -548,6 +548,9 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "location") {
     switch (filter.operator) {
       case "is":
+        if (filter.value === "has-location") {
+          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+        }
         if (filter.value === "without-location") {
           return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
         }
@@ -558,6 +561,9 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )`;
 
       case "isNot":
+        if (filter.value === "has-location") {
+          return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+        }
         if (filter.value === "without-location") {
           return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
         }
@@ -573,12 +579,25 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+              ? filter.value
+              : [filter.value]
         ).filter(Boolean);
 
-        if (values.includes("without-location")) {
-          // Remove "without-location" from the values array
+        const hasLocation = values.includes("has-location");
+        const hasWithoutLocation = values.includes("without-location");
+
+        // If both are selected, match all assets
+        if (hasLocation && hasWithoutLocation) {
+          return whereClause;
+        }
+
+        // Handle "has-location" - assets that have a location
+        if (hasLocation) {
+          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+        }
+
+        // Handle "without-location" - assets that don't have a location
+        if (hasWithoutLocation) {
           const locationIds = values.filter((v) => v !== "without-location");
 
           if (locationIds.length === 0) {
@@ -613,10 +632,13 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     }
   }
 
-  // Add location handling using asset's kitId since we're using LEFT JOIN
+  // Add kit handling using asset's kitId since we're using LEFT JOIN
   if (filter.name === "kit") {
     switch (filter.operator) {
       case "is":
+        if (filter.value === "in-kit") {
+          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+        }
         if (filter.value === "without-kit") {
           return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
         }
@@ -627,6 +649,9 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )`;
 
       case "isNot":
+        if (filter.value === "in-kit") {
+          return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+        }
         if (filter.value === "without-kit") {
           return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
         }
@@ -642,12 +667,25 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+              ? filter.value
+              : [filter.value]
         ).filter(Boolean);
 
-        if (values.includes("without-kit")) {
-          // Remove "without-kit" from the values array
+        const hasInKit = values.includes("in-kit");
+        const hasWithoutKit = values.includes("without-kit");
+
+        // If both are selected, match all assets
+        if (hasInKit && hasWithoutKit) {
+          return whereClause;
+        }
+
+        // Handle "in-kit" - assets that are in a kit
+        if (hasInKit) {
+          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+        }
+
+        // Handle "without-kit" - assets that are not in a kit
+        if (hasWithoutKit) {
           const kitIds = values.filter((v) => v !== "without-kit");
 
           if (kitIds.length === 0) {
@@ -820,6 +858,9 @@ function addRelationFilter(
 function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   switch (filter.operator) {
     case "is":
+      if (filter.value === "in-custody") {
+        return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+      }
       if (filter.value === "without-custody") {
         return Prisma.sql`${whereClause} AND cu.id IS NULL`;
       }
@@ -843,17 +884,20 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       )`;
 
     case "isNot":
+      if (filter.value === "in-custody") {
+        return Prisma.sql`${whereClause} AND cu.id IS NULL`;
+      }
       if (filter.value === "without-custody") {
         return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
       }
       return Prisma.sql`${whereClause} AND NOT (
         EXISTS (
-          SELECT 1 FROM "Custody" cu 
-          WHERE cu."assetId" = a.id 
+          SELECT 1 FROM "Custody" cu
+          WHERE cu."assetId" = a.id
           AND cu."teamMemberId" = ${filter.value}
         )
         OR EXISTS (
-          SELECT 1 FROM "Booking" b 
+          SELECT 1 FROM "Booking" b
           JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
@@ -870,12 +914,35 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
           : Array.isArray(filter.value)
-          ? filter.value
-          : [filter.value]
+            ? filter.value
+            : [filter.value]
       ).filter(Boolean);
 
-      if (values.includes("without-custody")) {
-        // Remove "without-custody" from the values array
+      const hasInCustody = values.includes("in-custody");
+      const hasWithoutCustody = values.includes("without-custody");
+
+      // If both "in-custody" and "without-custody" are selected, match all assets
+      if (hasInCustody && hasWithoutCustody) {
+        return whereClause;
+      }
+
+      // Handle "in-custody" - assets that have a custodian
+      if (hasInCustody) {
+        const custodianIds = values.filter(
+          (v) => v !== "in-custody" && v !== "without-custody"
+        );
+
+        if (custodianIds.length === 0) {
+          return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+        }
+
+        // "in-custody" combined with specific custodians: any asset with custody
+        // (the specific IDs are subsumed by the general "in-custody")
+        return Prisma.sql`${whereClause} AND cu.id IS NOT NULL`;
+      }
+
+      // Handle "without-custody" - assets that don't have a custodian
+      if (hasWithoutCustody) {
         const custodianIds = values.filter((v) => v !== "without-custody");
 
         if (custodianIds.length === 0) {

@@ -203,6 +203,19 @@ function formatSingleValue(
   // Handle field-specific formatting with lookups
   const valueStr = String(value);
 
+  // Handle special filter values for custody, location, and kit
+  const specialValues: Record<string, string> = {
+    "in-custody": "In custody",
+    "without-custody": "Without custody",
+    "has-location": "Has location",
+    "without-location": "Without location",
+    "in-kit": "In a kit",
+    "without-kit": "Without kit",
+  };
+  if (specialValues[valueStr]) {
+    return specialValues[valueStr];
+  }
+
   // Location lookup
   if (fieldName === "location" && lookupData?.locations) {
     const location = lookupData.locations.find((loc) => loc.id === valueStr);

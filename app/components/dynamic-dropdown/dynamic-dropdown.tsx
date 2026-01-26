@@ -51,6 +51,15 @@ type Props = ModelFilterProps & {
   };
 
   /**
+   * A special item that will be added to the list in dropdown, this item can be used to filter items
+   * that have a value, like "In custody" or "Has location" etc.
+   */
+  withValueItem?: {
+    id: string;
+    name: string;
+  };
+
+  /**
    * If `true`, a "Select All" item will be added in dropdown which allow
    * the user to select all items in the list
    */
@@ -74,6 +83,7 @@ export default function DynamicDropdown({
   showSearch = true,
   renderItem,
   withoutValueItem,
+  withValueItem,
   allowSelectAll,
   ...hookProps
 }: Props) {
@@ -179,7 +189,11 @@ export default function DynamicDropdown({
               )}
 
               {/* Top Divider */}
-              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+              <When
+                truthy={Boolean(
+                  allowSelectAll || withValueItem || withoutValueItem
+                )}
+              >
                 <div className="h-2 w-full  bg-gray-50" />
               </When>
 
@@ -193,6 +207,40 @@ export default function DynamicDropdown({
                 >
                   <span className="pr-2">Select all</span>
                 </div>
+              </When>
+
+              <When truthy={Boolean(withValueItem)}>
+                <label
+                  key={withValueItem?.id}
+                  htmlFor={withValueItem?.id}
+                  className={tw(
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    selectedItems.includes(withValueItem?.id ?? "") &&
+                      "bg-gray-50"
+                  )}
+                >
+                  <span className="pr-2 normal-case">
+                    {withValueItem?.name}
+                    <input
+                      id={withValueItem?.id}
+                      type="checkbox"
+                      value={withValueItem?.id}
+                      className="hidden"
+                      checked={selectedItems.includes(withValueItem?.id ?? "")}
+                      onChange={(e) => {
+                        handleSelectItemChange(e.currentTarget.value);
+                      }}
+                    />
+                  </span>
+
+                  <When
+                    truthy={selectedItems.includes(withValueItem?.id ?? "")}
+                  >
+                    <span className="h-auto w-[18px] text-primary">
+                      <CheckIcon />
+                    </span>
+                  </When>
+                </label>
               </When>
 
               <When truthy={Boolean(withoutValueItem)}>
@@ -232,7 +280,11 @@ export default function DynamicDropdown({
               </When>
 
               {/* Bottom Divider */}
-              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+              <When
+                truthy={Boolean(
+                  allowSelectAll || withValueItem || withoutValueItem
+                )}
+              >
                 <div className="h-2 w-full  bg-gray-50" />
               </When>
 
