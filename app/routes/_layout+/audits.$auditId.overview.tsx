@@ -14,6 +14,8 @@ import { AuditAssetRowActionsDropdown } from "~/components/audit/audit-asset-row
 import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
+import BulkActionsDropdown from "~/components/audit/bulk-actions-dropdown";
+import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-assets-from-audit-dialog";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
@@ -26,6 +28,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
+import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -42,11 +45,12 @@ import {
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
   removeAssetFromAudit,
+  removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getParams, payload } from "~/utils/http.server";
+import { error, getParams, parseData, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -229,6 +233,40 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       return redirect(`/audits/${auditId}/overview`);
+    }
+
+    if (intent === "bulk-remove-assets") {
+      const { assetIds } = parseData(formData, BulkRemoveAssetsFromAuditSchema);
+
+      // Convert assetIds to auditAssetIds
+      const auditAssets = await db.auditAsset.findMany({
+        where: {
+          auditSessionId: auditId,
+          assetId: { in: assetIds },
+        },
+        select: { id: true },
+      });
+
+      const auditAssetIds = auditAssets.map((aa) => aa.id);
+
+      if (auditAssetIds.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          message: "No matching assets found in audit",
+          additionalData: { intent, assetIds },
+          label,
+          status: 400,
+        });
+      }
+
+      await removeAssetsFromAudit({
+        auditId,
+        auditAssetIds,
+        organizationId,
+        userId,
+      });
+
+      return data(payload({ success: true }));
     }
 
     throw new ShelfError({
@@ -532,7 +570,7 @@ export default function AuditOverview() {
         <Filters
           className="responsive-filters mb-2"
           slots={{
-            "right-of-search": (
+            "left-of-search": (
               <AuditStatusFilter statusItems={AUDIT_STATUS_ITEMS} />
             ),
           }}
@@ -540,6 +578,7 @@ export default function AuditOverview() {
         <List
           ItemComponent={AssetListItem}
           customEmptyStateContent={filterMetadata.emptyState}
+          bulkActions={canRemoveAssets ? <BulkActionsDropdown /> : undefined}
           headerChildren={
             <>
               {showAuditStatusColumn && (

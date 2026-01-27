@@ -7,6 +7,10 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import {
+  createAssetNotesForAuditAddition,
+  createAssetNotesForAuditRemoval,
+} from "~/modules/note/service.server";
 import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -314,6 +318,18 @@ export async function createAuditSession(
       })),
     } satisfies CreateAuditSessionResult;
   });
+
+  // Create asset notes outside the transaction
+  if (assets.length > 0) {
+    await createAssetNotesForAuditAddition({
+      assetIds: assets.map((a) => a.id),
+      userId: createdById,
+      audit: {
+        id: result.session.id,
+        name: result.session.name,
+      },
+    });
+  }
 
   return result;
 }
@@ -1826,86 +1842,102 @@ export async function addAssetsToAudit({
   addedCount: number;
   skippedCount: number;
 }> {
-  return db.$transaction(async (tx) => {
-    // Verify audit exists and is PENDING
-    const audit = await tx.auditSession.findUnique({
-      where: { id: auditId, organizationId },
-      select: { status: true },
-    });
-
-    if (!audit) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { auditId, organizationId },
-        label,
-        status: 404,
+  return db
+    .$transaction(async (tx) => {
+      // Verify audit exists and is PENDING
+      const audit = await tx.auditSession.findUnique({
+        where: { id: auditId, organizationId },
+        select: { id: true, name: true, status: true },
       });
-    }
 
-    if (audit.status !== AuditStatus.PENDING) {
-      throw new ShelfError({
-        cause: null,
-        message: "Can only add assets to pending audits",
-        additionalData: { auditId, status: audit.status },
-        label,
-        status: 400,
-      });
-    }
+      if (!audit) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit not found",
+          additionalData: { auditId, organizationId },
+          label,
+          status: 404,
+        });
+      }
 
-    // Fetch existing audit assets to filter out duplicates
-    const existingAuditAssets = await tx.auditAsset.findMany({
-      where: {
-        auditSessionId: auditId,
-        assetId: { in: assetIds },
-      },
-      select: { assetId: true },
-    });
+      if (audit.status !== AuditStatus.PENDING) {
+        throw new ShelfError({
+          cause: null,
+          message: "Can only add assets to pending audits",
+          additionalData: { auditId, status: audit.status },
+          label,
+          status: 400,
+        });
+      }
 
-    const existingAssetIds = new Set(
-      existingAuditAssets.map((aa) => aa.assetId)
-    );
-
-    // Filter out assets already in audit
-    const newAssetIds = assetIds.filter((id) => !existingAssetIds.has(id));
-
-    // Create new audit asset entries
-    if (newAssetIds.length > 0) {
-      await tx.auditAsset.createMany({
-        data: newAssetIds.map((assetId) => ({
+      // Fetch existing audit assets to filter out duplicates
+      const existingAuditAssets = await tx.auditAsset.findMany({
+        where: {
           auditSessionId: auditId,
-          assetId,
-          expected: true,
-          status: AuditAssetStatus.PENDING,
-        })),
-      });
-
-      // Update audit session counts
-      await tx.auditSession.update({
-        where: { id: auditId },
-        data: {
-          expectedAssetCount: { increment: newAssetIds.length },
-          missingAssetCount: { increment: newAssetIds.length },
+          assetId: { in: assetIds },
         },
+        select: { assetId: true },
       });
-    }
 
-    const addedCount = newAssetIds.length;
-    const skippedCount = assetIds.length - addedCount;
+      const existingAssetIds = new Set(
+        existingAuditAssets.map((aa) => aa.assetId)
+      );
 
-    // Create activity note with asset details
-    if (addedCount > 0) {
-      await createAssetsAddedToAuditNote({
-        auditSessionId: auditId,
-        userId,
-        addedAssetIds: newAssetIds,
-        skippedCount,
-        tx,
-      });
-    }
+      // Filter out assets already in audit
+      const newAssetIds = assetIds.filter((id) => !existingAssetIds.has(id));
 
-    return { addedCount, skippedCount };
-  });
+      // Create new audit asset entries
+      if (newAssetIds.length > 0) {
+        await tx.auditAsset.createMany({
+          data: newAssetIds.map((assetId) => ({
+            auditSessionId: auditId,
+            assetId,
+            expected: true,
+            status: AuditAssetStatus.PENDING,
+          })),
+        });
+
+        // Update audit session counts
+        await tx.auditSession.update({
+          where: { id: auditId },
+          data: {
+            expectedAssetCount: { increment: newAssetIds.length },
+            missingAssetCount: { increment: newAssetIds.length },
+          },
+        });
+      }
+
+      const addedCount = newAssetIds.length;
+      const skippedCount = assetIds.length - addedCount;
+
+      // Create activity note with asset details
+      if (addedCount > 0) {
+        await createAssetsAddedToAuditNote({
+          auditSessionId: auditId,
+          userId,
+          addedAssetIds: newAssetIds,
+          skippedCount,
+          tx,
+        });
+      }
+
+      return { addedCount, skippedCount, newAssetIds, audit };
+    })
+    .then(async (result) => {
+      // Create asset notes outside the transaction
+      if (result.addedCount > 0) {
+        await createAssetNotesForAuditAddition({
+          assetIds: result.newAssetIds,
+          userId,
+          audit: result.audit,
+        });
+      }
+
+      return {
+        addedCount: result.addedCount,
+        skippedCount: result.skippedCount,
+      };
+    });
 }
 
 /**
@@ -1925,74 +1957,85 @@ export async function removeAssetFromAudit({
   organizationId: string;
   userId: string;
 }): Promise<void> {
-  return db.$transaction(async (tx) => {
-    // Verify audit exists and is PENDING
-    const audit = await tx.auditSession.findUnique({
-      where: { id: auditId, organizationId },
-      select: { status: true },
-    });
-
-    if (!audit) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { auditId, organizationId },
-        label,
-        status: 404,
+  return db
+    .$transaction(async (tx) => {
+      // Verify audit exists and is PENDING
+      const audit = await tx.auditSession.findUnique({
+        where: { id: auditId, organizationId },
+        select: { id: true, name: true, status: true },
       });
-    }
 
-    if (audit.status !== AuditStatus.PENDING) {
-      throw new ShelfError({
-        cause: null,
-        message: "Can only remove assets from pending audits",
-        additionalData: { auditId, status: audit.status },
-        label,
-        status: 400,
+      if (!audit) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit not found",
+          additionalData: { auditId, organizationId },
+          label,
+          status: 404,
+        });
+      }
+
+      if (audit.status !== AuditStatus.PENDING) {
+        throw new ShelfError({
+          cause: null,
+          message: "Can only remove assets from pending audits",
+          additionalData: { auditId, status: audit.status },
+          label,
+          status: 400,
+        });
+      }
+
+      // Fetch the audit asset to get the actual asset ID
+      const auditAsset = await tx.auditAsset.findUnique({
+        where: { id: auditAssetId },
+        select: { assetId: true, expected: true },
       });
-    }
 
-    // Fetch the audit asset to get the actual asset ID
-    const auditAsset = await tx.auditAsset.findUnique({
-      where: { id: auditAssetId },
-      select: { assetId: true, expected: true },
-    });
+      if (!auditAsset) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit asset not found",
+          additionalData: { auditAssetId },
+          label,
+          status: 404,
+        });
+      }
 
-    if (!auditAsset) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit asset not found",
-        additionalData: { auditAssetId },
-        label,
-        status: 404,
+      // Delete the audit asset (cascade will delete related scans)
+      await tx.auditAsset.delete({
+        where: { id: auditAssetId },
       });
-    }
 
-    // Delete the audit asset (cascade will delete related scans)
-    await tx.auditAsset.delete({
-      where: { id: auditAssetId },
-    });
+      // Update audit session counts
+      // If it was an expected asset, decrement expectedAssetCount
+      if (auditAsset.expected) {
+        await tx.auditSession.update({
+          where: { id: auditId },
+          data: {
+            expectedAssetCount: { decrement: 1 },
+            missingAssetCount: { decrement: 1 },
+          },
+        });
+      }
 
-    // Update audit session counts
-    // If it was an expected asset, decrement expectedAssetCount
-    if (auditAsset.expected) {
-      await tx.auditSession.update({
-        where: { id: auditId },
-        data: {
-          expectedAssetCount: { decrement: 1 },
-          missingAssetCount: { decrement: 1 },
-        },
+      // Create activity note
+      await createAssetRemovedFromAuditNote({
+        auditSessionId: auditId,
+        assetId: auditAsset.assetId,
+        userId,
+        tx,
       });
-    }
 
-    // Create activity note
-    await createAssetRemovedFromAuditNote({
-      auditSessionId: auditId,
-      assetId: auditAsset.assetId,
-      userId,
-      tx,
+      return { assetId: auditAsset.assetId, audit };
+    })
+    .then(async (result) => {
+      // Create asset note outside the transaction
+      await createAssetNotesForAuditRemoval({
+        assetIds: [result.assetId],
+        userId,
+        audit: result.audit,
+      });
     });
-  });
 }
 
 /**
@@ -2012,70 +2055,83 @@ export async function removeAssetsFromAudit({
   organizationId: string;
   userId: string;
 }): Promise<{ removedCount: number }> {
-  return db.$transaction(async (tx) => {
-    // Verify audit exists and is PENDING
-    const audit = await tx.auditSession.findUnique({
-      where: { id: auditId, organizationId },
-      select: { status: true },
-    });
-
-    if (!audit) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { auditId, organizationId },
-        label,
-        status: 404,
+  return db
+    .$transaction(async (tx) => {
+      // Verify audit exists and is PENDING
+      const audit = await tx.auditSession.findUnique({
+        where: { id: auditId, organizationId },
+        select: { id: true, name: true, status: true },
       });
-    }
 
-    if (audit.status !== AuditStatus.PENDING) {
-      throw new ShelfError({
-        cause: null,
-        message: "Can only remove assets from pending audits",
-        additionalData: { auditId, status: audit.status },
-        label,
-        status: 400,
+      if (!audit) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit not found",
+          additionalData: { auditId, organizationId },
+          label,
+          status: 404,
+        });
+      }
+
+      if (audit.status !== AuditStatus.PENDING) {
+        throw new ShelfError({
+          cause: null,
+          message: "Can only remove assets from pending audits",
+          additionalData: { auditId, status: audit.status },
+          label,
+          status: 400,
+        });
+      }
+
+      // Fetch the audit assets to get the actual asset IDs
+      const auditAssets = await tx.auditAsset.findMany({
+        where: { id: { in: auditAssetIds } },
+        select: { id: true, assetId: true, expected: true },
       });
-    }
 
-    // Fetch the audit assets to get the actual asset IDs
-    const auditAssets = await tx.auditAsset.findMany({
-      where: { id: { in: auditAssetIds } },
-      select: { id: true, assetId: true, expected: true },
-    });
+      if (auditAssets.length === 0) {
+        return { removedCount: 0, assetIds: [], audit };
+      }
 
-    if (auditAssets.length === 0) {
-      return { removedCount: 0 };
-    }
+      const assetIds = auditAssets.map((aa) => aa.assetId);
+      const expectedCount = auditAssets.filter((aa) => aa.expected).length;
 
-    const assetIds = auditAssets.map((aa) => aa.assetId);
-    const expectedCount = auditAssets.filter((aa) => aa.expected).length;
-
-    // Delete the audit assets (cascade will delete related scans)
-    await tx.auditAsset.deleteMany({
-      where: { id: { in: auditAssetIds } },
-    });
-
-    // Update audit session counts
-    if (expectedCount > 0) {
-      await tx.auditSession.update({
-        where: { id: auditId },
-        data: {
-          expectedAssetCount: { decrement: expectedCount },
-          missingAssetCount: { decrement: expectedCount },
-        },
+      // Delete the audit assets (cascade will delete related scans)
+      await tx.auditAsset.deleteMany({
+        where: { id: { in: auditAssetIds } },
       });
-    }
 
-    // Create activity note
-    await createAssetsRemovedFromAuditNote({
-      auditSessionId: auditId,
-      assetIds,
-      userId,
-      tx,
+      // Update audit session counts
+      if (expectedCount > 0) {
+        await tx.auditSession.update({
+          where: { id: auditId },
+          data: {
+            expectedAssetCount: { decrement: expectedCount },
+            missingAssetCount: { decrement: expectedCount },
+          },
+        });
+      }
+
+      // Create activity note
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: auditId,
+        assetIds,
+        userId,
+        tx,
+      });
+
+      return { removedCount: auditAssets.length, assetIds, audit };
+    })
+    .then(async (result) => {
+      // Create asset notes outside the transaction
+      if (result.removedCount > 0) {
+        await createAssetNotesForAuditRemoval({
+          assetIds: result.assetIds,
+          userId,
+          audit: result.audit,
+        });
+      }
+
+      return { removedCount: result.removedCount };
     });
-
-    return { removedCount: auditAssets.length };
-  });
 }

@@ -11,6 +11,7 @@ vi.mock("~/database/db.server", () => ({
     },
     user: {
       findFirstOrThrow: vi.fn(),
+      findUnique: vi.fn(),
     },
   },
 }));
@@ -30,6 +31,7 @@ vi.mock("~/utils/markdoc-wrappers", () => ({
   wrapKitsWithDataForNote: vi.fn((kit) => `kit:${kit?.name || "unknown"}`),
   wrapUserLinkForNote: vi.fn((user) => `@${user.firstName}`),
   wrapTagForNote: vi.fn((tag) => `#${tag.name}`),
+  wrapLinkForNote: vi.fn((to, text) => `[${text}](${to})`),
 }));
 
 import { db } from "~/database/db.server";
@@ -46,6 +48,8 @@ import {
   createAssetCategoryChangeNote,
   createAssetDescriptionChangeNote,
   createAssetNameChangeNote,
+  createAssetNotesForAuditAddition,
+  createAssetNotesForAuditRemoval,
   createAssetValuationChangeNote,
   createBulkKitChangeNotes,
   createNote,
@@ -684,6 +688,239 @@ describe("note service", () => {
       });
 
       expect(db.note.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAssetNotesForAuditAddition", () => {
+    it("creates notes for assets added to audit", async () => {
+      vi.mocked(db.user.findUnique).mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      } as any);
+      vi.mocked(db.note.createMany).mockResolvedValue({ count: 3 });
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await createAssetNotesForAuditAddition({
+        assetIds: ["asset-1", "asset-2", "asset-3"],
+        userId: "user-1",
+        audit,
+      });
+
+      expect(db.user.findUnique).toHaveBeenCalledWith({
+        where: { id: "user-1" },
+        select: { id: true, firstName: true, lastName: true },
+      });
+
+      expect(db.note.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            content:
+              "@John added asset to audit [Q1 Audit](/audits/audit-1/overview).",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-1",
+          },
+          {
+            content:
+              "@John added asset to audit [Q1 Audit](/audits/audit-1/overview).",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-2",
+          },
+          {
+            content:
+              "@John added asset to audit [Q1 Audit](/audits/audit-1/overview).",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-3",
+          },
+        ],
+      });
+    });
+
+    it("does not create notes when user is not found", async () => {
+      vi.mocked(db.user.findUnique).mockResolvedValue(null);
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await createAssetNotesForAuditAddition({
+        assetIds: ["asset-1"],
+        userId: "nonexistent-user",
+        audit,
+      });
+
+      expect(db.note.createMany).not.toHaveBeenCalled();
+    });
+
+    it("does not create notes when assetIds array is empty", async () => {
+      vi.mocked(db.user.findUnique).mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      } as any);
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await createAssetNotesForAuditAddition({
+        assetIds: [],
+        userId: "user-1",
+        audit,
+      });
+
+      expect(db.note.createMany).not.toHaveBeenCalled();
+    });
+
+    it("throws ShelfError when database operation fails", async () => {
+      vi.mocked(db.user.findUnique).mockRejectedValue(
+        new Error("Database error")
+      );
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await expect(
+        createAssetNotesForAuditAddition({
+          assetIds: ["asset-1"],
+          userId: "user-1",
+          audit,
+        })
+      ).rejects.toThrow(ShelfError);
+
+      await expect(
+        createAssetNotesForAuditAddition({
+          assetIds: ["asset-1"],
+          userId: "user-1",
+          audit,
+        })
+      ).rejects.toThrow(
+        "Something went wrong while creating asset notes for audit addition"
+      );
+    });
+  });
+
+  describe("createAssetNotesForAuditRemoval", () => {
+    it("creates notes for assets removed from audit", async () => {
+      vi.mocked(db.user.findUnique).mockResolvedValue({
+        id: "user-1",
+        firstName: "Jane",
+        lastName: "Smith",
+      } as any);
+      vi.mocked(db.note.createMany).mockResolvedValue({ count: 2 });
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await createAssetNotesForAuditRemoval({
+        assetIds: ["asset-1", "asset-2"],
+        userId: "user-1",
+        audit,
+      });
+
+      expect(db.user.findUnique).toHaveBeenCalledWith({
+        where: { id: "user-1" },
+        select: { id: true, firstName: true, lastName: true },
+      });
+
+      expect(db.note.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            content:
+              "@Jane removed asset from audit [Q1 Audit](/audits/audit-1/overview).",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-1",
+          },
+          {
+            content:
+              "@Jane removed asset from audit [Q1 Audit](/audits/audit-1/overview).",
+            type: "UPDATE",
+            userId: "user-1",
+            assetId: "asset-2",
+          },
+        ],
+      });
+    });
+
+    it("does not create notes when user is not found", async () => {
+      vi.mocked(db.user.findUnique).mockResolvedValue(null);
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await createAssetNotesForAuditRemoval({
+        assetIds: ["asset-1"],
+        userId: "nonexistent-user",
+        audit,
+      });
+
+      expect(db.note.createMany).not.toHaveBeenCalled();
+    });
+
+    it("does not create notes when assetIds array is empty", async () => {
+      vi.mocked(db.user.findUnique).mockResolvedValue({
+        id: "user-1",
+        firstName: "Jane",
+        lastName: "Smith",
+      } as any);
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await createAssetNotesForAuditRemoval({
+        assetIds: [],
+        userId: "user-1",
+        audit,
+      });
+
+      expect(db.note.createMany).not.toHaveBeenCalled();
+    });
+
+    it("throws ShelfError when database operation fails", async () => {
+      vi.mocked(db.user.findUnique).mockRejectedValue(
+        new Error("Database error")
+      );
+
+      const audit = {
+        id: "audit-1",
+        name: "Q1 Audit",
+      };
+
+      await expect(
+        createAssetNotesForAuditRemoval({
+          assetIds: ["asset-1"],
+          userId: "user-1",
+          audit,
+        })
+      ).rejects.toThrow(ShelfError);
+
+      await expect(
+        createAssetNotesForAuditRemoval({
+          assetIds: ["asset-1"],
+          userId: "user-1",
+          audit,
+        })
+      ).rejects.toThrow(
+        "Something went wrong while creating asset notes for audit removal"
+      );
     });
   });
 });
