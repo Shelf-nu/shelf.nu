@@ -192,7 +192,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "set-reminder": {
         const { redirectTo, ...payload } = parseData(
           formData,
-          setReminderSchema
+          setReminderSchema,
+          { shouldBeCaptured: false }
         );
         const hints = getHints(request);
 
