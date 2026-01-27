@@ -83,6 +83,98 @@ app/
 - **Form Handling**: Remix Form with client-side validation
 - **UI Primitives**: Radix UI components with Tailwind styling
 
+### Form Validation Pattern (Required)
+
+**IMPORTANT:** All forms MUST display server-side validation errors as a fallback. Client-side validation can fail or be bypassed, so server-side errors must always be shown to users.
+
+**Why This Matters:**
+
+- Client-side validation can be bypassed (disabled JS, modified requests)
+- Zod schemas may behave differently on client vs server (e.g., date comparisons)
+- Users must always see meaningful error messages, never generic "Something went wrong"
+
+**Implementation Steps:**
+
+1. **Import required utilities:**
+
+```typescript
+import { useActionData } from "react-router";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
+```
+
+2. **Get validation errors from action data:**
+
+```typescript
+// Inside your component
+const actionData = useActionData<DataOrErrorResponse>();
+
+/** This handles server side errors in case client side validation fails */
+const validationErrors = getValidationErrors<typeof yourZodSchema>(
+  actionData?.error
+);
+```
+
+3. **Display server errors as fallback in each input:**
+
+```typescript
+<Input
+  name={zo.fields.fieldName()}
+  error={
+    validationErrors?.fieldName?.message || zo.errors.fieldName()?.message
+  }
+  // ... other props
+/>
+```
+
+**Complete Example:**
+
+```typescript
+// Schema definition
+export const myFormSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().email("Invalid email"),
+  date: z.coerce.date().min(new Date(), "Date must be in the future"),
+});
+
+// Component
+export default function MyForm() {
+  const zo = useZorm("MyForm", myFormSchema);
+
+  const actionData = useActionData<DataOrErrorResponse>();
+  const validationErrors = getValidationErrors<typeof myFormSchema>(
+    actionData?.error
+  );
+
+  return (
+    <Form method="POST">
+      <Input
+        name={zo.fields.name()}
+        error={validationErrors?.name?.message || zo.errors.name()?.message}
+        label="Name"
+      />
+      <Input
+        name={zo.fields.email()}
+        error={validationErrors?.email?.message || zo.errors.email()?.message}
+        label="Email"
+      />
+      <Input
+        type="datetime-local"
+        name={zo.fields.date()}
+        error={validationErrors?.date?.message || zo.errors.date()?.message}
+        label="Date"
+      />
+      <Button type="submit">Submit</Button>
+    </Form>
+  );
+}
+```
+
+**Working Examples:**
+
+- Reminder dialog: `app/components/asset-reminder/set-or-edit-reminder-dialog.tsx`
+- Booking form: `app/components/booking/forms/edit-booking-form.tsx`
+
 ### Key Business Features
 
 - **Asset Management**: CRUD operations, QR code generation, image processing
