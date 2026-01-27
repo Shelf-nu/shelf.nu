@@ -88,6 +88,7 @@ export type FailureReason = {
     | "SSO"
     | "Kit"
     | "Note"
+    | "Audit Image"
     // Other kinds of errors
     | "DB"
     | "Request validation"
@@ -99,6 +100,7 @@ export type FailureReason = {
     | "Image Cache"
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import
+    | "Audit"
     | "Update";
   /**
    * The message intended for the user.

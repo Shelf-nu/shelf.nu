@@ -14,6 +14,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
@@ -24,6 +25,7 @@ import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
+import BulkStartAuditDialog from "./bulk-start-audit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -126,6 +128,24 @@ function ConditionalDropdown() {
           action: PermissionAction.update,
         })}
       >
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.audit,
+            action: PermissionAction.create,
+          })}
+        >
+          <BulkStartAuditDialog />
+        </When>
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.audit,
+            action: PermissionAction.update,
+          })}
+        >
+          <BulkAddToAuditDialog />
+        </When>
         <BulkLocationUpdateDialog />
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
@@ -236,6 +256,39 @@ function ConditionalDropdown() {
                 </span>
               </Button>
             </DropdownMenuItem>
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.audit,
+                action: PermissionAction.create,
+              })}
+            >
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="start-audit"
+                  label="Create audit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+            </When>
+
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.audit,
+                action: PermissionAction.update,
+              })}
+            >
+              <DropdownMenuItem className="border-b py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="add-to-audit"
+                  label="Add to existing audit"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+            </When>
 
             <When
               truthy={userHasPermission({
