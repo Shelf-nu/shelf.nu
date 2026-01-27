@@ -317,6 +317,8 @@ describe("audit service", () => {
 
     it("adds new assets to pending audit", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "PENDING",
       });
       mockDb.auditAsset.findMany.mockResolvedValue([]);
@@ -330,7 +332,7 @@ describe("audit service", () => {
 
       expect(mockDb.auditSession.findUnique).toHaveBeenCalledWith({
         where: { id: "audit-1", organizationId: "org-1" },
-        select: { status: true },
+        select: { id: true, name: true, status: true },
       });
 
       expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
@@ -366,6 +368,8 @@ describe("audit service", () => {
 
     it("filters out duplicate assets", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "PENDING",
       });
       mockDb.auditAsset.findMany.mockResolvedValue([{ assetId: "asset-1" }]);
@@ -415,6 +419,8 @@ describe("audit service", () => {
 
     it("throws error when audit is not PENDING", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "COMPLETED",
       });
 
@@ -436,6 +442,8 @@ describe("audit service", () => {
 
     it("removes expected asset from pending audit", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "PENDING",
       });
       mockDb.auditAsset.findUnique.mockResolvedValue({
@@ -452,7 +460,7 @@ describe("audit service", () => {
 
       expect(mockDb.auditSession.findUnique).toHaveBeenCalledWith({
         where: { id: "audit-1", organizationId: "org-1" },
-        select: { status: true },
+        select: { id: true, name: true, status: true },
       });
 
       expect(mockDb.auditAsset.delete).toHaveBeenCalledWith({
@@ -470,6 +478,8 @@ describe("audit service", () => {
 
     it("removes unexpected asset without decrementing counts", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "PENDING",
       });
       mockDb.auditAsset.findUnique.mockResolvedValue({
@@ -540,6 +550,8 @@ describe("audit service", () => {
 
     it("removes multiple assets from pending audit", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "PENDING",
       });
       mockDb.auditAsset.findMany.mockResolvedValue([
@@ -574,6 +586,8 @@ describe("audit service", () => {
 
     it("returns zero when no assets found", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "PENDING",
       });
       mockDb.auditAsset.findMany.mockResolvedValue([]);
@@ -604,6 +618,8 @@ describe("audit service", () => {
 
     it("throws error when audit is not PENDING", async () => {
       mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-1",
+        name: "Test Audit",
         status: "COMPLETED",
       });
 
