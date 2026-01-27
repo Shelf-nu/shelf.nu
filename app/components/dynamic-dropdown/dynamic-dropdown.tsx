@@ -1,4 +1,4 @@
-import { cloneElement, useState } from "react";
+import { cloneElement, useCallback, useState } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -66,6 +66,16 @@ type Props = ModelFilterProps & {
   allowSelectAll?: boolean;
 
   onSelectionChange?: (selectedIds: string[]) => void;
+
+  /**
+   * Optional function to filter/transform the selection before it's committed.
+   * Called with the new selection and previous selection, returns the filtered selection.
+   * Use this to implement mutual exclusion logic (e.g., prevent selecting conflicting options).
+   */
+  filterSelection?: (
+    newSelection: string[],
+    previousSelection: string[]
+  ) => string[];
 };
 
 export default function DynamicDropdown({
@@ -85,6 +95,7 @@ export default function DynamicDropdown({
   withoutValueItem,
   withValueItem,
   allowSelectAll,
+  filterSelection,
   ...hookProps
 }: Props) {
   const navigation = useNavigation();
@@ -93,17 +104,55 @@ export default function DynamicDropdown({
 
   const {
     selectedItems,
+    setSelectedItems,
     searchQuery,
     setSearchQuery,
     handleSearchQueryChange,
     totalItems,
     items,
-    handleSelectItemChange,
+    handleSelectItemChange: baseHandleSelectItemChange,
     clearFilters,
     resetModelFiltersFetcher,
     getAllEntries,
     handleSelectAll,
   } = useModelFilters({ model, ...hookProps });
+
+  /**
+   * Wraps the base selection handler to apply filterSelection if provided.
+   * This allows parent components to implement mutual exclusion logic.
+   */
+  const handleSelectItemChange = useCallback(
+    (value: string) => {
+      if (filterSelection) {
+        // Calculate what the new selection would be
+        const isDeselecting = selectedItems.includes(value);
+        const newSelection = isDeselecting
+          ? selectedItems.filter((id) => id !== value)
+          : [...selectedItems, value];
+
+        // Apply the filter
+        const filteredSelection = filterSelection(newSelection, selectedItems);
+
+        // Update state directly with filtered selection
+        setSelectedItems(filteredSelection);
+
+        // Call onSelectionChange with filtered result
+        if (hookProps.onSelectionChange) {
+          hookProps.onSelectionChange(filteredSelection);
+        }
+      } else {
+        // No filter, use base handler
+        baseHandleSelectItemChange(value);
+      }
+    },
+    [
+      filterSelection,
+      selectedItems,
+      setSelectedItems,
+      baseHandleSelectItemChange,
+      hookProps,
+    ]
+  );
 
   return (
     <div className="relative w-full text-center">

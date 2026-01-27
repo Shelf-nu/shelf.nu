@@ -947,13 +947,15 @@ function CustodyEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedTeamMemberIds) => {
-          const filteredIds = filterConflictingSelections(
-            selectedTeamMemberIds,
-            selectedIds,
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
             "in-custody",
             "without-custody"
-          );
+          )
+        }
+        onSelectionChange={(filteredIds) => {
           handleChange(filteredIds.join(","));
         }}
       />
@@ -1193,13 +1195,15 @@ function LocationEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedLocationsIds) => {
-          const filteredIds = filterConflictingSelections(
-            selectedLocationsIds,
-            selectedIds,
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
             "in-location",
             "without-location"
-          );
+          )
+        }
+        onSelectionChange={(filteredIds) => {
           handleChange(filteredIds.join(","));
         }}
       />
@@ -1317,13 +1321,15 @@ function KitEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedKitsIds) => {
-          const filteredIds = filterConflictingSelections(
-            selectedKitsIds,
-            selectedIds,
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
             "in-kit",
             "without-kit"
-          );
+          )
+        }
+        onSelectionChange={(filteredIds) => {
           handleChange(filteredIds.join(","));
         }}
       />
