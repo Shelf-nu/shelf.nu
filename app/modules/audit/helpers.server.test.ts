@@ -6,6 +6,9 @@ import {
   createAuditStartedNote,
   createAuditCompletedNote,
   createAuditAssetImagesAddedNote,
+  createAssetsAddedToAuditNote,
+  createAssetRemovedFromAuditNote,
+  createAssetsRemovedFromAuditNote,
 } from "./helpers.server";
 
 // Mock the markdoc wrappers
@@ -941,6 +944,498 @@ describe("audit helpers", () => {
         auditAssetId: "nonexistent-asset",
         userId: "user-5",
         imageIds: ["img-1"],
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAssetsAddedToAuditNote", () => {
+    let mockTx: any;
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findUnique: vi.fn(),
+        },
+        asset: {
+          findMany: vi.fn(),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("creates a note for single asset added", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera A" },
+      ]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-1",
+        userId: "user-1",
+        addedAssetIds: ["asset-1"],
+        skippedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.asset.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ["asset-1"] } },
+        select: { id: true, title: true },
+        orderBy: { title: "asc" },
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          type: "UPDATE",
+          content: expect.stringContaining("added"),
+        },
+      });
+    });
+
+    it("creates a note for multiple assets added", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-2",
+        firstName: "Jane",
+        lastName: "Smith",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera A" },
+        { id: "asset-2", title: "Camera B" },
+        { id: "asset-3", title: "Laptop C" },
+      ]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-2",
+        userId: "user-2",
+        addedAssetIds: ["asset-1", "asset-2", "asset-3"],
+        skippedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-2",
+          userId: "user-2",
+          type: "UPDATE",
+          content: expect.stringContaining("added"),
+        },
+      });
+    });
+
+    it("includes skipped count when assets were skipped", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-3",
+        firstName: "Bob",
+        lastName: "Wilson",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera A" },
+        { id: "asset-2", title: "Camera B" },
+      ]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-3",
+        userId: "user-3",
+        addedAssetIds: ["asset-1", "asset-2"],
+        skippedCount: 3,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain("3");
+      expect(createCall.data.content).toContain("skipped");
+    });
+
+    it("includes user link in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-4",
+        firstName: "Alice",
+        lastName: "Johnson",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Monitor" },
+      ]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-4",
+        userId: "user-4",
+        addedAssetIds: ["asset-1"],
+        skippedCount: 0,
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% link to="/settings/team/users/user-4"'
+      );
+      expect(createCall.data.content).toContain('text="Alice Johnson"');
+    });
+
+    it("fetches assets sorted by title", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-5",
+        firstName: "Carol",
+        lastName: "Davis",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-3", title: "A-Camera" },
+        { id: "asset-1", title: "B-Laptop" },
+        { id: "asset-2", title: "C-Monitor" },
+      ]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-5",
+        userId: "user-5",
+        addedAssetIds: ["asset-1", "asset-2", "asset-3"],
+        skippedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.asset.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ["asset-1", "asset-2", "asset-3"] } },
+        select: { id: true, title: true },
+        orderBy: { title: "asc" },
+      });
+    });
+
+    it("skips note creation when user not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue(null);
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera" },
+      ]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-6",
+        userId: "nonexistent-user",
+        addedAssetIds: ["asset-1"],
+        skippedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+
+    it("skips note creation when no assets found", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-7",
+        firstName: "Dave",
+        lastName: "Brown",
+      });
+      mockTx.asset.findMany.mockResolvedValue([]);
+
+      await createAssetsAddedToAuditNote({
+        auditSessionId: "audit-7",
+        userId: "user-7",
+        addedAssetIds: ["nonexistent-asset"],
+        skippedCount: 0,
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAssetRemovedFromAuditNote", () => {
+    let mockTx: any;
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findUnique: vi.fn(),
+        },
+        asset: {
+          findUnique: vi.fn(),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("creates a note when asset is removed", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      });
+      mockTx.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Camera A",
+      });
+
+      await createAssetRemovedFromAuditNote({
+        auditSessionId: "audit-1",
+        assetId: "asset-1",
+        userId: "user-1",
+        tx: mockTx,
+      });
+
+      expect(mockTx.asset.findUnique).toHaveBeenCalledWith({
+        where: { id: "asset-1" },
+        select: { id: true, title: true },
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          type: "UPDATE",
+          content: expect.stringContaining("removed"),
+        },
+      });
+    });
+
+    it("includes user link in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-2",
+        firstName: "Jane",
+        lastName: "Smith",
+      });
+      mockTx.asset.findUnique.mockResolvedValue({
+        id: "asset-2",
+        title: "Laptop B",
+      });
+
+      await createAssetRemovedFromAuditNote({
+        auditSessionId: "audit-2",
+        assetId: "asset-2",
+        userId: "user-2",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% link to="/settings/team/users/user-2"'
+      );
+      expect(createCall.data.content).toContain('text="Jane Smith"');
+    });
+
+    it("includes asset link in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-3",
+        firstName: "Bob",
+        lastName: "Wilson",
+      });
+      mockTx.asset.findUnique.mockResolvedValue({
+        id: "asset-3",
+        title: "Monitor C",
+      });
+
+      await createAssetRemovedFromAuditNote({
+        auditSessionId: "audit-3",
+        assetId: "asset-3",
+        userId: "user-3",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain('{% link to="/assets/asset-3"');
+      expect(createCall.data.content).toContain('text="Monitor C"');
+    });
+
+    it("skips note creation when user not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue(null);
+      mockTx.asset.findUnique.mockResolvedValue({
+        id: "asset-4",
+        title: "Keyboard D",
+      });
+
+      await createAssetRemovedFromAuditNote({
+        auditSessionId: "audit-4",
+        assetId: "asset-4",
+        userId: "nonexistent-user",
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+
+    it("skips note creation when asset not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-5",
+        firstName: "Alice",
+        lastName: "Johnson",
+      });
+      mockTx.asset.findUnique.mockResolvedValue(null);
+
+      await createAssetRemovedFromAuditNote({
+        auditSessionId: "audit-5",
+        assetId: "nonexistent-asset",
+        userId: "user-5",
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAssetsRemovedFromAuditNote", () => {
+    let mockTx: any;
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findUnique: vi.fn(),
+        },
+        asset: {
+          findMany: vi.fn(),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("creates a note for single asset removed", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera A" },
+      ]);
+
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: "audit-1",
+        assetIds: ["asset-1"],
+        userId: "user-1",
+        tx: mockTx,
+      });
+
+      expect(mockTx.asset.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ["asset-1"] } },
+        select: { id: true, title: true },
+        orderBy: { title: "asc" },
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          type: "UPDATE",
+          content: expect.stringContaining("removed"),
+        },
+      });
+    });
+
+    it("creates a note for multiple assets removed", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-2",
+        firstName: "Jane",
+        lastName: "Smith",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera A" },
+        { id: "asset-2", title: "Camera B" },
+        { id: "asset-3", title: "Laptop C" },
+      ]);
+
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: "audit-2",
+        assetIds: ["asset-1", "asset-2", "asset-3"],
+        userId: "user-2",
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledWith({
+        data: {
+          auditSessionId: "audit-2",
+          userId: "user-2",
+          type: "UPDATE",
+          content: expect.stringContaining("removed"),
+        },
+      });
+    });
+
+    it("includes user link in note content", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-3",
+        firstName: "Bob",
+        lastName: "Wilson",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Monitor" },
+      ]);
+
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: "audit-3",
+        assetIds: ["asset-1"],
+        userId: "user-3",
+        tx: mockTx,
+      });
+
+      const createCall = mockTx.auditNote.create.mock.calls[0][0];
+      expect(createCall.data.content).toContain(
+        '{% link to="/settings/team/users/user-3"'
+      );
+      expect(createCall.data.content).toContain('text="Bob Wilson"');
+    });
+
+    it("fetches assets sorted by title", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-4",
+        firstName: "Alice",
+        lastName: "Johnson",
+      });
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-3", title: "A-Camera" },
+        { id: "asset-1", title: "B-Laptop" },
+        { id: "asset-2", title: "C-Monitor" },
+      ]);
+
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: "audit-4",
+        assetIds: ["asset-1", "asset-2", "asset-3"],
+        userId: "user-4",
+        tx: mockTx,
+      });
+
+      expect(mockTx.asset.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ["asset-1", "asset-2", "asset-3"] } },
+        select: { id: true, title: true },
+        orderBy: { title: "asc" },
+      });
+    });
+
+    it("skips note creation when user not found", async () => {
+      mockTx.user.findUnique.mockResolvedValue(null);
+      mockTx.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "Camera" },
+      ]);
+
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: "audit-5",
+        assetIds: ["asset-1"],
+        userId: "nonexistent-user",
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+
+    it("skips note creation when no assets found", async () => {
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-6",
+        firstName: "Carol",
+        lastName: "Davis",
+      });
+      mockTx.asset.findMany.mockResolvedValue([]);
+
+      await createAssetsRemovedFromAuditNote({
+        auditSessionId: "audit-6",
+        assetIds: ["nonexistent-asset"],
+        userId: "user-6",
         tx: mockTx,
       });
 

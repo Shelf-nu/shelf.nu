@@ -10,6 +10,7 @@ import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
+import { AuditAssetRowActionsDropdown } from "~/components/audit/audit-asset-row-actions-dropdown";
 import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
@@ -40,6 +41,7 @@ import {
   cancelAuditSession,
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
+  removeAssetFromAudit,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
@@ -121,6 +123,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         rolesForOrg.includes(OrganizationRoles.OWNER)
       : false;
 
+    // Calculate permission to remove assets
+    // Only creator or admins/owners can remove assets, and only from PENDING audits
+    const isCreator = session.createdById === userId;
+    const canRemoveAssets =
+      (isCreator || isAdminOrOwner) && session.status === "PENDING";
+
     requireAuditAssigneeForBaseSelfService({
       audit: session,
       userId,
@@ -132,6 +140,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       payload({
         session,
         isAdminOrOwner,
+        canRemoveAssets,
         userId,
         header,
         generalImages,
@@ -199,6 +208,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return redirect(`/audits/${auditId}/overview`);
     }
 
+    if (intent === "remove-asset") {
+      const auditAssetId = formData.get("auditAssetId") as string;
+
+      if (!auditAssetId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit asset ID is required",
+          additionalData: { intent },
+          label,
+          status: 400,
+        });
+      }
+
+      await removeAssetFromAudit({
+        auditId,
+        auditAssetId,
+        organizationId,
+        userId,
+      });
+
+      return redirect(`/audits/${auditId}/overview`);
+    }
+
     throw new ShelfError({
       cause: null,
       message: "Invalid action intent",
@@ -213,7 +245,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AuditOverview() {
-  const { session, totalItems, generalImages, assetImages } =
+  const { session, totalItems, generalImages, assetImages, canRemoveAssets } =
     useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
@@ -517,6 +549,7 @@ export default function AuditOverview() {
               <CustodianHeader />
               <Th>Category</Th>
               <Th>Tags</Th>
+              {canRemoveAssets && <Th className="w-[60px]" />}
             </>
           }
           className="overflow-x-visible md:overflow-x-auto"
@@ -530,7 +563,7 @@ type LoaderData = Awaited<ReturnType<typeof loader>>;
 type AuditAssetItem = LoaderData["data"]["items"][number];
 
 function AssetListItem({ item }: { item: AuditAssetItem }) {
-  const { session } = useLoaderData<typeof loader>();
+  const { session, canRemoveAssets } = useLoaderData<typeof loader>();
   const { category, location, custody } = item;
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
@@ -621,6 +654,14 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
       <Td>
         <ListItemTagsColumn tags={item.tags} />
       </Td>
+      {canRemoveAssets && (
+        <Td className="text-right">
+          <AuditAssetRowActionsDropdown
+            auditAssetId={item.auditData?.auditAssetId || ""}
+            assetTitle={item.title}
+          />
+        </Td>
+      )}
     </>
   );
 }

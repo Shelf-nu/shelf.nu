@@ -50,7 +50,8 @@ type BulkDialogType =
   | "partial-checkin"
   | "add-to-kit"
   | "remove-from-kit"
-  | "start-audit";
+  | "start-audit"
+  | "add-to-audit";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;

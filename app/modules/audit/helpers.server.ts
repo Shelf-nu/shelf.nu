@@ -581,3 +581,170 @@ export async function createAssigneeRemovedNote({
     },
   });
 }
+
+/**
+ * Creates an automatic note when assets are added to an existing audit.
+ * Uses markdoc tags to show asset links/popovers.
+ */
+export async function createAssetsAddedToAuditNote({
+  auditSessionId,
+  userId,
+  addedAssetIds,
+  skippedCount,
+  tx,
+}: {
+  auditSessionId: string;
+  userId: string;
+  addedAssetIds: string[];
+  skippedCount: number;
+  tx: any; // Prisma transaction client
+}) {
+  const [adder, addedAssets] = await Promise.all([
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+    tx.asset.findMany({
+      where: { id: { in: addedAssetIds } },
+      select: { id: true, title: true },
+      orderBy: { title: "asc" },
+    }),
+  ]);
+
+  if (!adder || addedAssets.length === 0) {
+    return; // Skip note creation if user or assets not found
+  }
+
+  // Use wrapAssetsWithDataForNote to create proper asset links/popovers
+  const assetsMarkdoc = wrapAssetsWithDataForNote(addedAssets, "added");
+
+  let content = `${wrapUserLinkForNote({
+    id: adder.id,
+    firstName: adder.firstName,
+    lastName: adder.lastName,
+  })} added ${assetsMarkdoc} to audit.`;
+
+  if (skippedCount > 0) {
+    content += ` (**${skippedCount}** asset${
+      skippedCount === 1 ? "" : "s"
+    } skipped as already in audit)`;
+  }
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: adder.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
+
+/**
+ * Creates an automatic note when a single asset is removed from an audit.
+ * Uses markdoc tags to show asset link.
+ */
+export async function createAssetRemovedFromAuditNote({
+  auditSessionId,
+  assetId,
+  userId,
+  tx,
+}: {
+  auditSessionId: string;
+  assetId: string;
+  userId: string;
+  tx: any; // Prisma transaction client
+}) {
+  const [remover, asset] = await Promise.all([
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+    tx.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true, title: true },
+    }),
+  ]);
+
+  if (!remover || !asset) {
+    return; // Skip note creation if user or asset not found
+  }
+
+  const assetMarkdoc = wrapAssetsWithDataForNote(asset, "removed");
+
+  const content = `${wrapUserLinkForNote({
+    id: remover.id,
+    firstName: remover.firstName,
+    lastName: remover.lastName,
+  })} removed ${assetMarkdoc} from audit.`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: remover.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
+
+/**
+ * Creates an automatic note when multiple assets are removed from an audit (bulk).
+ * Uses markdoc tags to show asset links/popovers.
+ */
+export async function createAssetsRemovedFromAuditNote({
+  auditSessionId,
+  assetIds,
+  userId,
+  tx,
+}: {
+  auditSessionId: string;
+  assetIds: string[];
+  userId: string;
+  tx: any; // Prisma transaction client
+}) {
+  const [remover, assets] = await Promise.all([
+    tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+    }),
+    tx.asset.findMany({
+      where: { id: { in: assetIds } },
+      select: { id: true, title: true },
+      orderBy: { title: "asc" },
+    }),
+  ]);
+
+  if (!remover || assets.length === 0) {
+    return; // Skip note creation if user or assets not found
+  }
+
+  const assetsMarkdoc = wrapAssetsWithDataForNote(assets, "removed");
+
+  const content = `${wrapUserLinkForNote({
+    id: remover.id,
+    firstName: remover.firstName,
+    lastName: remover.lastName,
+  })} removed ${assetsMarkdoc} from audit.`;
+
+  await tx.auditNote.create({
+    data: {
+      auditSessionId,
+      userId: remover.id,
+      type: "UPDATE",
+      content,
+    },
+  });
+}
