@@ -285,6 +285,7 @@ export function useModelFilters({
     totalItems,
     items,
     selectedItems,
+    setSelectedItems,
     handleSelectItemChange,
     handleSearchQueryChange,
     resetModelFiltersFetcher,

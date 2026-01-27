@@ -40,6 +40,44 @@ import { extractQrIdFromValue } from "./helpers";
 import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
+/**
+ * Helper to filter out conflicting special values in multi-select.
+ * When user selects a positive option (e.g., "in-custody"), automatically
+ * removes the negative option (e.g., "without-custody") and vice versa.
+ *
+ * @param newSelection - The new selection array from the dropdown
+ * @param previousSelection - The previous selection array
+ * @param positiveId - The ID of the positive option (e.g., "in-custody")
+ * @param negativeId - The ID of the negative option (e.g., "without-custody")
+ * @returns Filtered selection with conflicting options removed
+ */
+function filterConflictingSelections(
+  newSelection: string[],
+  previousSelection: string[],
+  positiveId: string,
+  negativeId: string
+): string[] {
+  const hasPositive = newSelection.includes(positiveId);
+  const hasNegative = newSelection.includes(negativeId);
+
+  // No conflict
+  if (!hasPositive || !hasNegative) {
+    return newSelection;
+  }
+
+  // Both selected - remove the one that was already selected (keep newly added)
+  const hadPositive = previousSelection.includes(positiveId);
+  const hadNegative = previousSelection.includes(negativeId);
+
+  if (hadPositive && !hadNegative) {
+    // User just added negative, remove positive
+    return newSelection.filter((id) => id !== positiveId);
+  } else {
+    // User just added positive (or both are new), remove negative
+    return newSelection.filter((id) => id !== negativeId);
+  }
+}
+
 export function ValueField({
   filter,
   setFilter,
@@ -853,6 +891,10 @@ function CustodyEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search team members",
+    withValueItem: {
+      id: "in-custody",
+      name: "In custody",
+    },
     withoutValueItem: {
       id: "without-custody",
       name: "Without custody",
@@ -881,6 +923,9 @@ function CustodyEnumField({
                 {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-custody") {
+                          return "In custody";
+                        }
                         if (id === "without-custody") {
                           return "Without custody";
                         }
@@ -902,8 +947,16 @@ function CustodyEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedTeamMemberIds) => {
-          handleChange(selectedTeamMemberIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "in-custody",
+            "without-custody"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1086,6 +1139,10 @@ function LocationEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search locations",
+    withValueItem: {
+      id: "in-location",
+      name: "In a location",
+    },
     withoutValueItem: {
       id: "without-location",
       name: "Without location",
@@ -1116,6 +1173,9 @@ function LocationEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-location") {
+                          return "In a location";
+                        }
                         if (id === "without-location") {
                           return "Without location";
                         }
@@ -1135,8 +1195,16 @@ function LocationEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedLocationsIds) => {
-          handleChange(selectedLocationsIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "in-location",
+            "without-location"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1199,6 +1267,10 @@ function KitEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search kits",
+    withValueItem: {
+      id: "in-kit",
+      name: "In a kit",
+    },
     withoutValueItem: {
       id: "without-kit",
       name: "Without kit",
@@ -1229,6 +1301,9 @@ function KitEnumField({
                   : selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-kit") {
+                          return "In a kit";
+                        }
                         if (id === "without-kit") {
                           return "Without kit";
                         }
@@ -1246,8 +1321,16 @@ function KitEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedKitsIds) => {
-          handleChange(selectedKitsIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "in-kit",
+            "without-kit"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
