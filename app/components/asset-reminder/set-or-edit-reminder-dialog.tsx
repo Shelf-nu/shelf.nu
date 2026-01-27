@@ -14,7 +14,9 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 export const setReminderSchema = z.object({
   name: z.string().min(1, "Please enter name."),
   message: z.string().min(1, "Please enter message."),
-  alertDateTime: z.coerce.date().min(new Date()),
+  alertDateTime: z.coerce
+    .date()
+    .min(new Date(), "Please select a date in the future"),
   teamMembers: z
     .array(z.string())
     .min(1, "Please select at least one team member"),

@@ -115,11 +115,18 @@ export function parseData<Schema extends ZodType<any, any, any>>(
       }
     );
 
+    // Get the first validation error message to show to the user
+    const firstErrorMessage = Object.values(validationErrors).find(
+      (error) => error?.message
+    )?.message;
+
     throw badRequest(
       options?.message ||
+        firstErrorMessage ||
         "The request is invalid. Please try again. If the issue persists, contact support.",
       {
-        shouldBeCaptured: true,
+        // Validation errors are expected user input errors, not bugs
+        shouldBeCaptured: false,
         ...options,
         additionalData: {
           ...options?.additionalData,
