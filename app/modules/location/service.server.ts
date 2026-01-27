@@ -7,14 +7,10 @@ import type {
   Asset,
   Kit,
 } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import {
-  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-  PUBLIC_BUCKET,
-} from "~/utils/constants";
+import { PUBLIC_BUCKET } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -28,6 +24,12 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
+  wrapAssetsWithDataForNote,
+  wrapKitsWithDataForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   getFileUploadPath,
   parseFileFormData,
   removePublicFile,
@@ -35,15 +37,96 @@ import {
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
-  getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
+  getLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
+import {
+  createLocationNote as createLocationActivityNote,
+  createSystemLocationNote as createSystemLocationActivityNote,
+} from "../location-note/service.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
-const MAX_LOCATION_DEPTH = 12;
+
+function safeDisplay(value?: string | null) {
+  return value?.trim() || "—";
+}
+
+function formatLocationLink(location: Pick<Location, "id" | "name">) {
+  const name = safeDisplay(location.name);
+  return wrapLinkForNote(`/locations/${location.id}`, name);
+}
+
+function buildLocationDetailUpdateMessage({
+  userId,
+  firstName,
+  lastName,
+  changes,
+}: {
+  userId: User["id"];
+  firstName?: string | null;
+  lastName?: string | null;
+  changes: Array<{
+    label: string;
+    previous?: string | null;
+    next?: string | null;
+  }>;
+}) {
+  const userLink = wrapUserLinkForNote({ id: userId, firstName, lastName });
+  const lines = changes
+    .map(({ label, previous, next }) => {
+      if (previous === next) {
+        return null;
+      }
+
+      if (!previous && next) {
+        return `- **${label}** set to **${safeDisplay(next)}**`;
+      }
+
+      if (previous && !next) {
+        return `- **${label}** was cleared`;
+      }
+
+      return `- **${label}** changed from **${safeDisplay(
+        previous
+      )}** to **${safeDisplay(next)}**`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return `${userLink} updated location details:\n${lines.join("\n")}`;
+}
+
+function buildAssetListMarkup(
+  assets: Array<{ id: string; title: string }>,
+  action: "added" | "removed"
+) {
+  return wrapAssetsWithDataForNote(
+    assets.map((asset) => ({
+      id: asset.id,
+      title: safeDisplay(asset.title),
+    })),
+    action
+  );
+}
+
+function buildKitListMarkup(
+  kits: Array<{ id: string; name: string }>,
+  action: "added" | "removed"
+) {
+  return wrapKitsWithDataForNote(
+    kits.map((kit) => ({
+      id: kit.id,
+      name: safeDisplay(kit.name),
+    })),
+    action
+  );
+}
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
@@ -58,7 +141,6 @@ export async function getLocation(
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
     include?: Prisma.LocationInclude;
-    teamMemberIds?: string[] | null;
   }
 ) {
   const {
@@ -72,7 +154,6 @@ export async function getLocation(
     orderBy = "createdAt",
     orderDirection,
     include,
-    teamMemberIds,
   } = params;
 
   try {
@@ -84,7 +165,7 @@ export async function getLocation(
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Build where object for querying related assets */
-    const assetsWhere: Prisma.AssetWhereInput = {};
+    let assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
       assetsWhere.title = {
@@ -92,96 +173,6 @@ export async function getLocation(
         mode: "insensitive",
       };
     }
-
-    if (teamMemberIds && teamMemberIds.length) {
-      assetsWhere.OR = [
-        ...(assetsWhere.OR ?? []),
-        {
-          custody: { teamMemberId: { in: teamMemberIds } },
-        },
-        {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
-        },
-        {
-          bookings: {
-            some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-              },
-            },
-          },
-        },
-        {
-          bookings: {
-            some: {
-              custodianUserId: { in: teamMemberIds },
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
-
-    const parentInclude = {
-      select: {
-        id: true,
-        name: true,
-        parentId: true,
-        _count: { select: { children: true } },
-      },
-    } satisfies Prisma.LocationInclude["parent"];
-
-    const locationInclude: Prisma.LocationInclude = include
-      ? { ...include, parent: parentInclude }
-      : {
-          assets: {
-            include: {
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                  color: true,
-                },
-              },
-              tags: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-              custody: {
-                select: {
-                  custodian: {
-                    select: {
-                      id: true,
-                      name: true,
-                      user: {
-                        select: {
-                          id: true,
-                          firstName: true,
-                          lastName: true,
-                          profilePicture: true,
-                          email: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            skip,
-            take,
-            where: assetsWhere,
-            orderBy: { [orderBy]: orderDirection },
-          },
-          parent: parentInclude,
-        };
 
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
@@ -194,7 +185,31 @@ export async function getLocation(
               : []),
           ],
         },
-        include: locationInclude,
+        include: include
+          ? include
+          : {
+              assets: {
+                include: {
+                  category: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                    },
+                  },
+                  tags: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+                skip,
+                take,
+                where: assetsWhere,
+                orderBy: { [orderBy]: orderDirection },
+              },
+            },
       }),
 
       /** Count them */
@@ -255,165 +270,6 @@ export async function getLocation(
   }
 }
 
-export type LocationHierarchyEntry = Pick<
-  Location,
-  "id" | "name" | "parentId"
-> & {
-  depth: number;
-};
-
-/**
- * Returns the ancestor chain for a given location ordered from the root down to the provided node.
- */
-export async function getLocationHierarchy(params: {
-  organizationId: Organization["id"];
-  locationId: Location["id"];
-}) {
-  const { organizationId, locationId } = params;
-
-  return db.$queryRaw<LocationHierarchyEntry[]>`
-    WITH RECURSIVE location_hierarchy AS (
-      SELECT
-        id,
-        name,
-        "parentId",
-        "organizationId",
-        0 AS depth
-      FROM "Location"
-      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l.name,
-        l."parentId",
-        l."organizationId",
-        lh.depth + 1 AS depth
-      FROM "Location" l
-      INNER JOIN location_hierarchy lh ON lh."parentId" = l.id
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT id, name, "parentId", depth
-    FROM location_hierarchy
-    ORDER BY depth DESC
-  `;
-}
-
-/** Represents a node in the descendant tree rendered on location detail pages. */
-export type LocationTreeNode = Pick<Location, "id" | "name"> & {
-  children: LocationTreeNode[];
-};
-
-/** Raw row returned when querying descendants via recursive CTE. */
-type LocationDescendantRow = Pick<Location, "id" | "name" | "parentId">;
-/** Aggregate row holding the maximum depth returned from subtree depth query. */
-type SubtreeDepthRow = { maxDepth: number | null };
-
-/**
- * Fetches a nested tree of all descendants for the provided location.
- * Used to render the hierarchical child list on the location page sidebar.
- */
-export async function getLocationDescendantsTree(params: {
-  organizationId: Organization["id"];
-  locationId: Location["id"];
-}): Promise<LocationTreeNode[]> {
-  const { organizationId, locationId } = params;
-
-  const descendants = await db.$queryRaw<LocationDescendantRow[]>`
-    WITH RECURSIVE location_descendants AS (
-      SELECT
-        id,
-        name,
-        "parentId",
-        "organizationId"
-      FROM "Location"
-      WHERE "parentId" = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l.name,
-        l."parentId",
-        l."organizationId"
-      FROM "Location" l
-      INNER JOIN location_descendants ld ON ld.id = l."parentId"
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT id, name, "parentId"
-    FROM location_descendants
-  `;
-
-  const nodes = new Map<string, LocationTreeNode>();
-  const rootNodes: LocationTreeNode[] = [];
-
-  for (const row of descendants) {
-    nodes.set(row.id, { id: row.id, name: row.name, children: [] });
-  }
-
-  for (const row of descendants) {
-    const node = nodes.get(row.id);
-    if (!node) continue;
-
-    if (row.parentId === locationId) {
-      rootNodes.push(node);
-    }
-
-    const parentNode = row.parentId ? nodes.get(row.parentId) : null;
-    if (parentNode) {
-      parentNode.children.push(node);
-    }
-  }
-
-  return rootNodes;
-}
-
-/**
- * Returns the maximum depth (root node counted as 0) for a location's subtree.
- * Used by validation to ensure re-parent operations do not exceed the configured max depth.
- */
-export async function getLocationSubtreeDepth(params: {
-  organizationId: Organization["id"];
-  locationId: Location["id"];
-}): Promise<number> {
-  const { organizationId, locationId } = params;
-
-  const [result] = await db.$queryRaw<SubtreeDepthRow[]>`
-    WITH RECURSIVE location_subtree AS (
-      SELECT
-        id,
-        "parentId",
-        "organizationId",
-        0 AS depth
-      FROM "Location"
-      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l."parentId",
-        l."organizationId",
-        ls.depth + 1 AS depth
-      FROM "Location" l
-      INNER JOIN location_subtree ls ON l."parentId" = ls.id
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT MAX(depth) AS "maxDepth"
-    FROM location_subtree
-  `;
-
-  return result?.maxDepth ?? 0;
-}
-
-export const LOCATION_LIST_INCLUDE = {
-  _count: { select: { kits: true, assets: true, children: true } },
-  parent: {
-    select: {
-      id: true,
-      name: true,
-      parentId: true,
-      _count: { select: { children: true } },
-    },
-  },
-  image: { select: { updatedAt: true } },
-} satisfies Prisma.LocationInclude;
-
 export async function getLocations(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -429,7 +285,7 @@ export async function getLocations(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.LocationWhereInput = { organizationId };
+    let where: Prisma.LocationWhereInput = { organizationId };
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -446,7 +302,14 @@ export async function getLocations(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        include: LOCATION_LIST_INCLUDE,
+        include: {
+          _count: { select: { kits: true, assets: true } },
+          image: {
+            select: {
+              updatedAt: true,
+            },
+          },
+        },
       }),
 
       /** Count them */
@@ -477,110 +340,15 @@ export async function getLocationTotalValuation({
   return result._sum.valuation ?? 0;
 }
 
-/**
- * Validates that a parent location belongs to the same organization, does not create cycles,
- * and keeps the tree depth under {@link MAX_LOCATION_DEPTH}.
- */
-async function validateParentLocation({
-  organizationId,
-  parentId,
-  currentLocationId,
-}: {
-  organizationId: Organization["id"];
-  parentId?: Location["parentId"];
-  currentLocationId?: Location["id"];
-}) {
-  if (!parentId) {
-    return null;
-  }
-
-  if (currentLocationId && parentId === currentLocationId) {
-    throw new ShelfError({
-      cause: null,
-      message: "A location cannot be its own parent.",
-      additionalData: { currentLocationId, parentId, organizationId },
-      label,
-      status: 400,
-      shouldBeCaptured: false,
-    });
-  }
-
-  const parentLocation = await db.location.findFirst({
-    where: { id: parentId, organizationId },
-    select: { id: true },
-  });
-
-  if (!parentLocation) {
-    throw new ShelfError({
-      cause: null,
-      message: "Parent location not found.",
-      additionalData: { parentId, organizationId },
-      label,
-      status: 404,
-      shouldBeCaptured: false,
-    });
-  }
-
-  const hierarchy = await getLocationHierarchy({
-    organizationId,
-    locationId: parentId,
-  });
-
-  const parentDepth = hierarchy.reduce(
-    (maxDepth, location) => Math.max(maxDepth, location.depth),
-    0
-  );
-
-  const subtreeDepth =
-    currentLocationId === undefined
-      ? 0
-      : await getLocationSubtreeDepth({
-          organizationId,
-          locationId: currentLocationId,
-        });
-
-  if (parentDepth + 1 + subtreeDepth > MAX_LOCATION_DEPTH) {
-    throw new ShelfError({
-      cause: null,
-      title: "Not allowed",
-      message: `Locations cannot be nested deeper than ${MAX_LOCATION_DEPTH} levels.`,
-      additionalData: {
-        parentId,
-        organizationId,
-        parentDepth,
-        subtreeDepth,
-      },
-      label,
-      status: 400,
-      shouldBeCaptured: false,
-    });
-  }
-
-  if (currentLocationId && hierarchy.some((l) => l.id === currentLocationId)) {
-    throw new ShelfError({
-      cause: null,
-      message: "A location cannot be assigned to one of its descendants.",
-      additionalData: { parentId, currentLocationId, organizationId },
-      label,
-      status: 400,
-      shouldBeCaptured: false,
-    });
-  }
-
-  return parentLocation.id;
-}
-
 export async function createLocation({
   name,
   description,
   address,
   userId,
   organizationId,
-  parentId,
 }: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
   organizationId: Organization["id"];
-  parentId?: Location["parentId"];
 }) {
   try {
     // Geocode the address if provided
@@ -588,11 +356,6 @@ export async function createLocation({
     if (address) {
       coordinates = await geolocate(address);
     }
-
-    const validatedParentId = await validateParentLocation({
-      organizationId,
-      parentId,
-    });
 
     return await db.location.create({
       data: {
@@ -611,19 +374,9 @@ export async function createLocation({
             id: organizationId,
           },
         },
-        ...(validatedParentId && {
-          parent: {
-            connect: {
-              id: validatedParentId,
-            },
-          },
-        }),
       },
     });
   } catch (cause) {
-    if (isLikeShelfError(cause)) {
-      throw cause;
-    }
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: { userId, organizationId },
     });
@@ -663,16 +416,20 @@ export async function updateLocation(payload: {
   description?: Location["description"];
   userId: User["id"];
   organizationId: Organization["id"];
-  parentId?: Location["parentId"];
 }) {
-  const { id, name, address, description, userId, organizationId, parentId } =
-    payload;
+  const { id, name, address, description, userId, organizationId } = payload;
 
   try {
     // Get the current location to check if address changed
     const currentLocation = await db.location.findUniqueOrThrow({
       where: { id, organizationId },
-      select: { address: true, latitude: true, longitude: true },
+      select: {
+        address: true,
+        latitude: true,
+        longitude: true,
+        name: true,
+        description: true,
+      },
     });
 
     // Check if address has changed and geocode if necessary
@@ -689,16 +446,7 @@ export async function updateLocation(payload: {
       }
     }
 
-    const validatedParentId =
-      parentId === undefined
-        ? undefined
-        : await validateParentLocation({
-            organizationId,
-            parentId,
-            currentLocationId: id,
-          });
-
-    return await db.location.update({
+    const updatedLocation = await db.location.update({
       where: { id, organizationId },
       data: {
         name,
@@ -708,21 +456,67 @@ export async function updateLocation(payload: {
           latitude: coordinates?.lat || null,
           longitude: coordinates?.lon || null,
         }),
-        ...(validatedParentId !== undefined && {
-          parent: validatedParentId
-            ? {
-                connect: {
-                  id: validatedParentId,
-                },
-              }
-            : { disconnect: true },
-        }),
       },
     });
-  } catch (cause) {
-    if (isLikeShelfError(cause)) {
-      throw cause;
+
+    const changes: Array<{
+      label: string;
+      previous?: string | null;
+      next?: string | null;
+    }> = [];
+
+    if (typeof name !== "undefined" && name !== currentLocation.name) {
+      changes.push({
+        label: "Name",
+        previous: currentLocation.name,
+        next: name,
+      });
     }
+
+    if (
+      typeof description !== "undefined" &&
+      description !== currentLocation.description
+    ) {
+      changes.push({
+        label: "Description",
+        previous: currentLocation.description,
+        next: description ?? null,
+      });
+    }
+
+    if (typeof address !== "undefined" && address !== currentLocation.address) {
+      changes.push({
+        label: "Address",
+        previous: currentLocation.address,
+        next: address ?? null,
+      });
+    }
+
+    if (changes.length > 0) {
+      const user = await getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      const noteContent = buildLocationDetailUpdateMessage({
+        userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+        changes,
+      });
+
+      if (noteContent) {
+        await createSystemLocationActivityNote({
+          locationId: id,
+          content: noteContent,
+        });
+      }
+    }
+
+    return updatedLocation;
+  } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Location", {
       additionalData: {
         id,
@@ -855,12 +649,14 @@ export async function updateLocationImage({
   locationId,
   prevImageUrl,
   prevThumbnailUrl,
+  userId,
 }: {
   organizationId: Organization["id"];
   request: Request;
   locationId: Location["id"];
   prevImageUrl?: string | null;
   prevThumbnailUrl?: string | null;
+  userId: User["id"];
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -877,7 +673,6 @@ export async function updateLocationImage({
       },
       generateThumbnail: true,
       thumbnailSize: 108,
-      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const image = fileData.get("image") as string | null;
@@ -896,7 +691,7 @@ export async function updateLocationImage({
       } else {
         imagePath = image;
       }
-    } catch (_error) {
+    } catch (error) {
       imagePath = image;
     }
 
@@ -922,6 +717,24 @@ export async function updateLocationImage({
       },
     });
 
+    const user = await getUserByID(userId, {
+      select: {
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+
+    await createSystemLocationActivityNote({
+      locationId,
+      content: `${userLink} updated the location photo.`,
+    });
+
     if (prevImageUrl) {
       await removePublicFile({ publicUrl: prevImageUrl });
     }
@@ -935,7 +748,7 @@ export async function updateLocationImage({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while updating the location image.",
-      additionalData: { locationId, field: "image" },
+      additionalData: { locationId },
       label,
     });
   }
@@ -1011,7 +824,6 @@ export async function getLocationKits(
     search?: string | null;
     orderBy?: string;
     orderDirection?: "asc" | "desc";
-    teamMemberIds?: string[] | null;
   }
 ) {
   const {
@@ -1022,7 +834,6 @@ export async function getLocationKits(
     search,
     orderBy = "createdAt",
     orderDirection,
-    teamMemberIds,
   } = params;
 
   try {
@@ -1034,49 +845,6 @@ export async function getLocationKits(
       locationId: id,
     };
 
-    if (teamMemberIds && teamMemberIds.length) {
-      kitWhere.OR = [
-        ...(kitWhere.OR ?? []),
-        {
-          custody: { custodianId: { in: teamMemberIds } },
-        },
-        {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
-        },
-        {
-          assets: {
-            some: {
-              bookings: {
-                some: {
-                  custodianTeamMemberId: { in: teamMemberIds },
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
-            },
-          },
-        },
-        {
-          assets: {
-            some: {
-              bookings: {
-                some: {
-                  custodianUserId: { in: teamMemberIds },
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
-
     if (search) {
       kitWhere.name = {
         contains: search,
@@ -1087,28 +855,7 @@ export async function getLocationKits(
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         where: kitWhere,
-        include: {
-          category: true,
-          custody: {
-            select: {
-              custodian: {
-                select: {
-                  id: true,
-                  name: true,
-                  user: {
-                    select: {
-                      id: true,
-                      firstName: true,
-                      lastName: true,
-                      profilePicture: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        include: { category: true },
         skip,
         take,
         orderBy: { [orderBy]: orderDirection },
@@ -1134,14 +881,16 @@ export async function createLocationChangeNote({
   firstName,
   lastName,
   assetId,
+  assetTitle,
   userId,
   isRemoving,
 }: {
   currentLocation: Pick<Location, "id" | "name"> | null;
-  newLocation: Location | null;
+  newLocation: Pick<Location, "id" | "name"> | null;
   firstName: string;
   lastName: string;
   assetId: Asset["id"];
+  assetTitle: Asset["title"];
   userId: User["id"];
   isRemoving: boolean;
 }) {
@@ -1161,6 +910,54 @@ export async function createLocationChangeNote({
       userId,
       assetId,
     });
+
+    const userLink = wrapUserLinkForNote({ id: userId, firstName, lastName });
+    const assetAddedMarkup = wrapAssetsWithDataForNote(
+      { id: assetId, title: safeDisplay(assetTitle) },
+      "added"
+    );
+    const assetRemovedMarkup = wrapAssetsWithDataForNote(
+      { id: assetId, title: safeDisplay(assetTitle) },
+      "removed"
+    );
+
+    if (newLocation) {
+      const destinationLink = formatLocationLink(newLocation);
+      const arrivalMessage =
+        currentLocation && currentLocation.id !== newLocation.id
+          ? `${userLink} moved ${assetAddedMarkup} from ${formatLocationLink(
+              currentLocation
+            )} to ${destinationLink}.`
+          : `${userLink} set ${assetAddedMarkup} to ${destinationLink}.`;
+
+      await createLocationActivityNote({
+        content: arrivalMessage,
+        type: "UPDATE",
+        userId,
+        locationId: newLocation.id,
+      });
+    }
+
+    if (
+      currentLocation &&
+      (isRemoving || !newLocation || currentLocation.id !== newLocation.id)
+    ) {
+      const removalMessage =
+        newLocation && currentLocation.id !== newLocation.id && !isRemoving
+          ? `${userLink} moved ${assetRemovedMarkup} to ${formatLocationLink(
+              newLocation
+            )}.`
+          : `${userLink} removed ${assetRemovedMarkup} from ${formatLocationLink(
+              currentLocation
+            )}.`;
+
+      await createLocationActivityNote({
+        content: removalMessage,
+        type: "UPDATE",
+        userId,
+        locationId: currentLocation.id,
+      });
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1201,7 +998,7 @@ async function createBulkLocationChangeNotes({
   assetIds: Asset["id"][];
   removedAssetIds: Asset["id"][];
   userId: User["id"];
-  location: Location;
+  location: Pick<Location, "id" | "name">;
 }) {
   try {
     const user = await db.user
@@ -1223,6 +1020,9 @@ async function createBulkLocationChangeNotes({
         });
       });
 
+    const addedAssets: Array<{ id: string; title: string }> = [];
+    const removedAssetsSummary: Array<{ id: string; title: string }> = [];
+
     // Iterate over the modified assets
     for (const asset of modifiedAssets) {
       const isRemoving = removedAssetIds.includes(asset.id);
@@ -1239,10 +1039,47 @@ async function createBulkLocationChangeNotes({
           firstName: user.firstName || "",
           lastName: user.lastName || "",
           assetId: asset.id,
+          assetTitle: asset.title,
           userId,
           isRemoving,
         });
+
+        if (isNew && newLocation) {
+          addedAssets.push({ id: asset.id, title: asset.title });
+        }
+
+        if (isRemoving && currentLocation) {
+          removedAssetsSummary.push({ id: asset.id, title: asset.title });
+        }
       }
+    }
+
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    if (addedAssets.length > 0) {
+      const content = `${userLink} added ${buildAssetListMarkup(
+        addedAssets,
+        "added"
+      )} to ${formatLocationLink(location)}.`;
+      await createSystemLocationActivityNote({
+        locationId: location.id,
+        content,
+      });
+    }
+
+    if (removedAssetsSummary.length > 0) {
+      const content = `${userLink} removed ${buildAssetListMarkup(
+        removedAssetsSummary,
+        "removed"
+      )} from ${formatLocationLink(location)}.`;
+      await createSystemLocationActivityNote({
+        locationId: location.id,
+        content,
+      });
     }
   } catch (cause) {
     throw new ShelfError({
@@ -1276,8 +1113,12 @@ export async function updateLocationAssets({
           id: locationId,
           organizationId,
         },
-        include: {
-          assets: true,
+        select: {
+          id: true,
+          name: true,
+          assets: {
+            select: { id: true },
+          },
         },
       })
       .catch((cause) => {
@@ -1452,7 +1293,9 @@ export async function updateLocationKits({
     const location = await db.location
       .findUniqueOrThrow({
         where: { id: locationId, organizationId },
-        include: {
+        select: {
+          id: true,
+          name: true,
           kits: {
             select: {
               id: true,
@@ -1511,6 +1354,7 @@ export async function updateLocationKits({
         where: { id: { in: kitIds }, organizationId },
         select: {
           id: true,
+          name: true,
           assets: {
             select: {
               id: true,
@@ -1555,15 +1399,36 @@ export async function updateLocationKits({
           });
         });
 
+      const user = await getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      const kitsSummary = kitsToAdd.map((kit) => ({
+        id: kit.id,
+        name: kit.name ?? "",
+      }));
+
+      if (kitsSummary.length > 0) {
+        const userLink = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+
+        await createSystemLocationActivityNote({
+          locationId,
+          content: `${userLink} added ${buildKitListMarkup(
+            kitsSummary,
+            "added"
+          )} to ${formatLocationLink(location)}.`,
+        });
+      }
+
       // Add notes to the assets that their location was updated via their parent kit
       if (assetIds.length > 0) {
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          } satisfies Prisma.UserSelect,
-        });
         const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
 
         // Create individual notes for each asset
@@ -1592,7 +1457,11 @@ export async function updateLocationKits({
       // Get asset IDs from the kits being removed
       const kitsBeingRemoved = await db.kit.findMany({
         where: { id: { in: removedKitIds }, organizationId },
-        select: { id: true, assets: { select: { id: true, title: true } } },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true, title: true } },
+        },
       });
 
       const removedAssetIds = kitsBeingRemoved.flatMap((kit) =>
@@ -1628,15 +1497,36 @@ export async function updateLocationKits({
           });
         });
 
+      const user = await getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      const kitsSummary = kitsBeingRemoved.map((kit) => ({
+        id: kit.id,
+        name: kit.name ?? "",
+      }));
+
+      if (kitsSummary.length > 0) {
+        const userLink = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+
+        await createSystemLocationActivityNote({
+          locationId,
+          content: `${userLink} removed ${buildKitListMarkup(
+            kitsSummary,
+            "removed"
+          )} from ${formatLocationLink(location)}.`,
+        });
+      }
+
       // Add notes to the assets that their location was removed via their parent kit
       if (removedAssetIds.length > 0) {
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          } satisfies Prisma.UserSelect,
-        });
         const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
 
         // Create individual notes for each asset
