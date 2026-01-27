@@ -1,16 +1,13 @@
-import { useFetcher, useLoaderData } from "@remix-run/react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LocationNotes } from "~/components/location/notes";
+import { useFetcher, useLoaderData } from "react-router";
 
 // why: supplying deterministic Remix hooks for LocationNotes component rendering
-vi.mock("@remix-run/react", async () => {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+vi.mock("react-router", async () => {
   const actual =
-    await vi.importActual<typeof import("@remix-run/react")>(
-      "@remix-run/react"
-    );
+    await vi.importActual<typeof import("react-router")>("react-router");
 
   return {
     ...actual,
@@ -23,7 +20,6 @@ vi.mock("@remix-run/react", async () => {
       submit: vi.fn(),
     })),
     Link: ({ to, children, ...props }: any) => (
-      // eslint-disable-next-line jsx-a11y/anchor-is-valid
       <a href={typeof to === "string" ? to : "#"} {...props}>
         {children}
       </a>

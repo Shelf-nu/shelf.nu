@@ -8,11 +8,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import {
-  unstable_composeUploadHandlers,
-  unstable_createMemoryUploadHandler,
-  unstable_parseMultipartFormData,
-} from "@remix-run/node";
+import { parseFormData } from "@remix-run/form-data-parser";
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
@@ -41,18 +37,15 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
-import { formatBookingsDates } from "~/modules/booking/utils.server";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
+import { getDateTimeFormat } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
 import { formatCurrency } from "./currency";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
-import {
-  cleanMarkdownFormatting,
-  sanitizeNoteContent,
-} from "./note-sanitizer.server";
+import { cleanMarkdownFormatting } from "./markdown-cleaner";
+import { sanitizeNoteContent } from "./note-sanitizer.server";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -109,11 +102,8 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   try {
-    // Upload handler to store file in memory
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      memoryUploadHandler
-    );
+    // Files are automatically stored in memory with parseFormData
+    const formData = await parseFormData(request);
 
     const csvFile = formData.get("file") as File;
 
@@ -128,13 +118,10 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
           ? cause.message
           : "Something went wrong while parsing the CSV file.",
       label: "CSV",
+      shouldBeCaptured: !(cause instanceof CsvError),
     });
   }
 };
-
-export const memoryUploadHandler = unstable_composeUploadHandlers(
-  unstable_createMemoryUploadHandler()
-);
 
 export const buildCsvBackupDataFromAssets = ({
   assets,
@@ -312,6 +299,7 @@ export async function exportAssetsFromIndexToCsv({
       ...(settings.columns as Column[]),
     ],
     currentOrganization,
+    request,
   });
 
   // Join rows with CRLF as per CSV spec
@@ -322,12 +310,14 @@ export async function exportAssetsFromIndexToCsv({
  * Builds CSV export data from assets using the column settings to maintain order
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
   assets,
   columns,
   currentOrganization,
+  request,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -335,6 +325,7 @@ export const buildCsvExportDataFromAssets = ({
     Organization,
     "id" | "barcodesEnabled" | "currency"
   >;
+  request: Request;
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -347,6 +338,13 @@ export const buildCsvExportDataFromAssets = ({
   const headers = visibleColumns.map((col) =>
     formatValueForCsv(parseColumnName(col.name))
   );
+
+  // Create date formatter for reminder dates
+  const formatDate = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
+
   // Create data rows
   const rows = assets.map((asset) =>
     visibleColumns.map((column) => {
@@ -416,7 +414,21 @@ export const buildCsvExportDataFromAssets = ({
             value = asset.availableToBook ? "Yes" : "No";
             break;
           case "upcomingReminder": {
-            value = asset.upcomingReminder?.displayDate;
+            if (asset.upcomingReminder?.alertDateTime) {
+              try {
+                const date = new Date(asset.upcomingReminder.alertDateTime);
+                // Check if date is valid
+                if (!isNaN(date.getTime())) {
+                  value = formatDate(date);
+                } else {
+                  value = "";
+                }
+              } catch {
+                value = "";
+              }
+            } else {
+              value = "";
+            }
             break;
           }
           case "upcomingBookings": {
@@ -529,9 +541,10 @@ const formatCustomFieldForCsv = (
       }
       return fieldValue.valueBoolean ? "Yes" : "No";
 
-    case CustomFieldType.MULTILINE_TEXT:
+    case CustomFieldType.MULTILINE_TEXT: {
       const rawText = String(fieldValue.raw || "");
       return cleanMarkdownFormatting(rawText);
+    }
 
     case CustomFieldType.DATE:
       if (!fieldValue.valueDate) return "";
@@ -620,11 +633,10 @@ export async function exportBookingsFromIndexToCsv({
       });
     }
 
-    bookings = formatBookingsDates(bookings, request);
-
     // Pass both assets and columns to the build function
     const csvData = buildCsvExportDataFromBookings(
-      bookings as FlexibleBooking[]
+      bookings as FlexibleBooking[],
+      request
     );
 
     // Join rows with CRLF as per CSV spec
@@ -813,22 +825,26 @@ type FlexibleAsset = Partial<Asset> & {
 
 type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
   assets: FlexibleAsset[];
-  displayFrom?: string;
-  displayTo?: string;
-  displayOriginalFrom?: string;
-  displayOriginalTo?: string;
   tags: Pick<Tag, "name">[];
 };
 
 /**
  * Builds CSV export data from bookings
  * @param bookings - Array of bookings to export
+ * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromBookings = (
-  bookings: FlexibleBooking[]
+  bookings: FlexibleBooking[],
+  request: Request
 ): string[][] => {
   if (!bookings.length) return [];
+
+  // Create date formatter for CSV export
+  const format = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format;
 
   // Create headers row using column names
   const headers = {
@@ -837,13 +853,13 @@ export const buildCsvExportDataFromBookings = (
     name: "Name", // string
     status: "Status", // string
     from: "Actual start date", // date
+    originalFrom: "Planned start date",
     to: "Actual end date", // date
+    originalTo: "Planned end date",
     custodian: "Custodian",
     description: "Description", // string
     tags: "Tags",
     asset: "Assets", // New column for assets
-    originalFrom: "Planned start date",
-    originalTo: "Planned end date",
   };
 
   // Create data rows with assets
@@ -878,12 +894,27 @@ export const buildCsvExportDataFromBookings = (
             booking.status.slice(1).toLowerCase();
           break;
         case "from":
-          value = booking.displayFrom;
+          value = booking.from ? format(booking.from).split(",") : "";
           break;
+        case "originalFrom":
+          value = booking.originalFrom
+            ? format(booking.originalFrom).split(",")
+            : booking.from
+            ? format(booking.from).split(",")
+            : "";
+          break;
+
         case "to":
-          value = booking.displayTo;
+          value = booking.to ? format(booking.to).split(",") : "";
           break;
-        case "custodian":
+        case "originalTo":
+          value = booking.originalTo
+            ? format(booking.originalTo).split(",")
+            : booking.to
+            ? format(booking.to).split(",")
+            : "";
+          break;
+        case "custodian": {
           const teamMember = {
             name: booking.custodianTeamMember?.name ?? "",
             user: booking?.custodianUser
@@ -897,23 +928,13 @@ export const buildCsvExportDataFromBookings = (
 
           value = resolveTeamMemberName(teamMember, true);
           break;
+        }
         case "description":
           value = booking.description ?? "";
           break;
         case "asset":
           // Include the first asset title in the main booking row
           value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
-          break;
-        case "originalFrom":
-          value = booking.displayOriginalFrom
-            ? booking.displayOriginalFrom
-            : booking.displayFrom;
-          break;
-
-        case "originalTo":
-          value = booking.displayOriginalTo
-            ? booking.displayOriginalTo
-            : booking.displayTo;
           break;
 
         case "tags":

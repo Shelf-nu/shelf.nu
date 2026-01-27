@@ -691,7 +691,7 @@ export async function updateLocationImage({
       } else {
         imagePath = image;
       }
-    } catch (error) {
+    } catch (_error) {
       imagePath = image;
     }
 

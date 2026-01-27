@@ -1,12 +1,16 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
+import {
+  createLocationNote,
+  deleteLocationNote,
+} from "~/modules/location-note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
-  data,
+  payload,
   error,
   getActionMethod,
   getParams,
@@ -17,10 +21,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import {
-  createLocationNote,
-  deleteLocationNote,
-} from "~/modules/location-note/service.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -54,7 +54,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
         });
 
-        const payload = parseData(
+        const { content } = parseData(
           await request.formData(),
           MarkdownNoteSchema,
           {
@@ -63,7 +63,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         const note = await createLocationNote({
-          content: payload.content,
+          content,
           locationId,
           userId,
         });
@@ -75,7 +75,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data({ note }));
+        return payload({ note });
       }
       case "DELETE": {
         const { organizationId } = await requirePermission({
@@ -110,7 +110,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        return json(data(null));
+        return payload(null);
       }
       default: {
         throw notAllowedMethod(method);
@@ -118,7 +118,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { locationId, userId });
-    return json(error(reason), { status: reason.status });
+    return data(error(reason), { status: reason.status });
   }
 }
 

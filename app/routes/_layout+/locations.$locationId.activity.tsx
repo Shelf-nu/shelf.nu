@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
 import { z } from "zod";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -7,16 +7,16 @@ import { LocationNotes } from "~/components/location/notes";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getLocation } from "~/modules/location/service.server";
+import { getLocationNotes } from "~/modules/location-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
-import { getLocationNotes } from "~/modules/location-note/service.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -56,16 +56,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${location.name}'s activity`,
     };
 
-    return json(
-      data({
-        location: { id: location.id, name: location.name },
-        notes,
-        header,
-      })
-    );
+    return payload({
+      location: { id: location.id, name: location.name },
+      notes,
+      header,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { locationId, userId });
-    throw json(error(reason), { status: reason.status });
+    throw data(error(reason), { status: reason.status });
   }
 }
 
