@@ -115,19 +115,23 @@ export function parseData<Schema extends ZodType<any, any, any>>(
       }
     );
 
-    throw badRequest(
+    // Use the first validation error message as the main error message for better UX
+    const firstValidationError = Object.values(validationErrors)[0]?.message;
+    const errorMessage =
       options?.message ||
-        "The request is invalid. Please try again. If the issue persists, contact support.",
-      {
-        shouldBeCaptured: true,
-        ...options,
-        additionalData: {
-          ...options?.additionalData,
-          data,
-          validationErrors,
-        },
-      }
-    );
+      firstValidationError ||
+      "The request is invalid. Please try again. If the issue persists, contact support.";
+
+    throw badRequest(errorMessage, {
+      shouldBeCaptured: true,
+      title: "Validation error",
+      ...options,
+      additionalData: {
+        ...options?.additionalData,
+        data,
+        validationErrors,
+      },
+    });
   }
 
   return submission.data as Schema["_output"];

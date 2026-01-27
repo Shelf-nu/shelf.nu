@@ -272,8 +272,9 @@ describe(getParams.name, () => {
             },
           },
           label: "Request validation",
-          message:
-            "The request is invalid. Please try again. If the issue persists, contact support.",
+          // Uses the first validation error message for better UX
+          message: "Required",
+          title: "Validation error",
           traceId: expect.any(String),
         },
       });
@@ -303,6 +304,7 @@ describe(getParams.name, () => {
           },
           label: expect.any(String),
           message: expect.any(String),
+          title: "Validation error",
           traceId: expect.any(String),
         },
       });
@@ -346,9 +348,8 @@ describe(parseData.name, () => {
       expect(e).toBeInstanceOf(ShelfError);
       const error = e as ShelfError;
       expect(error.status).toEqual(400);
-      expect(error.message).toEqual(
-        "The request is invalid. Please try again. If the issue persists, contact support."
-      );
+      // Uses the first validation error message for better UX
+      expect(error.message).toEqual("Required");
       expect(error.additionalData).toEqual({
         data: {},
         validationErrors: {
