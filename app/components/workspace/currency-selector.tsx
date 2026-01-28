@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import {
@@ -44,6 +44,11 @@ export default function CurrencySelector({
         c.name.toLowerCase().includes(query)
     );
   }, [searchQuery]);
+
+  // Reset selected index when filtered results change to avoid out-of-bounds selection
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [filteredCurrencies.length]);
 
   function handleSelect(code: string) {
     setSelectedCurrency(code);

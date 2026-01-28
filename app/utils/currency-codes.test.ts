@@ -1,3 +1,4 @@
+import { Currency } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   CURRENCY_MAP,
@@ -57,6 +58,30 @@ describe("ISO 4217 Currency Codes", () => {
 
     it("should have at least 150 currencies (comprehensive ISO 4217 coverage)", () => {
       expect(ISO_4217_CURRENCIES.length).toBeGreaterThanOrEqual(150);
+    });
+
+    it("should be in sync with Prisma Currency enum", () => {
+      // Get all valid Prisma Currency enum values
+      const prismaCurrencies = Object.values(Currency);
+
+      // Verify every TS currency code is a valid Prisma enum value
+      for (const currency of ISO_4217_CURRENCIES) {
+        expect(
+          prismaCurrencies.includes(currency.code as Currency),
+          `Currency code ${currency.code} from currency-codes.ts is not in Prisma Currency enum`
+        ).toBe(true);
+      }
+
+      // Verify every Prisma enum value has a corresponding TS definition
+      for (const prismaCode of prismaCurrencies) {
+        expect(
+          ISO_4217_CURRENCIES.some((c) => c.code === prismaCode),
+          `Prisma Currency enum value ${prismaCode} is not in currency-codes.ts`
+        ).toBe(true);
+      }
+
+      // Verify counts match
+      expect(ISO_4217_CURRENCIES.length).toBe(prismaCurrencies.length);
     });
   });
 
