@@ -58,8 +58,8 @@ model User {
   assets            Asset[]
   categories        Category[]
   notes             Note[]
-  locationNotes     LocationNote[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
+  locationNotes     LocationNote[]     @relation("LocationNoteUser")
   qrCodes           Qr[]
   scans             Scan[]
   tags              Tag[]
@@ -95,6 +95,8 @@ model User {
 
   // This relationship will be used only when tierId == custom
   customTierLimit CustomTierLimit?
+
+  assetFilterPresets AssetFilterPreset[]
 
   @@unique([email, username])
   @@index([firstName, lastName])
@@ -218,6 +220,23 @@ enum AssetStatus {
   CHECKED_OUT
 }
 
+model AssetFilterPreset {
+  id             String   @id @default(cuid())
+  organizationId String
+  ownerId        String
+  name           String
+  query          String
+  starred        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, ownerId, name], map: "asset_filter_presets_owner_name_unique")
+  @@index([organizationId, ownerId], map: "asset_filter_presets_owner_lookup_idx")
+}
+
 model AssetIndexSettings {
   id String @id @default(cuid())
 
@@ -292,6 +311,7 @@ model Tag {
   id          String  @id @default(cuid())
   name        String
   description String?
+  color       String?
 
   useFor TagUseFor[] @default([ASSET])
 
@@ -365,9 +385,9 @@ model LocationNote {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user      User?     @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
-  userId    String?
-  location  Location  @relation("LocationNotes", fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user       User?    @relation("LocationNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId     String?
+  location   Location @relation("LocationNotes", fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   locationId String
 
   // Indexes for foreign keys
@@ -567,10 +587,16 @@ model Location {
   kits   Kit[]
   notes  LocationNote[] @relation("LocationNotes")
 
+  // Self-relation for nested locations
+  parentId String?
+  parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Location[] @relation("LocationHierarchy")
+
   // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, parentId])
 }
 
 // Master data for roles
@@ -685,6 +711,7 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
+  assetFilterPresets AssetFilterPreset[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -774,32 +801,32 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  canImportNRM     Boolean  @default(false)
-  canHideShelfBranding Boolean @default(false)
-  maxCustomFields  Int      @default(0)
-  maxOrganizations Int      @default(1)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   TierId   @id
+  tier                 Tier?
+  canImportAssets      Boolean  @default(false)
+  canExportAssets      Boolean  @default(false)
+  canImportNRM         Boolean  @default(false)
+  canHideShelfBranding Boolean  @default(false)
+  maxCustomFields      Int      @default(0)
+  maxOrganizations     Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId           String?  @unique // This is the foreign key
-  canImportAssets  Boolean  @default(true)
-  canExportAssets  Boolean  @default(true)
-  canImportNRM     Boolean  @default(true)
-  canHideShelfBranding Boolean @default(true)
-  maxCustomFields  Int      @default(1000)
-  maxOrganizations Int      @default(1)
-  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId               String?  @unique // This is the foreign key
+  canImportAssets      Boolean  @default(true)
+  canExportAssets      Boolean  @default(true)
+  canImportNRM         Boolean  @default(true)
+  canHideShelfBranding Boolean  @default(true)
+  maxCustomFields      Int      @default(1000)
+  maxOrganizations     Int      @default(1)
+  isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 model CustomField {
@@ -900,6 +927,7 @@ enum Currency {
   UGX // Ugandan Shilling
   ZAR // South African Rand
   PKR // Pakistani Rupee
+  RON // Romanian Leu
 }
 
 enum InviteStatuses {
@@ -993,10 +1021,10 @@ model Booking {
   partialCheckins PartialBookingCheckin[]
 
   // Datetime
-  createdAt DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime  @updatedAt @db.Timestamptz(3)
-  from      DateTime? @db.Timestamptz(3)
-  to        DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  from      DateTime @db.Timestamptz(3)
+  to        DateTime @db.Timestamptz(3)
 
   // When a booking is early check-in or early check-out, we store the original from and to
   // dates here and updated the from and to dates to current date (if users agrees to change) 
@@ -1208,6 +1236,7 @@ model Update {
   title       String
   content     String // Markdown content
   url         String? // Optional URL to redirect to when clicked
+  imageUrl    String? // Optional featured image URL (external hosting)
   publishDate DateTime // When the update should be visible to users
   status      UpdateStatus @default(DRAFT)
 
