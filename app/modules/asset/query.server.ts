@@ -632,6 +632,56 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     }
   }
 
+  // Add upcomingBookings handling to filter by booking ID
+  if (filter.name === "upcomingBookings") {
+    switch (filter.operator) {
+      case "is":
+        // Filter assets that are in the specified booking
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."_AssetToBooking" atb
+          JOIN public."Booking" bk ON atb."B" = bk.id
+          WHERE atb."A" = a.id
+          AND bk.id = ${filter.value}
+          AND bk.status IN ('DRAFT', 'RESERVED', 'ONGOING', 'OVERDUE')
+        )`;
+
+      case "isNot":
+        // Filter assets that are NOT in the specified booking
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM public."_AssetToBooking" atb
+          JOIN public."Booking" bk ON atb."B" = bk.id
+          WHERE atb."A" = a.id
+          AND bk.id = ${filter.value}
+          AND bk.status IN ('DRAFT', 'RESERVED', 'ONGOING', 'OVERDUE')
+        )`;
+
+      case "containsAny": {
+        const values = (
+          typeof filter.value === "string"
+            ? filter.value.split(",").map((v) => v.trim())
+            : Array.isArray(filter.value)
+            ? filter.value
+            : [filter.value]
+        ).filter(Boolean);
+
+        const bookingIdsArray = Prisma.join(
+          values.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
+        return Prisma.sql`${whereClause} AND EXISTS (
+          SELECT 1 FROM public."_AssetToBooking" atb
+          JOIN public."Booking" bk ON atb."B" = bk.id
+          WHERE atb."A" = a.id
+          AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
+          AND bk.status IN ('DRAFT', 'RESERVED', 'ONGOING', 'OVERDUE')
+        )`;
+      }
+
+      default:
+        return whereClause;
+    }
+  }
+
   // Add kit handling using asset's kitId since we're using LEFT JOIN
   if (filter.name === "kit") {
     switch (filter.operator) {

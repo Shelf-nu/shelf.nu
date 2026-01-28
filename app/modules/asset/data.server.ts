@@ -273,6 +273,9 @@ export async function simpleModeLoader({
        * */
       customFields: [],
       kits: [] as Kit[],
+      totalKits: 0,
+      bookings: [] as { id: string; name: string }[],
+      totalBookings: 0,
       // Those tags are used for the tags autocomplete on the booking form
       tagsData,
       // Saved filter presets
@@ -357,6 +360,8 @@ export async function advancedModeLoader({
     totalKits,
     tagsData,
     teamMembersForFormData,
+    bookings,
+    totalBookings,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -411,6 +416,26 @@ export async function advancedModeLoader({
             hasGetAllValue(searchParams, "teamMember"),
         })
       : Promise.resolve(null),
+
+    // Bookings for filter dropdown (upcoming bookings only)
+    db.booking.findMany({
+      where: {
+        organizationId,
+        status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+      },
+      select: { id: true, name: true },
+      take:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "booking")
+          ? undefined
+          : 12,
+      orderBy: { from: "asc" },
+    }),
+    db.booking.count({
+      where: {
+        organizationId,
+        status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+      },
+    }),
   ]);
 
   const header: HeaderData = {
@@ -484,6 +509,8 @@ export async function advancedModeLoader({
       tags,
       totalTags,
       tagsData,
+      bookings,
+      totalBookings,
       // Saved filter presets
       savedFilterPresets,
       savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
