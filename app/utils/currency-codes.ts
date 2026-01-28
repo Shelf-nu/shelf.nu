@@ -28,7 +28,7 @@ export interface CurrencyDefinition {
  * Complete list of active ISO 4217 currencies.
  * Sorted alphabetically by currency code.
  */
-export const ISO_4217_CURRENCIES: CurrencyDefinition[] = [
+export const ISO_4217_CURRENCIES: readonly CurrencyDefinition[] = [
   { code: "AED", name: "UAE Dirham", numericCode: "784", decimalDigits: 2 },
   { code: "AFN", name: "Afghani", numericCode: "971", decimalDigits: 2 },
   { code: "ALL", name: "Lek", numericCode: "008", decimalDigits: 2 },
@@ -434,7 +434,7 @@ export const ISO_4217_CURRENCIES: CurrencyDefinition[] = [
     numericCode: "932",
     decimalDigits: 2,
   },
-] as const;
+];
 
 /**
  * Array of ISO 4217 currency codes only (for validation, dropdowns, etc.)
