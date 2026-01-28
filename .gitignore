@@ -41,7 +41,7 @@ desktop-app/portable
 .npmrc
 
 .vscode
-
+.worktrees
 
 # Sentry Config File
 .sentryclirc
