@@ -1163,6 +1163,15 @@ export async function updateLocationAssets({
     }
 
     /**
+     * Filter out assets already at this location - they don't need notes
+     * since no actual change is happening for them.
+     */
+    const existingAssetIds = new Set(location.assets.map((a) => a.id));
+    const actuallyNewAssetIds = assetIds.filter(
+      (id) => !existingAssetIds.has(id)
+    );
+
+    /**
      * We need to query all the modified assets so we know their location before the change
      * That way we can later create notes for all the location changes
      */
@@ -1170,7 +1179,7 @@ export async function updateLocationAssets({
       .findMany({
         where: {
           id: {
-            in: [...assetIds, ...removedAssetIds],
+            in: [...actuallyNewAssetIds, ...removedAssetIds],
           },
           organizationId,
         },
@@ -1259,7 +1268,7 @@ export async function updateLocationAssets({
     /** Creates the relevant notes for all the changed assets */
     await createBulkLocationChangeNotes({
       modifiedAssets,
-      assetIds,
+      assetIds: actuallyNewAssetIds,
       removedAssetIds,
       userId,
       location,
@@ -1348,6 +1357,21 @@ export async function updateLocationKits({
       ];
     }
 
+    /**
+     * Filter out kits already at this location - they don't need notes
+     * since no actual change is happening for them.
+     */
+    const existingKitIds = new Set(location.kits.map((k) => k.id));
+    const actuallyNewKitIds = kitIds.filter((id) => !existingKitIds.has(id));
+
+    /**
+     * Also compute asset IDs that are already at this location via existing kits
+     * so we don't create duplicate notes for them.
+     */
+    const existingKitAssetIds = new Set(
+      location.kits.flatMap((kit) => kit.assets.map((a) => a.id))
+    );
+
     if (kitIds.length > 0) {
       // Get all asset IDs from the kits that are being added to this location
       const kitsToAdd = await db.kit.findMany({
@@ -1406,10 +1430,13 @@ export async function updateLocationKits({
         } satisfies Prisma.UserSelect,
       });
 
-      const kitsSummary = kitsToAdd.map((kit) => ({
-        id: kit.id,
-        name: kit.name ?? "",
-      }));
+      // Only include actually new kits in the summary note
+      const kitsSummary = kitsToAdd
+        .filter((kit) => actuallyNewKitIds.includes(kit.id))
+        .map((kit) => ({
+          id: kit.id,
+          name: kit.name ?? "",
+        }));
 
       if (kitsSummary.length > 0) {
         const userLink = wrapUserLinkForNote({
@@ -1428,8 +1455,11 @@ export async function updateLocationKits({
       }
 
       // Add notes to the assets that their location was updated via their parent kit
+      // Only include assets not already at this location
       if (assetIds.length > 0) {
-        const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
+        const allAssets = kitsToAdd
+          .flatMap((kit) => kit.assets)
+          .filter((asset) => !existingKitAssetIds.has(asset.id));
 
         // Create individual notes for each asset
         await Promise.all(
