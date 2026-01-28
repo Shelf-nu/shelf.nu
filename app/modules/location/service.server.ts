@@ -28,6 +28,12 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
+  wrapAssetsWithDataForNote,
+  wrapKitsWithDataForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
+import {
   getFileUploadPath,
   parseFileFormData,
   removePublicFile,
@@ -39,11 +45,56 @@ import {
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
+import {
+  createLocationNote as createLocationActivityNote,
+  createSystemLocationNote as createSystemLocationActivityNote,
+} from "../location-note/service.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
 const MAX_LOCATION_DEPTH = 12;
+
+/** Helper to safely display a value, showing a dash if empty */
+function safeDisplay(value?: string | null) {
+  return value?.trim() || "—";
+}
+
+/** Formats a location as a markdoc link for activity notes */
+function formatLocationLink(location: Pick<Location, "id" | "name">) {
+  const name = safeDisplay(location.name);
+  return wrapLinkForNote(`/locations/${location.id}`, name);
+}
+
+/** Builds a formatted list of assets for activity notes */
+function buildAssetListMarkup(
+  assets: Array<{ id: string; title: string }>,
+  action: "added" | "removed"
+) {
+  return assets
+    .map((asset) =>
+      wrapAssetsWithDataForNote(
+        { id: asset.id, title: safeDisplay(asset.title) },
+        action
+      )
+    )
+    .join(", ");
+}
+
+/** Builds a formatted list of kits for activity notes */
+function buildKitListMarkup(
+  kits: Array<{ id: string; name: string }>,
+  action: "added" | "removed"
+) {
+  return kits
+    .map((kit) =>
+      wrapKitsWithDataForNote(
+        { id: kit.id, name: safeDisplay(kit.name) },
+        action
+      )
+    )
+    .join(", ");
+}
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
@@ -1201,7 +1252,7 @@ async function createBulkLocationChangeNotes({
   assetIds: Asset["id"][];
   removedAssetIds: Asset["id"][];
   userId: User["id"];
-  location: Location;
+  location: Pick<Location, "id" | "name">;
 }) {
   try {
     const user = await db.user
@@ -1223,6 +1274,9 @@ async function createBulkLocationChangeNotes({
         });
       });
 
+    const addedAssets: Array<{ id: string; title: string }> = [];
+    const removedAssetsSummary: Array<{ id: string; title: string }> = [];
+
     // Iterate over the modified assets
     for (const asset of modifiedAssets) {
       const isRemoving = removedAssetIds.includes(asset.id);
@@ -1242,7 +1296,44 @@ async function createBulkLocationChangeNotes({
           userId,
           isRemoving,
         });
+
+        if (isNew && newLocation) {
+          addedAssets.push({ id: asset.id, title: asset.title });
+        }
+
+        if (isRemoving && currentLocation) {
+          removedAssetsSummary.push({ id: asset.id, title: asset.title });
+        }
       }
+    }
+
+    // Create summary notes on the location's activity log
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    if (addedAssets.length > 0) {
+      const content = `${userLink} added ${buildAssetListMarkup(
+        addedAssets,
+        "added"
+      )} to ${formatLocationLink(location)}.`;
+      await createSystemLocationActivityNote({
+        locationId: location.id,
+        content,
+      });
+    }
+
+    if (removedAssetsSummary.length > 0) {
+      const content = `${userLink} removed ${buildAssetListMarkup(
+        removedAssetsSummary,
+        "removed"
+      )} from ${formatLocationLink(location)}.`;
+      await createSystemLocationActivityNote({
+        locationId: location.id,
+        content,
+      });
     }
   } catch (cause) {
     throw new ShelfError({
@@ -1322,6 +1413,15 @@ export async function updateLocationAssets({
     }
 
     /**
+     * Filter out assets already at this location - they don't need notes
+     * since no actual change is happening for them.
+     */
+    const existingAssetIds = new Set(location.assets.map((a) => a.id));
+    const actuallyNewAssetIds = assetIds.filter(
+      (id) => !existingAssetIds.has(id)
+    );
+
+    /**
      * We need to query all the modified assets so we know their location before the change
      * That way we can later create notes for all the location changes
      */
@@ -1329,7 +1429,7 @@ export async function updateLocationAssets({
       .findMany({
         where: {
           id: {
-            in: [...assetIds, ...removedAssetIds],
+            in: [...actuallyNewAssetIds, ...removedAssetIds],
           },
           organizationId,
         },
@@ -1418,7 +1518,7 @@ export async function updateLocationAssets({
     /** Creates the relevant notes for all the changed assets */
     await createBulkLocationChangeNotes({
       modifiedAssets,
-      assetIds,
+      assetIds: actuallyNewAssetIds,
       removedAssetIds,
       userId,
       location,
@@ -1505,12 +1605,28 @@ export async function updateLocationKits({
       ];
     }
 
+    /**
+     * Filter out kits already at this location - they don't need notes
+     * since no actual change is happening for them.
+     */
+    const existingKitIds = new Set(location.kits.map((k) => k.id));
+    const actuallyNewKitIds = kitIds.filter((id) => !existingKitIds.has(id));
+
+    /**
+     * Also compute asset IDs that are already at this location via existing kits
+     * so we don't create duplicate notes for them.
+     */
+    const existingKitAssetIds = new Set(
+      location.kits.flatMap((kit) => kit.assets.map((a) => a.id))
+    );
+
     if (kitIds.length > 0) {
       // Get all asset IDs from the kits that are being added to this location
       const kitsToAdd = await db.kit.findMany({
         where: { id: { in: kitIds }, organizationId },
         select: {
           id: true,
+          name: true,
           assets: {
             select: {
               id: true,
@@ -1555,16 +1671,44 @@ export async function updateLocationKits({
           });
         });
 
-      // Add notes to the assets that their location was updated via their parent kit
-      if (assetIds.length > 0) {
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          } satisfies Prisma.UserSelect,
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      // Only include actually new kits in the summary note
+      const kitsSummary = kitsToAdd
+        .filter((kit) => actuallyNewKitIds.includes(kit.id))
+        .map((kit) => ({
+          id: kit.id,
+          name: kit.name ?? kit.id,
+        }));
+
+      if (kitsSummary.length > 0) {
+        const userLink = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
         });
-        const allAssets = kitsToAdd.flatMap((kit) => kit.assets);
+
+        await createSystemLocationActivityNote({
+          locationId,
+          content: `${userLink} added ${buildKitListMarkup(
+            kitsSummary,
+            "added"
+          )} to ${formatLocationLink(location)}.`,
+        });
+      }
+
+      // Add notes to the assets that their location was updated via their parent kit
+      // Only include assets not already at this location
+      if (assetIds.length > 0) {
+        const allAssets = kitsToAdd
+          .flatMap((kit) => kit.assets)
+          .filter((asset) => !existingKitAssetIds.has(asset.id));
 
         // Create individual notes for each asset
         await Promise.all(
@@ -1592,7 +1736,11 @@ export async function updateLocationKits({
       // Get asset IDs from the kits being removed
       const kitsBeingRemoved = await db.kit.findMany({
         where: { id: { in: removedKitIds }, organizationId },
-        select: { id: true, assets: { select: { id: true, title: true } } },
+        select: {
+          id: true,
+          name: true,
+          assets: { select: { id: true, title: true } },
+        },
       });
 
       const removedAssetIds = kitsBeingRemoved.flatMap((kit) =>
@@ -1638,6 +1786,28 @@ export async function updateLocationKits({
           } satisfies Prisma.UserSelect,
         });
         const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
+
+        // Create location activity note for removed kits
+        const removedKitsSummary = kitsBeingRemoved.map((kit) => ({
+          id: kit.id,
+          name: kit.name ?? kit.id,
+        }));
+
+        if (removedKitsSummary.length > 0) {
+          const userLink = wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          });
+
+          await createSystemLocationActivityNote({
+            locationId,
+            content: `${userLink} removed ${buildKitListMarkup(
+              removedKitsSummary,
+              "removed"
+            )} from ${formatLocationLink(location)}.`,
+          });
+        }
 
         // Create individual notes for each asset
         await Promise.all(
