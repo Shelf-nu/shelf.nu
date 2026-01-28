@@ -1,5 +1,6 @@
 import { type ActionFunctionArgs, redirect, data } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
@@ -17,6 +18,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         redirectTo: z.string().optional(),
       })
     );
+
+    // Persist to database for cross-device workspace persistence
+    await db.user.update({
+      where: { id: userId },
+      data: { lastSelectedOrganizationId: organizationId },
+    });
 
     return redirect(safeRedirect(redirectTo), {
       headers: [

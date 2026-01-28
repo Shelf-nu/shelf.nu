@@ -1,5 +1,6 @@
 import { createCookie } from "react-router";
 import { getRequestCache } from "@server/request-cache.server";
+import { db } from "~/database/db.server";
 import {
   destroyCookie,
   parseCookie,
@@ -75,11 +76,26 @@ async function getSelectedOrganizationUncached({
   const organizations = userOrganizations.map((uo) => uo.organization);
   const userOrganizationIds = organizations.map((org) => org.id);
 
-  // If the organizationId is not set or the user is not part of the organization, we set it to the personal organization
-  // This case should be extremely rare (be revoked from an organization while browsing it), so, I keep it simple
-  // 💡 This can be improved by implementing a system that sends an sse notification when a user is revoked and forcing the app to reload
+  // If the organizationId is not set or the user is not part of the organization,
+  // fall back to the last selected organization from the database (cross-device persistence),
+  // then to the personal organization, then to the first available organization
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-    organizationId = userOrganizationIds[0];
+    // Try to use the last selected organization from the database
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { lastSelectedOrganizationId: true },
+    });
+
+    if (
+      user?.lastSelectedOrganizationId &&
+      userOrganizationIds.includes(user.lastSelectedOrganizationId)
+    ) {
+      organizationId = user.lastSelectedOrganizationId;
+    } else {
+      // Fall back to personal organization, then first available
+      const personalOrg = organizations.find((org) => org.type === "PERSONAL");
+      organizationId = personalOrg?.id ?? userOrganizationIds[0];
+    }
   }
 
   const currentOrganization = organizations.find(
