@@ -199,6 +199,7 @@ export default function LocationPage() {
     { to: "overview", content: "Overview" },
     { to: "assets", content: "Assets" },
     { to: "kits", content: "Kits" },
+    { to: "activity", content: "Activity" },
   ];
 
   /**
