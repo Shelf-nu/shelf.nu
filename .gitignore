@@ -41,7 +41,7 @@ desktop-app/portable
 .npmrc
 
 .vscode
-
+.worktrees
 
 # Sentry Config File
 .sentryclirc
@@ -52,4 +52,3 @@ docs/.vitepress/cache
 docs/.vitepress/dist
 .vercel
 
-.react-router/types
