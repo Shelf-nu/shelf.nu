@@ -52,4 +52,4 @@ docs/.vitepress/cache
 docs/.vitepress/dist
 .vercel
 
-.react-router/types
+.react-router/types.worktrees/
