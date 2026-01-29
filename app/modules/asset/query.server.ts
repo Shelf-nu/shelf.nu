@@ -1104,7 +1104,7 @@ function addUpcomingBookingsFilter(
         return whereClause;
       }
 
-      // Handle "has-booking" - assets that have upcoming bookings
+      // "has-booking" subsumes specific booking IDs - just check for any upcoming booking
       if (hasBooking) {
         return Prisma.sql`${whereClause} AND ${bookingExistsSubquery}`;
       }
