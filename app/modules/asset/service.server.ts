@@ -3534,33 +3534,33 @@ export async function bulkUpdateAssetLocation({
       });
     }
 
-    // Group removed assets by their previous location
-    if (!newLocationId) {
-      const byLocation = new Map<
-        string,
-        { name: string; assets: typeof assetData }
-      >();
-      for (const asset of assets) {
-        if (asset.location) {
-          const existing = byLocation.get(asset.location.id);
-          if (existing) {
-            existing.assets.push({ id: asset.id, title: asset.title });
-          } else {
-            byLocation.set(asset.location.id, {
-              name: asset.location.name,
-              assets: [{ id: asset.id, title: asset.title }],
-            });
-          }
-        }
+    // Create removal notes on previous locations for assets that moved away
+    const byPrevLocation = new Map<
+      string,
+      { name: string; assets: typeof assetData }
+    >();
+    for (const asset of assets) {
+      // Skip assets that had no previous location or were already at the target
+      if (!asset.location || asset.location.id === newLocation?.id) {
+        continue;
       }
-      for (const [locId, { name, assets: locAssets }] of byLocation) {
-        const locationLink = wrapLinkForNote(`/locations/${locId}`, name);
-        const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
-        await createSystemLocationNote({
-          locationId: locId,
-          content: `${userLink} removed ${assetMarkup} from ${locationLink}.`,
+      const existing = byPrevLocation.get(asset.location.id);
+      if (existing) {
+        existing.assets.push({ id: asset.id, title: asset.title });
+      } else {
+        byPrevLocation.set(asset.location.id, {
+          name: asset.location.name,
+          assets: [{ id: asset.id, title: asset.title }],
         });
       }
+    }
+    for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
+      const locationLink = wrapLinkForNote(`/locations/${locId}`, name);
+      const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
+      await createSystemLocationNote({
+        locationId: locId,
+        content: `${userLink} removed ${assetMarkup} from ${locationLink}.`,
+      });
     }
 
     return true;
