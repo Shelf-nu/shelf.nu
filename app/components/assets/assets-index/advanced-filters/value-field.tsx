@@ -1356,6 +1356,134 @@ function KitEnumField({
   );
 }
 
+/** Component that handles upcoming bookings selection for both single and multi-select scenarios */
+function UpcomingBookingsEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected Booking IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    // Handle multi-select values
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "booking" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id,
+    }),
+    renderItem: (item: any) => item.name,
+    initialDataKey: "bookings",
+    countKey: "totalBookings",
+    label: "Filter by booking",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search bookings",
+    withValueItem: {
+      id: "has-booking",
+      name: "Has upcoming bookings",
+    },
+    withoutValueItem: {
+      id: "without-booking",
+      name: "No upcoming bookings",
+    },
+    disabled,
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        name={name}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0 &&
+                    data.bookings &&
+                    data.bookings.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        if (id === "has-booking") {
+                          return "Has upcoming bookings";
+                        }
+                        if (id === "without-booking") {
+                          return "No upcoming bookings";
+                        }
+                        const booking = data.bookings?.find((b) => b.id === id);
+                        return booking?.name || "";
+                      })
+                      .join(", ")
+                  : "Select booking"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "has-booking",
+            "without-booking"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      fieldName={name}
+      placeholder={disabled ? "Select a column first" : "Select booking"}
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Booking"
+    />
+  );
+}
+
 /** Component that handles tag selection for multi-select scenario  */
 function TagsField({
   handleChange,
@@ -1548,6 +1676,21 @@ function ValueEnumField({
     return (
       <>
         <KitEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "upcomingBookings") {
+    return (
+      <>
+        <UpcomingBookingsEnumField
           value={value}
           handleChange={handleChange}
           multiSelect={multiSelect}
