@@ -2,13 +2,14 @@ import { Currency } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   CURRENCY_MAP,
+  formatCurrency,
   getCurrencyDecimalDigits,
   getCurrencyDefinition,
   getCurrencyName,
   ISO_4217_CURRENCIES,
   ISO_4217_CURRENCY_CODES,
   isValidCurrencyCode,
-} from "./currency-codes";
+} from "./currency";
 
 describe("ISO 4217 Currency Codes", () => {
   describe("ISO_4217_CURRENCIES", () => {
@@ -68,7 +69,7 @@ describe("ISO 4217 Currency Codes", () => {
       for (const currency of ISO_4217_CURRENCIES) {
         expect(
           prismaCurrencies.includes(currency.code as Currency),
-          `Currency code ${currency.code} from currency-codes.ts is not in Prisma Currency enum`
+          `Currency code ${currency.code} from currency.ts is not in Prisma Currency enum`
         ).toBe(true);
       }
 
@@ -76,7 +77,7 @@ describe("ISO 4217 Currency Codes", () => {
       for (const prismaCode of prismaCurrencies) {
         expect(
           ISO_4217_CURRENCIES.some((c) => c.code === prismaCode),
-          `Prisma Currency enum value ${prismaCode} is not in currency-codes.ts`
+          `Prisma Currency enum value ${prismaCode} is not in currency.ts`
         ).toBe(true);
       }
 
@@ -172,5 +173,95 @@ describe("ISO 4217 Currency Codes", () => {
       expect(isValidCurrencyCode("US")).toBe(false);
       expect(isValidCurrencyCode("usd")).toBe(false); // case sensitive
     });
+  });
+});
+
+describe("formatCurrency", () => {
+  it("should format USD with 2 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.5,
+      currency: "USD" as Currency,
+      locale: "en-US",
+    });
+    expect(result).toBe("$1,234.50");
+  });
+
+  it("should format EUR with 2 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.5,
+      currency: "EUR" as Currency,
+      locale: "en-US",
+    });
+    // en-US locale formats EUR with symbol
+    expect(result).toContain("1,234.50");
+  });
+
+  it("should format JPY with 0 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234,
+      currency: "JPY" as Currency,
+      locale: "en-US",
+    });
+    // JPY should not have decimal places
+    expect(result).toBe("¥1,234");
+  });
+
+  it("should format KRW with 0 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234,
+      currency: "KRW" as Currency,
+      locale: "en-US",
+    });
+    // KRW should not have decimal places
+    expect(result).toContain("1,234");
+    expect(result).not.toContain(".");
+  });
+
+  it("should format BHD with 3 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.567,
+      currency: "BHD" as Currency,
+      locale: "en-US",
+    });
+    // BHD uses 3 decimal places
+    expect(result).toContain("1,234.567");
+  });
+
+  it("should format KWD with 3 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.567,
+      currency: "KWD" as Currency,
+      locale: "en-US",
+    });
+    // KWD uses 3 decimal places
+    expect(result).toContain("1,234.567");
+  });
+
+  it("should handle zero values", () => {
+    const result = formatCurrency({
+      value: 0,
+      currency: "USD" as Currency,
+      locale: "en-US",
+    });
+    expect(result).toBe("$0.00");
+  });
+
+  it("should handle negative values", () => {
+    const result = formatCurrency({
+      value: -1234.56,
+      currency: "USD" as Currency,
+      locale: "en-US",
+    });
+    expect(result).toBe("-$1,234.56");
+  });
+
+  it("should respect locale formatting", () => {
+    const result = formatCurrency({
+      value: 1234.56,
+      currency: "EUR" as Currency,
+      locale: "de-DE",
+    });
+    // German locale uses comma as decimal separator and period as thousands
+    expect(result).toContain("1.234,56");
   });
 });
