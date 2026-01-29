@@ -20,6 +20,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import AssetRowActionsDropdown from "~/components/location/asset-row-actions-dropdown";
+import { db } from "~/database/db.server";
 import ListBulkActionsDropdown from "~/components/location/list-bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
@@ -48,7 +49,8 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -198,18 +200,43 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })
         );
 
+        let resolvedAssetIds = assetIds;
+
+        /**
+         * When "Select all" is used, the assetIds array contains
+         * ALL_SELECTED_KEY. We need to expand it to actual asset
+         * IDs for the location, respecting any active filters.
+         */
+        if (assetIds.includes(ALL_SELECTED_KEY)) {
+          const searchParams = getCurrentSearchParams(request);
+          const assetsWhere = getAssetsWhereInput({
+            organizationId,
+            currentSearchParams: searchParams.toString(),
+          });
+
+          const allAssets = await db.asset.findMany({
+            where: {
+              ...assetsWhere,
+              locationId,
+            },
+            select: { id: true },
+          });
+
+          resolvedAssetIds = allAssets.map((a) => a.id);
+        }
+
         await updateLocationAssets({
           organizationId,
           locationId,
           userId,
           request,
           assetIds: [],
-          removedAssetIds: assetIds,
+          removedAssetIds: resolvedAssetIds,
         });
 
         sendNotification({
           title: "Assets removed",
-          message: `${assetIds.length} asset(s) removed from this location`,
+          message: `${resolvedAssetIds.length} asset(s) removed from this location`,
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
