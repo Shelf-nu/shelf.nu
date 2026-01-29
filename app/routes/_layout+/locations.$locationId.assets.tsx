@@ -20,7 +20,6 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import AssetRowActionsDropdown from "~/components/location/asset-row-actions-dropdown";
-import { db } from "~/database/db.server";
 import ListBulkActionsDropdown from "~/components/location/list-bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
@@ -30,9 +29,11 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import {
   getLocation,
   updateLocationAssets,
@@ -49,7 +50,6 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
