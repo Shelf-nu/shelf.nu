@@ -3483,35 +3483,42 @@ export async function bulkUpdateAssetLocation({
         })
       : null;
 
+    // Filter out assets already at the target location
+    const assetsToUpdate = assets.filter(
+      (a) => a.location?.id !== newLocation?.id
+    );
+
     await db.$transaction(async (tx) => {
-      /** Updating location of assets to newLocation */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { locationId: newLocation?.id ? newLocation.id : null },
-      });
+      if (assetsToUpdate.length > 0) {
+        /** Updating location of assets to newLocation */
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
+          data: { locationId: newLocation?.id ? newLocation.id : null },
+        });
 
-      /** Creating notes for the assets */
-      await tx.note.createMany({
-        data: assets.map((asset) => {
-          const isRemoving = !newLocationId;
+        /** Creating notes for the assets */
+        await tx.note.createMany({
+          data: assetsToUpdate.map((asset) => {
+            const isRemoving = !newLocationId;
 
-          const content = getLocationUpdateNoteContent({
-            currentLocation: asset.location,
-            newLocation,
-            userId,
-            firstName: user?.firstName ?? "",
-            lastName: user?.lastName ?? "",
-            isRemoving,
-          });
+            const content = getLocationUpdateNoteContent({
+              currentLocation: asset.location,
+              newLocation,
+              userId,
+              firstName: user?.firstName ?? "",
+              lastName: user?.lastName ?? "",
+              isRemoving,
+            });
 
-          return {
-            content,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          };
-        }),
-      });
+            return {
+              content,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
     });
 
     // Create location activity notes
