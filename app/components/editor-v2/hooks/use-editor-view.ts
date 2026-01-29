@@ -4,6 +4,7 @@ import type { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 
+import type { Slice } from "prosemirror-model";
 import {
   countRawBlocks,
   parseMarkdoc,
@@ -165,6 +166,12 @@ export function useEditorView(
             },
           };
         },
+      },
+      clipboardTextParser: (text: string, _$context, _plain): Slice => {
+        // When plain text is pasted, parse it as markdown so that
+        // markdown formatting (headings, bold, lists, etc.) is preserved.
+        const doc = parseMarkdoc(text, schema);
+        return doc.slice(0, doc.content.size);
       },
       handleDOMEvents: {
         focus: (_view, event) => {
