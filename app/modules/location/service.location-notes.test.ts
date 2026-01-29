@@ -155,22 +155,21 @@ describe("location service activity logging", () => {
   });
 
   describe("createLocationChangeNote", () => {
-    it("logs asset moves to the location activity", async () => {
+    it("creates an asset note for the location change", async () => {
       await createLocationChangeNote({
         currentLocation: { id: "loc-1", name: "Old" },
-        newLocation: { id: "loc-2", name: "New" } as any,
+        newLocation: { id: "loc-2", name: "New" },
         firstName: "Ada",
         lastName: "Lovelace",
         assetId: "asset-1",
-        assetTitle: "Camera",
         userId: "user-1",
         isRemoving: false,
       });
 
-      expect(locationNoteMocks.createLocationNote).toHaveBeenCalledWith(
+      expect(createNoteMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          locationId: "loc-2",
-          content: expect.stringContaining("Camera"),
+          assetId: "asset-1",
+          type: "UPDATE",
         })
       );
     });

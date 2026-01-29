@@ -1873,6 +1873,11 @@ export async function bulkUpdateKitLocation({
       });
 
       if (location) {
+        const locLink = wrapLinkForNote(
+          `/locations/${location.id}`,
+          location.name
+        );
+
         // Only count kits not already at the target location
         const actuallyMovedKits = kitsWithAssets.filter(
           (k) => k.locationId !== newLocationId
@@ -1883,10 +1888,6 @@ export async function bulkUpdateKitLocation({
             id: k.id,
             name: k.name,
           }));
-          const locLink = wrapLinkForNote(
-            `/locations/${location.id}`,
-            location.name
-          );
           const kitMarkup = wrapKitsWithDataForNote(kitData, "added");
           await createSystemLocationNote({
             locationId: location.id,

@@ -1301,7 +1301,7 @@ export async function createLocationChangeNote({
   isRemoving,
 }: {
   currentLocation: Pick<Location, "id" | "name"> | null;
-  newLocation: Location | null;
+  newLocation: Pick<Location, "id" | "name"> | null;
   firstName: string;
   lastName: string;
   assetId: Asset["id"];
