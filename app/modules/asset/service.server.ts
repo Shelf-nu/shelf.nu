@@ -1452,6 +1452,50 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+
+      // Create location activity notes
+      const userLink = wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+      const assetData = [{ id: asset.id, title: asset.title }];
+
+      if (newLocation) {
+        const newLocLink = wrapLinkForNote(
+          `/locations/${newLocation.id}`,
+          newLocation.name
+        );
+        const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+        const movedFrom = currentLocation
+          ? ` Moved from ${wrapLinkForNote(
+              `/locations/${currentLocation.id}`,
+              currentLocation.name
+            )}.`
+          : "";
+        await createSystemLocationNote({
+          locationId: newLocation.id,
+          content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
+        });
+      }
+
+      if (currentLocation && currentLocation.id !== newLocation?.id) {
+        const prevLocLink = wrapLinkForNote(
+          `/locations/${currentLocation.id}`,
+          currentLocation.name
+        );
+        const assetMarkup = wrapAssetsWithDataForNote(assetData, "removed");
+        const movedTo = newLocation
+          ? ` Moved to ${wrapLinkForNote(
+              `/locations/${newLocation.id}`,
+              newLocation.name
+            )}.`
+          : "";
+        await createSystemLocationNote({
+          locationId: currentLocation.id,
+          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
+        });
+      }
     }
 
     if (assetBeforeUpdate && trackedFieldUpdates) {
