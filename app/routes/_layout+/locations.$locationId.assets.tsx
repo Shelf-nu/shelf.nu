@@ -1,5 +1,9 @@
 import type { Asset, Category, Location, Tag } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, useLoaderData } from "react-router";
 import z from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -15,6 +19,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
+import AssetRowActionsDropdown from "~/components/location/asset-row-actions-dropdown";
+import ListBulkActionsDropdown from "~/components/location/list-bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -26,16 +32,21 @@ import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getLocation } from "~/modules/location/service.server";
+import {
+  getLocation,
+  updateLocationAssets,
+} from "~/modules/location/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   payload,
   error,
   getCurrentSearchParams,
   getParams,
+  parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -138,6 +149,83 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { locationId } = getParams(params, paramsSchema);
+
+  try {
+    const { organizationId } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.location,
+      action: PermissionAction.manageAssets,
+    });
+
+    const formData = await request.formData();
+    const intent = formData.get("intent") as string;
+
+    switch (intent) {
+      case "removeAsset": {
+        const { assetId } = parseData(
+          formData,
+          z.object({ assetId: z.string() })
+        );
+
+        await updateLocationAssets({
+          organizationId,
+          locationId,
+          userId,
+          request,
+          assetIds: [],
+          removedAssetIds: [assetId],
+        });
+
+        sendNotification({
+          title: "Asset removed",
+          message: "Asset has been removed from this location",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      case "bulk-remove-assets": {
+        const { assetIds } = parseData(
+          formData,
+          z.object({
+            assetIds: z.array(z.string()).min(1),
+          })
+        );
+
+        await updateLocationAssets({
+          organizationId,
+          locationId,
+          userId,
+          request,
+          assetIds: [],
+          removedAssetIds: assetIds,
+        });
+
+        sendNotification({
+          title: "Assets removed",
+          message: `${assetIds.length} asset(s) removed from this location`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      default:
+        throw new Error(`Unsupported intent: ${intent}`);
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, locationId });
+    return data(error(reason), { status: reason.status });
+  }
+}
+
 export default function LocationAssets() {
   const { roles } = useUserRoleHelper();
   const { location } = useLoaderData<typeof loader>();
@@ -222,12 +310,18 @@ export default function LocationAssets() {
         <List
           className=""
           ItemComponent={ListAssetContent}
-          extraItemComponentProps={{ canReadCustody }}
+          extraItemComponentProps={{
+            canReadCustody,
+            userRoleCanManageAssets,
+          }}
+          bulkActions={
+            userRoleCanManageAssets ? <ListBulkActionsDropdown /> : undefined
+          }
           headerChildren={
             <>
               <Th>Category</Th>
               <Th>Tags</Th>
-              <Th className="flex items-center gap-1 whitespace-nowrap">
+              <Th className="flex items-center gap-1 whitespace-nowrap md:border-b-0">
                 Custodian{" "}
                 <InfoTooltip
                   iconClassName="size-4"
@@ -245,6 +339,9 @@ export default function LocationAssets() {
                   }
                 />
               </Th>
+              <When truthy={userRoleCanManageAssets}>
+                <Th />
+              </When>
             </>
           }
           customEmptyStateContent={{
@@ -281,7 +378,7 @@ const ListAssetContent = ({
       };
     };
   };
-  extraProps: { canReadCustody: boolean };
+  extraProps: { canReadCustody: boolean; userRoleCanManageAssets: boolean };
 }) => {
   const { category, tags, custody } = item;
   return (
@@ -338,6 +435,11 @@ const ListAssetContent = ({
           ) : (
             <EmptyTableValue />
           )}
+        </Td>
+      </When>
+      <When truthy={extraProps.userRoleCanManageAssets}>
+        <Td>
+          <AssetRowActionsDropdown asset={item} />
         </Td>
       </When>
     </>
