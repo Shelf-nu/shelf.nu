@@ -225,6 +225,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           resolvedAssetIds = allAssets.map((a) => a.id);
         }
 
+        if (resolvedAssetIds.length === 0) {
+          return payload({
+            success: true,
+            message: "No assets matched the current selection",
+          });
+        }
+
         await updateLocationAssets({
           organizationId,
           locationId,
