@@ -321,7 +321,7 @@ export default function LocationAssets() {
             <>
               <Th>Category</Th>
               <Th>Tags</Th>
-              <Th className="flex items-center gap-1 whitespace-nowrap">
+              <Th className="flex items-center gap-1 whitespace-nowrap md:border-b-0">
                 Custodian{" "}
                 <InfoTooltip
                   iconClassName="size-4"
@@ -340,7 +340,7 @@ export default function LocationAssets() {
                 />
               </Th>
               <When truthy={userRoleCanManageAssets}>
-                <Th>Actions</Th>
+                <Th />
               </When>
             </>
           }
