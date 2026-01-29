@@ -71,14 +71,11 @@ function buildAssetListMarkup(
   assets: Array<{ id: string; title: string }>,
   action: "added" | "removed"
 ) {
-  return assets
-    .map((asset) =>
-      wrapAssetsWithDataForNote(
-        { id: asset.id, title: safeDisplay(asset.title) },
-        action
-      )
-    )
-    .join(", ");
+  const sanitized = assets.map((a) => ({
+    id: a.id,
+    title: safeDisplay(a.title),
+  }));
+  return wrapAssetsWithDataForNote(sanitized, action);
 }
 
 /** Builds a formatted list of kits for activity notes */

@@ -93,6 +93,8 @@ import { Logger } from "~/utils/logger";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
+  wrapAssetsWithDataForNote,
+  wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
@@ -142,6 +144,7 @@ import {
   createTagChangeNoteIfNeeded,
   type TagSummary,
 } from "../note/service.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -3510,6 +3513,55 @@ export async function bulkUpdateAssetLocation({
         }),
       });
     });
+
+    // Create location activity notes
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    const assetData = assets.map((a) => ({ id: a.id, title: a.title }));
+
+    if (newLocation && assetData.length > 0) {
+      const locationLink = wrapLinkForNote(
+        `/locations/${newLocation.id}`,
+        newLocation.name
+      );
+      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+      await createSystemLocationNote({
+        locationId: newLocation.id,
+        content: `${userLink} added ${assetMarkup} to ${locationLink}.`,
+      });
+    }
+
+    // Group removed assets by their previous location
+    if (!newLocationId) {
+      const byLocation = new Map<
+        string,
+        { name: string; assets: typeof assetData }
+      >();
+      for (const asset of assets) {
+        if (asset.location) {
+          const existing = byLocation.get(asset.location.id);
+          if (existing) {
+            existing.assets.push({ id: asset.id, title: asset.title });
+          } else {
+            byLocation.set(asset.location.id, {
+              name: asset.location.name,
+              assets: [{ id: asset.id, title: asset.title }],
+            });
+          }
+        }
+      }
+      for (const [locId, { name, assets: locAssets }] of byLocation) {
+        const locationLink = wrapLinkForNote(`/locations/${locId}`, name);
+        const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
+        await createSystemLocationNote({
+          locationId: locId,
+          content: `${userLink} removed ${assetMarkup} from ${locationLink}.`,
+        });
+      }
+    }
 
     return true;
   } catch (cause) {
