@@ -634,52 +634,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
   // Add upcomingBookings handling to filter by booking ID
   if (filter.name === "upcomingBookings") {
-    switch (filter.operator) {
-      case "is":
-        // Filter assets that are in the specified booking
-        return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."_AssetToBooking" atb
-          JOIN public."Booking" bk ON atb."B" = bk.id
-          WHERE atb."A" = a.id
-          AND bk.id = ${filter.value}
-          AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
-        )`;
-
-      case "isNot":
-        // Filter assets that are NOT in the specified booking
-        return Prisma.sql`${whereClause} AND NOT EXISTS (
-          SELECT 1 FROM public."_AssetToBooking" atb
-          JOIN public."Booking" bk ON atb."B" = bk.id
-          WHERE atb."A" = a.id
-          AND bk.id = ${filter.value}
-          AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
-        )`;
-
-      case "containsAny": {
-        const values = (
-          typeof filter.value === "string"
-            ? filter.value.split(",").map((v) => v.trim())
-            : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
-        ).filter(Boolean);
-
-        const bookingIdsArray = Prisma.join(
-          values.map((id) => Prisma.sql`${id}`),
-          ", "
-        );
-        return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."_AssetToBooking" atb
-          JOIN public."Booking" bk ON atb."B" = bk.id
-          WHERE atb."A" = a.id
-          AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
-          AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
-        )`;
-      }
-
-      default:
-        return whereClause;
-    }
+    return addUpcomingBookingsFilter(whereClause, filter);
   }
 
   // Add kit handling using asset's kitId since we're using LEFT JOIN
@@ -1086,6 +1041,116 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       return whereClause;
   }
 }
+/**
+ * Adds upcoming bookings filtering to the WHERE clause
+ * Handles "has-booking" and "without-booking" special values
+ */
+function addUpcomingBookingsFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter
+): Prisma.Sql {
+  const bookingExistsSubquery = Prisma.sql`EXISTS (
+    SELECT 1 FROM public."_AssetToBooking" atb
+    JOIN public."Booking" bk ON atb."B" = bk.id
+    WHERE atb."A" = a.id
+    AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+  )`;
+
+  switch (filter.operator) {
+    case "is":
+      if (filter.value === "has-booking") {
+        return Prisma.sql`${whereClause} AND ${bookingExistsSubquery}`;
+      }
+      if (filter.value === "without-booking") {
+        return Prisma.sql`${whereClause} AND NOT ${bookingExistsSubquery}`;
+      }
+      return Prisma.sql`${whereClause} AND EXISTS (
+        SELECT 1 FROM public."_AssetToBooking" atb
+        JOIN public."Booking" bk ON atb."B" = bk.id
+        WHERE atb."A" = a.id
+        AND bk.id = ${filter.value}
+        AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+      )`;
+
+    case "isNot":
+      if (filter.value === "has-booking") {
+        return Prisma.sql`${whereClause} AND NOT ${bookingExistsSubquery}`;
+      }
+      if (filter.value === "without-booking") {
+        return Prisma.sql`${whereClause} AND ${bookingExistsSubquery}`;
+      }
+      return Prisma.sql`${whereClause} AND NOT EXISTS (
+        SELECT 1 FROM public."_AssetToBooking" atb
+        JOIN public."Booking" bk ON atb."B" = bk.id
+        WHERE atb."A" = a.id
+        AND bk.id = ${filter.value}
+        AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+      )`;
+
+    case "containsAny": {
+      const values = (
+        typeof filter.value === "string"
+          ? filter.value.split(",").map((v) => v.trim())
+          : Array.isArray(filter.value)
+          ? filter.value
+          : [filter.value]
+      ).filter(Boolean);
+
+      const hasBooking = values.includes("has-booking");
+      const withoutBooking = values.includes("without-booking");
+
+      // If both are selected, match all assets
+      if (hasBooking && withoutBooking) {
+        return whereClause;
+      }
+
+      // Handle "has-booking" - assets that have upcoming bookings
+      if (hasBooking) {
+        return Prisma.sql`${whereClause} AND ${bookingExistsSubquery}`;
+      }
+
+      // Handle "without-booking" combined with specific booking IDs
+      if (withoutBooking) {
+        const bookingIds = values.filter((v) => v !== "without-booking");
+
+        if (bookingIds.length === 0) {
+          return Prisma.sql`${whereClause} AND NOT ${bookingExistsSubquery}`;
+        }
+
+        const bookingIdsArray = Prisma.join(
+          bookingIds.map((id) => Prisma.sql`${id}`),
+          ", "
+        );
+        return Prisma.sql`${whereClause} AND (
+          NOT ${bookingExistsSubquery}
+          OR EXISTS (
+            SELECT 1 FROM public."_AssetToBooking" atb
+            JOIN public."Booking" bk ON atb."B" = bk.id
+            WHERE atb."A" = a.id
+            AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
+            AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+          )
+        )`;
+      }
+
+      const bookingIdsArray = Prisma.join(
+        values.map((id) => Prisma.sql`${id}`),
+        ", "
+      );
+      return Prisma.sql`${whereClause} AND EXISTS (
+        SELECT 1 FROM public."_AssetToBooking" atb
+        JOIN public."Booking" bk ON atb."B" = bk.id
+        WHERE atb."A" = a.id
+        AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
+        AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+      )`;
+    }
+
+    default:
+      return whereClause;
+  }
+}
+
 /**
  * Handles array type filters (e.g., tags)
  * @param whereClause - The existing WHERE clause
