@@ -2,6 +2,7 @@ import { Text, ProgressCircle } from "@tremor/react";
 import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
+import { formatCurrency } from "~/utils/currency";
 import { EmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 import { InfoTooltip } from "../shared/info-tooltip";
@@ -64,9 +65,10 @@ export default function InventoryValueChart() {
                   Inventory value
                 </Text>
                 <Text className="mb-3 break-words !text-[30px] font-semibold text-gray-900">
-                  {(totalValuation || 0).toLocaleString(locale, {
-                    style: "currency",
-                    currency: currency,
+                  {formatCurrency({
+                    value: totalValuation || 0,
+                    locale,
+                    currency,
                   })}
                 </Text>
               </div>
