@@ -1312,14 +1312,56 @@ async function createBulkLocationChangeNotes({
     });
 
     if (addedAssets.length > 0) {
+      // Group added assets by their previous location for "Moved from" context
+      const byPrevLoc = new Map<string, string>();
+      for (const asset of modifiedAssets) {
+        if (assetIds.includes(asset.id) && asset.location) {
+          byPrevLoc.set(asset.location.id, asset.location.name);
+        }
+      }
+      const prevLocLinks = [...byPrevLoc.entries()].map(([id, name]) =>
+        wrapLinkForNote(`/locations/${id}`, name)
+      );
+      const movedFromSuffix =
+        prevLocLinks.length > 0
+          ? ` Moved from ${prevLocLinks.join(", ")}.`
+          : "";
+
       const content = `${userLink} added ${buildAssetListMarkup(
         addedAssets,
         "added"
-      )} to ${formatLocationLink(location)}.`;
+      )} to ${formatLocationLink(location)}.${movedFromSuffix}`;
       await createSystemLocationActivityNote({
         locationId: location.id,
         content,
       });
+
+      // Also create removal notes on previous locations
+      const byPrevLocation = new Map<
+        string,
+        { name: string; assets: typeof addedAssets }
+      >();
+      for (const asset of modifiedAssets) {
+        if (!assetIds.includes(asset.id) || !asset.location) continue;
+        const existing = byPrevLocation.get(asset.location.id);
+        if (existing) {
+          existing.assets.push({ id: asset.id, title: asset.title });
+        } else {
+          byPrevLocation.set(asset.location.id, {
+            name: asset.location.name,
+            assets: [{ id: asset.id, title: asset.title }],
+          });
+        }
+      }
+      for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
+        const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+        const assetMarkup = buildAssetListMarkup(locAssets, "removed");
+        const movedTo = ` Moved to ${formatLocationLink(location)}.`;
+        await createSystemLocationActivityNote({
+          locationId: locId,
+          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
+        });
+      }
     }
 
     if (removedAssetsSummary.length > 0) {

@@ -3522,25 +3522,12 @@ export async function bulkUpdateAssetLocation({
     });
     const assetData = assets.map((a) => ({ id: a.id, title: a.title }));
 
-    if (newLocation && assetData.length > 0) {
-      const locationLink = wrapLinkForNote(
-        `/locations/${newLocation.id}`,
-        newLocation.name
-      );
-      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
-      await createSystemLocationNote({
-        locationId: newLocation.id,
-        content: `${userLink} added ${assetMarkup} to ${locationLink}.`,
-      });
-    }
-
-    // Create removal notes on previous locations for assets that moved away
+    // Group assets by their previous location
     const byPrevLocation = new Map<
       string,
       { name: string; assets: typeof assetData }
     >();
     for (const asset of assets) {
-      // Skip assets that had no previous location or were already at the target
       if (!asset.location || asset.location.id === newLocation?.id) {
         continue;
       }
@@ -3554,12 +3541,42 @@ export async function bulkUpdateAssetLocation({
         });
       }
     }
+
+    // Note on the new location
+    if (newLocation && assetData.length > 0) {
+      const newLocLink = wrapLinkForNote(
+        `/locations/${newLocation.id}`,
+        newLocation.name
+      );
+      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+
+      const prevLocLinks = [...byPrevLocation.entries()].map(([id, { name }]) =>
+        wrapLinkForNote(`/locations/${id}`, name)
+      );
+      const movedFromSuffix =
+        prevLocLinks.length > 0
+          ? ` Moved from ${prevLocLinks.join(", ")}.`
+          : "";
+
+      await createSystemLocationNote({
+        locationId: newLocation.id,
+        content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
+      });
+    }
+
+    // Removal notes on previous locations
     for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
-      const locationLink = wrapLinkForNote(`/locations/${locId}`, name);
+      const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
       const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
+      const movedToSuffix = newLocation
+        ? ` Moved to ${wrapLinkForNote(
+            `/locations/${newLocation.id}`,
+            newLocation.name
+          )}.`
+        : "";
       await createSystemLocationNote({
         locationId: locId,
-        content: `${userLink} removed ${assetMarkup} from ${locationLink}.`,
+        content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
       });
     }
 
