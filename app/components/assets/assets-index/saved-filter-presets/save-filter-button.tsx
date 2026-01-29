@@ -90,10 +90,10 @@ export function SaveFilterButton({
   const title = atLimit
     ? `Maximum ${savedFilterPresetLimit} presets allowed`
     : hasUnappliedFilters
-    ? "Apply filters first before saving"
-    : !hasFilters
-    ? "No filters to save"
-    : "Save current filters";
+      ? "Apply filters first before saving"
+      : !hasFilters
+        ? "No filters to save"
+        : "Save current filters";
 
   return (
     <>

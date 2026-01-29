@@ -101,10 +101,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     disabled ||
     Boolean(
       bookingStatus?.isReserved ||
-        bookingStatus?.isOngoing ||
-        bookingStatus?.isCompleted ||
-        bookingStatus?.isOverdue ||
-        bookingStatus?.isCancelled
+      bookingStatus?.isOngoing ||
+      bookingStatus?.isCompleted ||
+      bookingStatus?.isOverdue ||
+      bookingStatus?.isCancelled
     );
   const bookingSettings = useBookingSettings();
 
@@ -243,10 +243,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                         reason: bookingFlags?.hasUnavailableAssets
                           ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
                           : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
-                          : isProcessing || isLoadingWorkingHours
-                          ? undefined
-                          : "You need to add assets to your booking before you can reserve it",
+                            ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                            : isProcessing || isLoadingWorkingHours
+                              ? undefined
+                              : "You need to add assets to your booking before you can reserve it",
                       }
                     : false
                 }
@@ -276,10 +276,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                         reason: bookingFlags?.hasAssetsInCustody
                           ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
                           : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can check-out"
-                          : isProcessing || isLoadingWorkingHours
-                          ? undefined
-                          : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
+                            ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can check-out"
+                            : isProcessing || isLoadingWorkingHours
+                              ? undefined
+                              : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
                       }
                     : false
                 }
