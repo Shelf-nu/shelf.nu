@@ -1393,6 +1393,14 @@ function UpcomingBookingsEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search bookings",
+    withValueItem: {
+      id: "has-booking",
+      name: "Has upcoming bookings",
+    },
+    withoutValueItem: {
+      id: "without-booking",
+      name: "No upcoming bookings",
+    },
     disabled,
   };
 
@@ -1421,6 +1429,12 @@ function UpcomingBookingsEnumField({
                     data.bookings.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "has-booking") {
+                          return "Has upcoming bookings";
+                        }
+                        if (id === "without-booking") {
+                          return "No upcoming bookings";
+                        }
                         const booking = data.bookings?.find((b) => b.id === id);
                         return booking?.name || "";
                       })
@@ -1435,8 +1449,16 @@ function UpcomingBookingsEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedBookingIds) => {
-          handleChange(selectedBookingIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "has-booking",
+            "without-booking"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
