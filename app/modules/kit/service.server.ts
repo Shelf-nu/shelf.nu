@@ -45,6 +45,7 @@ import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapCustodianForNote,
+  wrapKitsWithDataForNote,
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -69,6 +70,7 @@ import {
   createNote,
   createNotes,
 } from "../note/service.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -1735,6 +1737,8 @@ export async function bulkUpdateKitLocation({
       select: {
         id: true,
         name: true,
+        locationId: true,
+        location: { select: { id: true, name: true } },
         assets: {
           select: {
             id: true,
@@ -1845,6 +1849,106 @@ export async function bulkUpdateKitLocation({
             })
           )
         );
+      }
+    }
+
+    // Create location activity notes
+    const userForNote = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: userForNote?.firstName,
+      lastName: userForNote?.lastName,
+    });
+
+    if (newLocationId && newLocationId.trim() !== "") {
+      const location = await db.location.findUnique({
+        where: { id: newLocationId },
+        select: { id: true, name: true },
+      });
+
+      if (location) {
+        // Only count kits not already at the target location
+        const actuallyMovedKits = kitsWithAssets.filter(
+          (k) => k.locationId !== newLocationId
+        );
+
+        if (actuallyMovedKits.length > 0) {
+          const kitData = actuallyMovedKits.map((k) => ({
+            id: k.id,
+            name: k.name,
+          }));
+          const locLink = wrapLinkForNote(
+            `/locations/${location.id}`,
+            location.name
+          );
+          const kitMarkup = wrapKitsWithDataForNote(kitData, "added");
+          await createSystemLocationNote({
+            locationId: location.id,
+            content: `${userLink} added ${kitMarkup} to ${locLink}.`,
+          });
+        }
+
+        // Removal notes on previous locations
+        const byPrevLoc = new Map<
+          string,
+          { name: string; kits: Array<{ id: string; name: string }> }
+        >();
+        for (const kit of actuallyMovedKits) {
+          if (!kit.locationId || kit.locationId === newLocationId) continue;
+          const prevLocName = kit.location?.name ?? "Unknown location";
+          const prevLocId = kit.locationId;
+          const existing = byPrevLoc.get(prevLocId);
+          if (existing) {
+            existing.kits.push({ id: kit.id, name: kit.name });
+          } else {
+            byPrevLoc.set(prevLocId, {
+              name: prevLocName,
+              kits: [{ id: kit.id, name: kit.name }],
+            });
+          }
+        }
+        for (const [locId, { name, kits }] of byPrevLoc) {
+          const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+          const kitMarkup = wrapKitsWithDataForNote(kits, "removed");
+          const movedTo = ` Moved to ${locLink}.`;
+          await createSystemLocationNote({
+            locationId: locId,
+            content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.${movedTo}`,
+          });
+        }
+      }
+    } else {
+      // Kits removed from location — create removal notes
+      const byPrevLoc = new Map<
+        string,
+        { name: string; kits: Array<{ id: string; name: string }> }
+      >();
+      for (const kit of kitsWithAssets) {
+        if (!kit.locationId) continue;
+        const prevLocName = kit.location?.name ?? "Unknown location";
+        const existing = byPrevLoc.get(kit.locationId);
+        if (existing) {
+          existing.kits.push({ id: kit.id, name: kit.name });
+        } else {
+          byPrevLoc.set(kit.locationId, {
+            name: prevLocName,
+            kits: [{ id: kit.id, name: kit.name }],
+          });
+        }
+      }
+      for (const [locId, { name, kits }] of byPrevLoc) {
+        const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+        const kitMarkup = wrapKitsWithDataForNote(kits, "removed");
+        await createSystemLocationNote({
+          locationId: locId,
+          content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.`,
+        });
       }
     }
 

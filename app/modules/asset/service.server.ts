@@ -3520,17 +3520,22 @@ export async function bulkUpdateAssetLocation({
       firstName: user?.firstName,
       lastName: user?.lastName,
     });
-    const assetData = assets.map((a) => ({ id: a.id, title: a.title }));
+    // Filter out assets already at the target location
+    const actuallyChanged = assets.filter(
+      (a) => a.location?.id !== newLocation?.id
+    );
+    const assetData = actuallyChanged.map((a) => ({
+      id: a.id,
+      title: a.title,
+    }));
 
     // Group assets by their previous location
     const byPrevLocation = new Map<
       string,
       { name: string; assets: typeof assetData }
     >();
-    for (const asset of assets) {
-      if (!asset.location || asset.location.id === newLocation?.id) {
-        continue;
-      }
+    for (const asset of actuallyChanged) {
+      if (!asset.location) continue;
       const existing = byPrevLocation.get(asset.location.id);
       if (existing) {
         existing.assets.push({ id: asset.id, title: asset.title });
