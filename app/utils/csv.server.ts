@@ -666,7 +666,7 @@ type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
 };
 
 const sanitizeCsvValue = (value: string | null | undefined) =>
-  formatValueForCsv((value ?? "").replace(/\r?\n/g, "\\n"));
+  formatValueForCsv((value ?? "").replace(/\r?\n/g, " "));
 
 const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
   const rows = notes.map((note) => {
