@@ -46,10 +46,7 @@ import {
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
-import {
-  createLocationNote as createLocationActivityNote,
-  createSystemLocationNote as createSystemLocationActivityNote,
-} from "../location-note/service.server";
+import { createSystemLocationNote as createSystemLocationActivityNote } from "../location-note/service.server";
 import { createNote } from "../note/service.server";
 import { getUserByID } from "../user/service.server";
 
