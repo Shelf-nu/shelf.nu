@@ -421,7 +421,7 @@ export async function advancedModeLoader({
     db.booking.findMany({
       where: {
         organizationId,
-        status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
       },
       select: { id: true, name: true },
       take:
@@ -433,7 +433,7 @@ export async function advancedModeLoader({
     db.booking.count({
       where: {
         organizationId,
-        status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
       },
     }),
   ]);

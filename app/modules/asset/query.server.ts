@@ -642,7 +642,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           JOIN public."Booking" bk ON atb."B" = bk.id
           WHERE atb."A" = a.id
           AND bk.id = ${filter.value}
-          AND bk.status IN ('DRAFT', 'RESERVED', 'ONGOING', 'OVERDUE')
+          AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
         )`;
 
       case "isNot":
@@ -652,7 +652,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           JOIN public."Booking" bk ON atb."B" = bk.id
           WHERE atb."A" = a.id
           AND bk.id = ${filter.value}
-          AND bk.status IN ('DRAFT', 'RESERVED', 'ONGOING', 'OVERDUE')
+          AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
         )`;
 
       case "containsAny": {
@@ -673,7 +673,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           JOIN public."Booking" bk ON atb."B" = bk.id
           WHERE atb."A" = a.id
           AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
-          AND bk.status IN ('DRAFT', 'RESERVED', 'ONGOING', 'OVERDUE')
+          AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
         )`;
       }
 
