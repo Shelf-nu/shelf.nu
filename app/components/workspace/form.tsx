@@ -9,7 +9,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { defaultValidateFileAtom, fileErrorAtom } from "~/atoms/file";
 import { useSearchParams } from "~/hooks/search-params";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
-import { ISO_4217_CURRENCIES } from "~/utils/currency-codes";
+import { ISO_4217_CURRENCIES } from "~/utils/currency";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";

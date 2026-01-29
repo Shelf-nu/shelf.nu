@@ -873,7 +873,7 @@ model AssetCustomFieldValue {
 }
 
 // ISO 4217 Currency Codes
-// See app/utils/currency-codes.ts for the canonical list with full metadata
+// See app/utils/currency.ts for the canonical list with full metadata
 // Sorted alphabetically by currency code
 enum Currency {
   AED // UAE Dirham

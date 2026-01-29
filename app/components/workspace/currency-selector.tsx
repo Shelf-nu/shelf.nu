@@ -8,7 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
-import { getCurrencyName, ISO_4217_CURRENCIES } from "~/utils/currency-codes";
+import { getCurrencyName, ISO_4217_CURRENCIES } from "~/utils/currency";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import When from "../when/when";
