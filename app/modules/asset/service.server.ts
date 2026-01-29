@@ -135,6 +135,7 @@ import {
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createAssetCategoryChangeNote,
   createAssetDescriptionChangeNote,
@@ -144,7 +145,6 @@ import {
   createTagChangeNoteIfNeeded,
   type TagSummary,
 } from "../note/service.server";
-import { createSystemLocationNote } from "../location-note/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";

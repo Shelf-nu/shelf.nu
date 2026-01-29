@@ -65,12 +65,12 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createBulkKitChangeNotes,
   createNote,
   createNotes,
 } from "../note/service.server";
-import { createSystemLocationNote } from "../location-note/service.server";
 import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
