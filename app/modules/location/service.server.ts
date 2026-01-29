@@ -29,6 +29,7 @@ import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   wrapAssetsWithDataForNote,
+  wrapDescriptionForNote,
   wrapKitsWithDataForNote,
   wrapLinkForNote,
   wrapUserLinkForNote,
@@ -717,10 +718,18 @@ export async function updateLocation(payload: {
     payload;
 
   try {
-    // Get the current location to check if address changed
+    // Get the current location to check for changes
     const currentLocation = await db.location.findUniqueOrThrow({
       where: { id, organizationId },
-      select: { address: true, latitude: true, longitude: true },
+      select: {
+        name: true,
+        description: true,
+        address: true,
+        latitude: true,
+        longitude: true,
+        parentId: true,
+        parent: { select: { id: true, name: true } },
+      },
     });
 
     // Check if address has changed and geocode if necessary
@@ -746,7 +755,7 @@ export async function updateLocation(payload: {
             currentLocationId: id,
           });
 
-    return await db.location.update({
+    const updatedLocation = await db.location.update({
       where: { id, organizationId },
       data: {
         name,
@@ -767,6 +776,21 @@ export async function updateLocation(payload: {
         }),
       },
     });
+
+    // Create location activity notes for changed fields
+    await createLocationEditNotes({
+      locationId: id,
+      userId,
+      previous: currentLocation,
+      next: {
+        name,
+        description,
+        address,
+        parentId: validatedParentId,
+      },
+    });
+
+    return updatedLocation;
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -779,6 +803,100 @@ export async function updateLocation(payload: {
       },
     });
   }
+}
+
+async function createLocationEditNotes({
+  locationId,
+  userId,
+  previous,
+  next,
+}: {
+  locationId: string;
+  userId: string;
+  previous: {
+    name: string;
+    description: string | null;
+    address: string | null;
+    parentId: string | null;
+    parent: { id: string; name: string } | null;
+  };
+  next: {
+    name?: string;
+    description?: string | null;
+    address?: string | null;
+    parentId?: string | null;
+  };
+}) {
+  const escape = (v: string) => `**${v.replace(/([*_`~])/g, "\\$1")}**`;
+  const changes: string[] = [];
+
+  // Name change
+  if (next.name !== undefined && next.name !== previous.name) {
+    changes.push(`- **Name:** ${escape(previous.name)} → ${escape(next.name)}`);
+  }
+
+  // Description change
+  if (next.description !== undefined) {
+    const prev = previous.description?.trim() || null;
+    const curr = next.description?.trim() || null;
+    if (prev !== curr) {
+      const tag = wrapDescriptionForNote(prev, curr);
+      changes.push(`- **Description:** ${tag}`);
+    }
+  }
+
+  // Address change
+  if (next.address !== undefined) {
+    const prev = previous.address?.trim() || null;
+    const curr = next.address?.trim() || null;
+    if (prev !== curr) {
+      const prevDisplay = prev ? escape(prev) : "*none*";
+      const currDisplay = curr ? escape(curr) : "*none*";
+      changes.push(`- **Address:** ${prevDisplay} → ${currDisplay}`);
+    }
+  }
+
+  // Parent location change
+  if (next.parentId !== undefined && next.parentId !== previous.parentId) {
+    const prevParent = previous.parent
+      ? wrapLinkForNote(
+          `/locations/${previous.parent.id}`,
+          previous.parent.name
+        )
+      : "*none*";
+
+    let newParentDisplay = "*none*";
+    if (next.parentId) {
+      const newParent = await db.location.findUnique({
+        where: { id: next.parentId },
+        select: { id: true, name: true },
+      });
+      newParentDisplay = newParent
+        ? wrapLinkForNote(`/locations/${newParent.id}`, newParent.name)
+        : "*unknown*";
+    }
+
+    changes.push(`- **Parent:** ${prevParent} → ${newParentDisplay}`);
+  }
+
+  if (changes.length === 0) return;
+
+  const user = await db.user.findFirst({
+    where: { id: userId },
+    select: { firstName: true, lastName: true },
+  });
+  const userLink = wrapUserLinkForNote({
+    id: userId,
+    firstName: user?.firstName,
+    lastName: user?.lastName,
+  });
+
+  const content = `${userLink} updated the location:\n\n${changes.join("\n")}`;
+
+  await createSystemLocationActivityNote({
+    locationId,
+    content,
+  });
 }
 
 export async function createLocationsIfNotExists({
