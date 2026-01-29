@@ -1781,6 +1781,8 @@ export async function updateLocationKits({
         select: {
           id: true,
           name: true,
+          locationId: true,
+          location: { select: { id: true, name: true } },
           assets: {
             select: {
               id: true,
@@ -1848,13 +1850,63 @@ export async function updateLocationKits({
           lastName: user?.lastName,
         });
 
+        // Build "Moved from" context for kits coming from other locations
+        const actuallyNewKits = kitsToAdd.filter((kit) =>
+          actuallyNewKitIds.includes(kit.id)
+        );
+        const prevLocLinks = [
+          ...new Map(
+            actuallyNewKits
+              .filter((k) => k.locationId && k.locationId !== locationId)
+              .map((k) => [
+                k.locationId!,
+                wrapLinkForNote(
+                  `/locations/${k.locationId}`,
+                  k.location?.name ?? "Unknown"
+                ),
+              ])
+          ).values(),
+        ];
+        const movedFromSuffix =
+          prevLocLinks.length > 0
+            ? ` Moved from ${prevLocLinks.join(", ")}.`
+            : "";
+
         await createSystemLocationActivityNote({
           locationId,
           content: `${userLink} added ${buildKitListMarkup(
             kitsSummary,
             "added"
-          )} to ${formatLocationLink(location)}.`,
+          )} to ${formatLocationLink(location)}.${movedFromSuffix}`,
         });
+
+        // Create removal notes on previous locations
+        const byPrevLoc = new Map<
+          string,
+          { name: string; kits: Array<{ id: string; name: string }> }
+        >();
+        for (const kit of actuallyNewKits) {
+          if (!kit.locationId || kit.locationId === locationId) continue;
+          const prevLocName = kit.location?.name ?? "Unknown";
+          const existing = byPrevLoc.get(kit.locationId);
+          if (existing) {
+            existing.kits.push({ id: kit.id, name: kit.name ?? kit.id });
+          } else {
+            byPrevLoc.set(kit.locationId, {
+              name: prevLocName,
+              kits: [{ id: kit.id, name: kit.name ?? kit.id }],
+            });
+          }
+        }
+        for (const [locId, { name, kits }] of byPrevLoc) {
+          const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+          const kitMarkup = buildKitListMarkup(kits, "removed");
+          const movedTo = ` Moved to ${formatLocationLink(location)}.`;
+          await createSystemLocationActivityNote({
+            locationId: locId,
+            content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.${movedTo}`,
+          });
+        }
       }
 
       // Add notes to the assets that their location was updated via their parent kit
