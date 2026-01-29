@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useLoaderData } from "react-router";
+import { useParams } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
@@ -16,7 +16,7 @@ export default function BulkRemoveAssetsFromLocationDialog() {
     BulkRemoveAssetsFromLocationSchema
   );
   const totalSelectedItems = useAtomValue(selectedBulkItemsCountAtom);
-  const { location } = useLoaderData<{ location: { id: string } }>();
+  const { locationId } = useParams<{ locationId: string }>();
 
   return (
     <BulkUpdateDialogContent
@@ -25,7 +25,7 @@ export default function BulkRemoveAssetsFromLocationDialog() {
       title={`Remove selected assets (${totalSelectedItems})`}
       arrayFieldId="assetIds"
       description={`Are you sure you want to remove ${totalSelectedItems} selected asset(s) from this location?`}
-      actionUrl={`/locations/${location.id}/assets`}
+      actionUrl={`/locations/${locationId}/assets`}
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <>

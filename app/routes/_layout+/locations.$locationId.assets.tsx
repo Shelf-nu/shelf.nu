@@ -29,11 +29,10 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
-import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
   getLocation,
   updateLocationAssets,
@@ -50,7 +49,7 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -200,30 +199,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })
         );
 
-        let resolvedAssetIds = assetIds;
-
-        /**
-         * When "Select all" is used, the assetIds array contains
-         * ALL_SELECTED_KEY. We need to expand it to actual asset
-         * IDs for the location, respecting any active filters.
-         */
-        if (assetIds.includes(ALL_SELECTED_KEY)) {
-          const searchParams = getCurrentSearchParams(request);
-          const assetsWhere = getAssetsWhereInput({
-            organizationId,
-            currentSearchParams: searchParams.toString(),
-          });
-
-          const allAssets = await db.asset.findMany({
-            where: {
-              ...assetsWhere,
-              locationId,
-            },
-            select: { id: true },
-          });
-
-          resolvedAssetIds = allAssets.map((a) => a.id);
-        }
+        const resolvedAssetIds = await resolveLocationAssetIds({
+          ids: assetIds,
+          organizationId,
+          locationId,
+          request,
+        });
 
         if (resolvedAssetIds.length === 0) {
           return payload({

@@ -26,11 +26,10 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
-import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getKitsWhereInput } from "~/modules/kit/utils.server";
+import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
 import {
   getLocationKits,
   updateLocationKits,
@@ -47,7 +46,7 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
-import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
+import { getParamsValues } from "~/utils/list";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -187,30 +186,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })
         );
 
-        let resolvedKitIds = kitIds;
-
-        /**
-         * When "Select all" is used, the kitIds array contains
-         * ALL_SELECTED_KEY. We need to expand it to actual kit
-         * IDs for the location, respecting any active filters.
-         */
-        if (kitIds.includes(ALL_SELECTED_KEY)) {
-          const searchParams = getCurrentSearchParams(request);
-          const kitsWhere = getKitsWhereInput({
-            organizationId,
-            currentSearchParams: searchParams.toString(),
-          });
-
-          const allKits = await db.kit.findMany({
-            where: {
-              ...kitsWhere,
-              locationId,
-            },
-            select: { id: true },
-          });
-
-          resolvedKitIds = allKits.map((k) => k.id);
-        }
+        const resolvedKitIds = await resolveLocationKitIds({
+          ids: kitIds,
+          organizationId,
+          locationId,
+          request,
+        });
 
         if (resolvedKitIds.length === 0) {
           return payload({
