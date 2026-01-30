@@ -47,7 +47,8 @@ export async function createLocationNote({
 export async function createSystemLocationNote({
   content,
   locationId,
-}: Pick<LocationNote, "content" | "locationId">) {
+  userId,
+}: Pick<LocationNote, "content" | "locationId"> & { userId?: string }) {
   try {
     return await db.locationNote.create({
       data: {
@@ -56,6 +57,13 @@ export async function createSystemLocationNote({
         location: {
           connect: { id: locationId },
         },
+        ...(userId
+          ? {
+              user: {
+                connect: { id: userId },
+              },
+            }
+          : {}),
       },
     });
   } catch (cause) {

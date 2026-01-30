@@ -1892,6 +1892,7 @@ export async function bulkUpdateKitLocation({
           await createSystemLocationNote({
             locationId: location.id,
             content: `${userLink} added ${kitMarkup} to ${locLink}.`,
+            userId,
           });
         }
 
@@ -1921,6 +1922,7 @@ export async function bulkUpdateKitLocation({
           await createSystemLocationNote({
             locationId: locId,
             content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.${movedTo}`,
+            userId,
           });
         }
       }
@@ -1949,6 +1951,7 @@ export async function bulkUpdateKitLocation({
         await createSystemLocationNote({
           locationId: locId,
           content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.`,
+          userId,
         });
       }
     }

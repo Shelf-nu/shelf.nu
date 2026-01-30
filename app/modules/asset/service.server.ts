@@ -1476,6 +1476,7 @@ export async function updateAsset({
         await createSystemLocationNote({
           locationId: newLocation.id,
           content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
+          userId,
         });
       }
 
@@ -1494,6 +1495,7 @@ export async function updateAsset({
         await createSystemLocationNote({
           locationId: currentLocation.id,
           content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
+          userId,
         });
       }
     }
@@ -3617,6 +3619,7 @@ export async function bulkUpdateAssetLocation({
       await createSystemLocationNote({
         locationId: newLocation.id,
         content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
+        userId,
       });
     }
 
@@ -3633,6 +3636,7 @@ export async function bulkUpdateAssetLocation({
       await createSystemLocationNote({
         locationId: locId,
         content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
+        userId,
       });
     }
 

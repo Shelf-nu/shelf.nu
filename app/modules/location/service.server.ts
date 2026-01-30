@@ -893,6 +893,7 @@ async function createLocationEditNotes({
   await createSystemLocationActivityNote({
     locationId,
     content,
+    userId,
   });
 }
 
@@ -1449,6 +1450,7 @@ async function createBulkLocationChangeNotes({
       await createSystemLocationActivityNote({
         locationId: location.id,
         content,
+        userId,
       });
 
       // Also create removal notes on previous locations
@@ -1475,6 +1477,7 @@ async function createBulkLocationChangeNotes({
         await createSystemLocationActivityNote({
           locationId: locId,
           content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
+          userId,
         });
       }
     }
@@ -1487,6 +1490,7 @@ async function createBulkLocationChangeNotes({
       await createSystemLocationActivityNote({
         locationId: location.id,
         content,
+        userId,
       });
     }
   } catch (cause) {
@@ -1878,6 +1882,7 @@ export async function updateLocationKits({
             kitsSummary,
             "added"
           )} to ${formatLocationLink(location)}.${movedFromSuffix}`,
+          userId,
         });
 
         // Create removal notes on previous locations
@@ -1905,6 +1910,7 @@ export async function updateLocationKits({
           await createSystemLocationActivityNote({
             locationId: locId,
             content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.${movedTo}`,
+            userId,
           });
         }
       }
@@ -2012,6 +2018,7 @@ export async function updateLocationKits({
               removedKitsSummary,
               "removed"
             )} from ${formatLocationLink(location)}.`,
+            userId,
           });
         }
 
