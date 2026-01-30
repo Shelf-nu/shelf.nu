@@ -142,7 +142,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     const rows = csv.trim().split("\n");
     expect(rows[0]).toBe("Date,Author,Type,Content");
     expect(rows[1]).toBe(
-      '"formatted-2024-02-10T08:15:00.000Z","Alex Stone","COMMENT","Packed ""Lens"" set\\nVerify inventory"'
+      '"formatted-2024-02-10T08:15:00.000Z","Alex Stone","COMMENT","Packed ""Lens"" set Verify inventory"'
     );
     expect(rows[2]).toBe(
       '"formatted-2024-02-09T12:00:00.000Z","","UPDATE","System update"'

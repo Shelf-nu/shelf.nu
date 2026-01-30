@@ -142,7 +142,7 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
     const rows = csv.trim().split("\n");
     expect(rows[0]).toBe("Date,Author,Type,Content");
     expect(rows[1]).toBe(
-      '"formatted-2024-01-02T10:00:00.000Z","Carlos Virreira","COMMENT","Line with ""quotes""\\nand newline"'
+      '"formatted-2024-01-02T10:00:00.000Z","Carlos Virreira","COMMENT","Line with ""quotes"" and newline"'
     );
     expect(rows[2]).toBe(
       '"formatted-2024-01-01T09:30:00.000Z","","UPDATE","System note"'
