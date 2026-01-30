@@ -296,9 +296,7 @@ export default function AuditOverview() {
     currentFilter === null ||
     currentFilter === "ALL" ||
     currentFilter === "EXPECTED";
-  const assignedUsers = session.assignments.filter(
-    (assignment) => assignment.userId !== session.createdById
-  );
+  const assignedUsers = session.assignments;
 
   const expectedCount = session.expectedAssetCount || 0;
   const foundCount = session.foundAssetCount || 0;
@@ -453,7 +451,18 @@ export default function AuditOverview() {
                         />
                       ))
                     ) : (
-                      <span>Not assigned </span>
+                      <span className="flex items-center gap-1">
+                        Not assigned
+                        <InfoTooltip
+                          iconClassName="size-4"
+                          content={
+                            <p className="text-sm text-gray-600">
+                              Any user with access can perform this audit
+                              because it has no specific assignee.
+                            </p>
+                          }
+                        />
+                      </span>
                     )}
                   </div>
                 </div>

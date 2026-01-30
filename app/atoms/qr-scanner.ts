@@ -50,6 +50,14 @@ export const scannedItemIdsAtom = atom((get) => {
   return { assetIds, kitIds, idsTotalCount: assetIds.length + kitIds.length };
 });
 
+/** Stores info about the last duplicate scan so consumers can show a toast / highlight. */
+export type DuplicateScanInfo = {
+  qrId: string;
+  assetTitle: string;
+  timestamp: number;
+};
+export const lastDuplicateScanAtom = atom<DuplicateScanInfo | null>(null);
+
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(
   null,
@@ -76,6 +84,20 @@ export const addScannedItemAtom = atom(
             }, // Add the new entry at the start
         ...currentItems, // Spread the rest of the existing items
       });
+    } else {
+      // QR already in list – signal duplicate so consumers can show toast/highlight
+      const existingItem = currentItems[qrId];
+      if (existingItem?.data) {
+        const title =
+          "title" in existingItem.data
+            ? (existingItem.data as AssetFromQr).title
+            : (existingItem.data as KitFromQr).name;
+        set(lastDuplicateScanAtom, {
+          qrId,
+          assetTitle: title || "Unknown",
+          timestamp: Date.now(),
+        });
+      }
     }
   }
 );
@@ -200,6 +222,8 @@ export type AuditScannedItem = {
   auditAssetId?: string; // Link to AuditAsset record for notes/images
   auditNotesCount?: number;
   auditImagesCount?: number;
+  mainImage?: string | null;
+  thumbnailImage?: string | null;
 };
 
 export type AuditAssetMeta = {

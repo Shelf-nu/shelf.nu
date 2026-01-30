@@ -10,9 +10,11 @@ import type {
 import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 
+import { showNotificationAtom } from "~/atoms/notifications";
 import {
   addScannedItemAtom,
   auditSessionAtom,
+  lastDuplicateScanAtom,
   type AuditScannedItem,
 } from "~/atoms/qr-scanner";
 import { scannedItemsAtom } from "~/atoms/qr-scanner";
@@ -330,6 +332,20 @@ export default function AuditSessionRoute() {
   const addItem = useSetAtom(addScannedItemAtom);
   const auditSession = useAtomValue(auditSessionAtom);
   const scannedItems = useAtomValue(scannedItemsAtom);
+  const duplicateScan = useAtomValue(lastDuplicateScanAtom);
+  const showNotification = useSetAtom(showNotificationAtom);
+
+  // Show toast when a duplicate scan is detected
+  useEffect(() => {
+    if (duplicateScan) {
+      showNotification({
+        title: "Already scanned",
+        message: `Asset "${duplicateScan.assetTitle}" has already been scanned`,
+        icon: { name: "scan", variant: "gray" },
+        senderId: null,
+      });
+    }
+  }, [duplicateScan, showNotification]);
 
   // Track which items have been persisted to avoid duplicate API calls
   const persistedItemsRef = useRef<Set<string>>(new Set());
@@ -351,6 +367,8 @@ export default function AuditSessionRoute() {
             auditAssetId: asset.auditAssetId,
             auditNotesCount: asset.auditNotesCount ?? 0,
             auditImagesCount: asset.auditImagesCount ?? 0,
+            mainImage: asset.mainImage,
+            thumbnailImage: asset.thumbnailImage,
           }) as AuditScannedItem
       ),
     [expectedAssets]

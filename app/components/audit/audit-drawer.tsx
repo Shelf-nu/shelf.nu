@@ -1,5 +1,11 @@
 import type React from "react";
-import { useCallback, useMemo, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useFetcher } from "react-router";
 import { z } from "zod";
@@ -7,6 +13,7 @@ import {
   auditSessionAtom,
   clearScannedItemsAtom,
   auditAssetMetaAtom,
+  lastDuplicateScanAtom,
   removeMultipleScannedItemsAtom,
   removeScannedItemAtom,
   scannedItemsAtom,
@@ -17,6 +24,7 @@ import {
 import { AuditAssetActions } from "~/components/audit/audit-asset-actions";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
 import {
   createBlockers,
@@ -137,6 +145,17 @@ export function AuditDrawer({
 }: AuditDrawerProps) {
   const items = useAtomValue(scannedItemsAtom);
   const auditSession = useAtomValue(auditSessionAtom);
+  const duplicateScan = useAtomValue(lastDuplicateScanAtom);
+  const [highlightedQrId, setHighlightedQrId] = useState<string | null>(null);
+
+  // Highlight the duplicate row briefly when a duplicate scan is detected
+  useEffect(() => {
+    if (duplicateScan) {
+      setHighlightedQrId(duplicateScan.qrId);
+      const timer = setTimeout(() => setHighlightedQrId(null), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [duplicateScan]);
   const auditAssetMeta = useAtomValue(auditAssetMetaAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
@@ -317,6 +336,11 @@ export function AuditDrawer({
       qrId={qrId}
       item={item}
       onRemove={handleRemove}
+      className={
+        highlightedQrId === qrId
+          ? "duration-[2500ms] bg-amber-50 transition-colors"
+          : undefined
+      }
       searchParams={
         auditSession ? { auditSessionId: auditSession.id } : undefined
       }
@@ -369,28 +393,42 @@ export function AuditDrawer({
         const [, AuditLabels] = createAvailabilityLabels(availabilityConfigs);
 
         return (
-          <div className="flex flex-col gap-1">
-            <p className="word-break whitespace-break-spaces font-medium">
-              {"title" in data ? data.title : data.name}
-            </p>
-            <div className="flex flex-wrap items-center gap-1">
-              <span className={assetTypeBadgeClass}>
-                {item.type === "asset" ? "asset" : "kit"}
-              </span>
-              <AuditLabels />
-              {/* Action buttons for notes and images */}
-              {auditSession && item.type === "asset" && data?.id && (
-                <AuditAssetActions
-                  auditAssetId={data.auditAssetId || ""}
-                  auditSessionId={auditSession.id}
-                  assetName={
-                    ("title" in data ? data.title : data.name) || "Asset"
-                  }
-                  isPending={false}
-                  notesCount={notesCount}
-                  imagesCount={imagesCount}
-                />
-              )}
+          <div className="flex items-center gap-2">
+            <ImageWithPreview
+              thumbnailUrl={data.thumbnailImage || data.mainImage}
+              alt={data.title || "Asset"}
+              className="size-[54px] rounded-[2px]"
+            />
+            <div className="flex flex-col gap-1">
+              <Button
+                asChild
+                variant="link"
+                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
+                to={`${auditAssetId}/details`}
+              >
+                <span className="word-break whitespace-break-spaces">
+                  {"title" in data ? data.title : data.name}
+                </span>
+              </Button>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className={assetTypeBadgeClass}>
+                  {item.type === "asset" ? "asset" : "kit"}
+                </span>
+                <AuditLabels />
+                {/* Action buttons for notes and images */}
+                {auditSession && item.type === "asset" && data?.id && (
+                  <AuditAssetActions
+                    auditAssetId={data.auditAssetId || ""}
+                    auditSessionId={auditSession.id}
+                    assetName={
+                      ("title" in data ? data.title : data.name) || "Asset"
+                    }
+                    isPending={false}
+                    notesCount={notesCount}
+                    imagesCount={imagesCount}
+                  />
+                )}
+              </div>
             </div>
           </div>
         );
@@ -405,41 +443,56 @@ export function AuditDrawer({
     <Tr key={`pending-${asset.id}`} skipEntrance>
       <td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
-          <div className="flex flex-col gap-1">
-            <p className="word-break whitespace-break-spaces font-medium text-gray-600">
-              {asset.name}
-            </p>
-            <div className="flex flex-wrap items-center gap-1">
-              <span className={assetTypeBadgeClass}>asset</span>
-              <AvailabilityBadge
-                badgeText="Pending"
-                tooltipTitle="Pending scan"
-                tooltipContent="This asset is expected but has not been scanned yet."
-                className="border-gray-200 bg-gray-50 text-gray-600"
-              />
-              {/* Action buttons for notes and images on pending assets */}
-              {auditSession && (
-                <AuditAssetActions
-                  auditAssetId={asset.auditAssetId || ""}
-                  auditSessionId={auditSession.id}
-                  assetName={asset.name}
-                  isPending={true}
-                  notesCount={
-                    asset.auditAssetId
-                      ? auditAssetMeta[asset.auditAssetId]?.notesCount ??
-                        asset.auditNotesCount ??
-                        0
-                      : asset.auditNotesCount ?? 0
-                  }
-                  imagesCount={
-                    asset.auditAssetId
-                      ? auditAssetMeta[asset.auditAssetId]?.imagesCount ??
-                        asset.auditImagesCount ??
-                        0
-                      : asset.auditImagesCount ?? 0
-                  }
+          <div className="flex items-center gap-2">
+            <ImageWithPreview
+              thumbnailUrl={asset.thumbnailImage || asset.mainImage}
+              alt={asset.name || "Asset"}
+              className="size-[54px] rounded-[2px]"
+            />
+
+            <div className="flex flex-col gap-1">
+              <Button
+                asChild
+                variant="link"
+                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
+                to={`${asset.auditAssetId}/details`}
+              >
+                <span className="word-break whitespace-break-spaces">
+                  {asset.name}
+                </span>
+              </Button>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className={assetTypeBadgeClass}>asset</span>
+                <AvailabilityBadge
+                  badgeText="Pending"
+                  tooltipTitle="Pending scan"
+                  tooltipContent="This asset is expected but has not been scanned yet."
+                  className="border-gray-200 bg-gray-50 text-gray-600"
                 />
-              )}
+                {/* Action buttons for notes and images on pending assets */}
+                {auditSession && (
+                  <AuditAssetActions
+                    auditAssetId={asset.auditAssetId || ""}
+                    auditSessionId={auditSession.id}
+                    assetName={asset.name}
+                    isPending={true}
+                    notesCount={
+                      asset.auditAssetId
+                        ? auditAssetMeta[asset.auditAssetId]?.notesCount ??
+                          asset.auditNotesCount ??
+                          0
+                        : asset.auditNotesCount ?? 0
+                    }
+                    imagesCount={
+                      asset.auditAssetId
+                        ? auditAssetMeta[asset.auditAssetId]?.imagesCount ??
+                          asset.auditImagesCount ??
+                          0
+                        : asset.auditImagesCount ?? 0
+                    }
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>

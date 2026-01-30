@@ -66,12 +66,20 @@ export function AuditAssetActions({
     }
   }, [fetcher.state, fetcher.data]);
 
+  const lastProcessedImageRef = useRef<string | null>(null);
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data || fetcher.data.error) {
       return;
     }
 
-    if (fetcher.data?.success && fetcher.data?.image && auditAssetId) {
+    const imageId = fetcher.data?.image?.id;
+    if (
+      fetcher.data?.success &&
+      imageId &&
+      auditAssetId &&
+      lastProcessedImageRef.current !== imageId
+    ) {
+      lastProcessedImageRef.current = imageId;
       // Update local count so the scan list reflects the new image immediately.
       incrementMeta({ auditAssetId, imagesDelta: 1 });
     }

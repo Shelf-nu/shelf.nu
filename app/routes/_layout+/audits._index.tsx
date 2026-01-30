@@ -1,7 +1,7 @@
 import type { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data } from "react-router";
+import { data, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { NewAuditInfoDialog } from "~/components/audit/new-audit-info-dialog";
@@ -103,6 +103,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        isSelfServiceOrBase,
         searchFieldTooltip: {
           title: "Search audits",
           text: "Search audits by name or description.",
@@ -123,11 +124,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AuditsIndexPage() {
+  const { isSelfServiceOrBase } = useLoaderData<typeof loader>();
   return (
     <>
-      <Header>
-        <NewAuditInfoDialog />
-      </Header>
+      <Header>{!isSelfServiceOrBase && <NewAuditInfoDialog />}</Header>
       <ListContentWrapper>
         <Filters
           slots={{

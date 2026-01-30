@@ -111,6 +111,32 @@ export default function BulkAddToAuditDialog() {
                   )}
                 </div>
               </>
+            ) : !isLoading && data?.audits?.length === 0 ? (
+              // Empty state - no pending audits
+              <>
+                <div className="mb-6 rounded-md border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-sm text-gray-600">
+                    There are no pending audits.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <Button
+                    variant="secondary"
+                    width="full"
+                    onClick={handleCloseDialog}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    width="full"
+                    to="/audits/new"
+                    onClick={handleCloseDialog}
+                  >
+                    Create new audit
+                  </Button>
+                </div>
+              </>
             ) : (
               // Form state
               <>

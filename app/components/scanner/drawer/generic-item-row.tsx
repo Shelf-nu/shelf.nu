@@ -72,6 +72,8 @@ type GenericItemRowProps<T> = {
    * Optional additional search params to be sent to the get-scanned-item endpoint
    */
   searchParams?: Record<string, string>;
+  /** Optional className to apply to the row wrapper (Tr) */
+  className?: string;
 };
 
 /**
@@ -87,6 +89,7 @@ export function GenericItemRow<T>({
   assetExtraInclude,
   kitExtraInclude,
   searchParams: additionalSearchParams,
+  className: rowClassName,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
 
@@ -191,7 +194,7 @@ export function GenericItemRow<T>({
     item?.error || (fetchError ? "Failed to fetch item" : undefined);
 
   return (
-    <Tr skipEntrance={hadDataOnMountRef.current}>
+    <Tr skipEntrance={hadDataOnMountRef.current} className={rowClassName}>
       <Td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           {shouldShowItem
@@ -222,10 +225,12 @@ export function GenericItemRow<T>({
 export function Tr({
   children,
   skipEntrance = false,
+  className,
 }: {
   children: ReactNode;
   /** Skip entrance animation for items restored from DB to prevent jumping on route changes */
   skipEntrance?: boolean;
+  className?: string;
 }) {
   return (
     <motion.tr
@@ -233,7 +238,10 @@ export function Tr({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       exit={{ opacity: 0 }}
-      className="h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0"
+      className={tw(
+        "h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0",
+        className
+      )}
       style={{
         transform: "translateZ(0)",
         willChange: "transform",

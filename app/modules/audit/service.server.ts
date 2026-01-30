@@ -93,6 +93,8 @@ export type AuditExpectedAsset = {
   auditAssetId: string;
   auditNotesCount?: number;
   auditImagesCount?: number;
+  mainImage?: string | null;
+  thumbnailImage?: string | null;
 };
 
 export type CreateAuditSessionResult = {
@@ -585,11 +587,15 @@ export async function getAuditSessionDetails({
               select: {
                 id: true,
                 title: true,
+                mainImage: true,
+                thumbnailImage: true,
               },
             },
             _count: {
               select: {
-                notes: true,
+                notes: {
+                  where: { type: "COMMENT" },
+                },
                 images: true,
               },
             },
@@ -645,6 +651,8 @@ export async function getAuditSessionDetails({
         auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
         auditNotesCount: auditAsset._count?.notes ?? 0,
         auditImagesCount: auditAsset._count?.images ?? 0,
+        mainImage: auditAsset.asset?.mainImage ?? null,
+        thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
       }));
 
     return {
@@ -796,8 +804,12 @@ export async function getAssetsForAuditSession({
           break;
         case "MISSING":
           // Assets that are expected but not found
+          // During active audits, unscanned assets have PENDING status;
+          // after completion they become MISSING.
           auditAssetWhere.expected = true;
-          auditAssetWhere.status = AuditAssetStatus.MISSING;
+          auditAssetWhere.status = {
+            in: [AuditAssetStatus.MISSING, AuditAssetStatus.PENDING],
+          };
           break;
         case "UNEXPECTED":
           // Assets that were scanned but not expected
@@ -1179,7 +1191,9 @@ export async function getAuditScans({
             expected: true,
             _count: {
               select: {
-                notes: true,
+                notes: {
+                  where: { type: "COMMENT" },
+                },
                 images: true,
               },
             },
@@ -1216,7 +1230,9 @@ export async function getAuditScans({
           expected: true,
           _count: {
             select: {
-              notes: true,
+              notes: {
+                where: { type: "COMMENT" },
+              },
               images: true,
             },
           },

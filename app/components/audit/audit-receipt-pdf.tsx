@@ -180,7 +180,7 @@ const AuditPDFContent = ({
               : user.email;
           })
           .join(", ")
-      : "None";
+      : "Not assigned";
 
   // Group asset-specific images by their associated asset
   const assetImageGroups = assetImages.reduce(
@@ -288,23 +288,23 @@ const AuditPDFContent = ({
           </span>
         </div>
         {/* Conditionally render optional date fields */}
-        <When truthy={!!session.startedAt}>
-          <div className="flex border-b border-gray-300 p-2">
-            <span className="min-w-[150px] text-sm font-medium">Started</span>
-            <span className="grow text-gray-600">
-              <DateS
-                date={session.startedAt!}
-                options={{ dateStyle: "short", timeStyle: "short" }}
-              />
-            </span>
-          </div>
-        </When>
         <When truthy={!!session.dueDate}>
           <div className="flex border-b border-gray-300 p-2">
             <span className="min-w-[150px] text-sm font-medium">Due date</span>
             <span className="grow text-gray-600">
               <DateS
                 date={session.dueDate!}
+                options={{ dateStyle: "short", timeStyle: "short" }}
+              />
+            </span>
+          </div>
+        </When>
+        <When truthy={!!session.startedAt}>
+          <div className="flex border-b border-gray-300 p-2">
+            <span className="min-w-[150px] text-sm font-medium">Started</span>
+            <span className="grow text-gray-600">
+              <DateS
+                date={session.startedAt!}
                 options={{ dateStyle: "short", timeStyle: "short" }}
               />
             </span>
