@@ -51,7 +51,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
-    const { assetExtraInclude, kitExtraInclude } = parseData(
+    const { assetExtraInclude, kitExtraInclude, auditSessionId } = parseData(
       searchParams,
       z.object({
         assetExtraInclude: z
@@ -76,10 +76,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
               throw new Error("Invalid JSON input for kitExtraInclude");
             }
           }),
+        auditSessionId: z.string().optional(),
       })
     ) as {
       assetExtraInclude: Prisma.AssetInclude | undefined;
       kitExtraInclude: Prisma.KitInclude | undefined;
+      auditSessionId?: string;
     };
 
     const assetInclude: Prisma.AssetInclude = {
@@ -115,11 +117,49 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
+      // If audit session ID provided, fetch the auditAssetId and counts
+      let auditAssetId: string | undefined;
+      let auditNotesCount = 0;
+      let auditImagesCount = 0;
+      if (auditSessionId && asset.id) {
+        const auditAsset = await db.auditAsset.findFirst({
+          where: {
+            auditSessionId,
+            assetId: asset.id,
+          },
+          select: { id: true },
+        });
+        auditAssetId = auditAsset?.id;
+        if (auditAssetId) {
+          const [notesCount, imagesCount] = await Promise.all([
+            db.auditNote.count({
+              where: {
+                auditSessionId,
+                auditAssetId,
+              },
+            }),
+            db.auditImage.count({
+              where: {
+                auditSessionId,
+                auditAssetId,
+              },
+            }),
+          ]);
+          auditNotesCount = notesCount;
+          auditImagesCount = imagesCount;
+        }
+      }
+
       return data(
         payload({
           qr: {
             type: "asset" as const,
-            asset,
+            asset: {
+              ...asset,
+              auditAssetId,
+              auditNotesCount,
+              auditImagesCount,
+            },
           },
         })
       );
@@ -157,11 +197,52 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
+    // If audit session ID provided, fetch the auditAssetId and counts
+    let auditAssetId: string | undefined;
+    let auditNotesCount = 0;
+    let auditImagesCount = 0;
+    if (auditSessionId && qr.asset?.id) {
+      const auditAsset = await db.auditAsset.findFirst({
+        where: {
+          auditSessionId,
+          assetId: qr.asset.id,
+        },
+        select: { id: true },
+      });
+      auditAssetId = auditAsset?.id;
+      if (auditAssetId) {
+        const [notesCount, imagesCount] = await Promise.all([
+          db.auditNote.count({
+            where: {
+              auditSessionId,
+              auditAssetId,
+            },
+          }),
+          db.auditImage.count({
+            where: {
+              auditSessionId,
+              auditAssetId,
+            },
+          }),
+        ]);
+        auditNotesCount = notesCount;
+        auditImagesCount = imagesCount;
+      }
+    }
+
     return data(
       payload({
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+          asset: qr.asset
+            ? {
+                ...qr.asset,
+                auditAssetId,
+                auditNotesCount,
+                auditImagesCount,
+              }
+            : undefined,
         },
       })
     );

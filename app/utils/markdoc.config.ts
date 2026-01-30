@@ -188,5 +188,23 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
+    audit_images: {
+      render: "AuditImagesComponent",
+      description:
+        "Renders audit completion images as thumbnails with preview capability",
+      attributes: {
+        count: {
+          type: Number,
+          required: true,
+          description: "Number of images attached to audit completion",
+        },
+        ids: {
+          type: String,
+          required: true,
+          description: "Comma-separated list of audit image IDs",
+        },
+      },
+      selfClosing: true,
+    },
   },
 };

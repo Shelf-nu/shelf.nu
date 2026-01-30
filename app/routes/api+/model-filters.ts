@@ -42,6 +42,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
     userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
+    usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
@@ -111,6 +112,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
         ];
+      } else if (modelFilters.usersOnly) {
+        // Filter to show only team members with users (exclude NRMs)
+        where.user = { isNot: null };
       }
     } else {
       where.OR.push({

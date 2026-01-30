@@ -38,6 +38,8 @@ export enum PermissionEntity {
   scan = "scan",
   custody = "custody",
   assetReminders = "assetReminders",
+  audit = "audit",
+  auditNote = "auditNote",
   userData = "user-data", // This is for the user to load their own data.
   update = "update",
   commandPaletteSearch = "command-palette-search",
@@ -63,6 +65,11 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
     ],
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+    ],
+    [PermissionEntity.audit]: [PermissionAction.read, PermissionAction.update],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
@@ -108,6 +115,11 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
     ],
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+    ],
+    [PermissionEntity.audit]: [PermissionAction.read, PermissionAction.update],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
@@ -166,6 +178,12 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.delete,
     ],
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [
       PermissionAction.create,
@@ -231,6 +249,12 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [PermissionAction.read],
     [PermissionEntity.custody]: [PermissionAction.read],
     [PermissionEntity.assetReminders]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.audit]: [
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
@@ -277,6 +301,12 @@ export const Role2PermissionMap: {
       PermissionAction.update,
       PermissionAction.delete,
     ],
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [
       PermissionAction.create,
@@ -344,6 +374,12 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [PermissionAction.read],
     [PermissionEntity.custody]: [PermissionAction.read],
     [PermissionEntity.assetReminders]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.audit]: [
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
