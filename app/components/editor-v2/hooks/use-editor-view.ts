@@ -4,7 +4,6 @@ import type { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 
-import type { Slice } from "prosemirror-model";
 import {
   countRawBlocks,
   parseMarkdoc,
