@@ -26,16 +26,24 @@ ${invite.inviter.firstName} ${
   invite.inviter.lastName
 } invites you to join Shelf as a member of ${
   invite.organization.name
-}’s workspace.
+}'s workspace.
+${
+  extraMessage
+    ? `
+---
+Message from ${invite.inviter.firstName} ${invite.inviter.lastName}:
 
+${extraMessage}
+---
+`
+    : ""
+}
 Click the link to accept the invite:
 ${SERVER_URL}/accept-invite/${invite.id}?token=${token}
 
-Once you’re done setting up your account, you'll be able to access the workspace and start exploring features like Asset Explorer, Location Tracking, Collaboration, Custom fields and more.
+Once you're done setting up your account, you'll be able to access the workspace and start exploring features like Asset Explorer, Location Tracking, Collaboration, Custom fields and more.
 
 If you have any questions or need assistance, please don't hesitate to contact our support team at ${SUPPORT_EMAIL}.
-
-${extraMessage ? extraMessage : ""}
 
 Thanks,
 The Shelf Team
