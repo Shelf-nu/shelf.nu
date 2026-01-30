@@ -28,9 +28,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
-  wrapAssetsWithDataForNote,
   wrapDescriptionForNote,
-  wrapKitsWithDataForNote,
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -39,6 +37,11 @@ import {
   parseFileFormData,
   removePublicFile,
 } from "~/utils/storage.server";
+import {
+  formatLocationLink,
+  buildAssetListMarkup,
+  buildKitListMarkup,
+} from "./utils";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
@@ -52,41 +55,6 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
 const MAX_LOCATION_DEPTH = 12;
-
-/** Helper to safely display a value, showing a dash if empty */
-function safeDisplay(value?: string | null) {
-  return value?.trim() || "—";
-}
-
-/** Formats a location as a markdoc link for activity notes */
-function formatLocationLink(location: Pick<Location, "id" | "name">) {
-  const name = safeDisplay(location.name);
-  return wrapLinkForNote(`/locations/${location.id}`, name);
-}
-
-/** Builds a formatted list of assets for activity notes */
-function buildAssetListMarkup(
-  assets: Array<{ id: string; title: string }>,
-  action: "added" | "removed"
-) {
-  const sanitized = assets.map((a) => ({
-    id: a.id,
-    title: safeDisplay(a.title),
-  }));
-  return wrapAssetsWithDataForNote(sanitized, action);
-}
-
-/** Builds a formatted list of kits for activity notes */
-function buildKitListMarkup(
-  kits: Array<{ id: string; name: string }>,
-  action: "added" | "removed"
-) {
-  const sanitized = kits.map((k) => ({
-    id: k.id,
-    name: safeDisplay(k.name),
-  }));
-  return wrapKitsWithDataForNote(sanitized, action);
-}
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
