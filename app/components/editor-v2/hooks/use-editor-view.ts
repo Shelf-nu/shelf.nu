@@ -166,6 +166,24 @@ export function useEditorView(
           };
         },
       },
+      handlePaste: (view, event) => {
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text) return false;
+
+        // Check if the pasted text contains markdown syntax
+        const hasMarkdown =
+          /(?:^#{1,4}\s|^[*-]\s|^>\s|^(\d+)\.\s|\*\*.+\*\*|__.+__|\[.+\]\(.+\))/m.test(
+            text
+          );
+        if (!hasMarkdown) return false;
+
+        // Parse the pasted markdown into ProseMirror nodes
+        const doc = parseMarkdoc(text, schema);
+        const slice = doc.slice(0, doc.content.size);
+        const tr = view.state.tr.replaceSelection(slice);
+        view.dispatch(tr.scrollIntoView());
+        return true;
+      },
       handleDOMEvents: {
         focus: (_view, event) => {
           onFocusRef.current?.(
