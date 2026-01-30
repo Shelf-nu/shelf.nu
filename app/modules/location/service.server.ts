@@ -81,14 +81,11 @@ function buildKitListMarkup(
   kits: Array<{ id: string; name: string }>,
   action: "added" | "removed"
 ) {
-  return kits
-    .map((kit) =>
-      wrapKitsWithDataForNote(
-        { id: kit.id, name: safeDisplay(kit.name) },
-        action
-      )
-    )
-    .join(", ");
+  const sanitized = kits.map((k) => ({
+    id: k.id,
+    name: safeDisplay(k.name),
+  }));
+  return wrapKitsWithDataForNote(sanitized, action);
 }
 
 export async function getLocation(
