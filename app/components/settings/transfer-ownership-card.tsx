@@ -35,6 +35,10 @@ import When from "../when/when";
 
 type TransferOwnershipCardProps = {
   className?: string;
+  /** Form action URL. Defaults to "/settings/general" */
+  action?: string;
+  /** Organization name for confirmation input. If not provided, uses currentOrganization from context */
+  organizationName?: string;
 };
 
 export const TransferOwnershipSchema = z.object({
@@ -53,6 +57,8 @@ export const TransferOwnershipSchema = z.object({
 
 export default function TransferOwnershipCard({
   className,
+  action = "/settings/general",
+  organizationName,
 }: TransferOwnershipCardProps) {
   const { admins } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
@@ -63,6 +69,9 @@ export default function TransferOwnershipCard({
   >(null);
   const disabled = useDisabled();
   const currentOrganization = useCurrentOrganization();
+
+  // Use provided organizationName or fall back to currentOrganization
+  const confirmationOrgName = organizationName ?? currentOrganization?.name;
 
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
 
@@ -114,7 +123,7 @@ export default function TransferOwnershipCard({
               method="POST"
               encType="multipart/form-data"
               ref={zo.ref}
-              action="/settings/general"
+              action={action}
             >
               <input type="hidden" name="intent" value="transfer-ownership" />
 
@@ -177,7 +186,7 @@ export default function TransferOwnershipCard({
                     }}
                   />
                   <p className="text-sm text-gray-500">
-                    Expected input: {currentOrganization?.name}
+                    Expected input: {confirmationOrgName}
                   </p>
                 </div>
 
@@ -222,7 +231,7 @@ export default function TransferOwnershipCard({
                   disabled={
                     !selectedOwner
                       ? { reason: "Please select a new owner." }
-                      : confirmationInput !== currentOrganization?.name
+                      : confirmationInput !== confirmationOrgName
                       ? {
                           reason: "Please type the workspace name to confirm.",
                         }

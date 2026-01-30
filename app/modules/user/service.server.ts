@@ -1027,6 +1027,18 @@ async function getUsers({
         orderBy: { createdAt: "desc" },
         include: {
           tier: true,
+          userOrganizations: {
+            select: {
+              roles: true,
+              organization: {
+                select: {
+                  id: true,
+                  type: true,
+                  userId: true,
+                },
+              },
+            },
+          },
         },
       }),
 

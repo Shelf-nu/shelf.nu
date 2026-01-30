@@ -40,6 +40,7 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
     case "category":
     case "location":
     case "kit":
+    case "upcomingBookings":
       return "enum";
     case "description":
       return "text";

@@ -215,12 +215,13 @@ export function AdvancedIndexColumn({
       return <DescriptionColumn value={item.description ?? ""} />;
 
     case "valuation": {
-      const value = item?.valuation?.toLocaleString(locale, {
-        currency: currentOrganization.currency,
-        style: "currency",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+      const value = item?.valuation
+        ? formatCurrency({
+            value: item.valuation,
+            locale,
+            currency: currentOrganization.currency,
+          })
+        : null;
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
           {value ? value : <EmptyTableValue />}

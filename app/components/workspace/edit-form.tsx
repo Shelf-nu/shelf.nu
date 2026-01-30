@@ -22,7 +22,6 @@ import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
-import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
@@ -144,7 +143,7 @@ const WorkspaceGeneralEditForms = ({
         <FormRow rowLabel={"Main image"} className="border-b-0">
           <div>
             <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
             <Input
               // disabled={disabled}
@@ -159,7 +158,7 @@ const WorkspaceGeneralEditForms = ({
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
           </div>
         </FormRow>
@@ -168,16 +167,7 @@ const WorkspaceGeneralEditForms = ({
           <FormRow
             rowLabel={"Currency"}
             className={"border-b-0"}
-            subHeading={
-              <p>
-                Choose the currency for your workspace. If you don't see your
-                currency, please{" "}
-                <CrispButton variant="link" className="inline text-xs">
-                  contact support
-                </CrispButton>
-                .
-              </p>
-            }
+            subHeading="Choose the currency for your workspace. All ISO 4217 currencies are supported."
           >
             <InnerLabel hideLg>Currency</InnerLabel>
             <CurrencySelector

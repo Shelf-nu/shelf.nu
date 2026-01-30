@@ -40,6 +40,7 @@ export function ProfilePictureUpload() {
         accept: {
           "image/png": [".png"],
           "image/jpeg": [".jpg", ".jpeg"],
+          "image/webp": [".webp"],
         },
       }}
       fetcher={fetcher}

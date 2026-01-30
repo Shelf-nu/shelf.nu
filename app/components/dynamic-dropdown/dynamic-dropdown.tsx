@@ -1,4 +1,4 @@
-import { cloneElement, useState } from "react";
+import { cloneElement, useCallback, useState } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -51,12 +51,31 @@ type Props = ModelFilterProps & {
   };
 
   /**
+   * A special item that will be added to the list in dropdown, this item can be used to filter items
+   * that have a value, like "In custody" or "Has location" etc.
+   */
+  withValueItem?: {
+    id: string;
+    name: string;
+  };
+
+  /**
    * If `true`, a "Select All" item will be added in dropdown which allow
    * the user to select all items in the list
    */
   allowSelectAll?: boolean;
 
   onSelectionChange?: (selectedIds: string[]) => void;
+
+  /**
+   * Optional function to filter/transform the selection before it's committed.
+   * Called with the new selection and previous selection, returns the filtered selection.
+   * Use this to implement mutual exclusion logic (e.g., prevent selecting conflicting options).
+   */
+  filterSelection?: (
+    newSelection: string[],
+    previousSelection: string[]
+  ) => string[];
 };
 
 export default function DynamicDropdown({
@@ -74,7 +93,9 @@ export default function DynamicDropdown({
   showSearch = true,
   renderItem,
   withoutValueItem,
+  withValueItem,
   allowSelectAll,
+  filterSelection,
   ...hookProps
 }: Props) {
   const navigation = useNavigation();
@@ -83,17 +104,55 @@ export default function DynamicDropdown({
 
   const {
     selectedItems,
+    setSelectedItems,
     searchQuery,
     setSearchQuery,
     handleSearchQueryChange,
     totalItems,
     items,
-    handleSelectItemChange,
+    handleSelectItemChange: baseHandleSelectItemChange,
     clearFilters,
     resetModelFiltersFetcher,
     getAllEntries,
     handleSelectAll,
   } = useModelFilters({ model, ...hookProps });
+
+  /**
+   * Wraps the base selection handler to apply filterSelection if provided.
+   * This allows parent components to implement mutual exclusion logic.
+   */
+  const handleSelectItemChange = useCallback(
+    (value: string) => {
+      if (filterSelection) {
+        // Calculate what the new selection would be
+        const isDeselecting = selectedItems.includes(value);
+        const newSelection = isDeselecting
+          ? selectedItems.filter((id) => id !== value)
+          : [...selectedItems, value];
+
+        // Apply the filter
+        const filteredSelection = filterSelection(newSelection, selectedItems);
+
+        // Update state directly with filtered selection
+        setSelectedItems(filteredSelection);
+
+        // Call onSelectionChange with filtered result
+        if (hookProps.onSelectionChange) {
+          hookProps.onSelectionChange(filteredSelection);
+        }
+      } else {
+        // No filter, use base handler
+        baseHandleSelectItemChange(value);
+      }
+    },
+    [
+      filterSelection,
+      selectedItems,
+      setSelectedItems,
+      baseHandleSelectItemChange,
+      hookProps,
+    ]
+  );
 
   return (
     <div className="relative w-full text-center">
@@ -179,7 +238,11 @@ export default function DynamicDropdown({
               )}
 
               {/* Top Divider */}
-              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+              <When
+                truthy={Boolean(
+                  allowSelectAll || withValueItem || withoutValueItem
+                )}
+              >
                 <div className="h-2 w-full  bg-gray-50" />
               </When>
 
@@ -193,6 +256,40 @@ export default function DynamicDropdown({
                 >
                   <span className="pr-2">Select all</span>
                 </div>
+              </When>
+
+              <When truthy={Boolean(withValueItem)}>
+                <label
+                  key={withValueItem?.id}
+                  htmlFor={withValueItem?.id}
+                  className={tw(
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    selectedItems.includes(withValueItem?.id ?? "") &&
+                      "bg-gray-50"
+                  )}
+                >
+                  <span className="pr-2 normal-case">
+                    {withValueItem?.name}
+                    <input
+                      id={withValueItem?.id}
+                      type="checkbox"
+                      value={withValueItem?.id}
+                      className="hidden"
+                      checked={selectedItems.includes(withValueItem?.id ?? "")}
+                      onChange={(e) => {
+                        handleSelectItemChange(e.currentTarget.value);
+                      }}
+                    />
+                  </span>
+
+                  <When
+                    truthy={selectedItems.includes(withValueItem?.id ?? "")}
+                  >
+                    <span className="h-auto w-[18px] text-primary">
+                      <CheckIcon />
+                    </span>
+                  </When>
+                </label>
               </When>
 
               <When truthy={Boolean(withoutValueItem)}>
@@ -232,7 +329,11 @@ export default function DynamicDropdown({
               </When>
 
               {/* Bottom Divider */}
-              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+              <When
+                truthy={Boolean(
+                  allowSelectAll || withValueItem || withoutValueItem
+                )}
+              >
                 <div className="h-2 w-full  bg-gray-50" />
               </When>
 

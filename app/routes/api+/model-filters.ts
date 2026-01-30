@@ -122,6 +122,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    if (modelFilters.name === "booking") {
+      where.status = { in: ["RESERVED", "ONGOING", "OVERDUE"] };
+    }
+
     if (modelFilters.name === "tag" && modelFilters.useFor) {
       // Tags with "All" selected are stored with an empty useFor array, so filtering only by `has`
       // would hide those tags in bulk/tag pickers even though they are intended to be available.

@@ -237,7 +237,7 @@ export const LocationForm = ({
             <FormRow rowLabel={"Main image"}>
               <div>
                 <p className="hidden lg:block">
-                  Accepts PNG, JPG or JPEG (max.4 MB)
+                  Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
                 </p>
                 <Input
                   disabled={disabled}
@@ -252,7 +252,7 @@ export const LocationForm = ({
                   inputClassName="border-0 shadow-none p-0 rounded-none"
                 />
                 <p className="mt-2 lg:hidden">
-                  Accepts PNG, JPG or JPEG (max.4 MB)
+                  Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
                 </p>
               </div>
             </FormRow>
@@ -269,7 +269,9 @@ export const LocationForm = ({
             className="mt-2"
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
-          <p className="hidden lg:block">Accepts PNG, JPG or JPEG (max.4 MB)</p>
+          <p className="hidden lg:block">
+            Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
+          </p>
         </When>
 
         <When
