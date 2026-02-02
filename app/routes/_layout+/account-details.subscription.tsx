@@ -9,6 +9,7 @@ import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
 
+import { WarningBox } from "~/components/shared/warning-box";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
@@ -26,6 +27,7 @@ import {
   getDomainUrl,
   getStripePricesAndProducts,
   createStripeCheckoutSession,
+  getCustomerHasUnpaidInvoices,
   getStripeCustomer,
   getOrCreateCustomerId,
 } from "~/utils/stripe.server";
@@ -63,7 +65,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
     )) as CustomerWithSubscriptions;
 
     /* Get the prices and products from Stripe */
-    const prices = await getStripePricesAndProducts();
+    const [prices, hasUnpaidInvoice] = await Promise.all([
+      getStripePricesAndProducts(),
+      getCustomerHasUnpaidInvoices(customer.id),
+    ]);
 
     return payload({
       title: `Subscriptions`,
@@ -76,6 +81,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
       prices,
       customer,
       usedFreeTrial: user.usedFreeTrial,
+      hasUnpaidInvoice,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -139,8 +145,15 @@ export const handle = {
 };
 
 export default function SubscriptionPage() {
-  const { title, subTitle, prices, tier, tierLimit, customer } =
-    useLoaderData<typeof loader>();
+  const {
+    title,
+    subTitle,
+    prices,
+    tier,
+    tierLimit,
+    customer,
+    hasUnpaidInvoice,
+  } = useLoaderData<typeof loader>();
 
   const isCustomTier = tier === "custom" && !!tierLimit;
   const isEnterprise =
@@ -185,6 +198,8 @@ export default function SubscriptionPage() {
   return (
     <>
       <div className=" flex flex-col">
+        {hasUnpaidInvoice ? <UnpaidInvoiceWarning /> : null}
+
         {hasNoSubscription ? (
           <div className="mb-8 mt-3">
             <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
@@ -217,5 +232,33 @@ export default function SubscriptionPage() {
       </div>
       <SuccessfulSubscriptionModal />
     </>
+  );
+}
+
+function UnpaidInvoiceWarning() {
+  return (
+    <WarningBox className="mb-8 mt-3">
+      <div>
+        <p className="font-semibold">Unpaid invoice</p>
+        <p className="mt-1">
+          We were unable to process your latest payment. If payment is not
+          resolved, your subscription will be fully canceled. Any existing
+          pricing, discounts, or legacy plans tied to your subscription cannot
+          be recovered after cancellation — you would need to purchase a new
+          subscription at current rates.
+        </p>
+        <p className="mt-2">
+          Please update your payment method through the{" "}
+          <CustomerPortalForm
+            buttonText="customer portal"
+            className="inline"
+            buttonProps={{
+              variant: "link",
+            }}
+          />
+          .
+        </p>
+      </div>
+    </WarningBox>
   );
 }

@@ -537,6 +537,28 @@ async function generateReturnUrl({
  * and the provided subscription details. If the subscription is inactive
  * and the user is not on the "free" tier, their tier is downgraded to "free."
  */
+/** Checks if a customer has any open (unpaid) invoices */
+export async function getCustomerHasUnpaidInvoices(
+  customerId: string
+): Promise<boolean> {
+  try {
+    if (!stripe) return false;
+    const invoices = await stripe.invoices.list({
+      customer: customerId,
+      status: "open",
+      limit: 1,
+    });
+    return invoices.data.length > 0;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to check unpaid invoices",
+      additionalData: { customerId },
+      label,
+    });
+  }
+}
+
 export async function validateSubscriptionIsActive({
   user,
   subscription,

@@ -38,6 +38,7 @@ import { SequentialIdMigrationModal } from "~/components/sequential-id-migration
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
+import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
@@ -59,6 +60,7 @@ import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   disabledTeamOrg,
   getCustomerActiveSubscription,
+  getCustomerHasUnpaidInvoices,
   getStripeCustomer,
   stripe,
   validateSubscriptionIsActive,
@@ -103,6 +105,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     let subscription = null;
+    let hasUnpaidInvoice = false;
 
     if (user.customerId && stripe) {
       // Get the Stripe customer
@@ -112,6 +115,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       /** Find the active subscription for the Stripe customer */
       subscription = getCustomerActiveSubscription({ customer });
       await validateSubscriptionIsActive({ user, subscription });
+
+      hasUnpaidInvoice = await getCustomerHasUnpaidInvoices(user.customerId);
     }
 
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
@@ -182,6 +187,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         unreadUpdatesCount,
+        hasUnpaidInvoice,
         needsSequentialIdMigration,
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
@@ -228,6 +234,7 @@ export default function App() {
   useCrisp();
   const {
     disabledTeamOrg,
+    hasUnpaidInvoice,
     minimizedSidebar,
     needsSequentialIdMigration,
     currentOrganizationId,
@@ -248,6 +255,7 @@ export default function App() {
         <AtomsResetHandler />
         <AppSidebar id="navigation" />
         <SidebarInset id="main-content" tabIndex={-1}>
+          {hasUnpaidInvoice ? <UnpaidInvoiceBanner /> : null}
           {disabledTeamOrg ? (
             <NoSubscription />
           ) : workspaceSwitching ? (

@@ -125,7 +125,7 @@ function Item({
         : planTier === "tier_1"
         ? "Plus plan"
         : subscriptionPrice?.product.name,
-      subscription.status,
+      formatSubscriptionStatus(subscription.status),
       interval === "year" ? "Yearly billing" : "Monthly billing",
     ];
     if (isLegacyPricing) {
@@ -346,4 +346,19 @@ function getSubscriptionStatus(subscription: Stripe.Subscription) {
     isActive: subscription.status === "active",
     isPaused: subscription.status === "paused",
   };
+}
+
+/** Maps Stripe subscription status to a human-friendly label */
+function formatSubscriptionStatus(status: Stripe.Subscription.Status): string {
+  const statusMap: Record<string, string> = {
+    active: "Active",
+    past_due: "Past due",
+    unpaid: "Unpaid",
+    canceled: "Canceled",
+    incomplete: "Incomplete",
+    incomplete_expired: "Expired",
+    trialing: "Trialing",
+    paused: "Paused",
+  };
+  return statusMap[status] || status;
 }
