@@ -2099,9 +2099,11 @@ export async function cancelBooking({
   organizationId,
   hints,
   userId,
+  cancellationReason,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   userId?: string;
+  cancellationReason?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -2158,7 +2160,7 @@ export async function cancelBooking({
 
       return tx.booking.update({
         where: { id: bookingFound.id },
-        data: { status: BookingStatus.CANCELLED },
+        data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
           assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -2181,6 +2183,7 @@ export async function cancelBooking({
         to: booking.to as Date,
         bookingId: booking.id,
         hints,
+        cancellationReason,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -2188,6 +2191,7 @@ export async function cancelBooking({
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
         hints,
+        cancellationReason,
       });
 
       sendEmail({

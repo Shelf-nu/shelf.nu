@@ -47,16 +47,35 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
             undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <div className="flex justify-center gap-2">
-            <AlertDialogCancel asChild>
-              <Button variant="secondary" disabled={disabled}>
-                Go back
-              </Button>
-            </AlertDialogCancel>
-
-            <Form method="post">
-              <input type="hidden" name="intent" value="cancel" />
+        <Form method="post">
+          <input type="hidden" name="intent" value="cancel" />
+          <div className="mb-4">
+            <label
+              htmlFor="cancellationReason"
+              className="mb-1 block text-left text-[14px] font-medium text-gray-700"
+            >
+              Cancellation reason{" "}
+              <span className="font-normal text-gray-500">(optional)</span>
+            </label>
+            <textarea
+              id="cancellationReason"
+              name="cancellationReason"
+              rows={3}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-500 focus:ring-primary-500"
+              placeholder="Let the custodian know why this booking was cancelled..."
+              disabled={disabled}
+            />
+            <p className="-mt-1 text-text-sm text-gray-500">
+              The custodian will be notified of the cancellation reason.
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <div className="flex justify-center gap-2">
+              <AlertDialogCancel asChild>
+                <Button variant="secondary" disabled={disabled}>
+                  Go back
+                </Button>
+              </AlertDialogCancel>
               <Button
                 type="submit"
                 className={tw(
@@ -66,9 +85,9 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
               >
                 Cancel booking
               </Button>
-            </Form>
-          </div>
-        </AlertDialogFooter>
+            </div>
+          </AlertDialogFooter>
+        </Form>
       </AlertDialogContent>
     </AlertDialog>
   );

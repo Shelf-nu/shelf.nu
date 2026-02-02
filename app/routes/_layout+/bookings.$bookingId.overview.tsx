@@ -913,11 +913,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "cancel": {
+        const cancellationReason =
+          formData.get("cancellationReason")?.toString()?.trim() || undefined;
         const cancelledBooking = await cancelBooking({
           id,
           organizationId,
           hints: getClientHint(request),
           userId: user.id,
+          cancellationReason,
         });
 
         const actor = wrapUserLinkForNote({

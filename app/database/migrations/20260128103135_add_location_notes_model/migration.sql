@@ -7,6 +7,7 @@ CREATE TABLE "LocationNote" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "userId" TEXT,
     "locationId" TEXT NOT NULL,
+
     CONSTRAINT "LocationNote_pkey" PRIMARY KEY ("id")
 );
 
