@@ -18,6 +18,7 @@ import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import {
   BookingFormSchema,
+  CancelBookingSchema,
   ExtendBookingSchema,
 } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
@@ -913,8 +914,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "cancel": {
-        const cancellationReason =
-          formData.get("cancellationReason")?.toString()?.trim() || undefined;
+        const { cancellationReason } = parseData(
+          formData,
+          CancelBookingSchema,
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
         const cancelledBooking = await cancelBooking({
           id,
           organizationId,
@@ -933,7 +939,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           cancelledBooking.name.trim()
         );
         await createNotes({
-          content: `${actor} cancelled booking ${cancelledBookingLink}.`,
+          content: `${actor} cancelled booking ${cancelledBookingLink}.${
+            cancellationReason ? `\n\nReason: ${cancellationReason}` : ""
+          }`,
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),

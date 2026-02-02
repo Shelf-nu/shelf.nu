@@ -1,3 +1,5 @@
+import { useActionData } from "react-router";
+import { useZorm } from "react-zorm";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -10,8 +12,11 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
+import { CancelBookingSchema } from "./forms/forms-schema";
 import { AlertIcon } from "../icons/library";
 
 type CancelBookingDialogProps = {
@@ -20,6 +25,13 @@ type CancelBookingDialogProps = {
 
 export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
   const disabled = useDisabled();
+  const zo = useZorm("CancelBooking", CancelBookingSchema);
+  const actionData = useActionData<DataOrErrorResponse>();
+
+  /** This handles server side errors in case client side validation fails */
+  const validationErrors = getValidationErrors<typeof CancelBookingSchema>(
+    actionData?.error
+  );
 
   return (
     <AlertDialog>
@@ -47,7 +59,7 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
             undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <Form method="post">
+        <Form method="post" ref={zo.ref}>
           <input type="hidden" name="intent" value="cancel" />
           <div className="mb-4">
             <label
@@ -59,14 +71,27 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
             </label>
             <textarea
               id="cancellationReason"
-              name="cancellationReason"
+              name={zo.fields.cancellationReason()}
               rows={3}
+              maxLength={500}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-500 focus:ring-primary-500"
               placeholder="Let the custodian know why this booking was cancelled..."
               disabled={disabled}
+              aria-describedby="cancellationReason-description"
             />
-            <p className="-mt-1 text-text-sm text-gray-500">
-              If the custodian has an associated user account with an email address, they will be notified of the cancellation reason.
+            {(validationErrors?.cancellationReason?.message ||
+              zo.errors.cancellationReason()?.message) && (
+              <p className="text-sm text-error-500">
+                {validationErrors?.cancellationReason?.message ||
+                  zo.errors.cancellationReason()?.message}
+              </p>
+            )}
+            <p
+              id="cancellationReason-description"
+              className="-mt-1 text-text-sm text-gray-500"
+            >
+              If the custodian has an associated user account with an email
+              address, they will be notified of the cancellation reason.
             </p>
           </div>
           <AlertDialogFooter>

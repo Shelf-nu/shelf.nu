@@ -175,6 +175,17 @@ export default function MyForm() {
 - Reminder dialog: `app/components/asset-reminder/set-or-edit-reminder-dialog.tsx`
 - Booking form: `app/components/booking/forms/edit-booking-form.tsx`
 
+### Accessibility
+
+All UI implementations must meet **WCAG 2.1 AA** as a minimum. This includes:
+
+- Sufficient color contrast ratios (4.5:1 for normal text, 3:1 for large text)
+- All interactive elements must be keyboard accessible
+- Form inputs must have associated labels
+- Use `aria-describedby` to link inputs to helper/error text
+- Meaningful alt text for images and icons
+- Focus indicators must be visible
+
 ### Key Business Features
 
 - **Asset Management**: CRUD operations, QR code generation, image processing
