@@ -4,9 +4,10 @@ import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
+import { unpaidInvoiceAdminText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
-import { CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
+import { ADMIN_EMAIL, CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -351,6 +352,76 @@ export async function action({ request }: ActionFunctionArgs) {
           if (user.tierId === TierId.tier_1) {
             await resetPersonalWorkspaceBranding(user.id);
           }
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "invoice.payment_failed": {
+        const failedInvoice = event.data.object as Stripe.Invoice;
+
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: true },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        if (ADMIN_EMAIL) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Unpaid invoice: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: failedInvoice.id,
+            }),
+          });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "invoice.paid":
+      case "invoice.voided":
+      case "invoice.marked_uncollectible": {
+        const resolvedInvoice = event.data.object as Stripe.Invoice;
+
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: false },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        if (ADMIN_EMAIL) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Invoice resolved: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: resolvedInvoice.id,
+            }),
+          });
         }
 
         return new Response(null, { status: 200 });

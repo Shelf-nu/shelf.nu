@@ -350,7 +350,7 @@ function getSubscriptionStatus(subscription: Stripe.Subscription) {
 
 /** Maps Stripe subscription status to a human-friendly label */
 function formatSubscriptionStatus(status: Stripe.Subscription.Status): string {
-  const statusMap: Record<string, string> = {
+  const statusMap: Record<Stripe.Subscription.Status, string> = {
     active: "Active",
     past_due: "Past due",
     unpaid: "Unpaid",

@@ -60,7 +60,6 @@ import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   disabledTeamOrg,
   getCustomerActiveSubscription,
-  getCustomerHasUnpaidInvoices,
   getStripeCustomer,
   stripe,
   validateSubscriptionIsActive,
@@ -90,6 +89,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         skipSubscriptionCheck: true,
         sso: true,
         tierId: true,
+        hasUnpaidInvoice: true,
         roles: { select: { id: true, name: true } },
         userOrganizations: {
           where: {
@@ -105,7 +105,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     let subscription = null;
-    let hasUnpaidInvoice = false;
 
     if (user.customerId && stripe) {
       // Get the Stripe customer
@@ -115,8 +114,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       /** Find the active subscription for the Stripe customer */
       subscription = getCustomerActiveSubscription({ customer });
       await validateSubscriptionIsActive({ user, subscription });
-
-      hasUnpaidInvoice = await getCustomerHasUnpaidInvoices(user.customerId);
     }
 
     /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
@@ -187,7 +184,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         unreadUpdatesCount,
-        hasUnpaidInvoice,
+        hasUnpaidInvoice: user.hasUnpaidInvoice,
         needsSequentialIdMigration,
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin

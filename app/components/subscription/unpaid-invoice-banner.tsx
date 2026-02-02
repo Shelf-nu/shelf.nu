@@ -1,15 +1,20 @@
-import { Link } from "react-router";
+import { CustomerPortalForm } from "./customer-portal-form";
 
 export function UnpaidInvoiceBanner() {
   return (
-    <div className="bg-error-600 px-4 py-3 text-center text-sm text-white -mx-4">
+    <div
+      role="alert"
+      className="bg-error-600 px-4 py-3 text-center text-sm text-white"
+    >
       You have an unpaid invoice. Please{" "}
-      <Link
-        to="/account-details/subscription"
-        className="font-semibold underline"
-      >
-        update your payment method
-      </Link>{" "}
+      <CustomerPortalForm
+        buttonText="update your payment method"
+        className="inline"
+        buttonProps={{
+          variant: "link",
+          className: "font-semibold text-white underline",
+        }}
+      />{" "}
       to avoid service interruption.
     </div>
   );

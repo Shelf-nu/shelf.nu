@@ -9,11 +9,13 @@ import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
 
+import { DateS } from "~/components/shared/date";
 import { WarningBox } from "~/components/shared/warning-box";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
+import { useUserData } from "~/hooks/use-user-data";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
 import { getUserByID } from "~/modules/user/service.server";
@@ -27,7 +29,7 @@ import {
   getDomainUrl,
   getStripePricesAndProducts,
   createStripeCheckoutSession,
-  getCustomerHasUnpaidInvoices,
+  getCustomerOpenInvoices,
   getStripeCustomer,
   getOrCreateCustomerId,
 } from "~/utils/stripe.server";
@@ -64,10 +66,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
       await getOrCreateCustomerId(user)
     )) as CustomerWithSubscriptions;
 
-    /* Get the prices and products from Stripe */
-    const [prices, hasUnpaidInvoice] = await Promise.all([
+    /* Get the prices, products, and open invoices from Stripe */
+    const [prices, openInvoices] = await Promise.all([
       getStripePricesAndProducts(),
-      getCustomerHasUnpaidInvoices(customer.id),
+      getCustomerOpenInvoices(customer.id),
     ]);
 
     return payload({
@@ -81,7 +83,13 @@ export async function loader({ context }: LoaderFunctionArgs) {
       prices,
       customer,
       usedFreeTrial: user.usedFreeTrial,
-      hasUnpaidInvoice,
+      openInvoices: openInvoices.map((inv) => ({
+        number: inv.number,
+        amountDue: inv.amount_due,
+        currency: inv.currency,
+        dueDate: inv.due_date,
+        hostedInvoiceUrl: inv.hosted_invoice_url,
+      })),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -145,15 +153,10 @@ export const handle = {
 };
 
 export default function SubscriptionPage() {
-  const {
-    title,
-    subTitle,
-    prices,
-    tier,
-    tierLimit,
-    customer,
-    hasUnpaidInvoice,
-  } = useLoaderData<typeof loader>();
+  const { title, subTitle, prices, tier, tierLimit, customer, openInvoices } =
+    useLoaderData<typeof loader>();
+  const user = useUserData();
+  const hasUnpaidInvoice = user?.hasUnpaidInvoice ?? false;
 
   const isCustomTier = tier === "custom" && !!tierLimit;
   const isEnterprise =
@@ -198,7 +201,9 @@ export default function SubscriptionPage() {
   return (
     <>
       <div className=" flex flex-col">
-        {hasUnpaidInvoice ? <UnpaidInvoiceWarning /> : null}
+        {hasUnpaidInvoice ? (
+          <UnpaidInvoiceWarning invoices={openInvoices} />
+        ) : null}
 
         {hasNoSubscription ? (
           <div className="mb-8 mt-3">
@@ -235,7 +240,15 @@ export default function SubscriptionPage() {
   );
 }
 
-function UnpaidInvoiceWarning() {
+type OpenInvoice = {
+  number: string | null;
+  amountDue: number;
+  currency: string;
+  dueDate: number | null;
+  hostedInvoiceUrl?: string | null;
+};
+
+function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
   return (
     <WarningBox className="mb-8 mt-3">
       <div>
@@ -247,6 +260,41 @@ function UnpaidInvoiceWarning() {
           be recovered after cancellation — you would need to purchase a new
           subscription at current rates.
         </p>
+
+        {invoices.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {invoices.map((inv) => (
+              <li
+                key={inv.number}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+              >
+                <span className="font-medium">{inv.number}</span>
+                <span>
+                  {new Intl.NumberFormat("en-US", {
+                    style: "currency",
+                    currency: inv.currency,
+                  }).format(inv.amountDue / 100)}
+                </span>
+                {inv.dueDate ? (
+                  <span>
+                    Due <DateS date={new Date(inv.dueDate * 1000)} />
+                  </span>
+                ) : null}
+                {inv.hostedInvoiceUrl ? (
+                  <a
+                    href={inv.hostedInvoiceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium underline"
+                  >
+                    View invoice
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
         <p className="mt-2">
           Please update your payment method through the{" "}
           <CustomerPortalForm

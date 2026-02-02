@@ -532,33 +532,31 @@ async function generateReturnUrl({
     : `${domainUrl}/account-details/subscription?${urlSearchParams.toString()}`;
 }
 
-/**
- * Validates if the user's subscription is active based on their current tier
- * and the provided subscription details. If the subscription is inactive
- * and the user is not on the "free" tier, their tier is downgraded to "free."
- */
-/** Checks if a customer has any open (unpaid) invoices */
-export async function getCustomerHasUnpaidInvoices(
-  customerId: string
-): Promise<boolean> {
+/** Fetches open (unpaid) invoices for a customer */
+export async function getCustomerOpenInvoices(customerId: string) {
   try {
-    if (!stripe) return false;
+    if (!stripe) return [];
     const invoices = await stripe.invoices.list({
       customer: customerId,
       status: "open",
-      limit: 1,
+      limit: 10,
     });
-    return invoices.data.length > 0;
+    return invoices.data;
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to check unpaid invoices",
+      message: "Failed to fetch open invoices",
       additionalData: { customerId },
       label,
     });
   }
 }
 
+/**
+ * Validates if the user's subscription is active based on their current tier
+ * and the provided subscription details. If the subscription is inactive
+ * and the user is not on the "free" tier, their tier is downgraded to "free."
+ */
 export async function validateSubscriptionIsActive({
   user,
   subscription,
