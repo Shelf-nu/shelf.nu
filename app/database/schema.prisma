@@ -1155,6 +1155,8 @@ model Booking {
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
 
+  cancellationReason String?
+
   // Indexes for foreign keys
   @@index([creatorId])
   @@index([custodianTeamMemberId])
