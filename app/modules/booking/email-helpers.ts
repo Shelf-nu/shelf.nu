@@ -159,7 +159,7 @@ export const deletedBookingEmailContent = (args: BasicEmailContentArgs) =>
 /**
  * Booking is cancelled
  *
- * This email gets sent when a booking is checked-in
+ * This email gets sent when a booking is cancelled
  */
 export const cancelledBookingEmailContent = (
   args: BasicEmailContentArgs & { cancellationReason?: string }

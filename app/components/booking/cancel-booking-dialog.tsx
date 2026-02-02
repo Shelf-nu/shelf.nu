@@ -66,13 +66,13 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
               disabled={disabled}
             />
             <p className="-mt-1 text-text-sm text-gray-500">
-              The custodian will be notified of the cancellation reason.
+              If the custodian has an associated user account with an email address, they will be notified of the cancellation reason.
             </p>
           </div>
           <AlertDialogFooter>
             <div className="flex justify-center gap-2">
               <AlertDialogCancel asChild>
-                <Button variant="secondary" disabled={disabled}>
+                <Button type="button" variant="secondary" disabled={disabled}>
                   Go back
                 </Button>
               </AlertDialogCancel>
