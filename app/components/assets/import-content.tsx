@@ -1,6 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import type { DuplicateBarcode } from "~/modules/barcode/service.server";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils/form";
@@ -365,6 +366,15 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                 />
               ) : null}
 
+              {data?.error?.additionalData?.duplicateBarcodes ? (
+                <DuplicateBarcodesTable
+                  data={
+                    data.error.additionalData
+                      .duplicateBarcodes as DuplicateBarcode[]
+                  }
+                />
+              ) : null}
+
               {data?.error?.additionalData?.kitCustodyConflicts ? (
                 <table className="mt-4 w-full rounded-md border text-left text-sm">
                   <thead className="bg-error-100 text-xs">
@@ -503,6 +513,40 @@ function BrokenQrCodesTable({
             <Tr key={code.title}>
               <Td>{code.title}</Td>
               <Td>{code.qrId}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
+
+function DuplicateBarcodesTable({ data }: { data: DuplicateBarcode[] }) {
+  return (
+    <div className="mt-3">
+      <h5>Duplicate barcodes</h5>
+      <Table className="mt-1 [&_td]:p-1 [&_th]:p-1">
+        <thead>
+          <Tr>
+            <Th>Barcode</Th>
+            <Th>Type</Th>
+            <Th>Used by assets</Th>
+          </Tr>
+        </thead>
+        <tbody>
+          {data.map((barcode) => (
+            <Tr key={barcode.value}>
+              <Td className="align-top">{barcode.value}</Td>
+              <Td className="align-top">{barcode.type}</Td>
+              <Td className="whitespace-normal">
+                <ul className="list-disc pl-4">
+                  {barcode.assets.map((asset, i) => (
+                    <li key={i}>
+                      {asset.title}: Line {asset.row}
+                    </li>
+                  ))}
+                </ul>
+              </Td>
             </Tr>
           ))}
         </tbody>

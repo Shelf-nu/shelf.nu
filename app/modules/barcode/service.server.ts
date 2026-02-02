@@ -691,7 +691,23 @@ export async function updateBarcodes({
 export type BarcodePerImportedAsset = {
   key: string;
   title: string;
+  row: number;
   barcodes: { type: BarcodeType; value: string; existingId?: string }[];
+};
+
+/** Represents a barcode that appears on multiple assets in the import data */
+export type DuplicateBarcode = {
+  /** The barcode value (e.g. "05743") */
+  value: string;
+  /** The barcode type (e.g. "Code128", "EAN13") */
+  type: string;
+  /** The assets that share this barcode */
+  assets: {
+    /** Asset title from the CSV */
+    title: string;
+    /** Row number in the CSV file (1-based, includes header) */
+    row: number;
+  }[];
 };
 
 export async function parseBarcodesFromImportData({
@@ -707,7 +723,7 @@ export async function parseBarcodesFromImportData({
     const barcodePerAsset: BarcodePerImportedAsset[] = [];
 
     // Extract barcode data from each asset
-    data.forEach((asset) => {
+    data.forEach((asset, index) => {
       const assetBarcodes: { type: BarcodeType; value: string }[] = [];
 
       // Check each barcode type column
@@ -754,6 +770,7 @@ export async function parseBarcodesFromImportData({
         barcodePerAsset.push({
           key: asset.key,
           title: asset.title,
+          row: index + 2, // +1 for header row, +1 for 0-based index
           barcodes: assetBarcodes,
         });
       }
@@ -763,40 +780,47 @@ export async function parseBarcodesFromImportData({
       return []; // No barcodes to validate
     }
 
-    // Collect all barcode values for duplicate checking
+    // Collect all barcode values and track which assets use each
     const allBarcodeValues: string[] = [];
-    const barcodeSourceMap = new Map<
+    const barcodeAssetsMap = new Map<
       string,
-      { assetTitle: string; type: BarcodeType }
+      { type: BarcodeType; assets: { title: string; row: number }[] }
     >();
 
     barcodePerAsset.forEach((asset) => {
       asset.barcodes.forEach((barcode) => {
         allBarcodeValues.push(barcode.value);
-        barcodeSourceMap.set(barcode.value, {
-          assetTitle: asset.title,
-          type: barcode.type,
-        });
+        const existing = barcodeAssetsMap.get(barcode.value);
+        if (existing) {
+          existing.assets.push({ title: asset.title, row: asset.row });
+        } else {
+          barcodeAssetsMap.set(barcode.value, {
+            type: barcode.type,
+            assets: [{ title: asset.title, row: asset.row }],
+          });
+        }
       });
     });
 
     // Check for duplicates within the import data
-    const duplicateValues = allBarcodeValues.filter(
-      (value, index, self) => self.indexOf(value) !== index
-    );
+    const duplicateBarcodes: DuplicateBarcode[] = [];
+    for (const [value, info] of barcodeAssetsMap) {
+      if (info.assets.length > 1) {
+        duplicateBarcodes.push({
+          value,
+          type: info.type,
+          assets: info.assets,
+        });
+      }
+    }
 
-    if (duplicateValues.length > 0) {
-      const duplicateDetails = duplicateValues.map((value) => {
-        const source = barcodeSourceMap.get(value);
-        return `${value} (${source?.type}) for asset "${source?.assetTitle}"`;
-      });
-
+    if (duplicateBarcodes.length > 0) {
       throw new ShelfError({
         cause: null,
-        message: `Some barcodes appear multiple times in the import data. Each barcode must be unique: ${duplicateDetails.join(
-          ", "
-        )}`,
-        additionalData: { duplicateValues, duplicateDetails },
+        title: "Duplicate barcodes in import data",
+        message:
+          "Some barcodes appear multiple times in the import data. Each barcode must be unique.",
+        additionalData: { duplicateBarcodes },
         label,
         shouldBeCaptured: false,
       });
@@ -821,7 +845,7 @@ export async function parseBarcodesFromImportData({
 
     if (linkedBarcodes.length > 0) {
       const linkedDetails = linkedBarcodes.map((barcode) => {
-        const source = barcodeSourceMap.get(barcode.value);
+        const source = barcodeAssetsMap.get(barcode.value);
         const linkedTo =
           barcode.asset?.title || barcode.kit?.name || "Unknown item";
         return `${barcode.value} (${source?.type}) - already linked to "${linkedTo}"`;
