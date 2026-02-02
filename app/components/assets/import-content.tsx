@@ -529,7 +529,6 @@ function DuplicateBarcodesTable({ data }: { data: DuplicateBarcode[] }) {
         <thead>
           <Tr>
             <Th>Barcode</Th>
-            <Th>Type</Th>
             <Th>Used by assets</Th>
           </Tr>
         </thead>
@@ -537,12 +536,11 @@ function DuplicateBarcodesTable({ data }: { data: DuplicateBarcode[] }) {
           {data.map((barcode) => (
             <Tr key={barcode.value}>
               <Td className="align-top">{barcode.value}</Td>
-              <Td className="align-top">{barcode.type}</Td>
               <Td className="whitespace-normal">
                 <ul className="list-disc pl-4">
                   {barcode.assets.map((asset, i) => (
                     <li key={i}>
-                      {asset.title}: Line {asset.row}
+                      {asset.title} ({asset.type}): Line {asset.row}
                     </li>
                   ))}
                 </ul>

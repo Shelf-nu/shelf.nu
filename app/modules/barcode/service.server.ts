@@ -695,16 +695,16 @@ export type BarcodePerImportedAsset = {
   barcodes: { type: BarcodeType; value: string; existingId?: string }[];
 };
 
-/** Represents a barcode that appears on multiple assets in the import data */
+/** Represents a barcode value that appears on multiple assets in the import data */
 export type DuplicateBarcode = {
   /** The barcode value (e.g. "05743") */
   value: string;
-  /** The barcode type (e.g. "Code128", "EAN13") */
-  type: string;
-  /** The assets that share this barcode */
+  /** The assets that share this barcode value */
   assets: {
     /** Asset title from the CSV */
     title: string;
+    /** The barcode type for this occurrence (e.g. "Code128", "EAN13") */
+    type: BarcodeType;
     /** Row number in the CSV file (1-based, includes header) */
     row: number;
   }[];
@@ -784,32 +784,33 @@ export async function parseBarcodesFromImportData({
     const allBarcodeValues: string[] = [];
     const barcodeAssetsMap = new Map<
       string,
-      { type: BarcodeType; assets: { title: string; row: number }[] }
+      { title: string; type: BarcodeType; row: number }[]
     >();
 
     barcodePerAsset.forEach((asset) => {
       asset.barcodes.forEach((barcode) => {
         allBarcodeValues.push(barcode.value);
         const existing = barcodeAssetsMap.get(barcode.value);
+        const entry = {
+          title: asset.title,
+          type: barcode.type,
+          row: asset.row,
+        };
         if (existing) {
-          existing.assets.push({ title: asset.title, row: asset.row });
+          existing.push(entry);
         } else {
-          barcodeAssetsMap.set(barcode.value, {
-            type: barcode.type,
-            assets: [{ title: asset.title, row: asset.row }],
-          });
+          barcodeAssetsMap.set(barcode.value, [entry]);
         }
       });
     });
 
     // Check for duplicates within the import data
     const duplicateBarcodes: DuplicateBarcode[] = [];
-    for (const [value, info] of barcodeAssetsMap) {
-      if (info.assets.length > 1) {
+    for (const [value, assets] of barcodeAssetsMap) {
+      if (assets.length > 1) {
         duplicateBarcodes.push({
           value,
-          type: info.type,
-          assets: info.assets,
+          assets,
         });
       }
     }
@@ -845,10 +846,10 @@ export async function parseBarcodesFromImportData({
 
     if (linkedBarcodes.length > 0) {
       const linkedDetails = linkedBarcodes.map((barcode) => {
-        const source = barcodeAssetsMap.get(barcode.value);
+        const sources = barcodeAssetsMap.get(barcode.value);
         const linkedTo =
           barcode.asset?.title || barcode.kit?.name || "Unknown item";
-        return `${barcode.value} (${source?.type}) - already linked to "${linkedTo}"`;
+        return `${barcode.value} (${sources?.[0]?.type}) - already linked to "${linkedTo}"`;
       });
 
       throw new ShelfError({
