@@ -8,10 +8,13 @@ import { data, redirect, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
+import { Button } from "~/components/shared/button";
 
 import { DateS } from "~/components/shared/date";
 import { WarningBox } from "~/components/shared/warning-box";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
+import type { PaidInvoice } from "~/components/subscription/invoice-history";
+import { InvoiceHistory } from "~/components/subscription/invoice-history";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
@@ -30,6 +33,9 @@ import {
   getStripePricesAndProducts,
   createStripeCheckoutSession,
   getCustomerOpenInvoices,
+  getCustomerPaidInvoices,
+  getCustomerUpcomingInvoices,
+  getCustomerSubscriptionsWithProducts,
   getStripeCustomer,
   getOrCreateCustomerId,
 } from "~/utils/stripe.server";
@@ -66,11 +72,57 @@ export async function loader({ context }: LoaderFunctionArgs) {
       await getOrCreateCustomerId(user)
     )) as CustomerWithSubscriptions;
 
-    /* Get the prices, products, and open invoices from Stripe */
-    const [prices, openInvoices] = await Promise.all([
+    /* Get the prices, products, subscriptions, and invoices from Stripe */
+    const [
+      prices,
+      openInvoices,
+      paidInvoicesData,
+      upcomingInvoicesData,
+      subscriptionsWithProducts,
+    ] = await Promise.all([
       getStripePricesAndProducts(),
       getCustomerOpenInvoices(customer.id),
+      getCustomerPaidInvoices(customer.id),
+      getCustomerUpcomingInvoices(customer),
+      getCustomerSubscriptionsWithProducts(customer.id),
     ]);
+
+    // Transform paid invoices to simplified type for UI
+    const paidInvoices: PaidInvoice[] = paidInvoicesData.map((inv) => ({
+      id: inv.id,
+      number: inv.number,
+      amountPaid: inv.amount_paid,
+      currency: inv.currency,
+      paidAt: inv.status_transitions?.paid_at ?? null,
+      hostedInvoiceUrl: inv.hosted_invoice_url ?? null,
+    }));
+
+    // Transform upcoming invoices to simplified type for UI
+    // Get subscription name from the customer's subscriptions data
+    const upcomingInvoices = upcomingInvoicesData.map((inv) => {
+      const subscriptionId = inv.subscription as string;
+
+      // Find the subscription in customer data to get its name
+      const subscription = customer.subscriptions?.data.find(
+        (sub) => sub.id === subscriptionId
+      );
+
+      // Get the product name from the first line item description or subscription item
+      let subscriptionName = "Subscription";
+      if (inv.lines?.data?.[0]?.description) {
+        subscriptionName = inv.lines.data[0].description;
+      } else if (subscription?.items?.data?.[0]?.price?.nickname) {
+        subscriptionName = subscription.items.data[0].price.nickname;
+      }
+
+      return {
+        subscriptionId,
+        subscriptionName,
+        amountDue: inv.amount_due,
+        currency: inv.currency,
+        periodEnd: inv.period_end,
+      };
+    });
 
     return payload({
       title: `Subscriptions`,
@@ -82,14 +134,27 @@ export async function loader({ context }: LoaderFunctionArgs) {
       tierLimit,
       prices,
       customer,
+      subscriptionsWithProducts,
       usedFreeTrial: user.usedFreeTrial,
-      openInvoices: openInvoices.map((inv) => ({
-        number: inv.number,
-        amountDue: inv.amount_due,
-        currency: inv.currency,
-        dueDate: inv.due_date,
-        hostedInvoiceUrl: inv.hosted_invoice_url,
-      })),
+      openInvoices: openInvoices.map((inv) => {
+        // Get subscription name from line items description
+        let subscriptionName = "Subscription";
+        if (inv.lines?.data?.[0]?.description) {
+          subscriptionName = inv.lines.data[0].description;
+        }
+
+        return {
+          number: inv.number,
+          subscriptionName,
+          amountDue: inv.amount_due,
+          currency: inv.currency,
+          // Use due_date if available, otherwise fall back to period_end
+          dueDate: inv.due_date ?? inv.period_end,
+          hostedInvoiceUrl: inv.hosted_invoice_url,
+        };
+      }),
+      paidInvoices,
+      upcomingInvoices,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -153,8 +218,18 @@ export const handle = {
 };
 
 export default function SubscriptionPage() {
-  const { title, subTitle, prices, tier, tierLimit, customer, openInvoices } =
-    useLoaderData<typeof loader>();
+  const {
+    title,
+    subTitle,
+    prices,
+    tier,
+    tierLimit,
+    customer,
+    subscriptionsWithProducts,
+    openInvoices,
+    paidInvoices,
+    upcomingInvoices,
+  } = useLoaderData<typeof loader>();
   const user = useUserData();
   const hasUnpaidInvoice = user?.hasUnpaidInvoice ?? false;
 
@@ -232,7 +307,17 @@ export default function SubscriptionPage() {
         {hasNoSubscription ? (
           <PricingTable prices={prices} />
         ) : (
-          <SubscriptionsOverview customer={customer} prices={prices} />
+          <>
+            <SubscriptionsOverview
+              customer={customer}
+              subscriptions={subscriptionsWithProducts}
+              prices={prices}
+            />
+            <InvoiceHistory
+              paidInvoices={paidInvoices}
+              upcomingInvoices={upcomingInvoices}
+            />
+          </>
         )}
       </div>
       <SuccessfulSubscriptionModal />
@@ -242,6 +327,7 @@ export default function SubscriptionPage() {
 
 type OpenInvoice = {
   number: string | null;
+  subscriptionName: string;
   amountDue: number;
   currency: string;
   dueDate: number | null;
@@ -252,8 +338,8 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
   return (
     <WarningBox className="mb-8 mt-3">
       <div>
-        <p className="font-semibold">Unpaid invoice</p>
-        <p className="mt-1">
+        <h4 className="font-semibold">Unpaid invoice/s</h4>
+        <p className="mt-1 text-gray-800">
           We were unable to process your latest payment. If payment is not
           resolved, your subscription will be fully canceled. Any existing
           pricing, discounts, or legacy plans tied to your subscription cannot
@@ -262,40 +348,53 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
         </p>
 
         {invoices.length > 0 ? (
-          <ul className="mt-3 space-y-2">
+          <ul className="mt-4 space-y-3">
             {invoices.map((inv) => (
               <li
                 key={inv.number}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+                className="rounded border border-warning-200 bg-warning-50 p-3"
               >
-                <span className="font-medium">{inv.number}</span>
-                <span>
-                  {new Intl.NumberFormat("en-US", {
-                    style: "currency",
-                    currency: inv.currency,
-                  }).format(inv.amountDue / 100)}
-                </span>
-                {inv.dueDate ? (
-                  <span>
-                    Due <DateS date={new Date(inv.dueDate * 1000)} />
-                  </span>
-                ) : null}
-                {inv.hostedInvoiceUrl ? (
-                  <a
-                    href={inv.hostedInvoiceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium underline"
-                  >
-                    View invoice
-                  </a>
-                ) : null}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-gray-900">
+                      {inv.subscriptionName}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Invoice {inv.number}
+                      {inv.dueDate ? (
+                        <>
+                          {" · "}Due{" "}
+                          <DateS date={new Date(inv.dueDate * 1000)} />
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-900">
+                      {new Intl.NumberFormat("en-US", {
+                        style: "currency",
+                        currency: inv.currency,
+                      }).format(inv.amountDue / 100)}
+                    </span>
+                    {inv.hostedInvoiceUrl ? (
+                      <Button
+                        href={inv.hostedInvoiceUrl}
+                        as="a"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="link-gray"
+                      >
+                        View invoice
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
         ) : null}
 
-        <p className="mt-2">
+        <div className="mt-2 text-gray-800">
           Please update your payment method through the{" "}
           <CustomerPortalForm
             buttonText="customer portal"
@@ -305,7 +404,7 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
             }}
           />
           .
-        </p>
+        </div>
       </div>
     </WarningBox>
   );

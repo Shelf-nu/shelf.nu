@@ -4,7 +4,7 @@ export function UnpaidInvoiceBanner() {
   return (
     <div
       role="alert"
-      className="bg-error-600 px-4 py-3 text-center text-sm text-white"
+      className="-mx-4 bg-error-600 px-4 py-3 text-center text-sm text-white"
     >
       You have an unpaid invoice. Please{" "}
       <CustomerPortalForm
@@ -12,7 +12,7 @@ export function UnpaidInvoiceBanner() {
         className="inline"
         buttonProps={{
           variant: "link",
-          className: "font-semibold text-white underline",
+          className: "font-semibold text-white underline hover:text-white/80",
         }}
       />{" "}
       to avoid service interruption.

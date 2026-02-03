@@ -352,6 +352,39 @@ export const getStripeCustomer = async (customerId: string) => {
   }
 };
 
+/** Fetches subscriptions for a customer with expanded product details */
+export const getCustomerSubscriptionsWithProducts = async (
+  customerId: string
+) => {
+  try {
+    if (!stripe) return [];
+
+    // First, get the list of subscription IDs
+    const subscriptionsList = await stripe.subscriptions.list({
+      customer: customerId,
+    });
+
+    // Then fetch each subscription individually with product expansion
+    // (Stripe limits list expansion to 4 levels, but retrieve allows it)
+    const subscriptions = await Promise.all(
+      subscriptionsList.data.map((sub) =>
+        stripe.subscriptions.retrieve(sub.id, {
+          expand: ["items.data.price.product"],
+        })
+      )
+    );
+
+    return subscriptions;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to retrieve subscriptions from Stripe",
+      additionalData: { customerId },
+      label,
+    });
+  }
+};
+
 export async function createBillingPortalSession({
   customerId,
 }: {
@@ -445,6 +478,7 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
       customerId,
       tierId,
       productType,
+      product,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -568,5 +602,75 @@ export async function validateSubscriptionIsActive({
 
   if (!subscription && user.tierId !== "free") {
     await updateUserTierId(user.id, "free");
+  }
+}
+
+/** Fetches paid invoices for a customer (last N invoices) */
+export async function getCustomerPaidInvoices(customerId: string, limit = 10) {
+  try {
+    if (!stripe) return [];
+    const invoices = await stripe.invoices.list({
+      customer: customerId,
+      status: "paid",
+      limit,
+    });
+    return invoices.data;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch paid invoices",
+      additionalData: { customerId },
+      label,
+    });
+  }
+}
+
+/** Fetches upcoming invoices for all active subscriptions of a customer */
+export async function getCustomerUpcomingInvoices(
+  customer: CustomerWithSubscriptions
+) {
+  try {
+    if (!stripe) return [];
+
+    const activeSubscriptions =
+      customer.subscriptions?.data.filter(
+        (sub) => sub.status === "active" || sub.status === "trialing"
+      ) ?? [];
+
+    if (activeSubscriptions.length === 0) return [];
+
+    // Fetch upcoming invoice for each active subscription
+    const upcomingInvoices = await Promise.all(
+      activeSubscriptions.map(async (sub) => {
+        try {
+          const invoice = await stripe.invoices.retrieveUpcoming({
+            customer: customer.id,
+            subscription: sub.id,
+          });
+          return invoice;
+        } catch (cause) {
+          // Stripe throws 'invoice_upcoming_none' when there's no upcoming invoice
+          if (
+            cause instanceof Stripe.errors.StripeInvalidRequestError &&
+            cause.code === "invoice_upcoming_none"
+          ) {
+            return null;
+          }
+          throw cause;
+        }
+      })
+    );
+
+    // Filter out null values (subscriptions without upcoming invoices)
+    return upcomingInvoices.filter(
+      (invoice): invoice is NonNullable<typeof invoice> => invoice !== null
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch upcoming invoices",
+      additionalData: { customerId: customer.id },
+      label,
+    });
   }
 }
