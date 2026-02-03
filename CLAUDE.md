@@ -82,6 +82,7 @@ app/
 - **Reusable Components**: Organized by feature/domain in `app/components/`
 - **Form Handling**: Remix Form with client-side validation
 - **UI Primitives**: Radix UI components with Tailwind styling
+- **Date Display**: Always use the `DateS` component (`app/components/shared/date.tsx`) for displaying dates in the UI. Do not use raw `toLocaleDateString()` or other custom date formatting.
 
 ### Form Validation Pattern (Required)
 
