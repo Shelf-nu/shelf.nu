@@ -135,9 +135,10 @@ export async function createCategoriesIfNotExists({
 
     // now we loop through the categories and check if they exist
     for (const [category, _] of categories) {
+      const trimmedCategory = (category as string).trim();
       const existingCategory = await db.category.findFirst({
         where: {
-          name: { equals: category, mode: "insensitive" },
+          name: { equals: trimmedCategory, mode: "insensitive" },
           organizationId,
         },
       });
@@ -146,7 +147,7 @@ export async function createCategoriesIfNotExists({
         // if the category doesn't exist, we create a new one
         const newCategory = await db.category.create({
           data: {
-            name: (category as string).trim(),
+            name: trimmedCategory,
             color: getRandomColor(),
             user: {
               connect: {

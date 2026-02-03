@@ -886,9 +886,10 @@ export async function createLocationsIfNotExists({
 
     // now we loop through the locations and check if they exist
     for (const [location, _] of locations) {
+      const trimmedLocation = (location as string).trim();
       const existingLocation = await db.location.findFirst({
         where: {
-          name: { equals: location, mode: "insensitive" },
+          name: { equals: trimmedLocation, mode: "insensitive" },
           organizationId,
         },
       });
@@ -897,7 +898,7 @@ export async function createLocationsIfNotExists({
         // if the location doesn't exist, we create a new one
         const newLocation = await db.location.create({
           data: {
-            name: (location as string).trim(),
+            name: trimmedLocation,
             user: {
               connect: {
                 id: userId,
