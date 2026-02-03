@@ -607,7 +607,7 @@ export async function createLocation({
 
     return await db.location.create({
       data: {
-        name,
+        name: name.trim(),
         description,
         address,
         latitude: coordinates?.lat || null,
@@ -720,7 +720,7 @@ export async function updateLocation(payload: {
     const updatedLocation = await db.location.update({
       where: { id, organizationId },
       data: {
-        name,
+        name: name?.trim(),
         description,
         address,
         ...(shouldUpdateCoordinates && {

@@ -21,7 +21,7 @@ export async function createCategory({
   try {
     return await db.category.create({
       data: {
-        name,
+        name: name.trim(),
         description,
         color,
         user: {
@@ -215,7 +215,7 @@ export async function updateCategory({
         organizationId,
       },
       data: {
-        name,
+        name: name?.trim(),
         description,
         color,
       },
