@@ -27,6 +27,8 @@
     "allow": [
       "Bash(find:*)",
       "Bash(xargs:*)",
+      "Bash(ls:*)",
+      "Bash(npm run test:*)",
       "Bash(npm run typecheck:*)",
       "Bash(npm run lint:*)",
       "Bash(npm run lint:fix:*)",

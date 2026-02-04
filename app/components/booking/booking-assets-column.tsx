@@ -230,7 +230,9 @@ export function BookingAssetsColumn() {
                             isExpanded={isExpanded}
                             onToggleExpansion={toggleKitExpansion}
                             bookingStatus={booking.status}
-                            assets={item.assets as AssetWithBooking[]}
+                            assets={
+                              item.assets as unknown as AssetWithBooking[]
+                            }
                             partialCheckinDetails={partialCheckinDetails}
                             shouldShowCheckinColumns={shouldShowCheckinColumns}
                           />
@@ -242,7 +244,7 @@ export function BookingAssetsColumn() {
                       return (
                         <ListItem key={`asset-${asset.id}`} item={asset}>
                           <ListAssetContent
-                            item={asset as AssetWithBooking}
+                            item={asset as unknown as AssetWithBooking}
                             partialCheckinDetails={partialCheckinDetails}
                             shouldShowCheckinColumns={shouldShowCheckinColumns}
                           />
