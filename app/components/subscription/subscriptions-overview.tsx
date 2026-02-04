@@ -302,17 +302,13 @@ function Item({
               {isActive && (
                 <>
                   <span className="font-medium">RENEWS ON:</span>{" "}
-                  <DateS
-                    date={new Date(subscription.current_period_end * 1000)}
-                  />
+                  <DateS date={new Date(item.current_period_end * 1000)} />
                 </>
               )}
               {isPaused && (
                 <>
                   <span className="font-medium">PAUSED ON:</span>{" "}
-                  <DateS
-                    date={new Date(subscription.current_period_end * 1000)}
-                  />
+                  <DateS date={new Date(item.current_period_end * 1000)} />
                 </>
               )}
             </div>
