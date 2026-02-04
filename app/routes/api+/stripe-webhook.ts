@@ -16,7 +16,9 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
   fetchStripeSubscription,
+  getCustomerNotificationData,
   getDataFromStripeEvent,
+  getInvoiceNotificationData,
   stripe,
 } from "~/utils/stripe.server";
 
@@ -232,31 +234,19 @@ export async function action({ request }: ActionFunctionArgs) {
               });
             });
 
-          // Send email notification to user about their new subscription
-          const stripeCustomer = await stripe.customers.retrieve(customerId);
-          const stripeEmail =
-            stripeCustomer && !stripeCustomer.deleted
-              ? stripeCustomer.email
-              : null;
-          const stripeName =
-            stripeCustomer && !stripeCustomer.deleted
-              ? stripeCustomer.name
-              : null;
+          // Send email notification to user about their new subscription (deduplicated)
+          const { emailsToNotify, customerName } =
+            await getCustomerNotificationData({ customerId, user });
 
           // Get the product name (product is already fetched in getDataFromStripeEvent)
           const subscriptionName = product?.name || "Shelf Subscription";
-
-          // Collect unique emails to send to (Stripe email + Shelf user email if different)
-          const emailsToNotify = new Set<string>();
-          if (stripeEmail) emailsToNotify.add(stripeEmail.toLowerCase());
-          if (user.email) emailsToNotify.add(user.email.toLowerCase());
 
           for (const email of emailsToNotify) {
             sendEmail({
               to: email,
               subject: "Your Shelf subscription is now active",
               text: subscriptionGrantedText({
-                customerName: stripeName || user.firstName,
+                customerName,
                 subscriptionName,
               }),
             });
@@ -445,34 +435,27 @@ export async function action({ request }: ActionFunctionArgs) {
           });
         }
 
-        // Send user notification using email from Stripe (billing email may differ from Shelf account)
-        const stripeCustomer = await stripe.customers.retrieve(customerId);
-        if (stripeCustomer && !stripeCustomer.deleted && stripeCustomer.email) {
-          // Get subscription details from the invoice
-          const subscriptionName =
-            failedInvoice.lines?.data?.[0]?.description || "Shelf Subscription";
-          const amountDue = new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: failedInvoice.currency,
-          }).format(failedInvoice.amount_due / 100);
-          const dueDate = failedInvoice.due_date
-            ? new Date(failedInvoice.due_date * 1000).toLocaleDateString(
-                "en-US",
-                {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                }
-              )
-            : null;
+        // Send user notification (deduplicated)
+        const {
+          emailsToNotify,
+          customerName,
+          subscriptionName,
+          amountDue,
+          dueDate,
+        } = await getInvoiceNotificationData({
+          customerId,
+          invoice: failedInvoice,
+          user,
+        });
 
+        for (const email of emailsToNotify) {
           sendEmail({
-            to: stripeCustomer.email,
+            to: email,
             subject:
               "Action needed: Payment issue with your Shelf subscription",
             text: unpaidInvoiceUserText({
-              customerEmail: stripeCustomer.email,
-              customerName: stripeCustomer.name,
+              customerEmail: email,
+              customerName,
               subscriptionName,
               amountDue,
               dueDate,
@@ -512,9 +495,12 @@ export async function action({ request }: ActionFunctionArgs) {
          * - If `customer.subscription.created` event was missed or failed
          * - Any other scenario where the tier wasn't properly set on creation
          */
-        if (paidInvoice.subscription) {
+        // In Stripe API 2026-01-28, subscription moved to parent.subscription_details
+        const subscriptionId =
+          paidInvoice.parent?.subscription_details?.subscription;
+        if (subscriptionId) {
           const subscription = await fetchStripeSubscription(
-            paidInvoice.subscription as string
+            subscriptionId as string
           );
 
           if (subscription.status === "active") {
@@ -595,6 +581,113 @@ export async function action({ request }: ActionFunctionArgs) {
               invoiceId: resolvedInvoice.id,
             }),
           });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "invoice.overdue": {
+        const overdueInvoice = event.data.object as Stripe.Invoice;
+
+        // Mark user as having unpaid invoice
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: true },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        // Send admin notification
+        if (ADMIN_EMAIL) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Invoice overdue: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: overdueInvoice.id,
+            }),
+          });
+        }
+
+        // Send user notification (deduplicated)
+        const {
+          emailsToNotify,
+          customerName,
+          subscriptionName,
+          amountDue,
+          dueDate,
+        } = await getInvoiceNotificationData({
+          customerId,
+          invoice: overdueInvoice,
+          user,
+        });
+
+        for (const email of emailsToNotify) {
+          sendEmail({
+            to: email,
+            subject: "Action needed: Your Shelf invoice is overdue",
+            text: unpaidInvoiceUserText({
+              customerEmail: email,
+              customerName,
+              subscriptionName,
+              amountDue,
+              dueDate,
+            }),
+          });
+        }
+
+        // Downgrade user tier if invoice is for a subscription with a tier
+        const subscriptionId =
+          overdueInvoice.parent?.subscription_details?.subscription;
+        if (subscriptionId) {
+          const subscription = await fetchStripeSubscription(
+            subscriptionId as string
+          );
+          const product = subscription.items.data[0].plan
+            .product as Stripe.Product;
+          const tierId = product?.metadata?.shelf_tier;
+          const productType = product?.metadata?.product_type;
+
+          // Only downgrade for non-addon subscription products with a tier
+          if (tierId && productType !== "addon") {
+            const subscriptionTierIsHigherOrEqual =
+              subscriptionTiersPriority[tierId as TierId] >=
+              subscriptionTiersPriority[user.tierId];
+
+            if (subscriptionTierIsHigherOrEqual) {
+              await db.user
+                .update({
+                  where: { customerId },
+                  data: { tierId: TierId.free },
+                  select: { id: true },
+                })
+                .catch((cause) => {
+                  throw new ShelfError({
+                    cause,
+                    message:
+                      "Failed to downgrade user tier for overdue invoice",
+                    additionalData: { customerId, tierId, event },
+                    label: "Stripe webhook",
+                    status: 500,
+                  });
+                });
+
+              // Reset branding when downgrading from Plus (tier_1) to Free
+              if (user.tierId === TierId.tier_1) {
+                await resetPersonalWorkspaceBranding(user.id);
+              }
+            }
+          }
         }
 
         return new Response(null, { status: 200 });

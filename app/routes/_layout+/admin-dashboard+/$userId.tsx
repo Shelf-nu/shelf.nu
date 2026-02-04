@@ -451,7 +451,7 @@ export default function Area51UserPage() {
     return value;
   };
 
-  const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
+  const hasSubscription = (customer?.subscriptions?.data?.length ?? 0) > 0;
 
   return user ? (
     <div>

@@ -187,6 +187,16 @@ All UI implementations must meet **WCAG 2.1 AA** as a minimum. This includes:
 - Meaningful alt text for images and icons
 - Focus indicators must be visible
 
+### Code Abstraction
+
+- When you notice duplicated code patterns across multiple files or functions,
+  abstract them into reusable helper functions
+- Before implementing new functionality, check if similar logic already exists
+  that can be extracted and reused
+- Keep helper functions focused on a single responsibility
+- Place shared helpers near the code that uses them, or in a shared utils file
+  if used across multiple modules
+
 ### Key Business Features
 
 - **Asset Management**: CRUD operations, QR code generation, image processing

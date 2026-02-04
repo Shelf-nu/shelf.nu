@@ -100,7 +100,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
     // Transform upcoming invoices to simplified type for UI
     // Get subscription name from the customer's subscriptions data
     const upcomingInvoices = upcomingInvoicesData.map((inv) => {
-      const subscriptionId = inv.subscription as string;
+      // In Stripe API 2026-01-28, subscription moved to parent.subscription_details
+      const subscriptionId =
+        (inv.parent?.subscription_details?.subscription as string) ?? "";
 
       // Find the subscription in customer data to get its name
       const subscription = customer.subscriptions?.data.find(
@@ -127,7 +129,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
     return payload({
       title: `Subscriptions`,
       subTitle:
-        customer?.subscriptions.total_count === 0
+        customer?.subscriptions.data.length === 0
           ? "Pick an account plan that fits your workflow."
           : "Manage your account plan.",
       tier: user.tierId,
@@ -237,7 +239,7 @@ export default function SubscriptionPage() {
   const isEnterprise =
     isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
 
-  const hasNoSubscription = customer?.subscriptions.total_count === 0;
+  const hasNoSubscription = customer?.subscriptions.data.length === 0;
 
   /**
    * This handles the case when there is no subscription and custom tier is set.
