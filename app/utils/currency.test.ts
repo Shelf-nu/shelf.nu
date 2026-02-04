@@ -1,0 +1,267 @@
+import { Currency } from "@prisma/client";
+import { describe, expect, it } from "vitest";
+import {
+  CURRENCY_MAP,
+  formatCurrency,
+  getCurrencyDecimalDigits,
+  getCurrencyDefinition,
+  getCurrencyName,
+  ISO_4217_CURRENCIES,
+  ISO_4217_CURRENCY_CODES,
+  isValidCurrencyCode,
+} from "./currency";
+
+describe("ISO 4217 Currency Codes", () => {
+  describe("ISO_4217_CURRENCIES", () => {
+    it("should have no duplicate currency codes", () => {
+      const codes = ISO_4217_CURRENCIES.map((c) => c.code);
+      const uniqueCodes = new Set(codes);
+      expect(codes.length).toBe(uniqueCodes.size);
+    });
+
+    it("should have all codes in uppercase 3-letter format", () => {
+      for (const currency of ISO_4217_CURRENCIES) {
+        expect(currency.code).toMatch(/^[A-Z]{3}$/);
+      }
+    });
+
+    it("should have valid numeric codes (3 digits)", () => {
+      for (const currency of ISO_4217_CURRENCIES) {
+        expect(currency.numericCode).toMatch(/^\d{3}$/);
+      }
+    });
+
+    it("should have decimal digits between 0 and 3", () => {
+      for (const currency of ISO_4217_CURRENCIES) {
+        expect(currency.decimalDigits).toBeGreaterThanOrEqual(0);
+        expect(currency.decimalDigits).toBeLessThanOrEqual(3);
+      }
+    });
+
+    it("should be sorted alphabetically by code", () => {
+      const sorted = [...ISO_4217_CURRENCIES].sort((a, b) =>
+        a.code.localeCompare(b.code)
+      );
+      expect(ISO_4217_CURRENCIES.map((c) => c.code)).toEqual(
+        sorted.map((c) => c.code)
+      );
+    });
+
+    it("should include major world currencies", () => {
+      const majorCurrencies = ["USD", "EUR", "GBP", "JPY", "CNY", "CHF", "CAD"];
+      for (const code of majorCurrencies) {
+        expect(
+          ISO_4217_CURRENCIES.some((c) => c.code === code),
+          `Expected ${code} to be in the list`
+        ).toBe(true);
+      }
+    });
+
+    it("should have at least 150 currencies (comprehensive ISO 4217 coverage)", () => {
+      expect(ISO_4217_CURRENCIES.length).toBeGreaterThanOrEqual(150);
+    });
+
+    it("should be in sync with Prisma Currency enum", () => {
+      // Get all valid Prisma Currency enum values
+      const prismaCurrencies = Object.values(Currency);
+
+      // Verify every TS currency code is a valid Prisma enum value
+      for (const currency of ISO_4217_CURRENCIES) {
+        expect(
+          prismaCurrencies.includes(currency.code as Currency),
+          `Currency code ${currency.code} from currency.ts is not in Prisma Currency enum`
+        ).toBe(true);
+      }
+
+      // Verify every Prisma enum value has a corresponding TS definition
+      for (const prismaCode of prismaCurrencies) {
+        expect(
+          ISO_4217_CURRENCIES.some((c) => c.code === prismaCode),
+          `Prisma Currency enum value ${prismaCode} is not in currency.ts`
+        ).toBe(true);
+      }
+
+      // Verify counts match
+      expect(ISO_4217_CURRENCIES.length).toBe(prismaCurrencies.length);
+    });
+  });
+
+  describe("ISO_4217_CURRENCY_CODES", () => {
+    it("should be an array of strings", () => {
+      expect(Array.isArray(ISO_4217_CURRENCY_CODES)).toBe(true);
+      for (const code of ISO_4217_CURRENCY_CODES) {
+        expect(typeof code).toBe("string");
+      }
+    });
+
+    it("should match the codes from ISO_4217_CURRENCIES", () => {
+      const codes = ISO_4217_CURRENCIES.map((c) => c.code);
+      expect(ISO_4217_CURRENCY_CODES).toEqual(codes);
+    });
+  });
+
+  describe("CURRENCY_MAP", () => {
+    it("should have the same number of entries as ISO_4217_CURRENCIES", () => {
+      expect(CURRENCY_MAP.size).toBe(ISO_4217_CURRENCIES.length);
+    });
+
+    it("should allow lookup by currency code", () => {
+      const usd = CURRENCY_MAP.get("USD");
+      expect(usd).toBeDefined();
+      expect(usd?.name).toBe("US Dollar");
+      expect(usd?.numericCode).toBe("840");
+      expect(usd?.decimalDigits).toBe(2);
+    });
+  });
+
+  describe("getCurrencyDefinition", () => {
+    it("should return currency definition for valid code", () => {
+      const eur = getCurrencyDefinition("EUR");
+      expect(eur).toBeDefined();
+      expect(eur?.code).toBe("EUR");
+      expect(eur?.name).toBe("Euro");
+    });
+
+    it("should return undefined for invalid code", () => {
+      const invalid = getCurrencyDefinition("INVALID");
+      expect(invalid).toBeUndefined();
+    });
+  });
+
+  describe("getCurrencyName", () => {
+    it("should return currency name for valid code", () => {
+      expect(getCurrencyName("USD")).toBe("US Dollar");
+      expect(getCurrencyName("JPY")).toBe("Yen");
+      expect(getCurrencyName("GBP")).toBe("Pound Sterling");
+    });
+
+    it("should return code as fallback for invalid code", () => {
+      expect(getCurrencyName("INVALID")).toBe("INVALID");
+    });
+  });
+
+  describe("getCurrencyDecimalDigits", () => {
+    it("should return correct decimal digits", () => {
+      // Standard 2 decimal places
+      expect(getCurrencyDecimalDigits("USD")).toBe(2);
+      expect(getCurrencyDecimalDigits("EUR")).toBe(2);
+
+      // Zero decimal places
+      expect(getCurrencyDecimalDigits("JPY")).toBe(0);
+      expect(getCurrencyDecimalDigits("KRW")).toBe(0);
+
+      // Three decimal places
+      expect(getCurrencyDecimalDigits("BHD")).toBe(3);
+      expect(getCurrencyDecimalDigits("KWD")).toBe(3);
+    });
+
+    it("should return 2 as default for invalid code", () => {
+      expect(getCurrencyDecimalDigits("INVALID")).toBe(2);
+    });
+  });
+
+  describe("isValidCurrencyCode", () => {
+    it("should return true for valid codes", () => {
+      expect(isValidCurrencyCode("USD")).toBe(true);
+      expect(isValidCurrencyCode("EUR")).toBe(true);
+      expect(isValidCurrencyCode("JPY")).toBe(true);
+    });
+
+    it("should return false for invalid codes", () => {
+      expect(isValidCurrencyCode("INVALID")).toBe(false);
+      expect(isValidCurrencyCode("")).toBe(false);
+      expect(isValidCurrencyCode("US")).toBe(false);
+      expect(isValidCurrencyCode("usd")).toBe(false); // case sensitive
+    });
+  });
+});
+
+describe("formatCurrency", () => {
+  it("should format USD with 2 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.5,
+      currency: "USD" as Currency,
+      locale: "en-US",
+    });
+    expect(result).toBe("$1,234.50");
+  });
+
+  it("should format EUR with 2 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.5,
+      currency: "EUR" as Currency,
+      locale: "en-US",
+    });
+    // en-US locale formats EUR with symbol
+    expect(result).toContain("1,234.50");
+  });
+
+  it("should format JPY with 0 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234,
+      currency: "JPY" as Currency,
+      locale: "en-US",
+    });
+    // JPY should not have decimal places
+    expect(result).toBe("¥1,234");
+  });
+
+  it("should format KRW with 0 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234,
+      currency: "KRW" as Currency,
+      locale: "en-US",
+    });
+    // KRW should not have decimal places
+    expect(result).toContain("1,234");
+    expect(result).not.toContain(".");
+  });
+
+  it("should format BHD with 3 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.567,
+      currency: "BHD" as Currency,
+      locale: "en-US",
+    });
+    // BHD uses 3 decimal places
+    expect(result).toContain("1,234.567");
+  });
+
+  it("should format KWD with 3 decimal places", () => {
+    const result = formatCurrency({
+      value: 1234.567,
+      currency: "KWD" as Currency,
+      locale: "en-US",
+    });
+    // KWD uses 3 decimal places
+    expect(result).toContain("1,234.567");
+  });
+
+  it("should handle zero values", () => {
+    const result = formatCurrency({
+      value: 0,
+      currency: "USD" as Currency,
+      locale: "en-US",
+    });
+    expect(result).toBe("$0.00");
+  });
+
+  it("should handle negative values", () => {
+    const result = formatCurrency({
+      value: -1234.56,
+      currency: "USD" as Currency,
+      locale: "en-US",
+    });
+    expect(result).toBe("-$1,234.56");
+  });
+
+  it("should respect locale formatting", () => {
+    const result = formatCurrency({
+      value: 1234.56,
+      currency: "EUR" as Currency,
+      locale: "de-DE",
+    });
+    // German locale uses comma as decimal separator and period as thousands
+    expect(result).toContain("1.234,56");
+  });
+});

@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, useParams } from "react-router";
 import z from "zod";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -12,6 +16,8 @@ import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import KitListBulkActionsDropdown from "~/components/location/kit-list-bulk-actions-dropdown";
+import KitRowActionsDropdown from "~/components/location/kit-row-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -23,16 +29,22 @@ import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getLocationKits } from "~/modules/location/service.server";
+import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
+import {
+  getLocationKits,
+  updateLocationKits,
+} from "~/modules/location/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
   payload,
   error,
   getCurrentSearchParams,
   getParams,
+  parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -128,6 +140,94 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const { userId } = context.getSession();
+  const { locationId } = getParams(params, paramsSchema);
+
+  try {
+    const { organizationId } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.location,
+      action: PermissionAction.manageKits,
+    });
+
+    const formData = await request.formData();
+    const intent = formData.get("intent") as string;
+
+    switch (intent) {
+      case "removeKit": {
+        const { kitId } = parseData(formData, z.object({ kitId: z.string() }));
+
+        await updateLocationKits({
+          organizationId,
+          locationId,
+          userId,
+          request,
+          kitIds: [],
+          removedKitIds: [kitId],
+        });
+
+        sendNotification({
+          title: "Kit removed",
+          message: "Kit and its assets have been removed from this location",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      case "bulk-remove-kits": {
+        const { kitIds } = parseData(
+          formData,
+          z.object({
+            kitIds: z.array(z.string()).min(1),
+          })
+        );
+
+        const resolvedKitIds = await resolveLocationKitIds({
+          ids: kitIds,
+          organizationId,
+          locationId,
+          request,
+        });
+
+        if (resolvedKitIds.length === 0) {
+          return payload({
+            success: true,
+            message: "No kits matched the current selection",
+          });
+        }
+
+        await updateLocationKits({
+          organizationId,
+          locationId,
+          userId,
+          request,
+          kitIds: [],
+          removedKitIds: resolvedKitIds,
+        });
+
+        sendNotification({
+          title: "Kits removed",
+          message: `${resolvedKitIds.length} kit(s) and their assets removed from this location`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      default:
+        throw new Error(`Unsupported intent: ${intent}`);
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, locationId });
+    return data(error(reason), { status: reason.status });
+  }
+}
+
 export default function LocationKits() {
   const { roles } = useUserRoleHelper();
   const { locationId } = useParams<z.infer<typeof paramsSchema>>();
@@ -211,11 +311,17 @@ export default function LocationKits() {
         <List
           className=""
           ItemComponent={Row}
-          extraItemComponentProps={{ canReadCustody }}
+          extraItemComponentProps={{
+            canReadCustody,
+            userRoleCanManageKits,
+          }}
+          bulkActions={
+            userRoleCanManageKits ? <KitListBulkActionsDropdown /> : undefined
+          }
           headerChildren={
             <>
               <Th>Category</Th>
-              <Th className="flex items-center gap-1 whitespace-nowrap">
+              <Th className="flex items-center gap-1 whitespace-nowrap md:border-b-0">
                 Custodian{" "}
                 <InfoTooltip
                   iconClassName="size-4"
@@ -232,6 +338,9 @@ export default function LocationKits() {
                   }
                 />
               </Th>
+              <When truthy={userRoleCanManageKits}>
+                <Th />
+              </When>
             </>
           }
           customEmptyStateContent={{
@@ -262,7 +371,7 @@ const Row = ({
       };
     };
   }>;
-  extraProps: { canReadCustody: boolean };
+  extraProps: { canReadCustody: boolean; userRoleCanManageKits: boolean };
 }) => {
   const { category, custody } = item;
 
@@ -315,6 +424,11 @@ const Row = ({
           ) : (
             <EmptyTableValue />
           )}
+        </Td>
+      </When>
+      <When truthy={extraProps.userRoleCanManageKits}>
+        <Td>
+          <KitRowActionsDropdown kit={item} />
         </Td>
       </When>
     </>

@@ -1032,6 +1032,7 @@ describe("parseBarcodesFromImportData", () => {
     expect(result[0]).toEqual({
       key: "asset-1",
       title: "Test Asset 1",
+      row: 2,
       barcodes: [
         { type: BarcodeType.Code128, value: "ABCD1234", existingId: undefined },
         { type: BarcodeType.Code39, value: "ABC123", existingId: undefined },
@@ -1045,6 +1046,7 @@ describe("parseBarcodesFromImportData", () => {
     expect(result[1]).toEqual({
       key: "asset-2",
       title: "Test Asset 2",
+      row: 3,
       barcodes: [
         { type: BarcodeType.Code128, value: "EFGH5678", existingId: undefined },
         { type: BarcodeType.Code128, value: "IJKL9012", existingId: undefined },
@@ -1104,7 +1106,7 @@ describe("parseBarcodesFromImportData", () => {
   });
 
   it("should throw error for duplicate barcodes within import data", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     const duplicateData = [
       {
         key: "asset-1",
@@ -1118,13 +1120,64 @@ describe("parseBarcodesFromImportData", () => {
       },
     ];
 
-    await expect(
-      parseBarcodesFromImportData({
+    try {
+      await parseBarcodesFromImportData({
         data: duplicateData,
         userId: "user-1",
         organizationId: "org-1",
-      })
-    ).rejects.toThrow("Some barcodes appear multiple times in the import data");
+      });
+    } catch (error) {
+      expect((error as ShelfError).message).toBe(
+        "Some barcodes appear multiple times in the import data. Each barcode must be unique."
+      );
+      expect((error as ShelfError).additionalData).toMatchObject({
+        duplicateBarcodes: [
+          {
+            value: "DUPLICATE123",
+            assets: [
+              { title: "Test Asset 1", type: "Code128", row: 2 },
+              { title: "Test Asset 2", type: "Code128", row: 3 },
+            ],
+          },
+        ],
+      });
+    }
+  });
+
+  it("should report correct type per asset when same barcode value has different types", async () => {
+    expect.assertions(1);
+    const mixedTypeData = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        barcode_Code128: "SHARED123",
+      },
+      {
+        key: "asset-2",
+        title: "Test Asset 2",
+        barcode_Code39: "SHARED123",
+      },
+    ];
+
+    try {
+      await parseBarcodesFromImportData({
+        data: mixedTypeData,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+    } catch (error) {
+      expect((error as ShelfError).additionalData).toMatchObject({
+        duplicateBarcodes: [
+          {
+            value: "SHARED123",
+            assets: [
+              { title: "Test Asset 1", type: "Code128", row: 2 },
+              { title: "Test Asset 2", type: "Code39", row: 3 },
+            ],
+          },
+        ],
+      });
+    }
   });
 
   it("should throw error for barcodes already linked to assets", async () => {

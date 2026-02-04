@@ -465,3 +465,10 @@ export function ExtendBookingSchema({
 }
 
 export type ExtendBookingSchemaType = ReturnType<typeof ExtendBookingSchema>;
+
+export const CancelBookingSchema = z.object({
+  cancellationReason: z
+    .string()
+    .max(500, "Cancellation reason must be 500 characters or less")
+    .optional(),
+});

@@ -46,6 +46,7 @@ model User {
   sso                   Boolean @default(false)
   createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
+  hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
 
   // Datetime
   createdAt DateTime @default(now())
@@ -59,6 +60,7 @@ model User {
   categories        Category[]
   notes             Note[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
+  locationNotes     LocationNote[]     @relation("LocationNoteUser")
   qrCodes           Qr[]
   scans             Scan[]
   tags              Tag[]
@@ -219,16 +221,15 @@ enum AssetStatus {
   CHECKED_OUT
 }
 
-
 model AssetFilterPreset {
-  id             String                @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   ownerId        String
   name           String
   query          String
-  starred        Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  starred        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -372,6 +373,26 @@ model BookingNote {
 
   // Indexes for foreign keys
   @@index([bookingId])
+  @@index([userId])
+}
+
+model LocationNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user       User?    @relation("LocationNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId     String?
+  location   Location @relation("LocationNotes", fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  locationId String
+
+  // Indexes for foreign keys
+  @@index([locationId])
   @@index([userId])
 }
 
@@ -565,6 +586,7 @@ model Location {
 
   assets Asset[]
   kits   Kit[]
+  notes  LocationNote[] @relation("LocationNotes")
 
   // Self-relation for nested locations
   parentId String?
@@ -780,32 +802,32 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  canImportNRM     Boolean  @default(false)
-  canHideShelfBranding Boolean @default(false)
-  maxCustomFields  Int      @default(0)
-  maxOrganizations Int      @default(1)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   TierId   @id
+  tier                 Tier?
+  canImportAssets      Boolean  @default(false)
+  canExportAssets      Boolean  @default(false)
+  canImportNRM         Boolean  @default(false)
+  canHideShelfBranding Boolean  @default(false)
+  maxCustomFields      Int      @default(0)
+  maxOrganizations     Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId           String?  @unique // This is the foreign key
-  canImportAssets  Boolean  @default(true)
-  canExportAssets  Boolean  @default(true)
-  canImportNRM     Boolean  @default(true)
-  canHideShelfBranding Boolean @default(true)
-  maxCustomFields  Int      @default(1000)
-  maxOrganizations Int      @default(1)
-  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId               String?  @unique // This is the foreign key
+  canImportAssets      Boolean  @default(true)
+  canExportAssets      Boolean  @default(true)
+  canImportNRM         Boolean  @default(true)
+  canHideShelfBranding Boolean  @default(true)
+  maxCustomFields      Int      @default(1000)
+  maxOrganizations     Int      @default(1)
+  isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 model CustomField {
@@ -872,41 +894,165 @@ model AssetCustomFieldValue {
   @@index([customFieldId])
 }
 
+// ISO 4217 Currency Codes
+// See app/utils/currency.ts for the canonical list with full metadata
+// Sorted alphabetically by currency code
 enum Currency {
-  USD // United States Dollar
-  EUR // Euro
-  GBP // British Pound Sterling
-
-  AED // United Arab Emirates Dirham
+  AED // UAE Dirham
+  AFN // Afghani
+  ALL // Lek
+  AMD // Armenian Dram
+  ANG // Netherlands Antillean Guilder
+  AOA // Kwanza
+  ARS // Argentine Peso
   AUD // Australian Dollar
+  AWG // Aruban Florin
+  AZN // Azerbaijan Manat
+  BAM // Convertible Mark
+  BBD // Barbados Dollar
+  BDT // Taka
   BGN // Bulgarian Lev
+  BHD // Bahraini Dinar
+  BIF // Burundi Franc
+  BMD // Bermudian Dollar
+  BND // Brunei Dollar
+  BOB // Boliviano
   BRL // Brazilian Real
+  BSD // Bahamian Dollar
+  BTN // Ngultrum
+  BWP // Pula
+  BYN // Belarusian Ruble
+  BZD // Belize Dollar
   CAD // Canadian Dollar
+  CDF // Congolese Franc
   CHF // Swiss Franc
-  CNY // Chinese Yuan
+  CLP // Chilean Peso
+  CNY // Yuan Renminbi
+  COP // Colombian Peso
+  CRC // Costa Rican Colon
+  CUP // Cuban Peso
+  CVE // Cabo Verde Escudo
   CZK // Czech Koruna
+  DJF // Djibouti Franc
   DKK // Danish Krone
+  DOP // Dominican Peso
+  DZD // Algerian Dinar
+  EGP // Egyptian Pound
+  ERN // Nakfa
+  ETB // Ethiopian Birr
+  EUR // Euro
+  FJD // Fiji Dollar
+  FKP // Falkland Islands Pound
+  GBP // Pound Sterling
+  GEL // Lari
+  GHS // Ghana Cedi
+  GIP // Gibraltar Pound
+  GMD // Dalasi
+  GNF // Guinean Franc
+  GTQ // Quetzal
+  GYD // Guyana Dollar
   HKD // Hong Kong Dollar
-  IDR // Indonesian Rupiah
+  HNL // Lempira
+  HTG // Gourde
+  HUF // Forint
+  IDR // Rupiah
+  ILS // New Israeli Sheqel
   INR // Indian Rupee
-  JPY // Japanese Yen
-  KRW // South Korean Won
-  LKR // Sri Lankan Rupee
+  IQD // Iraqi Dinar
+  IRR // Iranian Rial
+  ISK // Iceland Krona
+  JMD // Jamaican Dollar
+  JOD // Jordanian Dinar
+  JPY // Yen
+  KES // Kenyan Shilling
+  KGS // Som
+  KHR // Riel
+  KMF // Comorian Franc
+  KPW // North Korean Won
+  KRW // Won
+  KWD // Kuwaiti Dinar
+  KYD // Cayman Islands Dollar
+  KZT // Tenge
+  LAK // Lao Kip
+  LBP // Lebanese Pound
+  LKR // Sri Lanka Rupee
+  LRD // Liberian Dollar
+  LSL // Loti
+  LYD // Libyan Dinar
+  MAD // Moroccan Dirham
+  MDL // Moldovan Leu
+  MGA // Malagasy Ariary
+  MKD // Denar
+  MMK // Kyat
+  MNT // Tugrik
+  MOP // Pataca
+  MRU // Ouguiya
+  MUR // Mauritius Rupee
+  MVR // Rufiyaa
+  MWK // Malawi Kwacha
   MXN // Mexican Peso
   MYR // Malaysian Ringgit
+  MZN // Mozambique Metical
+  NAD // Namibia Dollar
+  NGN // Naira
+  NIO // Cordoba Oro
   NOK // Norwegian Krone
+  NPR // Nepalese Rupee
   NZD // New Zealand Dollar
+  OMR // Rial Omani
+  PAB // Balboa
+  PEN // Sol
+  PGK // Kina
   PHP // Philippine Peso
-  PLN // Polish Zloty
+  PKR // Pakistan Rupee
+  PLN // Zloty
+  PYG // Guarani
+  QAR // Qatari Rial
+  RON // Romanian Leu
+  RSD // Serbian Dinar
   RUB // Russian Ruble
+  RWF // Rwanda Franc
   SAR // Saudi Riyal
+  SBD // Solomon Islands Dollar
+  SCR // Seychelles Rupee
+  SDG // Sudanese Pound
   SEK // Swedish Krona
   SGD // Singapore Dollar
-  TWD // Taiwanese Dollar
-  UGX // Ugandan Shilling
-  ZAR // South African Rand
-  PKR // Pakistani Rupee
-  RON // Romanian Leu
+  SHP // Saint Helena Pound
+  SLE // Leone
+  SOS // Somali Shilling
+  SRD // Surinam Dollar
+  SSP // South Sudanese Pound
+  STN // Dobra
+  SVC // El Salvador Colon
+  SYP // Syrian Pound
+  SZL // Lilangeni
+  THB // Baht
+  TJS // Somoni
+  TMT // Turkmenistan Manat
+  TND // Tunisian Dinar
+  TOP // Pa'anga
+  TRY // Turkish Lira
+  TTD // Trinidad and Tobago Dollar
+  TWD // New Taiwan Dollar
+  TZS // Tanzanian Shilling
+  UAH // Hryvnia
+  UGX // Uganda Shilling
+  USD // US Dollar
+  UYU // Peso Uruguayo
+  UZS // Uzbekistan Sum
+  VES // Bolívar Soberano
+  VND // Dong
+  VUV // Vatu
+  WST // Tala
+  XAF // CFA Franc BEAC
+  XCD // East Caribbean Dollar
+  XOF // CFA Franc BCEAO
+  XPF // CFP Franc
+  YER // Yemeni Rial
+  ZAR // Rand
+  ZMW // Zambian Kwacha
+  ZWL // Zimbabwe Dollar
 }
 
 enum InviteStatuses {
@@ -1010,6 +1156,8 @@ model Booking {
   // dates here and updated the from and to dates to current date (if users agrees to change) 
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
+
+  cancellationReason String?
 
   // Indexes for foreign keys
   @@index([creatorId])

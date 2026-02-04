@@ -45,6 +45,7 @@ import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapCustodianForNote,
+  wrapKitsWithDataForNote,
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -64,6 +65,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createBulkKitChangeNotes,
   createNote,
@@ -782,30 +784,37 @@ export async function releaseCustody({
       : "**Unknown Custodian**";
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
-    await Promise.all([
-      db.kit.update({
+    // Use transaction for atomicity - prevents orphaned custody records on partial failure
+    await db.$transaction(async (tx) => {
+      // Delete kit custody and update kit status
+      await tx.kit.update({
         where: { id: kitId, organizationId },
         data: {
           status: KitStatus.AVAILABLE,
           custody: { delete: true },
         },
-      }),
-      ...kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id, organizationId },
-          data: {
-            status: AssetStatus.AVAILABLE,
-            custody: { delete: true },
-          },
-        })
-      ),
-      createNotes({
-        content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
-        type: "UPDATE",
-        userId,
-        assetIds: kit.assets.map((asset) => asset.id),
-      }),
-    ]);
+      });
+
+      // Delete asset custody records first, then update asset status
+      const assetIds = kit.assets.map((a) => a.id);
+
+      await tx.custody.deleteMany({
+        where: { assetId: { in: assetIds } },
+      });
+
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds }, organizationId },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+
+    // Notes can be created outside transaction (not critical for consistency)
+    await createNotes({
+      content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
+      type: "UPDATE",
+      userId,
+      assetIds: kit.assets.map((asset) => asset.id),
+    });
 
     return kit;
   } catch (cause) {
@@ -1728,6 +1737,8 @@ export async function bulkUpdateKitLocation({
       select: {
         id: true,
         name: true,
+        locationId: true,
+        location: { select: { id: true, name: true } },
         assets: {
           select: {
             id: true,
@@ -1838,6 +1849,110 @@ export async function bulkUpdateKitLocation({
             })
           )
         );
+      }
+    }
+
+    // Create location activity notes
+    const userForNote = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: userForNote?.firstName,
+      lastName: userForNote?.lastName,
+    });
+
+    if (newLocationId && newLocationId.trim() !== "") {
+      const location = await db.location.findUnique({
+        where: { id: newLocationId },
+        select: { id: true, name: true },
+      });
+
+      if (location) {
+        const locLink = wrapLinkForNote(
+          `/locations/${location.id}`,
+          location.name
+        );
+
+        // Only count kits not already at the target location
+        const actuallyMovedKits = kitsWithAssets.filter(
+          (k) => k.locationId !== newLocationId
+        );
+
+        if (actuallyMovedKits.length > 0) {
+          const kitData = actuallyMovedKits.map((k) => ({
+            id: k.id,
+            name: k.name,
+          }));
+          const kitMarkup = wrapKitsWithDataForNote(kitData, "added");
+          await createSystemLocationNote({
+            locationId: location.id,
+            content: `${userLink} added ${kitMarkup} to ${locLink}.`,
+            userId,
+          });
+        }
+
+        // Removal notes on previous locations
+        const byPrevLoc = new Map<
+          string,
+          { name: string; kits: Array<{ id: string; name: string }> }
+        >();
+        for (const kit of actuallyMovedKits) {
+          if (!kit.locationId || kit.locationId === newLocationId) continue;
+          const prevLocName = kit.location?.name ?? "Unknown location";
+          const prevLocId = kit.locationId;
+          const existing = byPrevLoc.get(prevLocId);
+          if (existing) {
+            existing.kits.push({ id: kit.id, name: kit.name });
+          } else {
+            byPrevLoc.set(prevLocId, {
+              name: prevLocName,
+              kits: [{ id: kit.id, name: kit.name }],
+            });
+          }
+        }
+        for (const [locId, { name, kits }] of byPrevLoc) {
+          const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+          const kitMarkup = wrapKitsWithDataForNote(kits, "removed");
+          const movedTo = ` Moved to ${locLink}.`;
+          await createSystemLocationNote({
+            locationId: locId,
+            content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.${movedTo}`,
+            userId,
+          });
+        }
+      }
+    } else {
+      // Kits removed from location — create removal notes
+      const byPrevLoc = new Map<
+        string,
+        { name: string; kits: Array<{ id: string; name: string }> }
+      >();
+      for (const kit of kitsWithAssets) {
+        if (!kit.locationId) continue;
+        const prevLocName = kit.location?.name ?? "Unknown location";
+        const existing = byPrevLoc.get(kit.locationId);
+        if (existing) {
+          existing.kits.push({ id: kit.id, name: kit.name });
+        } else {
+          byPrevLoc.set(kit.locationId, {
+            name: prevLocName,
+            kits: [{ id: kit.id, name: kit.name }],
+          });
+        }
+      }
+      for (const [locId, { name, kits }] of byPrevLoc) {
+        const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+        const kitMarkup = wrapKitsWithDataForNote(kits, "removed");
+        await createSystemLocationNote({
+          locationId: locId,
+          content: `${userLink} removed ${kitMarkup} from ${prevLocLink}.`,
+          userId,
+        });
       }
     }
 
@@ -2158,21 +2273,26 @@ export async function updateKitAssets({
     if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       const assetIds = removedAssets.map((a) => a.id);
-      await Promise.all([
-        db.custody.deleteMany({
+
+      // Use transaction for atomicity - prevents orphaned custody records
+      await db.$transaction(async (tx) => {
+        await tx.custody.deleteMany({
           where: { assetId: { in: assetIds } },
-        }),
-        db.asset.updateMany({
+        });
+
+        await tx.asset.updateMany({
           where: { id: { in: assetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
-        }),
-        createNotes({
-          content: `${actor} released ${custodianDisplay}'s custody.`,
-          type: NoteType.UPDATE,
-          userId,
-          assetIds,
-        }),
-      ]);
+        });
+      });
+
+      // Notes can be created outside transaction (not critical for consistency)
+      await createNotes({
+        content: `${actor} released ${custodianDisplay}'s custody.`,
+        type: NoteType.UPDATE,
+        userId,
+        assetIds,
+      });
     }
 
     /**
@@ -2290,14 +2410,9 @@ export async function bulkRemoveAssetsFromKits({
     });
 
     await db.$transaction(async (tx) => {
-      /** Removing assets from kits */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((a) => a.id) } },
-        data: { kitId: null, status: AssetStatus.AVAILABLE },
-      });
-
       /**
-       * If there are assets whose kits were in custody, then we have to remove the custody
+       * If there are assets whose kits were in custody, then we have to remove the custody FIRST
+       * to avoid orphaned custody records when status is set to AVAILABLE
        */
       const assetsWhoseKitsInCustody = assets.filter(
         (asset) => !!asset.kit?.custody && asset.custody
@@ -2313,6 +2428,12 @@ export async function bulkRemoveAssetsFromKits({
           where: { id: { in: custodyIdsToDelete } },
         });
       }
+
+      /** Removing assets from kits - AFTER custody is deleted */
+      await tx.asset.updateMany({
+        where: { id: { in: assets.map((a) => a.id) } },
+        data: { kitId: null, status: AssetStatus.AVAILABLE },
+      });
 
       /** Create notes for assets released from custody */
       if (assetsWhoseKitsInCustody.length > 0) {

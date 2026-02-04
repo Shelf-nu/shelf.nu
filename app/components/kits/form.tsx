@@ -276,7 +276,7 @@ export default function KitsForm({
         <FormRow rowLabel="Image" className="border-b-0 pt-[10px]">
           <div>
             <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
             </p>
             <Input
               disabled={disabled}
@@ -291,7 +291,7 @@ export default function KitsForm({
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.8 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
             </p>
           </div>
         </FormRow>

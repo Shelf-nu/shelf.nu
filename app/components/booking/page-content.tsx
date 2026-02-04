@@ -1,3 +1,4 @@
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { formatBookingDuration } from "~/modules/booking/helpers";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
@@ -31,6 +32,13 @@ export function BookingPageContent() {
 
   return (
     <div className="md:mt-4">
+      {booking.status === BookingStatus.CANCELLED &&
+        booking.cancellationReason && (
+          <div className="mb-4 rounded-lg border border-warning-200 bg-warning-25 p-4">
+            <p className="mb-1 text-sm font-semibold ">Cancellation reason</p>
+            <p className="text-sm ">{booking.cancellationReason}</p>
+          </div>
+        )}
       <div className="mb-8 flex h-full flex-col items-stretch gap-2 lg:mb-2 lg:flex-row">
         <Card className="-mx-4 my-0 lg:mx-0 lg:w-2/3">
           <EditBookingForm

@@ -46,6 +46,7 @@ import {
   getOrCreateCustomerId,
   getStripeCustomer,
   getStripePricesAndProducts,
+  getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
@@ -192,19 +193,25 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     );
 
     /** Get the Stripe customer */
-    const customer = premiumIsEnabled
-      ? ((await getStripeCustomer(
-          await getOrCreateCustomerId(user)
-        )) as CustomerWithSubscriptions)
+    const customerId = premiumIsEnabled
+      ? await getOrCreateCustomerId(user)
+      : null;
+    const customer = customerId
+      ? ((await getStripeCustomer(customerId)) as CustomerWithSubscriptions)
       : null;
 
-    /* Get the prices and products from Stripe */
-    const prices = await getStripePricesAndProducts();
+    /* Get the prices, products, and subscriptions from Stripe */
+    const [prices, subscriptionsWithProducts] = await Promise.all([
+      getStripePricesAndProducts(),
+      customerId ? getCustomerSubscriptionsWithProducts(customerId) : [],
+    ]);
+
     return payload({
       user,
       organizations: userOrganizations.map((uo) => uo.organization),
       ssoUsersByDomain,
       customer,
+      subscriptionsWithProducts,
       prices,
       premiumIsEnabled,
     });
@@ -373,6 +380,7 @@ export default function Area51UserPage() {
     organizations,
     ssoUsersByDomain,
     customer,
+    subscriptionsWithProducts,
     prices,
     premiumIsEnabled,
   } = useLoaderData<typeof loader>();
@@ -443,7 +451,7 @@ export default function Area51UserPage() {
     return value;
   };
 
-  const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
+  const hasSubscription = (customer?.subscriptions?.data?.length ?? 0) > 0;
 
   return user ? (
     <div>
@@ -503,7 +511,11 @@ export default function Area51UserPage() {
             {!hasSubscription ? (
               <div>No subscription found</div>
             ) : (
-              <SubscriptionsOverview customer={customer} prices={prices} />
+              <SubscriptionsOverview
+                customer={customer}
+                subscriptions={subscriptionsWithProducts}
+                prices={prices}
+              />
             )}
           </div>
         </div>

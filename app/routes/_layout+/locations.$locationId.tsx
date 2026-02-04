@@ -199,6 +199,7 @@ export default function LocationPage() {
     { to: "overview", content: "Overview" },
     { to: "assets", content: "Assets" },
     { to: "kits", content: "Kits" },
+    { to: "activity", content: "Activity" },
   ];
 
   /**
@@ -237,7 +238,7 @@ export default function LocationPage() {
 
       <div className="mt-4 block md:mx-0 lg:flex">
         {/* Left column */}
-        <div className="flex-1 md:overflow-hidden">
+        <div className="flex-1">
           <Outlet />
         </div>
 
