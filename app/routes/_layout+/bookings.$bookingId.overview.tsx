@@ -104,7 +104,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const { page, perPageParam, orderBy, orderDirection } = paramsValues;
+  const { page, perPageParam, orderDirection } = paramsValues;
+  // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
+  const orderBy =
+    paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
