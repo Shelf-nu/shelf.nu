@@ -1,3 +1,8 @@
+/**
+ * @deprecated This DropdownMenu component is deprecated and should not be used for new features.
+ * Use Popover from @radix-ui/react-popover with custom select behavior instead.
+ * See `app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example.
+ */
 import * as React from "react";
 import type {
   ComponentPropsWithoutRef,

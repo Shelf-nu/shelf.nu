@@ -7,8 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Development
 
 - `npm run dev` - Start development server on port 3000
-- `npm run test` - Run Vitest unit tests
+- `npm run test -- --run` - Run Vitest unit tests (always use `--run` flag to prevent watch mode)
 - `npm run validate` - Run all tests, linting, and typecheck (use before commits)
+
+**IMPORTANT:** When running tests manually, ALWAYS use the `--run` flag (e.g., `npm run test -- --run`) to run tests once and exit. Without `--run`, Vitest runs in watch mode which consumes excessive memory. Never run multiple test processes in parallel as this can freeze the system.
 
 ### Code Quality
 
@@ -83,6 +85,10 @@ app/
 - **Form Handling**: Remix Form with client-side validation
 - **UI Primitives**: Radix UI components with Tailwind styling
 - **Date Display**: Always use the `DateS` component (`app/components/shared/date.tsx`) for displaying dates in the UI. Do not use raw `toLocaleDateString()` or other custom date formatting.
+
+### Deprecated Components
+
+- **DropdownMenu** (`app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
 
 ### Form Validation Pattern (Required)
 
