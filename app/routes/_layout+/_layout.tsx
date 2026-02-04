@@ -180,6 +180,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
+        scannerCameraId: userPrefsCookie.scannerCameraId as string | undefined,
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
