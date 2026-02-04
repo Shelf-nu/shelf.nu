@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { type Prisma } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 /** Includes needed for booking to have all data required for emails */
@@ -29,6 +29,7 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
   assets: {
     select: {
       id: true,
+      title: true,
       availableToBook: true,
       status: true,
       kitId: true,
@@ -38,6 +39,11 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           id: true,
           name: true,
           color: true,
+        },
+      },
+      kit: {
+        select: {
+          name: true,
         },
       },
     },
@@ -56,3 +62,15 @@ export enum BOOKING_SCHEDULER_EVENTS_ENUM {
   checkinReminder = `booking-checkin-reminder`,
   overdueHandler = `booking-overdue-handler`,
 }
+
+/**
+ * Sorting options available for booking assets
+ */
+export const BOOKING_ASSET_SORTING_OPTIONS = {
+  status: "Status",
+  title: "Name",
+  category: "Category",
+} as const;
+
+export type BookingAssetSortingOption =
+  keyof typeof BOOKING_ASSET_SORTING_OPTIONS;

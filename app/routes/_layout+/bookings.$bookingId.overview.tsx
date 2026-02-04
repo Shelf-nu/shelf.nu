@@ -104,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const { page, perPageParam } = paramsValues;
+  const { page, perPageParam, orderBy, orderDirection } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -202,29 +202,116 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
     const enhancedBooking = booking;
 
-    // Sort assets by booking context priority
-    enhancedBooking.assets = sortBookingAssets(
-      enhancedBooking.assets,
-      partialCheckinDetails
-    );
+    // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
+    // For other sort options, the database orderBy is sufficient
+    const isStatusSort = !orderBy || orderBy === "status";
+    if (isStatusSort) {
+      enhancedBooking.assets = sortBookingAssets(
+        enhancedBooking.assets,
+        partialCheckinDetails
+      );
+    }
 
     // Group assets by kitId for pagination purposes
-    const assetsByKit: Record<
+    const assetsByKit = new Map<
       string,
-      Array<(typeof enhancedBooking.assets)[0]>
-    > = {};
+      { kitName: string; assets: Array<(typeof enhancedBooking.assets)[0]> }
+    >();
     const individualAssets: Array<(typeof enhancedBooking.assets)[0]> = [];
 
     enhancedBooking.assets.forEach((asset) => {
-      if (asset.kitId) {
-        if (!assetsByKit[asset.kitId]) {
-          assetsByKit[asset.kitId] = [];
+      if (asset.kitId && asset.kit) {
+        if (!assetsByKit.has(asset.kitId)) {
+          assetsByKit.set(asset.kitId, { kitName: asset.kit.name, assets: [] });
         }
-        assetsByKit[asset.kitId].push(asset);
+        assetsByKit.get(asset.kitId)!.assets.push(asset);
       } else {
         individualAssets.push(asset);
       }
     });
+
+    // Sort multiplier based on direction
+    const sortMultiplier = orderDirection === "asc" ? 1 : -1;
+
+    // Compare function for sorting assets
+    const compareAssets = (
+      a: (typeof enhancedBooking.assets)[0],
+      b: (typeof enhancedBooking.assets)[0]
+    ): number => {
+      switch (orderBy) {
+        case "title":
+          return sortMultiplier * (a.title || "").localeCompare(b.title || "");
+        case "category": {
+          const catA = a.category?.name || "";
+          const catB = b.category?.name || "";
+          return sortMultiplier * catA.localeCompare(catB);
+        }
+        case "status":
+        default: {
+          const statusOrder: Record<string, number> = {
+            CHECKED_OUT: 1,
+            IN_CUSTODY: 2,
+            AVAILABLE: 3,
+          };
+          const statusA = statusOrder[a.status] || 99;
+          const statusB = statusOrder[b.status] || 99;
+          const statusDiff = sortMultiplier * (statusA - statusB);
+          return statusDiff !== 0
+            ? statusDiff
+            : (a.title || "").localeCompare(b.title || "");
+        }
+      }
+    };
+
+    // Sort assets within each kit
+    for (const [, group] of assetsByKit) {
+      group.assets.sort(compareAssets);
+    }
+
+    // Sort individual assets
+    individualAssets.sort(compareAssets);
+
+    // Sort kit groups
+    const sortedKitGroups = Array.from(assetsByKit.entries()).sort(
+      ([, groupA], [, groupB]) => {
+        switch (orderBy) {
+          case "title":
+            // Sort kits by kit name
+            return (
+              sortMultiplier * groupA.kitName.localeCompare(groupB.kitName)
+            );
+          case "category": {
+            // Sort kits by first asset's category
+            const catA = groupA.assets[0]?.category?.name || "";
+            const catB = groupB.assets[0]?.category?.name || "";
+            return sortMultiplier * catA.localeCompare(catB);
+          }
+          case "status":
+          default: {
+            // Sort kits by most urgent status
+            const statusOrder: Record<string, number> = {
+              CHECKED_OUT: 1,
+              IN_CUSTODY: 2,
+              AVAILABLE: 3,
+            };
+            const getKitPriority = (
+              assets: Array<(typeof enhancedBooking.assets)[0]>
+            ) => {
+              if (assets.length === 0) return 99;
+              return Math.min(
+                ...assets.map((a) => statusOrder[a.status] || 99)
+              );
+            };
+            const priorityA = getKitPriority(groupA.assets);
+            const priorityB = getKitPriority(groupB.assets);
+            const priorityDiff = sortMultiplier * (priorityA - priorityB);
+            return priorityDiff !== 0
+              ? priorityDiff
+              : groupA.kitName.localeCompare(groupB.kitName);
+          }
+        }
+      }
+    );
 
     // Create pagination items where each kit or individual asset is one item
     const paginationItems: Array<{
@@ -232,10 +319,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: string;
       assets: Array<(typeof enhancedBooking.assets)[0]>;
     }> = [
-      ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
+      ...sortedKitGroups.map(([kitId, group]) => ({
         type: "kit" as const,
         id: kitId,
-        assets,
+        assets: group.assets,
       })),
       ...individualAssets.map((asset) => ({
         type: "asset" as const,
