@@ -84,6 +84,7 @@ app/
 - **Reusable Components**: Organized by feature/domain in `app/components/`
 - **Form Handling**: Remix Form with client-side validation
 - **UI Primitives**: Radix UI components with Tailwind styling
+- **Date Display**: Always use the `DateS` component (`app/components/shared/date.tsx`) for displaying dates in the UI. Do not use raw `toLocaleDateString()` or other custom date formatting.
 
 ### Deprecated Components
 
@@ -191,6 +192,16 @@ All UI implementations must meet **WCAG 2.1 AA** as a minimum. This includes:
 - Use `aria-describedby` to link inputs to helper/error text
 - Meaningful alt text for images and icons
 - Focus indicators must be visible
+
+### Code Abstraction
+
+- When you notice duplicated code patterns across multiple files or functions,
+  abstract them into reusable helper functions
+- Before implementing new functionality, check if similar logic already exists
+  that can be extracted and reused
+- Keep helper functions focused on a single responsibility
+- Place shared helpers near the code that uses them, or in a shared utils file
+  if used across multiple modules
 
 ### Key Business Features
 

@@ -5,7 +5,13 @@ import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { payload, error, getParams } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getParams,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -36,12 +42,21 @@ export const loader = async ({
       action: PermissionAction.read,
     });
 
+    // Extract sorting params from URL using standard utilities
+    const searchParams = getCurrentSearchParams(request);
+    const paramsValues = getParamsValues(searchParams);
+    // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
+    const orderBy =
+      paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
+    const orderDirection = paramsValues.orderDirection;
+
     const pdfMeta: PdfDbResult = await fetchAllPdfRelatedData(
       bookingId,
       organizationId,
       userId,
       role,
-      request
+      request,
+      { orderBy, orderDirection }
     );
 
     const dateTimeFormat = getDateTimeFormat(request, {
