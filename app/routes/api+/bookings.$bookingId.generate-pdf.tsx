@@ -44,7 +44,11 @@ export const loader = async ({
 
     // Extract sorting params from URL using standard utilities
     const searchParams = getCurrentSearchParams(request);
-    const { orderBy, orderDirection } = getParamsValues(searchParams);
+    const paramsValues = getParamsValues(searchParams);
+    // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
+    const orderBy =
+      paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
+    const orderDirection = paramsValues.orderDirection;
 
     const pdfMeta: PdfDbResult = await fetchAllPdfRelatedData(
       bookingId,

@@ -74,13 +74,19 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
       case "title":
         return multiplier * a.title.localeCompare(b.title);
       case "category": {
-        const catA = a.category?.name || "";
-        const catB = b.category?.name || "";
-        return multiplier * catA.localeCompare(catB);
+        const catA = a.category?.name;
+        const catB = b.category?.name;
+        // Null categories go to the end regardless of direction
+        if (!catA && catB) return 1;
+        if (catA && !catB) return -1;
+        if (!catA && !catB) return a.title.localeCompare(b.title);
+        // At this point both catA and catB are defined (handled above)
+        return multiplier * catA!.localeCompare(catB!);
       }
       case "status":
       default: {
         // For status, CHECKED_OUT should come before AVAILABLE when desc
+        // Priority: CHECKED_OUT=1 (urgent), AVAILABLE=3 (least urgent)
         const statusOrder: Record<string, number> = {
           CHECKED_OUT: 1,
           IN_CUSTODY: 2,
@@ -88,7 +94,10 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
         };
         const statusA = statusOrder[a.status] || 99;
         const statusB = statusOrder[b.status] || 99;
-        const statusDiff = multiplier * (statusA - statusB);
+        // For "desc", lower priority number comes first (CHECKED_OUT before AVAILABLE)
+        // For "asc", higher priority number comes first (AVAILABLE before CHECKED_OUT)
+        const statusMultiplier = orderDirection === "desc" ? 1 : -1;
+        const statusDiff = statusMultiplier * (statusA - statusB);
         // Secondary sort by title for consistency
         return statusDiff !== 0 ? statusDiff : a.title.localeCompare(b.title);
       }
@@ -115,9 +124,15 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
           return multiplier * groupA.kitName.localeCompare(groupB.kitName);
         case "category": {
           // Sort kits by first asset's category (after assets are sorted)
-          const catA = groupA.assets[0]?.category?.name || "";
-          const catB = groupB.assets[0]?.category?.name || "";
-          return multiplier * catA.localeCompare(catB);
+          const catA = groupA.assets[0]?.category?.name;
+          const catB = groupB.assets[0]?.category?.name;
+          // Null categories go to the end regardless of direction
+          if (!catA && catB) return 1;
+          if (catA && !catB) return -1;
+          if (!catA && !catB)
+            return groupA.kitName.localeCompare(groupB.kitName);
+          // At this point both catA and catB are defined (handled above)
+          return multiplier * catA!.localeCompare(catB!);
         }
         case "status":
         default: {
@@ -133,7 +148,10 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
           };
           const priorityA = getKitPriority(groupA.assets);
           const priorityB = getKitPriority(groupB.assets);
-          const priorityDiff = multiplier * (priorityA - priorityB);
+          // For "desc", lower priority number comes first (CHECKED_OUT before AVAILABLE)
+          // For "asc", higher priority number comes first (AVAILABLE before CHECKED_OUT)
+          const statusMultiplier = orderDirection === "desc" ? 1 : -1;
+          const priorityDiff = statusMultiplier * (priorityA - priorityB);
           return priorityDiff !== 0
             ? priorityDiff
             : groupA.kitName.localeCompare(groupB.kitName);

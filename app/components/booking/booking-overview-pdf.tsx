@@ -35,7 +35,10 @@ export const BookingOverviewPDF = ({
   const [searchParams] = useSearchParams();
 
   // Get sorting params from URL search params
-  const orderBy = searchParams.get("orderBy") || "status";
+  // Default to "status" since that's the default for booking assets
+  const rawOrderBy = searchParams.get("orderBy");
+  const orderBy =
+    !rawOrderBy || rawOrderBy === "createdAt" ? "status" : rawOrderBy;
   const orderDirection = searchParams.get("orderDirection") || "desc";
 
   useEffect(() => {
@@ -94,7 +97,7 @@ export const BookingOverviewPDF = ({
                 You can either preview or download the PDF. Assets are sorted by{" "}
                 {BOOKING_ASSET_SORTING_OPTIONS[
                   orderBy as keyof typeof BOOKING_ASSET_SORTING_OPTIONS
-                ] || "Status"}{" "}
+                ] || BOOKING_ASSET_SORTING_OPTIONS.status}{" "}
                 ({orderDirection === "asc" ? "ascending" : "descending"}).
               </p>
               {!isFetchingBookings && (
