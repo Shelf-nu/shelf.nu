@@ -55,8 +55,10 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should exclude both direct custody AND active bookings
+      // Only counts booking custody when asset is CHECKED_OUT
       expect(sql).toContain("cu.id IS NULL");
-      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("CHECKED_OUT");
+      expect(sql).toContain("EXISTS");
       expect(sql).toContain("Booking");
     });
 
@@ -72,8 +74,10 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should exclude both direct custody AND active bookings
+      // Only counts booking custody when asset is CHECKED_OUT
       expect(sql).toContain("cu.id IS NULL");
-      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("CHECKED_OUT");
+      expect(sql).toContain("EXISTS");
       expect(sql).toContain("Booking");
     });
 
