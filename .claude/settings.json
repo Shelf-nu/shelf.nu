@@ -27,14 +27,17 @@
     "allow": [
       "Bash(find:*)",
       "Bash(xargs:*)",
+      "Bash(ls:*)",
+      "Bash(npm run test:*)",
       "Bash(npm run typecheck:*)",
       "Bash(npm run lint:*)",
       "Bash(npm run lint:fix:*)",
       "Bash(npm run validate:*)",
+      "Bash(npm view:*)",
       "WebSearch",
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:github.com)",
-      "Bash(npm view:*)"
+      "WebFetch(domain:docs.stripe.com)"
     ],
     "deny": [
       "Read(./.env)",

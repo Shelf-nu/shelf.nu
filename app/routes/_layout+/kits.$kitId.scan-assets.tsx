@@ -13,6 +13,7 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import AddAssetsToKitDrawer from "~/components/scanner/drawer/uses/add-assets-to-kit-drawer";
 import { db } from "~/database/db.server";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -99,6 +100,9 @@ export default function ScanAssetsForKit() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
+
+  const savedCameraId = useScannerCameraId();
+
   function handleCodeDetectionSuccess({
     value: qrId,
     error,
@@ -125,6 +129,7 @@ export default function ScanAssetsForKit() {
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
           }
+          savedCameraId={savedCameraId}
         />
       </div>
     </>

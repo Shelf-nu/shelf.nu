@@ -16,6 +16,7 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   addScannedAssetsToBooking,
@@ -156,6 +157,9 @@ export default function ScanAssetsForBookings() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
+
+  const savedCameraId = useScannerCameraId();
+
   function handleCodeDetectionSuccess({
     value: qrId,
     error,
@@ -182,6 +186,7 @@ export default function ScanAssetsForBookings() {
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
           }
+          savedCameraId={savedCameraId}
         />
       </div>
     </>
