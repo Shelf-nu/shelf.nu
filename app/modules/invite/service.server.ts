@@ -529,6 +529,7 @@ export async function getPaginatedAndFilterableSettingInvites({
           status: true,
           inviteeTeamMember: { select: { name: true } },
           roles: true,
+          inviteMessage: true,
         },
       }),
 
@@ -550,6 +551,7 @@ export async function getPaginatedAndFilterableSettingInvites({
       role: organizationRolesMap[invite?.roles[0]],
       userId: null,
       sso: false,
+      inviteMessage: invite.inviteMessage,
     }));
     const totalItems = totalItemsGrouped.length;
     const totalPages = Math.ceil(totalItems / perPage);
