@@ -56,14 +56,17 @@ export function CameraSelector({
       <PopoverPortal>
         <PopoverContent
           align="end"
+          onOpenAutoFocus={(e) => e.preventDefault()}
           className={tw(
             "z-[999999] mt-2 min-w-[200px] max-w-[300px] rounded-md border border-gray-200 bg-white shadow-md"
           )}
         >
-          <div className="p-1">
+          <div className="p-1" role="listbox" aria-label="Camera selection">
             {devices.map((device, index) => (
               <button
                 key={device.deviceId}
+                role="option"
+                aria-selected={currentDeviceId === device.deviceId}
                 className={tw(
                   "flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-left text-sm",
                   "hover:bg-gray-50 focus:bg-gray-50 focus:outline-none",
