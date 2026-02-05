@@ -60,8 +60,9 @@ describe("validateInvitationMessage", () => {
   });
 
   it("should accept messages that don't match phishing patterns", () => {
-    // "Your account has been suspended" has words in wrong order for suspended.*account
-    const result = validateInvitationMessage("Your account has been suspended");
+    const result = validateInvitationMessage(
+      "Your account has been approved and is ready to use"
+    );
     expect(result.isValid).toBe(true);
   });
 
@@ -84,6 +85,15 @@ describe("validateInvitationMessage", () => {
     const result = validateInvitationMessage(123 as any);
     expect(result.isValid).toBe(false);
     expect(result.error).toContain("string");
+  });
+
+  it("should block messages containing email-like addresses due to URL pattern", () => {
+    // Known limitation: the bare-domain pattern matches email domains too
+    const result = validateInvitationMessage(
+      "Contact us at support@example.com for help"
+    );
+    expect(result.isValid).toBe(false);
+    expect(result.error).toContain("URL");
   });
 });
 
