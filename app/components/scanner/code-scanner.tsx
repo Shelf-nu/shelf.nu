@@ -315,6 +315,7 @@ export const CodeScanner = ({
           />
         ) : (
           <CameraMode
+            isLoading={isLoading}
             setIsLoading={setIsLoading}
             paused={paused}
             setPaused={setPaused}
@@ -511,6 +512,7 @@ function ScannerMode({
 }
 
 function CameraMode({
+  isLoading,
   setIsLoading,
   paused,
   setPaused,
@@ -520,6 +522,7 @@ function CameraMode({
   currentDeviceId,
   savedCameraId,
 }: {
+  isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
   paused: boolean;
   setPaused: (paused: boolean) => void;
@@ -579,7 +582,11 @@ function CameraMode({
         }
       }
 
-      setInternalDeviceId(activeDeviceId);
+      // Only update internalDeviceId when a non-empty deviceId is available
+      // Safari/iOS may return undefined or empty string from track settings
+      if (activeDeviceId) {
+        setInternalDeviceId(activeDeviceId);
+      }
       onDevicesEnumerated(videoDevices, activeDeviceId);
     } catch {
       // Silently ignore enumeration errors
@@ -589,12 +596,19 @@ function CameraMode({
   // Effect to switch camera when currentDeviceId changes from parent
   useEffect(() => {
     // Only switch if the device ID has changed and differs from internal state
-    if (currentDeviceId && currentDeviceId !== internalDeviceId && !paused) {
+    if (
+      currentDeviceId &&
+      currentDeviceId !== internalDeviceId &&
+      !paused &&
+      !isLoading
+    ) {
       // Stop current stream tracks
       const video = videoRef.current?.video;
       if (video?.srcObject) {
         const stream = video.srcObject as MediaStream;
         stream.getTracks().forEach((track) => track.stop());
+        // Clear srcObject to fully release the previous stream reference
+        video.srcObject = null;
       }
 
       // Update constraints to use the new device
@@ -602,7 +616,7 @@ function CameraMode({
       setInternalDeviceId(currentDeviceId);
       setIsLoading(true);
     }
-  }, [currentDeviceId, internalDeviceId, paused, setIsLoading]);
+  }, [currentDeviceId, internalDeviceId, paused, isLoading, setIsLoading]);
 
   const handleUserMediaError = useCallback(
     async (cameraError: unknown) => {
@@ -763,12 +777,16 @@ function CameraMode({
           }
 
           /** Once the video can play, update canvas, stop loading, and enumerate devices */
-          video.addEventListener("canplay", () => {
-            updateCanvasSize({ video, canvas });
-            setIsLoading(false);
-            // Enumerate devices after camera is ready
-            void enumerateAndReportDevices();
-          });
+          video.addEventListener(
+            "canplay",
+            () => {
+              updateCanvasSize({ video, canvas });
+              setIsLoading(false);
+              // Enumerate devices after camera is ready
+              void enumerateAndReportDevices();
+            },
+            { once: true }
+          );
 
           video.addEventListener("error", (e) => {
             setError(

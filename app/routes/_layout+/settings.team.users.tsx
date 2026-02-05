@@ -168,17 +168,19 @@ export default function UserTeamSetting() {
 
       <ListContentWrapper>
         <Filters>
-          <ImportUsersDialog />
-          <InviteUserDialog
-            trigger={
-              <Button
-                className="ml-2 mt-2 w-full md:mt-0 md:w-max"
-                variant="primary"
-              >
-                <span className="whitespace-nowrap">Invite a user</span>
-              </Button>
-            }
-          />
+          <div className="flex items-center gap-1">
+            <ImportUsersDialog />
+            <InviteUserDialog
+              trigger={
+                <Button
+                  className="mt-2 w-full md:mt-0 md:w-max"
+                  variant="primary"
+                >
+                  <span className="whitespace-nowrap">Invite a user</span>
+                </Button>
+              }
+            />
+          </div>
         </Filters>
 
         <List
