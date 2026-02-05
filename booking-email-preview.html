@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Booking Email Preview — Asset List Feature</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #f2f4f7;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+      .preview-label {
+        text-align: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: #667085;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 12px;
+      }
+      .preview-wrapper {
+        display: flex;
+        gap: 32px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .preview-column {
+        flex: 1;
+        min-width: 400px;
+        max-width: 600px;
+      }
+      /* Simulates what email clients render for react-email Container (max-width:580px, centered) */
+      .email-container {
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        max-width: 580px;
+        margin: 0 auto;
+        padding: 32px 16px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1
+      style="
+        text-align: center;
+        font-size: 18px;
+        color: #101828;
+        margin-bottom: 24px;
+      "
+    >
+      Booking Notification Email Preview
+    </h1>
+
+    <div class="preview-wrapper">
+      <!-- ===== SMALL BOOKING (5 assets) ===== -->
+      <div class="preview-column">
+        <div class="preview-label">Small Booking — 5 assets, 1 kit</div>
+        <div class="email-container">
+          <!-- Logo -->
+          <div
+            style="
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              margin-bottom: 32px;
+            "
+          >
+            <div style="margin: 0 auto; display: flex">
+              <img
+                src="https://app.shelf.nu/static/images/logo-full-color(x2).png"
+                alt="Shelf's logo"
+                width="auto"
+                height="32"
+                style="margin-right: 6px; width: auto; height: 32px"
+              />
+            </div>
+          </div>
+
+          <!-- Heading + booking info -->
+          <div style="margin: 32px">
+            <h1
+              style="
+                font-size: 20px;
+                color: #101828;
+                font-weight: 600;
+                margin-bottom: 16px;
+              "
+            >
+              Booking reservation request for Sarah Chen
+            </h1>
+            <h2
+              style="
+                font-size: 16px;
+                color: #101828;
+                font-weight: 600;
+                margin-bottom: 16px;
+              "
+            >
+              Weekly Podcast Recording | 5 assets
+            </h2>
+            <p style="font-size: 16px; color: #344054">
+              <span style="color: #101828; font-weight: 600">Custodian:</span>
+              Sarah Chen
+            </p>
+            <p style="font-size: 16px; color: #344054">
+              <span style="color: #101828; font-weight: 600">From:</span>
+              2/10/26, 9:00 AM
+            </p>
+            <p style="font-size: 16px; color: #344054">
+              <span style="color: #101828; font-weight: 600">To:</span>
+              2/10/26, 12:00 PM
+            </p>
+          </div>
+
+          <!-- Booked items -->
+          <div style="margin: 0 32px 24px; text-align: left">
+            <p
+              style="
+                font-size: 16px;
+                color: #101828;
+                font-weight: 600;
+                margin-bottom: 8px;
+              "
+            >
+              Booked items
+            </p>
+            <table
+              style="
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 14px;
+                color: #344054;
+              "
+            >
+              <tbody>
+                <!-- Kit: Podcast Kit -->
+                <tr>
+                  <td
+                    style="
+                      padding: 8px 0 4px;
+                      font-weight: 600;
+                      color: #101828;
+                      border-bottom: 1px solid #eaecf0;
+                    "
+                  >
+                    Kit: Podcast Kit
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Shure SM7B Microphone
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Focusrite Scarlett 2i2 Audio Interface
+                  </td>
+                </tr>
+                <!-- Individual assets -->
+                <tr>
+                  <td
+                    style="
+                      padding: 8px 0 4px;
+                      font-weight: 600;
+                      color: #101828;
+                      border-bottom: 1px solid #eaecf0;
+                    "
+                  >
+                    Individual assets
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Sony WH-1000XM5 Headphones
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Elgato Key Light Air
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Blue Yeti Pop Filter
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- View booking button -->
+          <a
+            href="https://app.shelf.nu/bookings/clx1abc123?orgId=org_456"
+            style="
+              display: inline-flex;
+              max-width: 170px;
+              align-items: center;
+              justify-content: center;
+              border: 1px solid #ef6820;
+              background-color: #ef6820;
+              text-align: center;
+              font-size: 14px;
+              font-weight: 700;
+              color: white;
+              padding: 10px 18px;
+              border-radius: 4px;
+              text-decoration: none;
+              margin-bottom: 32px;
+            "
+          >
+            View booking in app
+          </a>
+
+          <!-- Admin footer -->
+          <p style="font-size: 14px; color: #344054">
+            This email was sent to you because you are the OWNER or ADMIN of the
+            workspace
+            <span style="color: #101828; font-weight: 600">"Acme Studios"</span
+            >. <br />
+            If you think you weren't supposed to have received this email please
+            contact support.
+          </p>
+          <p style="margin-bottom: 32px; font-size: 14px; color: #344054">
+            &copy; 2026 Shelf.nu
+          </p>
+        </div>
+      </div>
+
+      <!-- ===== LARGE BOOKING (25 shown / 47 total) ===== -->
+      <div class="preview-column">
+        <div class="preview-label">
+          Large Booking — 25 of 47 assets, 2 kits, truncated
+        </div>
+        <div class="email-container">
+          <!-- Logo -->
+          <div
+            style="
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              margin-bottom: 32px;
+            "
+          >
+            <div style="margin: 0 auto; display: flex">
+              <img
+                src="https://app.shelf.nu/static/images/logo-full-color(x2).png"
+                alt="Shelf's logo"
+                width="auto"
+                height="32"
+                style="margin-right: 6px; width: auto; height: 32px"
+              />
+            </div>
+          </div>
+
+          <!-- Heading + booking info -->
+          <div style="margin: 32px">
+            <h1
+              style="
+                font-size: 20px;
+                color: #101828;
+                font-weight: 600;
+                margin-bottom: 16px;
+              "
+            >
+              Booking reservation request for James Nakamura
+            </h1>
+            <h2
+              style="
+                font-size: 16px;
+                color: #101828;
+                font-weight: 600;
+                margin-bottom: 16px;
+              "
+            >
+              Q1 Product Launch — AV &amp; IT Setup | 47 assets
+            </h2>
+            <p style="font-size: 16px; color: #344054">
+              <span style="color: #101828; font-weight: 600">Custodian:</span>
+              James Nakamura
+            </p>
+            <p style="font-size: 16px; color: #344054">
+              <span style="color: #101828; font-weight: 600">From:</span>
+              3/3/26, 7:00 AM
+            </p>
+            <p style="font-size: 16px; color: #344054">
+              <span style="color: #101828; font-weight: 600">To:</span>
+              3/5/26, 6:00 PM
+            </p>
+          </div>
+
+          <!-- Booked items -->
+          <div style="margin: 0 32px 24px; text-align: left">
+            <p
+              style="
+                font-size: 16px;
+                color: #101828;
+                font-weight: 600;
+                margin-bottom: 8px;
+              "
+            >
+              Booked items
+            </p>
+            <table
+              style="
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 14px;
+                color: #344054;
+              "
+            >
+              <tbody>
+                <!-- Kit: Main Stage AV Rig -->
+                <tr>
+                  <td
+                    style="
+                      padding: 8px 0 4px;
+                      font-weight: 600;
+                      color: #101828;
+                      border-bottom: 1px solid #eaecf0;
+                    "
+                  >
+                    Kit: Main Stage AV Rig
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Panasonic PT-RZ120 Projector
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Da-Lite 16:9 Motorized Screen (120")
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Blackmagic ATEM Mini Pro Switcher
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Sennheiser EW 100 G4 Wireless Mic
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    JBL EON615 PA Speaker (Left)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    JBL EON615 PA Speaker (Right)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Yamaha MG12XU Mixing Console
+                  </td>
+                </tr>
+
+                <!-- Kit: Livestream Camera Kit -->
+                <tr>
+                  <td
+                    style="
+                      padding: 8px 0 4px;
+                      font-weight: 600;
+                      color: #101828;
+                      border-bottom: 1px solid #eaecf0;
+                    "
+                  >
+                    Kit: Livestream Camera Kit
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Sony A7 IV Mirrorless Camera
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Elgato Cam Link 4K Capture Card
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Manfrotto 502AH Fluid Head Tripod
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Sigma 24-70mm f/2.8 DG DN Lens
+                  </td>
+                </tr>
+
+                <!-- Individual assets -->
+                <tr>
+                  <td
+                    style="
+                      padding: 8px 0 4px;
+                      font-weight: 600;
+                      color: #101828;
+                      border-bottom: 1px solid #eaecf0;
+                    "
+                  >
+                    Individual assets
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Dell Latitude 5540 Laptop — Presenter 1
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Dell Latitude 5540 Laptop — Presenter 2
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Logitech Spotlight Presentation Remote
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Apple iPad Pro 12.9" (Registration Desk)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Apple iPad Pro 12.9" (Check-in Kiosk)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Anker PowerConf S500 Speakerphone
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    TP-Link Deco X50 Mesh Router (Event WiFi)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    APC Back-UPS Pro 1500VA (Stage Power)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Gaffer Tape Roll — Black (60yd)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Extension Cord Reel — 100ft (Stage Left)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Extension Cord Reel — 100ft (Stage Right)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Pelican 1650 Transport Case (AV Gear)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Pelican 1510 Transport Case (Cameras)
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0 4px 16px; color: #344054">
+                    Tascam DR-40X Field Recorder (Backup Audio)
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <!-- Truncation message -->
+            <p style="font-size: 14px; color: #667085; margin-top: 8px">
+              ... and 22 more items &mdash;
+              <a
+                href="https://app.shelf.nu/bookings/clx9xyz789?orgId=org_456"
+                style="color: #ef6820"
+              >
+                View full booking
+              </a>
+            </p>
+          </div>
+
+          <!-- View booking button -->
+          <a
+            href="https://app.shelf.nu/bookings/clx9xyz789?orgId=org_456"
+            style="
+              display: inline-flex;
+              max-width: 170px;
+              align-items: center;
+              justify-content: center;
+              border: 1px solid #ef6820;
+              background-color: #ef6820;
+              text-align: center;
+              font-size: 14px;
+              font-weight: 700;
+              color: white;
+              padding: 10px 18px;
+              border-radius: 4px;
+              text-decoration: none;
+              margin-bottom: 32px;
+            "
+          >
+            View booking in app
+          </a>
+
+          <!-- Admin footer -->
+          <p style="font-size: 14px; color: #344054">
+            This email was sent to you because you are the OWNER or ADMIN of the
+            workspace
+            <span style="color: #101828; font-weight: 600">"Acme Studios"</span
+            >. <br />
+            If you think you weren't supposed to have received this email please
+            contact support.
+          </p>
+          <p style="margin-bottom: 32px; font-size: 14px; color: #344054">
+            &copy; 2026 Shelf.nu
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
