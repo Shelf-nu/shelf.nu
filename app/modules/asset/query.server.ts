@@ -1721,7 +1721,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
-                      'id', u.id,
+                      'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
                       'profilePicture', bu."profilePicture",
