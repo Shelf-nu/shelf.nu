@@ -81,6 +81,9 @@ vitest.mock("~/database/db.server", () => ({
     kit: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    custody: {
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
     partialBookingCheckin: {
       create: vitest.fn().mockResolvedValue({}),
       count: vitest.fn().mockResolvedValue(0),
