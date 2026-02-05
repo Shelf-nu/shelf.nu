@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
-import { generateWhereClause, parseSortingOptions } from "./query.server";
+import {
+  assetQueryFragment,
+  generateWhereClause,
+  parseSortingOptions,
+} from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
@@ -38,7 +42,9 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should check both direct custody AND active bookings
+      // Only counts booking custody when asset is CHECKED_OUT
       expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
       expect(sql).toContain("ONGOING");
     });
@@ -55,8 +61,9 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should exclude both direct custody AND active bookings
+      // Only counts booking custody when asset is CHECKED_OUT
       expect(sql).toContain("cu.id IS NULL");
-      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
     });
 
@@ -72,8 +79,9 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should exclude both direct custody AND active bookings
+      // Only counts booking custody when asset is CHECKED_OUT
       expect(sql).toContain("cu.id IS NULL");
-      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
     });
 
@@ -89,7 +97,9 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should check both direct custody AND active bookings
+      // Only counts booking custody when asset is CHECKED_OUT
       expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
     });
 
@@ -106,6 +116,7 @@ describe("generateWhereClause - special filter values", () => {
 
       // "in-custody" subsumes specific IDs - checks for any custody (direct or booking)
       expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
       // Should NOT contain specific ID matching since in-custody covers all
       expect(sql).not.toContain("specific-team-member-id");
@@ -322,5 +333,36 @@ describe("generateWhereClause - special filter values", () => {
       expect(sql).toContain('"kitId" IS NULL');
       expect(sql).toContain("Kit");
     });
+  });
+});
+
+describe("assetQueryFragment - custody output", () => {
+  /**
+   * Helper to extract SQL string from Prisma.Sql for testing.
+   * Joins the strings array to get a readable representation.
+   */
+  function getFragmentSqlString(sql: ReturnType<typeof assetQueryFragment>) {
+    return sql.strings.join("?");
+  }
+
+  it("only includes booking custody when asset status is CHECKED_OUT", () => {
+    const fragment = assetQueryFragment();
+    const sql = getFragmentSqlString(fragment);
+
+    // The CASE WHEN for booking-based custody must be guarded by CHECKED_OUT
+    expect(sql).toContain(
+      "WHEN b.id IS NOT NULL AND a.status = 'CHECKED_OUT' THEN"
+    );
+  });
+
+  it("includes direct custody without CHECKED_OUT guard", () => {
+    const fragment = assetQueryFragment();
+    const sql = getFragmentSqlString(fragment);
+
+    // Direct custody (via Custody table) should not require CHECKED_OUT
+    expect(sql).toContain("WHEN cu.id IS NOT NULL THEN");
+    expect(sql).not.toContain(
+      "WHEN cu.id IS NOT NULL AND a.status = 'CHECKED_OUT'"
+    );
   });
 });
