@@ -124,14 +124,10 @@ export function sanitizeInvitationMessage(message: string): string {
   // Remove HTML tags
   let sanitized = message.replace(/<[^>]*>/g, "");
 
-  // Escape HTML entities to prevent XSS
-  sanitized = sanitized
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;")
-    .replace(/\//g, "&#x2F;");
+  // Note: We intentionally do NOT escape HTML entities here.
+  // The message is rendered as a React text node in the email template,
+  // which handles escaping automatically. Escaping here would cause
+  // double-encoding (e.g., & → &amp;amp; in the rendered email).
 
   // Normalize whitespace (preserve single line breaks, remove excessive spacing)
   sanitized = sanitized.replace(/\r\n/g, "\n"); // Normalize line endings

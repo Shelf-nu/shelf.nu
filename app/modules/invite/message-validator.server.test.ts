@@ -88,19 +88,20 @@ describe("validateInvitationMessage", () => {
 });
 
 describe("sanitizeInvitationMessage", () => {
-  it("should remove HTML tags and escape remaining special chars", () => {
+  it("should remove HTML tags and preserve remaining text", () => {
     const result = sanitizeInvitationMessage(
       "Hello <script>alert('xss')</script>world"
     );
-    // Tags are removed, then quotes are escaped
-    expect(result).toBe("Hello alert(&#x27;xss&#x27;)world");
+    // Tags are removed, text content is preserved as-is
+    expect(result).toBe("Hello alert('xss')world");
     expect(result).not.toContain("<script>");
   });
 
-  it("should escape HTML entities after removing tags", () => {
-    // Tags are removed first, then remaining special chars are escaped
+  it("should strip tags but preserve special characters as-is", () => {
+    // Tags are removed; &, quotes, etc. are NOT entity-encoded
+    // because React handles escaping at render time
     const result = sanitizeInvitationMessage("<div>Test & 'quotes'</div>");
-    expect(result).toBe("Test &amp; &#x27;quotes&#x27;");
+    expect(result).toBe("Test & 'quotes'");
   });
 
   it("should preserve line breaks but normalize excessive ones", () => {
@@ -132,18 +133,18 @@ describe("sanitizeInvitationMessage", () => {
     expect(sanitizeInvitationMessage(undefined as any)).toBe("");
   });
 
-  it("should neutralize potential XSS vectors", () => {
-    // Self-contained tags are completely removed (regex matches entire tag)
+  it("should neutralize potential XSS vectors by stripping tags", () => {
+    // Self-contained tags are completely removed
     expect(sanitizeInvitationMessage('<img src=x onerror="alert(1)">')).toBe(
       ""
     );
     expect(sanitizeInvitationMessage("<svg/onload=alert(1)>")).toBe("");
     expect(sanitizeInvitationMessage("<iframe src='evil.com'>")).toBe("");
-    // Non-tag content is escaped
+    // Non-tag content is preserved as-is
     expect(sanitizeInvitationMessage("javascript:alert(1)")).toBe(
       "javascript:alert(1)"
     );
-    // Mixed content: tags removed, special chars escaped
+    // Mixed content: tags removed, text preserved
     expect(sanitizeInvitationMessage("Click <a href='evil'>here</a>")).toBe(
       "Click here"
     );
@@ -175,7 +176,8 @@ describe("processInvitationMessage", () => {
   it("should return sanitized message for valid input", () => {
     const result = processInvitationMessage("Hello <b>world</b> & friends");
     expect(result.success).toBe(true);
-    expect(result.message).toBe("Hello world &amp; friends");
+    // Tags stripped, special chars preserved (React escapes at render time)
+    expect(result.message).toBe("Hello world & friends");
   });
 
   it("should return error for phishing attempts", () => {
