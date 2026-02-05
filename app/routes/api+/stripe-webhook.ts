@@ -536,7 +536,8 @@ export async function action({ request }: ActionFunctionArgs) {
           }
         }
 
-        if (ADMIN_EMAIL) {
+        // Only send admin notification for actual paid invoices (not $0 trial invoices)
+        if (ADMIN_EMAIL && paidInvoice.amount_paid > 0) {
           sendEmail({
             to: ADMIN_EMAIL,
             subject: `Invoice resolved: ${user.email}`,
