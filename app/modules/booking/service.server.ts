@@ -909,7 +909,7 @@ export async function reserveBooking({
     if (bookingFound.custodianUser?.email) {
       const custodian = bookingFound?.custodianUser
         ? `${bookingFound.custodianUser.firstName} ${bookingFound.custodianUser.lastName}`
-        : bookingFound.custodianTeamMember?.name ?? "";
+        : (bookingFound.custodianTeamMember?.name ?? "");
 
       /** Prepare email content */
       const subject = `✅ Booking reserved (${bookingFound.name}) - shelf.nu`;
@@ -922,12 +922,15 @@ export async function reserveBooking({
         to,
         hints,
         bookingId: bookingFound.id,
+        assets: bookingFound.assets,
+        organizationId: bookingFound.organizationId,
       });
 
       const html = await bookingUpdatesTemplateString({
         booking: bookingFound,
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
+        assets: bookingFound.assets,
         hints,
       });
       /** END Prepare email content */
@@ -947,6 +950,7 @@ export async function reserveBooking({
           booking: bookingFound,
           heading: `Booking reservation request for ${custodian}`,
           assetCount: bookingFound._count.assets,
+          assets: bookingFound.assets,
           hints,
           isAdminEmail: true,
         });
@@ -1012,6 +1016,7 @@ export async function checkoutBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
+          ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: {
             include: {
               bookings: createBookingConflictConditions({
@@ -1021,7 +1026,6 @@ export async function checkoutBooking({
               }),
             },
           },
-          ...BOOKING_INCLUDE_FOR_EMAIL,
         },
       })
       .catch((cause) => {
@@ -1468,8 +1472,8 @@ export async function checkinBooking({
 
         // Separate complete kits from individual assets
         const kitIds = getKitIdsByAssets(
-          (updatedBooking.assets || []).filter(
-            (a) => specificAssetIds?.includes(a.id)
+          (updatedBooking.assets || []).filter((a) =>
+            specificAssetIds?.includes(a.id)
           )
         );
         const completeKits: Array<{ id: string; name: string }> = [];
@@ -1555,7 +1559,7 @@ export async function checkinBooking({
     if (updatedBooking.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
         ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
-        : updatedBooking.custodianTeamMember?.name ?? "";
+        : (updatedBooking.custodianTeamMember?.name ?? "");
 
       const subject = `🎉 Booking completed (${updatedBooking.name}) - shelf.nu`;
       const text = completedBookingEmailContent({
@@ -1566,12 +1570,15 @@ export async function checkinBooking({
         to: updatedBooking.to as Date,
         bookingId: updatedBooking.id,
         hints: hints,
+        assets: updatedBooking.assets,
+        organizationId: updatedBooking.organizationId,
       });
 
       const html = await bookingUpdatesTemplateString({
         booking: updatedBooking,
         heading: `Your booking has been completed: "${updatedBooking.name}".`,
         assetCount: updatedBooking._count.assets,
+        assets: updatedBooking.assets,
         hints,
       });
 
@@ -2163,8 +2170,8 @@ export async function cancelBooking({
         where: { id: bookingFound.id },
         data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
-          assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
+          assets: true,
         },
       });
     });
@@ -2185,12 +2192,15 @@ export async function cancelBooking({
         bookingId: booking.id,
         hints,
         cancellationReason,
+        assets: booking.assets,
+        organizationId: booking.organizationId,
       });
 
       const html = await bookingUpdatesTemplateString({
         booking: booking,
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
+        assets: booking.assets,
         hints,
         cancellationReason,
       });
@@ -2448,7 +2458,7 @@ export async function extendBooking({
     if (updatedBooking?.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
         ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
-        : updatedBooking.custodianTeamMember?.name ?? "";
+        : (updatedBooking.custodianTeamMember?.name ?? "");
 
       const text = extendBookingEmailContent({
         bookingName: updatedBooking.name,
@@ -2459,6 +2469,8 @@ export async function extendBooking({
         hints,
         bookingId: updatedBooking.id,
         oldToDate: booking.to,
+        assets: updatedBooking.assets,
+        organizationId: updatedBooking.organizationId,
       });
 
       const { format } = getDateTimeFormatFromHints(hints, {
@@ -2472,6 +2484,7 @@ export async function extendBooking({
           newEndDate
         )}`,
         assetCount: updatedBooking._count.assets,
+        assets: updatedBooking.assets,
         hints,
       });
 

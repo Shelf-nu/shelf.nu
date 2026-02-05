@@ -15,6 +15,19 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
   _count: {
     select: { assets: true },
   },
+  assets: {
+    select: {
+      id: true,
+      title: true,
+      kit: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    take: 25,
+  },
 };
 
 /** Common relations to include in a booking */
