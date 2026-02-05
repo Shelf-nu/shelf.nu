@@ -34,6 +34,8 @@
       "Bash(npm run lint:fix:*)",
       "Bash(npm run validate:*)",
       "Bash(npm view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
       "WebSearch",
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:github.com)",

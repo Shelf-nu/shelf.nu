@@ -157,12 +157,12 @@ export function sanitizeInvitationMessage(message: string): string {
  */
 export function processInvitationMessage(message: string | null | undefined): {
   success: boolean;
-  message?: string;
+  message?: string | null;
   error?: string;
 } {
   // Allow empty/null messages (field is optional)
   if (!message || message.trim().length === 0) {
-    return { success: true, message: null as any };
+    return { success: true, message: null };
   }
 
   // Validate first

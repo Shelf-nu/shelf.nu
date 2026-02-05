@@ -8,6 +8,8 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 import Input from "../forms/input";
 import {
@@ -68,16 +70,20 @@ export default function InviteUserDialog({
   onClose,
 }: InviteUserDialogProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [messageCharCount, setMessageCharCount] = useState(0);
   const organization = useCurrentOrganization();
 
-  const fetcher = useFetcherWithReset<{
-    error?: { message?: string };
-    success?: boolean;
-  }>();
+  const fetcher =
+    useFetcherWithReset<DataOrErrorResponse<{ success?: boolean }>>();
 
   const disabled = isFormProcessing(fetcher.state);
 
   const zo = useZorm("NewQuestionWizardScreen", InviteUserFormSchema);
+
+  /** Handle server-side validation errors as fallback */
+  const validationErrors = getValidationErrors<typeof InviteUserFormSchema>(
+    fetcher.data?.error
+  );
 
   function openDialog() {
     setIsDialogOpen(true);
@@ -85,18 +91,20 @@ export default function InviteUserDialog({
 
   const closeDialog = useCallback(() => {
     zo.form?.reset();
+    setMessageCharCount(0);
     setIsDialogOpen(false);
     onClose && onClose();
   }, [onClose, zo.form]);
 
   useEffect(
     function handleSuccess() {
-      if (fetcher.data?.success === true) {
+      // Type narrowing: check for success data (no error, has success flag)
+      if (fetcher.data && !fetcher.data.error && "success" in fetcher.data) {
         closeDialog();
         fetcher.reset();
       }
     },
-    [closeDialog, fetcher, fetcher.data?.success]
+    [closeDialog, fetcher]
   );
 
   if (!organization) {
@@ -200,9 +208,16 @@ export default function InviteUserDialog({
                   </SelectContent>
                 </Select>
               </SelectGroup>
-              <When truthy={!!zo.errors.role()}>
+              <When
+                truthy={
+                  !!(
+                    validationErrors?.role?.message || zo.errors.role()?.message
+                  )
+                }
+              >
                 <p className="-mt-1 text-sm text-error-500">
-                  {zo.errors?.role()?.message}
+                  {validationErrors?.role?.message ||
+                    zo.errors?.role()?.message}
                 </p>
               </When>
 
@@ -212,7 +227,10 @@ export default function InviteUserDialog({
                   type="email"
                   autoComplete="email"
                   disabled={disabled}
-                  error={zo.errors.email()?.message}
+                  error={
+                    validationErrors?.email?.message ||
+                    zo.errors.email()?.message
+                  }
                   icon="mail"
                   label={"Email address"}
                   placeholder="zaans@huisje.com"
@@ -233,33 +251,35 @@ export default function InviteUserDialog({
                   rows={4}
                   maxLength={1000}
                   disabled={disabled}
+                  aria-describedby="inviteMessage-helper"
                   className="block w-full rounded-md border border-gray-300 px-3.5 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50"
                   placeholder="Add a personal note to help them understand why you're inviting them to this workspace..."
-                  onChange={(e) => {
-                    const charCount = e.target.value.length;
-                    const counter = document.getElementById(
-                      "inviteMessageCounter"
-                    );
-                    if (counter) {
-                      counter.textContent = `${charCount} / 1000 characters`;
-                      counter.className =
-                        charCount > 1000
-                          ? "text-xs text-error-500"
-                          : "text-xs text-gray-500";
-                    }
-                  }}
+                  onChange={(e) => setMessageCharCount(e.target.value.length)}
                 />
-                <div
-                  id="inviteMessageCounter"
-                  className="mt-1 text-xs text-gray-500"
-                >
-                  0 / 1000 characters
+                <div id="inviteMessage-helper" className="mt-1">
+                  <span
+                    className={
+                      messageCharCount > 1000
+                        ? "text-xs text-error-500"
+                        : "text-xs text-gray-500"
+                    }
+                  >
+                    {messageCharCount} / 1000 characters
+                  </span>
+                  <When
+                    truthy={
+                      !!(
+                        validationErrors?.inviteMessage?.message ||
+                        zo.errors.inviteMessage()?.message
+                      )
+                    }
+                  >
+                    <p className="text-sm text-error-500">
+                      {validationErrors?.inviteMessage?.message ||
+                        zo.errors.inviteMessage()?.message}
+                    </p>
+                  </When>
                 </div>
-                <When truthy={!!zo.errors.inviteMessage()}>
-                  <p className="mt-1 text-sm text-error-500">
-                    {zo.errors.inviteMessage()?.message}
-                  </p>
-                </When>
               </div>
 
               <When truthy={!!fetcher?.data?.error}>
