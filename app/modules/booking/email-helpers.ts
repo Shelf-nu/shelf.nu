@@ -185,9 +185,8 @@ export async function sendCheckinReminder(
       bookingName: booking.name,
       assetsCount: assetCount,
       custodian:
-        `${booking.custodianUser!.firstName} ${
-          booking.custodianUser?.lastName
-        }` || (booking.custodianTeamMember?.name as string),
+        `${booking.custodianUser!.firstName} ${booking.custodianUser
+          ?.lastName}` || (booking.custodianTeamMember?.name as string),
       from: booking.from!,
       to: booking.to!,
       bookingId: booking.id,
