@@ -257,13 +257,7 @@ export default function InviteUserDialog({
                   onChange={(e) => setMessageCharCount(e.target.value.length)}
                 />
                 <div id="inviteMessage-helper" className="mt-1">
-                  <span
-                    className={
-                      messageCharCount > 1000
-                        ? "text-xs text-error-500"
-                        : "text-xs text-gray-500"
-                    }
-                  >
+                  <span className="text-xs text-gray-500">
                     {messageCharCount} / 1000 characters
                   </span>
                   <When

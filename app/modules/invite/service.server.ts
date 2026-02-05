@@ -143,13 +143,13 @@ export async function createInvite(
     // Validate and sanitize invitation message
     const messageResult = processInvitationMessage(extraMessage);
     if (!messageResult.success) {
-      sendNotification({
-        title: "Invalid invitation message",
+      throw new ShelfError({
+        cause: null,
         message: messageResult.error || "The invitation message is invalid",
-        icon: { name: "x", variant: "error" },
-        senderId: userId,
+        additionalData: { userId, organizationId },
+        label: "Invite",
+        shouldBeCaptured: false,
       });
-      return null;
     }
     const sanitizedMessage = messageResult.message;
 
