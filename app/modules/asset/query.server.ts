@@ -7,6 +7,13 @@ import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
+/**
+ * SQL fragment: checks that the asset status is CHECKED_OUT.
+ * Used to guard booking-based custody so that partially checked-in
+ * assets are not incorrectly shown as "in custody".
+ */
+const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
+
 export const CUSTOM_FIELD_SEARCH_PATHS = [
   "valueText",
   "valueMultiLineText",
@@ -869,7 +876,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // (partially checked-in assets should not show as in custody)
         return Prisma.sql`${whereClause} AND (
           cu.id IS NOT NULL
-          OR (a.status = 'CHECKED_OUT' AND EXISTS (
+          OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -879,7 +886,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (filter.value === "without-custody") {
         // Exclude both direct custody and active booking custody
         return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
-          a.status = 'CHECKED_OUT' AND EXISTS (
+          ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -892,7 +899,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           WHERE cu."assetId" = a.id
           AND cu."teamMemberId" = ${filter.value}
         )
-        OR (a.status = 'CHECKED_OUT' AND EXISTS (
+        OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
           JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -909,7 +916,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (filter.value === "in-custody") {
         // Exclude both direct custody and active booking custody
         return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
-          a.status = 'CHECKED_OUT' AND EXISTS (
+          ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -920,7 +927,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // Include both direct custody and active booking custody
         return Prisma.sql`${whereClause} AND (
           cu.id IS NOT NULL
-          OR (a.status = 'CHECKED_OUT' AND EXISTS (
+          OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -933,7 +940,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           WHERE cu."assetId" = a.id
           AND cu."teamMemberId" = ${filter.value}
         )
-        OR (a.status = 'CHECKED_OUT' AND EXISTS (
+        OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
           JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -969,7 +976,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // Only count booking custody when asset is still CHECKED_OUT
         return Prisma.sql`${whereClause} AND (
           cu.id IS NOT NULL
-          OR (a.status = 'CHECKED_OUT' AND EXISTS (
+          OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -983,7 +990,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
         if (custodianIds.length === 0) {
           return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
-            a.status = 'CHECKED_OUT' AND EXISTS (
+            ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
               JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
               WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -997,7 +1004,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         );
         return Prisma.sql`${whereClause} AND (
           (cu.id IS NULL AND NOT (
-            a.status = 'CHECKED_OUT' AND EXISTS (
+            ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
               JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
               WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -1008,7 +1015,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             WHERE cu."assetId" = a.id
             AND cu."teamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
           )
-          OR (a.status = 'CHECKED_OUT' AND EXISTS (
+          OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -1033,7 +1040,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           WHERE cu."assetId" = a.id
           AND cu."teamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
         )
-        OR (a.status = 'CHECKED_OUT' AND EXISTS (
+        OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
           JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
@@ -1706,7 +1713,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 END
               )
             )
-          WHEN b.id IS NOT NULL AND a.status = 'CHECKED_OUT' THEN
+          WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
             jsonb_build_object(
               'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
               'custodian', jsonb_build_object(
