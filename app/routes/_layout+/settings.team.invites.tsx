@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { InviteStatuses } from "@prisma/client";
+import { MailIcon } from "lucide-react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -14,6 +15,12 @@ import { Filters } from "~/components/list/filters";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
@@ -184,6 +191,7 @@ export default function UserInvitesSetting() {
                 </div>
               </Th>
               <Th>Role</Th>
+              <Th>Message</Th>
               <Th>Status</Th>
               <Th>Actions</Th>
             </>
@@ -205,6 +213,9 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
       <Td>{item.custodies || 0}</Td>
       <Td>{item.role}</Td>
       <Td>
+        <InviteMessageCell message={item.inviteMessage} />
+      </Td>
+      <Td>
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
@@ -220,6 +231,26 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         ) : null}
       </Td>
     </>
+  );
+}
+
+function InviteMessageCell({ message }: { message?: string | null }) {
+  if (!message) {
+    return <span className="text-gray-400">-</span>;
+  }
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger className="text-gray-500 hover:text-gray-700">
+          <MailIcon className="size-4" />
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[300px]">
+          <h5 className="mb-1">Invite message</h5>
+          <p className="whitespace-pre-wrap text-sm text-gray-600">{message}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

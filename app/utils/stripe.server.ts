@@ -8,7 +8,7 @@ import {
   getOrganizationTierLimit,
   updateUserTierId,
 } from "~/modules/tier/service.server";
-import { STRIPE_SECRET_KEY } from "./env";
+import { SERVER_URL, STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
 
@@ -19,7 +19,6 @@ export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
     has_more?: boolean;
     data: Stripe.Subscription[];
-    total_count?: number;
   };
 };
 
@@ -34,7 +33,7 @@ function getStripeServerClient() {
   ) {
     // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
-      apiVersion: "2023-10-16",
+      apiVersion: "2026-01-28.clover",
     });
   }
   return _stripe;
@@ -393,7 +392,7 @@ export async function createBillingPortalSession({
   try {
     const { url } = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.SERVER_URL}/account-details/subscription`,
+      return_url: `${SERVER_URL}/account-details/subscription`,
     });
 
     return { url };
@@ -625,6 +624,75 @@ export async function getCustomerPaidInvoices(customerId: string, limit = 10) {
   }
 }
 
+/**
+ * Retrieves Stripe customer data and builds a deduplicated email list.
+ * Use this when sending subscription-related emails to both Stripe and Shelf emails.
+ */
+export async function getCustomerNotificationData({
+  customerId,
+  user,
+}: {
+  customerId: string;
+  user: { email: string; firstName: string | null };
+}) {
+  const stripeCustomer = await stripe.customers.retrieve(customerId);
+  const stripeEmail =
+    stripeCustomer && !stripeCustomer.deleted ? stripeCustomer.email : null;
+  const stripeName =
+    stripeCustomer && !stripeCustomer.deleted ? stripeCustomer.name : null;
+
+  // Deduplicate emails (Stripe email + Shelf user email)
+  const emailsToNotify = new Set<string>();
+  if (stripeEmail) emailsToNotify.add(stripeEmail.toLowerCase());
+  if (user.email) emailsToNotify.add(user.email.toLowerCase());
+
+  return {
+    emailsToNotify,
+    customerName: stripeName || user.firstName,
+  };
+}
+
+/**
+ * Prepares invoice notification data and returns deduplicated email list.
+ * Use this when sending invoice-related emails to both Stripe and Shelf emails.
+ */
+export async function getInvoiceNotificationData({
+  customerId,
+  invoice,
+  user,
+}: {
+  customerId: string;
+  invoice: Stripe.Invoice;
+  user: { email: string; firstName: string | null };
+}) {
+  const { emailsToNotify, customerName } = await getCustomerNotificationData({
+    customerId,
+    user,
+  });
+
+  const subscriptionName =
+    invoice.lines?.data?.[0]?.description || "Shelf Subscription";
+  const amountDue = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: invoice.currency,
+  }).format(invoice.amount_due / 100);
+  const dueDate = invoice.due_date
+    ? new Date(invoice.due_date * 1000).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
+
+  return {
+    emailsToNotify,
+    customerName,
+    subscriptionName,
+    amountDue,
+    dueDate,
+  };
+}
+
 /** Fetches upcoming invoices for all active subscriptions of a customer */
 export async function getCustomerUpcomingInvoices(
   customer: CustomerWithSubscriptions
@@ -643,16 +711,18 @@ export async function getCustomerUpcomingInvoices(
     const upcomingInvoices = await Promise.all(
       activeSubscriptions.map(async (sub) => {
         try {
-          const invoice = await stripe.invoices.retrieveUpcoming({
+          const invoice = await stripe.invoices.createPreview({
             customer: customer.id,
             subscription: sub.id,
           });
           return invoice;
         } catch (cause) {
-          // Stripe throws 'invoice_upcoming_none' when there's no upcoming invoice
+          // Stripe throws errors when there's no upcoming invoice:
+          // - 'invoice_upcoming_none' for subscriptions without upcoming invoices
+          // - 404 for trialing subscriptions that will pause (no payment method)
           if (
             cause instanceof Stripe.errors.StripeInvalidRequestError &&
-            cause.code === "invoice_upcoming_none"
+            (cause.code === "invoice_upcoming_none" || cause.statusCode === 404)
           ) {
             return null;
           }

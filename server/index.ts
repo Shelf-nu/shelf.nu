@@ -155,9 +155,9 @@ export default createHonoServer<ServerEnv>({
           "/api/oss-friends",
           "/api/stripe-webhook",
           "/qr",
-          "/qr/:path*",
-          "/qr/:path*/contact-owner",
-          "/qr/:path*/not-logged-in",
+          "/qr/:qrId",
+          "/qr/:qrId/not-logged-in",
+          "/qr/:qrId/contact-owner",
         ],
       })
     );

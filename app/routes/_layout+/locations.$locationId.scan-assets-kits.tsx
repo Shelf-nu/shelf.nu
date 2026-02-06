@@ -14,6 +14,7 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import AddAssetsKitsToLocationDrawer, {
   addScannedAssetsOrKitsToLocationSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-location-drawer";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getLocation,
@@ -140,6 +141,9 @@ export default function ScanAssetsKitsForLocation() {
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
+
+  const savedCameraId = useScannerCameraId();
+
   function handleCodeDetectionSuccess({
     value,
     error,
@@ -166,6 +170,7 @@ export default function ScanAssetsKitsForLocation() {
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
           }
+          savedCameraId={savedCameraId}
         />
       </div>
     </>
