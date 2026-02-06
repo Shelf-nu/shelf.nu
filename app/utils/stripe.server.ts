@@ -8,7 +8,7 @@ import {
   getOrganizationTierLimit,
   updateUserTierId,
 } from "~/modules/tier/service.server";
-import { STRIPE_SECRET_KEY } from "./env";
+import { SERVER_URL, STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
 
@@ -392,7 +392,7 @@ export async function createBillingPortalSession({
   try {
     const { url } = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.SERVER_URL}/account-details/subscription`,
+      return_url: `${SERVER_URL}/account-details/subscription`,
     });
 
     return { url };

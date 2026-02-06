@@ -6,6 +6,7 @@ import {
   refreshAccessToken,
   validateSession,
 } from "~/modules/auth/service.server";
+import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
 import { isQrId } from "~/utils/id";
@@ -214,20 +215,19 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     }
 
     const path = pathParts.join("/");
-    const serverUrl = process.env.SERVER_URL;
 
     // Check if the path is a single segment and a valid CUID
     if (pathParts.length === 1 && isQrId(path)) {
-      const redirectUrl = `${serverUrl}/qr/${path}`;
+      const redirectUrl = `${SERVER_URL}/qr/${path}`;
       // console.log(`urlShortener middleware: Redirecting QR to ${redirectUrl}`);
       return c.redirect(safeRedirect(redirectUrl), 301);
     }
 
-    // console.log(`urlShortener middleware: Redirecting to ${serverUrl}`);
+    // console.log(`urlShortener middleware: Redirecting to ${SERVER_URL}`);
     /**
      * In all other cases, we just redirect to the app root.
      * The URL shortener should only be used for QR codes
      * */
-    return c.redirect(safeRedirect(serverUrl), 301);
+    return c.redirect(safeRedirect(SERVER_URL), 301);
   });
 }
