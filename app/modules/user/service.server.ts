@@ -1338,6 +1338,78 @@ export async function revokeAccessToOrganization({
   }
 }
 
+/**
+ * Changes a user's role in an organization in-place.
+ * This is the same pattern used by ownership transfer and SCIM sync.
+ * Does NOT affect TeamMember, Custody, or Booking records.
+ */
+export async function changeUserRole({
+  userId,
+  organizationId,
+  newRole,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+  newRole: OrganizationRoles;
+}) {
+  try {
+    if (newRole === OrganizationRoles.OWNER) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot assign Owner role directly. Use ownership transfer instead.",
+        label,
+      });
+    }
+
+    const userOrg = await db.userOrganization.findFirst({
+      where: {
+        userId,
+        organizationId,
+      },
+    });
+
+    if (!userOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "User is not a member of this organization",
+        additionalData: { userId, organizationId },
+        label,
+      });
+    }
+
+    if (userOrg.roles.includes(OrganizationRoles.OWNER)) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot change the Owner's role. Use ownership transfer instead.",
+        label,
+      });
+    }
+
+    return await db.userOrganization.update({
+      where: {
+        userId_organizationId: {
+          userId,
+          organizationId,
+        },
+      },
+      data: {
+        roles: { set: [newRole] },
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to change user role",
+      additionalData: { userId, organizationId, newRole },
+      label,
+    });
+  }
+}
+
 /** Move entries inside an organization from 1 owner to another.
  * Affects the following models:
  *   - [x] Asset

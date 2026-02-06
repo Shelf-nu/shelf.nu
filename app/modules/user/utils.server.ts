@@ -1,5 +1,8 @@
 import type { OrganizationRoles } from "@prisma/client";
-import { InviteStatuses } from "@prisma/client";
+import {
+  InviteStatuses,
+  OrganizationRoles as OrgRolesEnum,
+} from "@prisma/client";
 import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -9,7 +12,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
 import { randomUsernameFromEmail } from "~/utils/user";
-import { revokeAccessToOrganization } from "./service.server";
+import { changeUserRole, revokeAccessToOrganization } from "./service.server";
 import { revokeAccessEmailText } from "../invite/helpers";
 import { createInvite } from "../invite/service.server";
 
@@ -27,7 +30,13 @@ export async function resolveUserAction(
   const { intent } = parseData(
     formData,
     z.object({
-      intent: z.enum(["delete", "revokeAccess", "resend", "cancelInvite"]),
+      intent: z.enum([
+        "delete",
+        "revokeAccess",
+        "resend",
+        "cancelInvite",
+        "changeRole",
+      ]),
     }),
     {
       additionalData: {
@@ -249,6 +258,46 @@ export async function resolveUserAction(
       }
 
       return payload(null);
+    }
+    case "changeRole": {
+      const { userId: targetUserId, role: newRole } = parseData(
+        formData,
+        z.object({
+          userId: z.string(),
+          role: z.nativeEnum(OrgRolesEnum),
+        }),
+        {
+          additionalData: {
+            organizationId,
+            intent,
+          },
+        }
+      );
+
+      if (targetUserId === userId) {
+        throw new ShelfError({
+          cause: null,
+          message: "You cannot change your own role",
+          label: "Team",
+        });
+      }
+
+      await changeUserRole({
+        userId: targetUserId,
+        organizationId,
+        newRole,
+      });
+
+      const roleName = organizationRolesMap[newRole] || newRole;
+
+      sendNotification({
+        title: "Role updated",
+        message: `User role has been changed to ${roleName}`,
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return redirect("/settings/team/users");
     }
     default: {
       throw new ShelfError({
