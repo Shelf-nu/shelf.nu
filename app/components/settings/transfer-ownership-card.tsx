@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
+import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import {
@@ -31,6 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../shared/modal";
+import { WarningBox } from "../shared/warning-box";
 import When from "../when/when";
 
 type TransferOwnershipCardProps = {
@@ -53,6 +55,10 @@ export const TransferOwnershipSchema = z.object({
         message: "You must agree to changing the owner of the workspace",
       })
     ),
+  transferSubscription: z
+    .string()
+    .optional()
+    .transform((value) => value === "on"),
 });
 
 export default function TransferOwnershipCard({
@@ -60,13 +66,19 @@ export default function TransferOwnershipCard({
   action = "/settings/general",
   organizationName,
 }: TransferOwnershipCardProps) {
-  const { admins } = useLoaderData<typeof loader>();
+  const {
+    admins,
+    ownerSubscriptionInfo,
+    ownerOtherTeamWorkspacesCount,
+    premiumIsEnabled,
+  } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
   const user = useUserData();
   const [confirmationInput, setConfirmationInput] = useState("");
   const [selectedOwner, setSelectedOwner] = useState<
     (typeof admins)[number] | null
   >(null);
+  const [transferSubscription, setTransferSubscription] = useState(false);
   const disabled = useDisabled();
   const currentOrganization = useCurrentOrganization();
 
@@ -76,6 +88,20 @@ export default function TransferOwnershipCard({
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
 
   const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
+
+  // Check if new owner has active subscription (to show blocking message)
+  const selectedOwnerHasSubscription = selectedOwner?.hasActiveSubscription;
+
+  // Check if current owner has a subscription that could be transferred
+  const ownerHasSubscription =
+    premiumIsEnabled && ownerSubscriptionInfo?.hasActiveSubscription;
+
+  // Warning: user is not transferring subscription and new owner has no subscription
+  const showNoSubscriptionWarning =
+    ownerHasSubscription &&
+    !transferSubscription &&
+    selectedOwner &&
+    !selectedOwnerHasSubscription;
 
   if (!isOwner && !isShelfAdmin) {
     return null;
@@ -133,6 +159,8 @@ export default function TransferOwnershipCard({
                 onValueChange={(value) => {
                   const newOwner = admins.find((admin) => admin.id === value);
                   setSelectedOwner(newOwner ?? null);
+                  // Reset subscription transfer checkbox when changing owner
+                  setTransferSubscription(false);
                 }}
               >
                 <SelectTrigger>
@@ -141,8 +169,19 @@ export default function TransferOwnershipCard({
 
                 <SelectContent>
                   {admins.map((admin) => (
-                    <SelectItem key={admin.id} value={admin.id}>
-                      {resolveTeamMemberName({ name: "", user: admin }, true)}
+                    <SelectItem
+                      key={admin.id}
+                      value={admin.id}
+                      disabled={admin.hasActiveSubscription}
+                    >
+                      <span
+                        className={tw(
+                          admin.hasActiveSubscription && "text-gray-400"
+                        )}
+                      >
+                        {resolveTeamMemberName({ name: "", user: admin }, true)}
+                        {admin.hasActiveSubscription && " (has subscription)"}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -154,7 +193,107 @@ export default function TransferOwnershipCard({
                 </p>
               </When>
 
-              <When truthy={!!selectedOwner}>
+              {/* Show blocking message if selected admin has subscription */}
+              <When truthy={!!selectedOwnerHasSubscription}>
+                <WarningBox className="mt-4">
+                  <span className="font-semibold">
+                    Cannot transfer to this admin
+                  </span>
+                  <p className="mt-1 text-sm">
+                    {resolveTeamMemberName(
+                      { name: "", user: selectedOwner },
+                      true
+                    )}{" "}
+                    already has an active subscription. Workspace ownership
+                    cannot be transferred to users with existing subscriptions.
+                  </p>
+                </WarningBox>
+              </When>
+
+              <When truthy={!!selectedOwner && !selectedOwnerHasSubscription}>
+                {/* Subscription Info Section */}
+                <When truthy={ownerHasSubscription}>
+                  <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex items-center gap-2 font-medium">
+                      <Icon icon="coins" />
+                      <span>Subscription Information</span>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-600">
+                      You have an active{" "}
+                      <span className="font-semibold">
+                        "{ownerSubscriptionInfo?.subscriptionName}"
+                      </span>{" "}
+                      subscription.
+                    </p>
+
+                    <div className="mt-3">
+                      <div className="flex cursor-pointer select-none items-start gap-2 py-2 text-sm">
+                        <input
+                          id="transferSubscription"
+                          name="transferSubscription"
+                          type="checkbox"
+                          checked={transferSubscription}
+                          onChange={(e) =>
+                            setTransferSubscription(e.target.checked)
+                          }
+                          aria-describedby="transferSubscription-description"
+                          className="mt-0.5 rounded-sm checked:bg-primary focus-within:ring-primary checked:hover:bg-primary checked:focus:bg-primary"
+                        />
+                        <div>
+                          <label
+                            htmlFor="transferSubscription"
+                            className="font-medium"
+                          >
+                            Transfer my subscription to the new owner
+                          </label>
+                          <p
+                            id="transferSubscription-description"
+                            className="mt-1 text-gray-500"
+                          >
+                            This includes: billing cycle, payment method, and
+                            billing history
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Warning for multiple workspaces */}
+                  <When
+                    truthy={
+                      transferSubscription && ownerOtherTeamWorkspacesCount > 0
+                    }
+                  >
+                    <WarningBox className="mt-3">
+                      <span className="font-semibold">
+                        Multiple workspaces affected
+                      </span>
+                      <p className="mt-1 text-sm">
+                        You own {ownerOtherTeamWorkspacesCount} other team{" "}
+                        {ownerOtherTeamWorkspacesCount === 1
+                          ? "workspace"
+                          : "workspaces"}
+                        . If you transfer your subscription, those workspaces
+                        will lose premium features until you subscribe again.
+                      </p>
+                    </WarningBox>
+                  </When>
+
+                  {/* Warning when not transferring subscription */}
+                  <When truthy={showNoSubscriptionWarning}>
+                    <WarningBox className="mt-3">
+                      <span className="font-semibold">
+                        New owner has no subscription
+                      </span>
+                      <p className="mt-1 text-sm">
+                        The new owner does not have an active subscription. If
+                        you don't transfer your subscription, access to this
+                        workspace may be limited until the new owner subscribes.
+                      </p>
+                    </WarningBox>
+                  </When>
+                </When>
+
                 <p className="mb-2 mt-4">
                   You are about to transfer ownership of this workspace to
                   <span className="ml-1 font-semibold">
@@ -170,6 +309,15 @@ export default function TransferOwnershipCard({
                   <li>Lose owner control of this workspace</li>
                   <li>No longer be able to manage billing</li>
                   <li>Become an admin member</li>
+                  <When truthy={transferSubscription}>
+                    <li>
+                      Transfer your subscription to{" "}
+                      {resolveTeamMemberName(
+                        { name: "", user: selectedOwner },
+                        true
+                      )}
+                    </li>
+                  </When>
                 </ul>
 
                 <div className="mb-2">
@@ -231,6 +379,11 @@ export default function TransferOwnershipCard({
                   disabled={
                     !selectedOwner
                       ? { reason: "Please select a new owner." }
+                      : selectedOwnerHasSubscription
+                      ? {
+                          reason:
+                            "Cannot transfer to a user with an active subscription.",
+                        }
                       : confirmationInput !== confirmationOrgName
                       ? {
                           reason: "Please type the workspace name to confirm.",

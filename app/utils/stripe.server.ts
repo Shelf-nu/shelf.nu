@@ -674,3 +674,197 @@ export async function getCustomerUpcomingInvoices(
     });
   }
 }
+
+export type OwnerSubscriptionInfo = {
+  hasActiveSubscription: boolean;
+  subscriptionName: string | null;
+  tierId: string | null;
+  subscriptionId: string | null;
+};
+
+/**
+ * Gets active subscription info for a user by their userId
+ * Returns the active or trialing subscription if one exists
+ */
+export async function getUserActiveSubscription(
+  userId: string
+): Promise<Stripe.Subscription | null> {
+  try {
+    if (!stripe || !premiumIsEnabled) return null;
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { customerId: true },
+    });
+
+    if (!user?.customerId) return null;
+
+    const customer = (await getStripeCustomer(
+      user.customerId
+    )) as CustomerWithSubscriptions;
+
+    if (customer.deleted) return null;
+
+    return getCustomerActiveSubscription({ customer });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get user active subscription",
+      additionalData: { userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Gets subscription info formatted for the transfer dialog display
+ * Returns details about the owner's active subscription
+ */
+export async function getOwnerSubscriptionInfo(
+  ownerId: string
+): Promise<OwnerSubscriptionInfo> {
+  try {
+    if (!stripe || !premiumIsEnabled) {
+      return {
+        hasActiveSubscription: false,
+        subscriptionName: null,
+        tierId: null,
+        subscriptionId: null,
+      };
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: ownerId },
+      select: { customerId: true, tierId: true },
+    });
+
+    if (!user?.customerId) {
+      return {
+        hasActiveSubscription: false,
+        subscriptionName: null,
+        tierId: user?.tierId || null,
+        subscriptionId: null,
+      };
+    }
+
+    const subscriptions = await getCustomerSubscriptionsWithProducts(
+      user.customerId
+    );
+
+    // Find active or trialing subscription
+    const activeSubscription = subscriptions.find(
+      (sub) => sub.status === "active" || sub.status === "trialing"
+    );
+
+    if (!activeSubscription) {
+      return {
+        hasActiveSubscription: false,
+        subscriptionName: null,
+        tierId: user.tierId,
+        subscriptionId: null,
+      };
+    }
+
+    // Get the product name from the subscription
+    const product = activeSubscription.items.data[0]?.price
+      ?.product as Stripe.Product | null;
+
+    return {
+      hasActiveSubscription: true,
+      subscriptionName: product?.name || "Active Plan",
+      tierId: user.tierId,
+      subscriptionId: activeSubscription.id,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get owner subscription info",
+      additionalData: { ownerId },
+      label,
+    });
+  }
+}
+
+/**
+ * Transfers a Stripe subscription to a different customer.
+ *
+ * Since Stripe doesn't support changing the customer on an existing subscription,
+ * we cancel the old one and create a new one for the new customer.
+ *
+ * The billing cycle is preserved by setting `billing_cycle_anchor` to the
+ * original subscription's renewal date (`current_period_end`). Combined with
+ * `proration_behavior: 'none'`, the new subscription is immediately active
+ * with no charge until the original renewal date.
+ *
+ * The new owner must add their own payment method before the renewal date.
+ */
+export async function transferSubscriptionToCustomer({
+  subscriptionId,
+  newCustomerId,
+}: {
+  subscriptionId: string;
+  newCustomerId: string;
+}): Promise<Stripe.Subscription> {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { subscriptionId, newCustomerId },
+        label,
+      });
+    }
+
+    // Retrieve the existing subscription with expanded price info
+    const existingSubscription = await stripe.subscriptions.retrieve(
+      subscriptionId,
+      { expand: ["items.data.price"] }
+    );
+
+    // Capture the original renewal date before cancellation
+    const originalRenewalDate = existingSubscription.current_period_end;
+
+    // Cancel the existing subscription immediately without prorating
+    // No credits are issued - the remaining value transfers to the new owner
+    await stripe.subscriptions.cancel(subscriptionId, {
+      prorate: false,
+    });
+
+    // Create new subscription for the new customer with the same plan.
+    // billing_cycle_anchor preserves the original renewal date so the first
+    // charge happens when the previously-paid period ends.
+    // proration_behavior 'none' ensures no charge for the partial period.
+    const newSubscription = await stripe.subscriptions.create({
+      customer: newCustomerId,
+      items: existingSubscription.items.data.map((item) => ({
+        price: item.price.id,
+        quantity: item.quantity ?? 1,
+      })),
+      billing_cycle_anchor: originalRenewalDate,
+      proration_behavior: "none",
+      metadata: {
+        transferred_from_subscription: subscriptionId,
+      },
+    });
+
+    return newSubscription;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to transfer subscription to new customer",
+      additionalData: { subscriptionId, newCustomerId },
+      label,
+    });
+  }
+}
+
+/**
+ * Checks if a user has an active subscription
+ * Used to validate if a user can receive a transferred subscription
+ */
+export async function userHasActiveSubscription(
+  userId: string
+): Promise<boolean> {
+  const subscription = await getUserActiveSubscription(userId);
+  return subscription !== null;
+}
