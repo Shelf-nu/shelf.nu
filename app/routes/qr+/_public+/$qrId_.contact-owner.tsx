@@ -49,6 +49,7 @@ export const QR_SELECT_FOR_REPORT = {
   asset: {
     select: {
       id: true,
+      title: true,
       organization: {
         select: {
           owner: {

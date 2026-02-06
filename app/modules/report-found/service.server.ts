@@ -1,7 +1,7 @@
 import type { Asset, Kit, Prisma, ReportFound, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
-import type { QR_SELECT_FOR_REPORT } from "~/routes/qr+/$qrId_.contact-owner";
+import type { QR_SELECT_FOR_REPORT } from "~/routes/qr+/_public+/$qrId_.contact-owner";
 import { ShelfError } from "~/utils/error";
 import { normalizeQrData } from "~/utils/qr";
 
