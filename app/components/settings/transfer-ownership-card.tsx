@@ -250,8 +250,9 @@ export default function TransferOwnershipCard({
                             id="transferSubscription-description"
                             className="mt-1 text-gray-500"
                           >
-                            This includes: billing cycle, payment method, and
-                            billing history
+                            The new owner will continue with the current billing
+                            cycle. They will need to add their own payment
+                            method before the next billing date.
                           </p>
                         </div>
                       </div>

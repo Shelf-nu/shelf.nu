@@ -9,12 +9,11 @@ export function newOwnerEmailText({
 }) {
   const subscriptionSection = subscriptionTransferred
     ? `
-Additionally, the previous owner's subscription has been transferred to you. This includes:
-- The current billing cycle and plan
-- Payment method on file
-- Billing history
+Additionally, the previous owner's subscription has been transferred to you.
 
-You can manage your subscription at any time from your account settings.
+The current billing cycle continues unchanged - you won't be charged until the next billing date. However, you will need to add your own payment method before then to avoid any interruption in service.
+
+You can manage your subscription and add a payment method from your account settings.
 `
     : "";
 
