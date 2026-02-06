@@ -125,26 +125,7 @@ export function initEnv() {
 /**
  * Server env
  */
-const getNormalizedServerUrl = (): string => {
-  const rawServerUrl = getEnv("SERVER_URL");
-  const normalizedServerUrl = rawServerUrl.replace(/\/+$/, "");
-
-  try {
-    const url = new URL(normalizedServerUrl);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error();
-    }
-  } catch {
-    throw new Error(
-      `Invalid SERVER_URL environment variable value: "${rawServerUrl}". ` +
-        "Expected a non-empty absolute URL with http or https scheme."
-    );
-  }
-
-  return normalizedServerUrl;
-};
-
-export const SERVER_URL = getNormalizedServerUrl();
+export const SERVER_URL = getEnv("SERVER_URL").replace(/\/+$/, "");
 export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
