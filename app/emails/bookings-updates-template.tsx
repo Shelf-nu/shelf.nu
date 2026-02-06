@@ -22,6 +22,7 @@ interface Props {
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
   cancellationReason?: string;
+  reasonLabel?: string;
 }
 
 export function BookingUpdatesEmailTemplate({
@@ -32,6 +33,7 @@ export function BookingUpdatesEmailTemplate({
   hideViewButton = false,
   isAdminEmail = false,
   cancellationReason,
+  reasonLabel = "Cancellation reason",
 }: Props) {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -103,7 +105,7 @@ export function BookingUpdatesEmailTemplate({
                 fontWeight: "600",
               }}
             >
-              Cancellation reason
+              {reasonLabel}
             </p>
             <p style={{ ...styles.p, margin: "0" }}>{cancellationReason}</p>
           </div>
@@ -144,6 +146,7 @@ export const bookingUpdatesTemplateString = ({
   hideViewButton = false,
   isAdminEmail = false,
   cancellationReason,
+  reasonLabel,
 }: Props) =>
   render(
     <BookingUpdatesEmailTemplate
@@ -154,5 +157,6 @@ export const bookingUpdatesTemplateString = ({
       hideViewButton={hideViewButton}
       isAdminEmail={isAdminEmail}
       cancellationReason={cancellationReason}
+      reasonLabel={reasonLabel}
     />
   );

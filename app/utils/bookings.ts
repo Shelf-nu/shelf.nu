@@ -10,6 +10,7 @@ export function canUserManageBookingAssets(
   const isCompleted = booking.status === BookingStatus.COMPLETE;
   const isArchived = booking.status === BookingStatus.ARCHIVED;
   const isCancelled = booking.status === BookingStatus.CANCELLED;
+  const isRejected = booking.status === BookingStatus.REJECTED;
 
   const cantManageAssetsAsSelfService =
     isSelfService && booking.status !== BookingStatus.DRAFT;
@@ -18,6 +19,7 @@ export function canUserManageBookingAssets(
     !isCompleted &&
     !isArchived &&
     !isCancelled &&
+    !isRejected &&
     !cantManageAssetsAsSelfService
   );
 }
@@ -27,11 +29,13 @@ export const bookingStatusColorMap: {
 } = {
   DRAFT: BADGE_COLORS.gray,
   RESERVED: BADGE_COLORS.blue,
+  APPROVED: BADGE_COLORS.green,
   ONGOING: BADGE_COLORS.violet,
   OVERDUE: BADGE_COLORS.red,
   COMPLETE: BADGE_COLORS.green,
   ARCHIVED: BADGE_COLORS.gray,
   CANCELLED: BADGE_COLORS.gray,
+  REJECTED: BADGE_COLORS.red,
 };
 
 /**

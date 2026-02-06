@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { useLoaderData, useSubmit } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {
@@ -23,6 +23,7 @@ import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 
 import ExtendBookingDialog from "./extend-booking-dialog";
+import { RejectBookingDialog } from "./reject-booking-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
@@ -34,11 +35,12 @@ interface Props {
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
-  const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
+  const { isCompleted, isOngoing, isReserved, isApproved, isOverdue, isDraft } =
     useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { isBaseOrSelfService, isAdministratorOrOwner, roles } =
+    useUserRoleHelper();
 
   const canArchiveBooking = userHasPermission({
     roles,
@@ -59,6 +61,24 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
       entity: PermissionEntity.booking,
       action: PermissionAction.extend,
     });
+
+  /**
+   * Check if this booking was created by a BASE user.
+   * Approve/Reject actions are only shown for BASE user bookings.
+   */
+  const creatorRoles = (
+    booking.creator as {
+      userOrganizations?: Array<{ roles: OrganizationRoles[] }>;
+    }
+  )?.userOrganizations;
+  const isBaseUserBooking =
+    creatorRoles &&
+    creatorRoles.length > 0 &&
+    creatorRoles[0].roles.includes(OrganizationRoles.BASE);
+
+  /** Admin/Owner can approve/reject RESERVED bookings created by BASE users */
+  const canApproveOrReject =
+    isAdministratorOrOwner && isReserved && isBaseUserBooking;
 
   return (
     <DropdownMenu modal={false}>
@@ -81,11 +101,38 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           align="end"
           className="order w-[220px] rounded-md bg-white p-1.5 text-right"
         >
-          <When truthy={booking.status === BookingStatus.RESERVED}>
+          <When truthy={canApproveOrReject}>
+            <DropdownMenuItem asChild>
+              <Button
+                variant="link"
+                className="justify-start font-medium text-success-600 hover:cursor-pointer hover:text-success-700"
+                width="full"
+                as="span"
+                onClick={() => {
+                  const formData = new FormData();
+                  formData.append("intent", "approve");
+                  void submit(formData, { method: "post" });
+                }}
+              >
+                Approve
+              </Button>
+            </DropdownMenuItem>
+            <RejectBookingDialog bookingName={booking.name} />
+          </When>
+
+          <When
+            truthy={
+              booking.status === BookingStatus.RESERVED ||
+              booking.status === BookingStatus.APPROVED
+            }
+          >
             <RevertToDraftDialog booking={booking} />
           </When>
           <When
-            truthy={(isOngoing || isReserved || isOverdue) && canCancelBooking}
+            truthy={
+              (isOngoing || isReserved || isApproved || isOverdue) &&
+              canCancelBooking
+            }
           >
             <CancelBookingDialog bookingName={booking.name} />
           </When>

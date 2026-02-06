@@ -29,6 +29,7 @@ export function getStatusClasses(
     case "DRAFT":
     case "ARCHIVED":
     case "CANCELLED":
+    case "REJECTED":
       statusClasses = [
         "md:!text-gray-700",
         "md:bg-gray-50",
@@ -36,6 +37,16 @@ export function getStatusClasses(
         "[&_.fc-daygrid-event-dot]:!border-gray-700",
         "[&_.fc-list-event-dot]:!border-gray-700",
         "md:focus:!bg-gray-100",
+      ];
+      break;
+    case "APPROVED":
+      statusClasses = [
+        "md:!text-success-700",
+        "md:bg-success-50",
+        "md:border-success-200",
+        "[&_.fc-daygrid-event-dot]:!border-success-700",
+        "[&_.fc-list-event-dot]:!border-success-700",
+        "md:focus:!bg-success-100",
       ];
       break;
     case "RESERVED":
@@ -94,7 +105,9 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   DRAFT: "md:!bg-gray-100",
   ARCHIVED: "md:!bg-gray-100",
   CANCELLED: "md:!bg-gray-100",
+  REJECTED: "md:!bg-gray-100",
   RESERVED: "md:!bg-blue-100",
+  APPROVED: "md:!bg-success-100",
   ONGOING: "md:!bg-purple-100",
   OVERDUE: "md:!bg-warning-100",
   COMPLETE: "md:!bg-success-100",

@@ -403,7 +403,8 @@ const ListBookingsContent = ({
   const hasUnavaiableAssets =
     item.assets.some(
       (asset) => !asset.availableToBook || asset.custody !== null
-    ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
+    ) &&
+    !["COMPLETE", "CANCELLED", "ARCHIVED", "REJECTED"].includes(item.status);
 
   return (
     <>

@@ -20,6 +20,7 @@ import {
   BookingFormSchema,
   CancelBookingSchema,
   ExtendBookingSchema,
+  RejectBookingSchema,
 } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
 import { ErrorContent } from "~/components/errors";
@@ -31,6 +32,7 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
+  approveBooking,
   archiveBooking,
   cancelBooking,
   checkinAssets,
@@ -41,6 +43,7 @@ import {
   getBooking,
   getBookingFlags,
   getDetailedPartialCheckinData,
+  rejectBooking,
   removeAssets,
   reserveBooking,
   revertBookingToDraft,
@@ -141,6 +144,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               firstName: true,
               lastName: true,
               profilePicture: true,
+              userOrganizations: {
+                where: { organizationId },
+                select: { roles: true },
+              },
             },
           },
         },
@@ -538,6 +545,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkIn",
           "archive",
           "cancel",
+          "approve",
+          "reject",
           "removeKit",
           "revert-to-draft",
           "extend-booking",
@@ -565,6 +574,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
+      approve: PermissionAction.update,
+      reject: PermissionAction.update,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.extend,
@@ -967,6 +978,63 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), {
           headers,
         });
+      }
+      case "approve": {
+        if (isSelfServiceOrBase) {
+          throw new ShelfError({
+            cause: null,
+            message: "You are not authorized to approve bookings.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+
+        await approveBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          userId: user.id,
+        });
+
+        sendNotification({
+          title: "Booking approved",
+          message: "The booking has been approved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }), { headers });
+      }
+      case "reject": {
+        if (isSelfServiceOrBase) {
+          throw new ShelfError({
+            cause: null,
+            message: "You are not authorized to reject bookings.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+
+        const { rejectionReason } = parseData(formData, RejectBookingSchema, {
+          additionalData: { userId, id, organizationId, role },
+        });
+
+        await rejectBooking({
+          id,
+          organizationId,
+          hints: getClientHint(request),
+          userId: user.id,
+          rejectionReason,
+        });
+
+        sendNotification({
+          title: "Booking rejected",
+          message: "The booking has been rejected",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }), { headers });
       }
       case "removeKit": {
         const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {

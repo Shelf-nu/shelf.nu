@@ -107,7 +107,8 @@ export function AvailabilityLabel({
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
             b.status === BookingStatus.OVERDUE ||
-            b.status === BookingStatus.RESERVED)
+            b.status === BookingStatus.RESERVED ||
+            b.status === BookingStatus.APPROVED)
       )
       .sort((a, b) => {
         // Sort by 'from' date descending to get the newest booking first

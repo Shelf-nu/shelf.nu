@@ -158,9 +158,11 @@ export function createBookingConflictConditions({
       ...(fromDate && toDate
         ? {
             OR: [
-              // Rule 1: RESERVED bookings always conflict
+              // Rule 1: RESERVED/APPROVED bookings always conflict
               {
-                status: BookingStatus.RESERVED,
+                status: {
+                  in: [BookingStatus.RESERVED, BookingStatus.APPROVED],
+                },
                 ...(includeCurrentBooking
                   ? {}
                   : { id: { not: currentBookingId } }),

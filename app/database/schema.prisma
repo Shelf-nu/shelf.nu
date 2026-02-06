@@ -1111,11 +1111,13 @@ model Announcement {
 enum BookingStatus {
   DRAFT
   RESERVED
+  APPROVED
   ONGOING
   OVERDUE
   COMPLETE
   ARCHIVED
   CANCELLED
+  REJECTED
 }
 
 model Booking {
@@ -1158,6 +1160,7 @@ model Booking {
   originalTo   DateTime? @db.Timestamptz(3)
 
   cancellationReason String?
+  rejectionReason    String?
 
   // Indexes for foreign keys
   @@index([creatorId])

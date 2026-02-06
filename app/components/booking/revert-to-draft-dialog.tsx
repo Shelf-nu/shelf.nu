@@ -26,7 +26,10 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
         className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
         width="full"
         onClick={handleOpenDialog}
-        disabled={booking.status !== BookingStatus.RESERVED}
+        disabled={
+          booking.status !== BookingStatus.RESERVED &&
+          booking.status !== BookingStatus.APPROVED
+        }
       >
         Revert to Draft
       </Button>
@@ -72,7 +75,10 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
         className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
         width="full"
         onClick={handleOpenDialog}
-        disabled={booking.status !== BookingStatus.RESERVED}
+        disabled={
+          booking.status !== BookingStatus.RESERVED &&
+          booking.status !== BookingStatus.APPROVED
+        }
       >
         Revert to Draft
       </Button>

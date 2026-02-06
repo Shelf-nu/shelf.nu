@@ -2514,11 +2514,13 @@ describe("getSystemActionText", () => {
     const statuses = [
       BookingStatus.DRAFT,
       BookingStatus.RESERVED,
+      BookingStatus.APPROVED,
       BookingStatus.ONGOING,
       BookingStatus.OVERDUE,
       BookingStatus.COMPLETE,
       BookingStatus.CANCELLED,
       BookingStatus.ARCHIVED,
+      BookingStatus.REJECTED,
     ];
 
     statuses.forEach((fromStatus) => {

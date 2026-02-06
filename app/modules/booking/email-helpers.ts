@@ -172,6 +172,30 @@ export const cancelledBookingEmailContent = (
   });
 
 /**
+ * Booking is approved
+ *
+ * This email gets sent when a booking is approved by an admin
+ */
+export const approvedBookingEmailContent = (args: BasicEmailContentArgs) =>
+  baseBookingTextEmailContent({
+    ...args,
+    emailContent: `Your booking has been approved: "${args.bookingName}". The assets are reserved for you and will be checked out on the start date.`,
+  });
+
+/**
+ * Booking is rejected
+ *
+ * This email gets sent when a booking is rejected by an admin
+ */
+export const rejectedBookingEmailContent = (
+  args: BasicEmailContentArgs & { rejectionReason: string }
+) =>
+  baseBookingTextEmailContent({
+    ...args,
+    emailContent: `Your booking has been rejected: "${args.bookingName}".\n\nReason: ${args.rejectionReason}`,
+  });
+
+/**
  * Booking is extended
  *
  * This email is sent when a booking's end date is extended.
