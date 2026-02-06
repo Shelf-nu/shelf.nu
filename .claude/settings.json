@@ -24,6 +24,23 @@
     ]
   },
   "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(ls:*)",
+      "Bash(npm run test:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run lint:fix:*)",
+      "Bash(npm run validate:*)",
+      "Bash(npm view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.stripe.com)"
+    ],
     "deny": [
       "Read(./.env)",
       "Read(**/.env.local)",

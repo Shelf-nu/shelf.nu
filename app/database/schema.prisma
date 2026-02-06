@@ -46,6 +46,7 @@ model User {
   sso                   Boolean @default(false)
   createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
+  hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
 
   // Datetime
   createdAt DateTime @default(now())
@@ -60,6 +61,7 @@ model User {
   notes              Note[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
   auditNotes        AuditNote[]        @relation("AuditNoteUser")
+  locationNotes     LocationNote[]     @relation("LocationNoteUser")
   qrCodes            Qr[]
   scans              Scan[]
   tags               Tag[]
@@ -85,7 +87,6 @@ model User {
   auditAssetsScanned AuditAsset[]
   auditScans         AuditScan[]
   auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
-
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
   referralSource String? // "How did you hear about us?" field.
@@ -228,16 +229,15 @@ enum AssetStatus {
   CHECKED_OUT
 }
 
-
 model AssetFilterPreset {
-  id             String                @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   ownerId        String
   name           String
   query          String
-  starred        Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  starred        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -381,6 +381,26 @@ model BookingNote {
 
   // Indexes for foreign keys
   @@index([bookingId])
+  @@index([userId])
+}
+
+model LocationNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user       User?    @relation("LocationNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId     String?
+  location   Location @relation("LocationNotes", fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  locationId String
+
+  // Indexes for foreign keys
+  @@index([locationId])
   @@index([userId])
 }
 
@@ -574,6 +594,7 @@ model Location {
 
   assets Asset[]
   kits   Kit[]
+  notes  LocationNote[] @relation("LocationNotes")
 
   // Self-relation for nested locations
   parentId String?
@@ -791,32 +812,32 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  canImportNRM     Boolean  @default(false)
-  canHideShelfBranding Boolean @default(false)
-  maxCustomFields  Int      @default(0)
-  maxOrganizations Int      @default(1)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   TierId   @id
+  tier                 Tier?
+  canImportAssets      Boolean  @default(false)
+  canExportAssets      Boolean  @default(false)
+  canImportNRM         Boolean  @default(false)
+  canHideShelfBranding Boolean  @default(false)
+  maxCustomFields      Int      @default(0)
+  maxOrganizations     Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId           String?  @unique // This is the foreign key
-  canImportAssets  Boolean  @default(true)
-  canExportAssets  Boolean  @default(true)
-  canImportNRM     Boolean  @default(true)
-  canHideShelfBranding Boolean @default(true)
-  maxCustomFields  Int      @default(1000)
-  maxOrganizations Int      @default(1)
-  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId               String?  @unique // This is the foreign key
+  canImportAssets      Boolean  @default(true)
+  canExportAssets      Boolean  @default(true)
+  canImportNRM         Boolean  @default(true)
+  canHideShelfBranding Boolean  @default(true)
+  maxCustomFields      Int      @default(1000)
+  maxOrganizations     Int      @default(1)
+  isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 model CustomField {
@@ -1064,10 +1085,11 @@ model Invite {
   inviteeTeamMember TeamMember   @relation(fields: [teamMemberId], references: [id])
   teamMemberId      String
 
-  inviteeEmail String
-  status       InviteStatuses      @default(PENDING)
-  inviteCode   String
-  roles        OrganizationRoles[]
+  inviteeEmail  String
+  status        InviteStatuses      @default(PENDING)
+  inviteCode    String
+  roles         OrganizationRoles[]
+  inviteMessage String?             @db.VarChar(1000)
 
   // Datetime
   expiresAt DateTime
@@ -1144,6 +1166,8 @@ model Booking {
   // dates here and updated the from and to dates to current date (if users agrees to change) 
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
+
+  cancellationReason String?
 
   // Indexes for foreign keys
   @@index([creatorId])

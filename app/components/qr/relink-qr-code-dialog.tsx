@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Form, useNavigation } from "react-router";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { isFormProcessing } from "~/utils/form";
 import Icon from "../icons/icon";
 import { ArrowLeftIcon, ArrowRightIcon } from "../icons/library";
@@ -39,6 +40,8 @@ export function RelinkQrCodeDialog({
 
   const navigation = useNavigation();
   const isSubmitting = isFormProcessing(navigation.state);
+
+  const savedCameraId = useScannerCameraId();
 
   const isNewCodeSameAsCurrent = currentQrId === newQrId;
 
@@ -125,6 +128,7 @@ export function RelinkQrCodeDialog({
               setPaused={() => {}}
               scannerModeClassName="h-[450px]"
               scannerModeCallback={() => {}}
+              savedCameraId={savedCameraId}
             />
 
             <div className="flex items-center justify-center gap-4 border-b border-gray-200 p-4">

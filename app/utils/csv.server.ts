@@ -666,7 +666,7 @@ type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
 };
 
 const sanitizeCsvValue = (value: string | null | undefined) =>
-  formatValueForCsv((value ?? "").replace(/\r?\n/g, "\\n"));
+  formatValueForCsv((value ?? "").replace(/\r?\n/g, " "));
 
 const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
   const rows = notes.map((note) => {
@@ -815,6 +815,26 @@ export async function exportAuditNotesToCsv({
     },
     findMany: (args) =>
       db.auditNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
+export async function exportLocationNotesToCsv({
+  request,
+  locationId,
+  organizationId,
+}: {
+  request: Request;
+  locationId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.LocationNoteWhereInput>({
+    request,
+    where: {
+      locationId,
+      location: { organizationId },
+    },
+    findMany: (args) =>
+      db.locationNote.findMany(args) as Promise<ActivityNoteRecord[]>,
   });
 }
 

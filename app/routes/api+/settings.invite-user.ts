@@ -26,7 +26,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await assertUserCanInviteUsersToWorkspace({ organizationId });
 
-    const { email, teamMemberId, role } = parseData(
+    const { email, teamMemberId, role, inviteMessage } = parseData(
       await request.formData(),
       InviteUserFormSchema
     );
@@ -79,6 +79,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       teamMemberName,
       teamMemberId,
       userId,
+      extraMessage: inviteMessage,
     });
 
     if (!invite) {

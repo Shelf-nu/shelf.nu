@@ -603,16 +603,17 @@ const Actions = ({
   referer?: string | null;
 }) => (
   <>
+    {/* Save button is first in DOM order so Enter key triggers it by default */}
+    <Button type="submit" disabled={disabled} className="order-last">
+      Save
+    </Button>
+
     <ButtonGroup>
       <Button to={referer} variant="secondary" disabled={disabled}>
         Cancel
       </Button>
       <AddAnother disabled={disabled} />
     </ButtonGroup>
-
-    <Button type="submit" disabled={disabled}>
-      Save
-    </Button>
   </>
 );
 

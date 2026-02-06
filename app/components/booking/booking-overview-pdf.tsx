@@ -3,8 +3,10 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
-
 import { Image } from "~/components/shared/image";
+
+import { useSearchParams } from "~/hooks/search-params";
+import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image/component";
@@ -30,10 +32,21 @@ export const BookingOverviewPDF = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [pdfMeta, setPdfMeta] = useState<PdfDbResult | null>(null);
   const [isFetchingBookings, setIsFetchingBookings] = useState(true);
+  const [searchParams] = useSearchParams();
+
+  // Get sorting params from URL search params
+  // Default to "status" since that's the default for booking assets
+  const rawOrderBy = searchParams.get("orderBy");
+  const orderBy =
+    !rawOrderBy || rawOrderBy === "createdAt" ? "status" : rawOrderBy;
+  const orderDirection = searchParams.get("orderDirection") || "desc";
 
   useEffect(() => {
     if (isDialogOpen) {
-      void fetch(`/api/bookings/${booking.id}/generate-pdf`)
+      // Pass current sorting params to ensure PDF matches UI order
+      void fetch(
+        `/api/bookings/${booking.id}/generate-pdf?orderBy=${orderBy}&orderDirection=${orderDirection}`
+      )
         .then((response) => response.json())
         .then((data) => {
           setPdfMeta(data.pdfMeta);
@@ -42,7 +55,7 @@ export const BookingOverviewPDF = ({
           setIsFetchingBookings(false);
         });
     }
-  }, [booking, isDialogOpen]);
+  }, [booking, isDialogOpen, orderBy, orderDirection]);
 
   const handlePrint = useReactToPrint({
     contentRef: componentRef,
@@ -80,7 +93,13 @@ export const BookingOverviewPDF = ({
           title={
             <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
               <h3>Generate booking checklist for "{booking?.name}"</h3>
-              <p>You can either preview or download the PDF.</p>
+              <p>
+                You can either preview or download the PDF. Assets are sorted by{" "}
+                {BOOKING_ASSET_SORTING_OPTIONS[
+                  orderBy as keyof typeof BOOKING_ASSET_SORTING_OPTIONS
+                ] || BOOKING_ASSET_SORTING_OPTIONS.status}{" "}
+                ({orderDirection === "asc" ? "ascending" : "descending"}).
+              </p>
               {!isFetchingBookings && (
                 <div className="mt-4">
                   <Button onClick={handlePrint}>Download PDF</Button>

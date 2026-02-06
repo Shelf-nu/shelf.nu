@@ -24,6 +24,7 @@ export interface TeamMembersWithUserOrInvite {
   userId: string | null;
   sso: boolean;
   custodies?: number;
+  inviteMessage?: string | null;
 }
 
 export async function getPaginatedAndFilterableSettingUsers({

@@ -25,6 +25,7 @@ export enum PermissionEntity {
   tag = "tag",
   category = "category",
   location = "location",
+  locationNote = "locationNote",
   customField = "customField",
   workspace = "workspace",
   teamMember = "teamMember",
@@ -74,6 +75,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
     [PermissionEntity.location]: [],
+    [PermissionEntity.locationNote]: [],
     [PermissionEntity.tag]: [],
     [PermissionEntity.teamMember]: [],
     [PermissionEntity.teamMemberProfile]: [],
@@ -124,6 +126,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],
     [PermissionEntity.location]: [],
+    [PermissionEntity.locationNote]: [],
     [PermissionEntity.tag]: [],
     [PermissionEntity.teamMember]: [],
     [PermissionEntity.teamMemberProfile]: [],
@@ -201,6 +204,11 @@ export const Role2PermissionMap: {
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.locationNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
       PermissionAction.delete,
     ],
     [PermissionEntity.tag]: [
@@ -324,6 +332,11 @@ export const Role2PermissionMap: {
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.locationNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
       PermissionAction.delete,
     ],
     [PermissionEntity.tag]: [

@@ -76,6 +76,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  getBookingAssetsOrderBy,
   hasAssetBookingConflicts,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
@@ -2099,9 +2100,11 @@ export async function cancelBooking({
   organizationId,
   hints,
   userId,
+  cancellationReason,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   userId?: string;
+  cancellationReason?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -2158,7 +2161,7 @@ export async function cancelBooking({
 
       return tx.booking.update({
         where: { id: bookingFound.id },
-        data: { status: BookingStatus.CANCELLED },
+        data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
           assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -2181,6 +2184,7 @@ export async function cancelBooking({
         to: booking.to as Date,
         bookingId: booking.id,
         hints,
+        cancellationReason,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -2188,6 +2192,7 @@ export async function cancelBooking({
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
         hints,
+        cancellationReason,
       });
 
       sendEmail({
@@ -3176,11 +3181,14 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     // Extract search parameters from request
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
-    const { search } = paramsValues;
-    const status =
-      searchParams.get("status") === "ALL"
-        ? null
-        : (searchParams.get("status") as AssetStatus | null);
+    const { search, orderBy, orderDirection } = paramsValues;
+    // const status =
+    //   searchParams.get("status") === "ALL"
+    //     ? null
+    //     : (searchParams.get("status") as AssetStatus | null);
+
+    // Get dynamic orderBy based on URL params
+    const assetsOrderBy = getBookingAssetsOrderBy(orderBy, orderDirection);
 
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -3189,31 +3197,25 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
 
-    // Build assets include with optional search and status filtering
-    let assetsInclude: Prisma.BookingInclude["assets"] =
-      BOOKING_WITH_ASSETS_INCLUDE.assets;
+    // Build assets include with optional search, status filtering, and dynamic sorting
+    const assetsWhere: Prisma.AssetWhereInput = {};
 
-    // Add WHERE clause if search or status filters are provided
-    if (search || status) {
-      const assetsWhere: Prisma.AssetWhereInput = {};
-
-      if (search) {
-        assetsWhere.title = {
-          contains: search,
-          mode: "insensitive",
-        };
-      }
-
-      // if (status) {
-      //   assetsWhere.status = status;
-      // }
-
-      assetsInclude = {
-        select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
-        orderBy: BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy,
-        where: assetsWhere,
+    if (search) {
+      assetsWhere.title = {
+        contains: search,
+        mode: "insensitive",
       };
     }
+
+    // if (status) {
+    //   assetsWhere.status = status;
+    // }
+
+    const assetsInclude: Prisma.BookingInclude["assets"] = {
+      select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
+      orderBy: assetsOrderBy,
+      ...(Object.keys(assetsWhere).length > 0 && { where: assetsWhere }),
+    };
 
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
