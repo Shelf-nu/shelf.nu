@@ -125,7 +125,7 @@ export function initEnv() {
 /**
  * Server env
  */
-export const SERVER_URL = getEnv("SERVER_URL");
+export const SERVER_URL = getEnv("SERVER_URL").replace(/\/+$/, "");
 export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
