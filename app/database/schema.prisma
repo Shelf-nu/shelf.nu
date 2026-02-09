@@ -47,6 +47,7 @@ model User {
   createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
   hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
+  warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
 
   // Datetime
   createdAt DateTime @default(now())
