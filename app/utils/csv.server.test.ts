@@ -1,5 +1,8 @@
 import { CustomFieldType } from "@prisma/client";
-import { parseFormData } from "@remix-run/form-data-parser";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -14,9 +17,14 @@ import {
 import { ShelfError } from "~/utils/error";
 
 // why: mock parseFormData to control file upload parsing in tests
-vi.mock("@remix-run/form-data-parser", () => ({
-  parseFormData: vi.fn(),
-}));
+// while keeping MaxFileSizeExceededError available
+vi.mock("@remix-run/form-data-parser", async () => {
+  const actual = await vi.importActual("@remix-run/form-data-parser");
+  return {
+    ...(actual as Record<string, unknown>),
+    parseFormData: vi.fn(),
+  };
+});
 // why: avoid Prisma connections when importing server utilities
 vi.mock("~/database/db.server", () => ({
   db: {},
@@ -124,6 +132,79 @@ describe("csvDataFromRequest", () => {
       "Something went wrong while parsing the CSV file."
     );
     expect(shelfError.shouldBeCaptured).toBe(true);
+  });
+
+  it("returns a user-friendly error for file size exceeded", async () => {
+    parseFormDataMock.mockRejectedValue(
+      new MaxFileSizeExceededError(2 * 1024 * 1024)
+    );
+
+    let thrown: unknown;
+    try {
+      await csvDataFromRequest({
+        request: new Request("http://localhost/assets/import", {
+          method: "POST",
+        }),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const shelfError = thrown as ShelfError;
+    expect(shelfError.title).toBe("File too large");
+    expect(shelfError.message).toMatch(/too large/);
+    expect(shelfError.shouldBeCaptured).toBe(false);
+  });
+
+  it("detects MaxFileSizeExceededError wrapped in a cause chain", async () => {
+    const innerError = new MaxFileSizeExceededError(2 * 1024 * 1024);
+    const wrappedError = new Error("Cannot parse form data");
+    wrappedError.cause = innerError;
+    parseFormDataMock.mockRejectedValue(wrappedError);
+
+    let thrown: unknown;
+    try {
+      await csvDataFromRequest({
+        request: new Request("http://localhost/assets/import", {
+          method: "POST",
+        }),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const shelfError = thrown as ShelfError;
+    expect(shelfError.title).toBe("File too large");
+    expect(shelfError.shouldBeCaptured).toBe(false);
+  });
+
+  it("filters out empty rows from parsed CSV", async () => {
+    const csv = [
+      "name,description",
+      "Asset 1,First asset",
+      ",,",
+      "",
+      "Asset 2,Second asset",
+      "  ,  ",
+    ].join("\n");
+
+    const formData = new FormData();
+    formData.set("file", new File([csv], "assets.csv", { type: "text/csv" }));
+    parseFormDataMock.mockResolvedValue(formData);
+
+    const result = await csvDataFromRequest({
+      request: new Request("http://localhost/assets/import", {
+        method: "POST",
+      }),
+    });
+
+    expect(result).toEqual([
+      ["name", "description"],
+      ["Asset 1", "First asset"],
+      ["Asset 2", "Second asset"],
+    ]);
   });
 });
 
