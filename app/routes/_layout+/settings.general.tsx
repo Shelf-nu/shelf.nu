@@ -48,7 +48,6 @@ import { requirePermission } from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
-  userHasActiveSubscription,
 } from "~/utils/stripe.server";
 import {
   canExportAssets,
@@ -135,17 +134,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (currentOrganization.type === OrganizationType.TEAM ||
         user.tierId === "tier_1");
 
-    // Check subscription status for each admin (to block transfer if they have subscription)
-    // Only check when premium features are enabled
-    const adminsWithSubscriptionStatus = await Promise.all(
-      admins.map(async (admin) => ({
-        ...admin,
-        hasActiveSubscription: premiumIsEnabled
-          ? await userHasActiveSubscription(admin.id)
-          : false,
-      }))
-    );
-
     // Count owner's other team workspaces (for warning about tier downgrade)
     const ownerOtherTeamWorkspacesCount = await db.organization.count({
       where: {
@@ -164,7 +152,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       curriences: Object.keys(Currency),
       isPersonalWorkspace:
         currentOrganization.type === OrganizationType.PERSONAL,
-      admins: adminsWithSubscriptionStatus,
+      admins,
       ownerSubscriptionInfo,
       ownerOtherTeamWorkspacesCount,
       premiumIsEnabled,

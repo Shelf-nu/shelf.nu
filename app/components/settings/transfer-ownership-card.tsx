@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Roles } from "@prisma/client";
-import { Form, useLoaderData } from "react-router";
+import { Form, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -8,6 +8,8 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { type loader } from "~/routes/_layout+/settings.general";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { InnerLabel } from "../forms/inner-label";
@@ -86,22 +88,24 @@ export default function TransferOwnershipCard({
   const confirmationOrgName = organizationName ?? currentOrganization?.name;
 
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
+  const actionData = useActionData<DataOrErrorResponse>();
+
+  /** This handles server side errors in case client side validation fails */
+  const validationErrors = getValidationErrors<typeof TransferOwnershipSchema>(
+    actionData?.error
+  );
 
   const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
-
-  // Check if new owner has active subscription (to show blocking message)
-  const selectedOwnerHasSubscription = selectedOwner?.hasActiveSubscription;
 
   // Check if current owner has a subscription that could be transferred
   const ownerHasSubscription =
     premiumIsEnabled && ownerSubscriptionInfo?.hasActiveSubscription;
 
-  // Warning: user is not transferring subscription and new owner has no subscription
-  const showNoSubscriptionWarning =
-    ownerHasSubscription &&
-    !transferSubscription &&
-    selectedOwner &&
-    !selectedOwnerHasSubscription;
+  // Get general server error (non-validation errors like "user already has subscription")
+  const serverError =
+    actionData?.error?.message && !validationErrors
+      ? actionData.error.message
+      : null;
 
   if (!isOwner && !isShelfAdmin) {
     return null;
@@ -153,6 +157,11 @@ export default function TransferOwnershipCard({
             >
               <input type="hidden" name="intent" value="transfer-ownership" />
 
+              {/* Server error display */}
+              <When truthy={!!serverError}>
+                <p className="mb-4 text-sm text-error-500">{serverError}</p>
+              </When>
+
               <InnerLabel>New owner</InnerLabel>
               <Select
                 name={zo.fields.newOwner()}
@@ -170,43 +179,27 @@ export default function TransferOwnershipCard({
                 <SelectContent>
                   {admins.map((admin) => (
                     <SelectItem key={admin.id} value={admin.id}>
-                      <span
-                        className={tw(
-                          admin.hasActiveSubscription && "text-gray-400"
-                        )}
-                      >
-                        {resolveTeamMemberName({ name: "", user: admin }, true)}
-                        {admin.hasActiveSubscription && " (has subscription)"}
-                      </span>
+                      {resolveTeamMemberName({ name: "", user: admin }, true)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
-              <When truthy={!!zo.errors?.newOwner()?.message}>
+              <When
+                truthy={
+                  !!(
+                    validationErrors?.newOwner?.message ||
+                    zo.errors?.newOwner()?.message
+                  )
+                }
+              >
                 <p className="text-sm text-error-500">
-                  {zo.errors?.newOwner()?.message}
+                  {validationErrors?.newOwner?.message ||
+                    zo.errors?.newOwner()?.message}
                 </p>
               </When>
 
-              {/* Show blocking message if selected admin has subscription */}
-              <When truthy={!!selectedOwnerHasSubscription}>
-                <WarningBox className="mt-4">
-                  <span className="font-semibold">
-                    Cannot transfer to this admin
-                  </span>
-                  <p className="mt-1 text-sm">
-                    {resolveTeamMemberName(
-                      { name: "", user: selectedOwner },
-                      true
-                    )}{" "}
-                    already has an active subscription. Workspace ownership
-                    cannot be transferred to users with existing subscriptions.
-                  </p>
-                </WarningBox>
-              </When>
-
-              <When truthy={!!selectedOwner && !selectedOwnerHasSubscription}>
+              <When truthy={!!selectedOwner}>
                 {/* Subscription Info Section */}
                 <When truthy={ownerHasSubscription}>
                   <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-4">
@@ -275,20 +268,6 @@ export default function TransferOwnershipCard({
                       </p>
                     </WarningBox>
                   </When>
-
-                  {/* Warning when not transferring subscription */}
-                  <When truthy={showNoSubscriptionWarning}>
-                    <WarningBox className="mt-3">
-                      <span className="font-semibold">
-                        New owner has no subscription
-                      </span>
-                      <p className="mt-1 text-sm">
-                        The new owner does not have an active subscription. If
-                        you don't transfer your subscription, access to this
-                        workspace may be limited until the new owner subscribes.
-                      </p>
-                    </WarningBox>
-                  </When>
                 </When>
 
                 <p className="mb-2 mt-4">
@@ -351,9 +330,17 @@ export default function TransferOwnershipCard({
 
                     <span>I understand this action cannot be undone.</span>
                   </label>
-                  <When truthy={!!zo.errors?.agreeConditions()?.message}>
+                  <When
+                    truthy={
+                      !!(
+                        validationErrors?.agreeConditions?.message ||
+                        zo.errors?.agreeConditions()?.message
+                      )
+                    }
+                  >
                     <p className="text-sm text-error-500">
-                      {zo.errors?.agreeConditions()?.message}
+                      {validationErrors?.agreeConditions?.message ||
+                        zo.errors?.agreeConditions()?.message}
                     </p>
                   </When>
                 </div>
@@ -376,11 +363,6 @@ export default function TransferOwnershipCard({
                   disabled={
                     !selectedOwner
                       ? { reason: "Please select a new owner." }
-                      : selectedOwnerHasSubscription
-                      ? {
-                          reason:
-                            "Cannot transfer to a user with an active subscription.",
-                        }
                       : confirmationInput !== confirmationOrgName
                       ? {
                           reason: "Please type the workspace name to confirm.",

@@ -103,11 +103,39 @@ export async function action({ request }: ActionFunctionArgs) {
     );
 
     const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");
-    const eventData = event.data.object as { customer: string };
-    const customerId = eventData.customer;
+    const eventData = event.data.object as { customer: string | null };
+
+    // For payment_method.detached, customer is null on the object but available in previous_attributes
+    let customerId = eventData.customer;
+    if (!customerId && event.type === "payment_method.detached") {
+      const previousAttributes = event.data.previous_attributes as
+        | { customer?: string }
+        | undefined;
+      customerId = previousAttributes?.customer ?? null;
+    }
+
+    // If we still don't have a customerId, return early for payment method events
+    // (this can happen if the payment method was never attached to a customer)
+    if (!customerId) {
+      if (
+        event.type === "payment_method.attached" ||
+        event.type === "payment_method.detached"
+      ) {
+        return new Response(null, { status: 200 });
+      }
+      // For other events, customerId is required
+      throw new ShelfError({
+        cause: null,
+        message: "No customer ID found in event",
+        additionalData: { event: event.type },
+        label: "Stripe webhook",
+        status: 400,
+      });
+    }
+
     const user = await db.user
       .findFirstOrThrow({
-        where: { customerId },
+        where: { customerId: customerId as string },
         select: {
           id: true,
           email: true,

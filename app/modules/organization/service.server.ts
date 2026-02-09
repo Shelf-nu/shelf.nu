@@ -774,61 +774,68 @@ export async function transferOwnership({
     });
 
     // Handle subscription transfer AFTER the ownership transfer succeeds
+    // Wrapped in try/catch to ensure ownership transfer completes even if subscription transfer fails
+    let subscriptionTransferError: Error | null = null;
     if (premiumIsEnabled && transferSubscription) {
-      const currentOwnerSubscription = await getUserActiveSubscription(
-        currentOwnerUserOrg.user.id
-      );
+      try {
+        const currentOwnerSubscription = await getUserActiveSubscription(
+          currentOwnerUserOrg.user.id
+        );
 
-      if (currentOwnerSubscription) {
-        // Ensure new owner has a Stripe customer ID
-        let newOwnerCustomerId: string | null | undefined =
-          newOwnerUserOrg.user.customerId;
-        if (!newOwnerCustomerId) {
-          newOwnerCustomerId = await createStripeCustomer({
-            email: newOwnerUserOrg.user.email,
-            name: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
-            userId: newOwnerId,
-          });
-        }
-
-        if (newOwnerCustomerId) {
-          // Transfer the subscription to the new customer in Stripe
-          await transferSubscriptionToCustomer({
-            subscriptionId: currentOwnerSubscription.id,
-            newCustomerId: newOwnerCustomerId,
-          });
-
-          // Update tiers in database
-          // New owner gets the transferred tier
-          await updateUserTierId(newOwnerId, currentOwnerTierId);
-
-          // Downgrade current owner to free
-          await updateUserTierId(currentOwnerUserOrg.user.id, "free");
-
-          subscriptionTransferred = true;
-
-          // Transfer usedFreeTrial flag if original owner used it
-          // This prevents the new owner from starting another trial
-          if (currentOwnerUserOrg.user.usedFreeTrial) {
-            await db.user.update({
-              where: { id: newOwnerId },
-              data: { usedFreeTrial: true },
-              select: { id: true },
+        if (currentOwnerSubscription) {
+          // Ensure new owner has a Stripe customer ID
+          let newOwnerCustomerId: string | null | undefined =
+            newOwnerUserOrg.user.customerId;
+          if (!newOwnerCustomerId) {
+            newOwnerCustomerId = await createStripeCustomer({
+              email: newOwnerUserOrg.user.email,
+              name: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+              userId: newOwnerId,
             });
           }
 
-          // Check if new owner has a payment method on their Stripe customer
-          // If not, set the warning flag so they see the banner
-          const hasPaymentMethod =
-            await customerHasPaymentMethod(newOwnerCustomerId);
-          if (!hasPaymentMethod) {
-            await db.user.update({
-              where: { id: newOwnerId },
-              data: { warnForNoPaymentMethod: true },
-              select: { id: true },
+          if (newOwnerCustomerId) {
+            // Transfer the subscription to the new customer in Stripe
+            await transferSubscriptionToCustomer({
+              subscriptionId: currentOwnerSubscription.id,
+              newCustomerId: newOwnerCustomerId,
             });
+
+            // Update tiers in database
+            // New owner gets the transferred tier
+            await updateUserTierId(newOwnerId, currentOwnerTierId);
+
+            // Downgrade current owner to free
+            await updateUserTierId(currentOwnerUserOrg.user.id, "free");
+
+            subscriptionTransferred = true;
+
+            // Transfer usedFreeTrial flag if original owner used it
+            // This prevents the new owner from starting another trial
+            if (currentOwnerUserOrg.user.usedFreeTrial) {
+              await db.user.update({
+                where: { id: newOwnerId },
+                data: { usedFreeTrial: true },
+                select: { id: true },
+              });
+            }
+
+            // Check if new owner has a payment method on their Stripe customer
+            // If not, set the warning flag so they see the banner
+            const hasPaymentMethod =
+              await customerHasPaymentMethod(newOwnerCustomerId);
+            if (!hasPaymentMethod) {
+              await db.user.update({
+                where: { id: newOwnerId },
+                data: { warnForNoPaymentMethod: true },
+                select: { id: true },
+              });
+            }
           }
         }
+      } catch (error) {
+        // Capture the error but don't throw - ownership transfer should still succeed
+        subscriptionTransferError = error as Error;
       }
     }
 
@@ -857,8 +864,16 @@ export async function transferOwnership({
 
     /** Send admin notification */
     if (ADMIN_EMAIL) {
+      const subscriptionStatus = subscriptionTransferError
+        ? `Failed - ${subscriptionTransferError.message}`
+        : subscriptionTransferred
+        ? "Yes"
+        : "No (not requested)";
+
       sendEmail({
-        subject: `Workspace transferred: ${currentOrganization.name}`,
+        subject: subscriptionTransferError
+          ? `⚠️ Workspace transferred with errors: ${currentOrganization.name}`
+          : `Workspace transferred: ${currentOrganization.name}`,
         to: ADMIN_EMAIL,
         text: `A workspace ownership transfer has occurred.
 
@@ -872,13 +887,21 @@ New Owner: ${newOwnerUserOrg.user.firstName} ${
           newOwnerUserOrg.user.lastName
         } (${newOwnerUserOrg.user.email})
 
-Subscription transferred: ${subscriptionTransferred ? "Yes" : "No"}
-`,
+Subscription transferred: ${subscriptionStatus}
+${
+  subscriptionTransferError
+    ? `\nError details: ${
+        subscriptionTransferError.stack || subscriptionTransferError.message
+      }`
+    : ""
+}`,
       });
     }
 
     return {
       newOwner: newOwnerUserOrg.user,
+      subscriptionTransferred,
+      subscriptionTransferError: subscriptionTransferError?.message,
     };
   } catch (cause) {
     throw new ShelfError({
