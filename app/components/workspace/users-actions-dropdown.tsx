@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { InviteStatuses, User } from "@prisma/client";
 import { useFetcher } from "react-router";
 import {
+  PenIcon,
   RefreshIcon,
   RemoveUserIcon,
   UserXIcon,
@@ -17,6 +18,7 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
+import { ChangeRoleDialog } from "./change-role-dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
@@ -45,12 +47,17 @@ export function TeamUsersActionsDropdown({
   const currentUser = useUserData();
   const isCurrentUser = currentUser?.id === userId;
 
+  const [changeRoleOpen, setChangeRoleOpen] = useState(false);
+
   /** Most users will have an invite, however we have to handle SSO case:
    *
    * 1. If the user has an invite, we show the "Resend invite" and "Cancel invite" buttons.
    * 2. If the user has accepted the invite or doesn't have an invite but has userId(SSO), we show the "Revoke access" button.
    */
   const hasInvite = !!inviteStatus;
+
+  const isAcceptedUser =
+    (hasInvite && inviteStatus === "ACCEPTED") || (!hasInvite && isSSO);
 
   return hasInvite || (!hasInvite && isSSO) ? (
     <>
@@ -120,12 +127,30 @@ export function TeamUsersActionsDropdown({
                 </Button>
               </>
             ) : null}
-            {(hasInvite && inviteStatus === "ACCEPTED") ||
-            (!hasInvite && isSSO) ? (
+            {isAcceptedUser ? (
               <>
                 {userId ? (
                   <input type="hidden" name="userId" value={userId} />
                 ) : null}
+                <Button
+                  type="button"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                  width="full"
+                  disabled={
+                    isCurrentUser
+                      ? { reason: "You cannot change your own role" }
+                      : disabled
+                  }
+                  onClick={() => {
+                    setOpen(false);
+                    setChangeRoleOpen(true);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <PenIcon /> Change role
+                  </span>
+                </Button>
                 <Button
                   type="submit"
                   variant="link"
@@ -150,6 +175,16 @@ export function TeamUsersActionsDropdown({
           </fetcher.Form>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {userId ? (
+        <ChangeRoleDialog
+          userId={userId}
+          currentRole={role}
+          isSSO={isSSO}
+          open={changeRoleOpen}
+          onOpenChange={setChangeRoleOpen}
+        />
+      ) : null}
     </>
   ) : null;
 }
