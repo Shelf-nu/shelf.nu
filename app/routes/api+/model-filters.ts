@@ -119,7 +119,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (modelFilters.name === "booking") {
-      where.status = { in: ["RESERVED", "ONGOING", "OVERDUE"] };
+      where.status = { in: ["RESERVED", "APPROVED", "ONGOING", "OVERDUE"] };
     }
 
     if (modelFilters.name === "tag" && modelFilters.useFor) {

@@ -27,7 +27,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       page,
       search,
       userId,
-      statuses: ["DRAFT", "RESERVED"],
+      statuses: ["DRAFT", "RESERVED", "APPROVED"],
       takeAll: true,
       ...(isSelfServiceOrBase && { custodianUserId: userId }),
     });

@@ -39,6 +39,12 @@ export function BookingPageContent() {
             <p className="text-sm ">{booking.cancellationReason}</p>
           </div>
         )}
+      {booking.status === BookingStatus.REJECTED && booking.rejectionReason && (
+        <div className="mb-4 rounded-lg border border-error-200 bg-error-25 p-4">
+          <p className="mb-1 text-sm font-semibold ">Rejection reason</p>
+          <p className="text-sm ">{booking.rejectionReason}</p>
+        </div>
+      )}
       <div className="mb-8 flex h-full flex-col items-stretch gap-2 lg:mb-2 lg:flex-row">
         <Card className="-mx-4 my-0 lg:mx-0 lg:w-2/3">
           <EditBookingForm

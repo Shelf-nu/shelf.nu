@@ -101,10 +101,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     disabled ||
     Boolean(
       bookingStatus?.isReserved ||
+        bookingStatus?.isApproved ||
         bookingStatus?.isOngoing ||
         bookingStatus?.isCompleted ||
         bookingStatus?.isOverdue ||
-        bookingStatus?.isCancelled
+        bookingStatus?.isCancelled ||
+        bookingStatus?.isRejected
     );
   const bookingSettings = useBookingSettings();
 
@@ -200,7 +202,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             {!(
               bookingStatus?.isCompleted ||
               bookingStatus?.isCancelled ||
-              bookingStatus?.isArchived
+              bookingStatus?.isArchived ||
+              bookingStatus?.isRejected
             ) ? (
               <>
                 <input
@@ -260,8 +263,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </Button>
             ) : null}
 
-            {/* When booking is reserved, we show the check-out button */}
-            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
+            {/* When booking is reserved or approved, we show the check-out button */}
+            <When
+              truthy={
+                (bookingStatus?.isReserved || bookingStatus?.isApproved) &&
+                canCheckOutBooking
+              }
+            >
               <CheckoutDialog
                 portalContainer={zo.form}
                 booking={{ id, name: name!, from: new Date(startDate!) }}
@@ -330,6 +338,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     bookingStatus?.isCompleted ||
                     bookingStatus?.isCancelled ||
                     bookingStatus?.isArchived ||
+                    bookingStatus?.isRejected ||
                     !canSeeActions
                   }
                   error={
@@ -392,6 +401,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     bookingStatus?.isCompleted ||
                     bookingStatus?.isCancelled ||
                     bookingStatus?.isArchived ||
+                    bookingStatus?.isRejected ||
                     !canSeeActions
                   }
                   existingTags={tags}
@@ -412,6 +422,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     bookingStatus?.isCompleted ||
                     bookingStatus?.isCancelled ||
                     bookingStatus?.isArchived ||
+                    bookingStatus?.isRejected ||
                     !canSeeActions
                   }
                   error={

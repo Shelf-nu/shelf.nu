@@ -9,11 +9,13 @@ export function useBookingStatusHelpers(status: BookingStatus | undefined) {
       return {
         isDraft: false,
         isReserved: false,
+        isApproved: false,
         isOngoing: false,
         isCompleted: false,
         isArchived: false,
         isOverdue: false,
         isCancelled: false,
+        isRejected: false,
       };
     }
 
@@ -21,11 +23,13 @@ export function useBookingStatusHelpers(status: BookingStatus | undefined) {
     return {
       isDraft: status === BookingStatus.DRAFT,
       isReserved: status === BookingStatus.RESERVED,
+      isApproved: status === BookingStatus.APPROVED,
       isOngoing: status === BookingStatus.ONGOING,
       isCompleted: status === BookingStatus.COMPLETE,
       isArchived: status === BookingStatus.ARCHIVED,
       isOverdue: status === BookingStatus.OVERDUE,
       isCancelled: status === BookingStatus.CANCELLED,
+      isRejected: status === BookingStatus.REJECTED,
       isInProgress:
         status === BookingStatus.ONGOING || status === BookingStatus.OVERDUE,
       isFinished:

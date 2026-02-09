@@ -17,14 +17,17 @@ export function TimeRemaining({
   if (
     status === BookingStatus.COMPLETE ||
     status === BookingStatus.ARCHIVED ||
-    status === BookingStatus.CANCELLED
+    status === BookingStatus.CANCELLED ||
+    status === BookingStatus.REJECTED
   ) {
     return null;
   }
 
-  // For DRAFT and RESERVED, show time until start
+  // For DRAFT, RESERVED, and APPROVED, show time until start
   const isUpcoming =
-    status === BookingStatus.DRAFT || status === BookingStatus.RESERVED;
+    status === BookingStatus.DRAFT ||
+    status === BookingStatus.RESERVED ||
+    status === BookingStatus.APPROVED;
 
   // Determine which date to use for calculation
   const targetDate = isUpcoming ? from : to;

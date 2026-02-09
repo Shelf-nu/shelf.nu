@@ -68,11 +68,13 @@ import {
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
 import {
+  approvedBookingEmailContent,
   assetReservedEmailContent,
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  rejectedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
 import {
@@ -198,11 +200,17 @@ export function getActionTextFromTransition(
       return "reserved the booking";
     case "RESERVED->DRAFT":
       return "reverted booking to draft";
+    case "RESERVED->APPROVED":
+      return "approved the booking";
+    case "RESERVED->REJECTED":
+      return "rejected the booking";
     case "RESERVED->CANCELLED":
+    case "APPROVED->CANCELLED":
     case "ONGOING->CANCELLED":
     case "OVERDUE->CANCELLED":
       return "cancelled the booking";
     case "RESERVED->ONGOING":
+    case "APPROVED->ONGOING":
       return "checked-out the booking";
     case "ONGOING->COMPLETE":
     case "OVERDUE->COMPLETE":
@@ -1151,7 +1159,7 @@ export async function checkoutBooking({
     if (userId) {
       await createStatusTransitionNote({
         bookingId: updatedBooking.id,
-        fromStatus: BookingStatus.RESERVED,
+        fromStatus: bookingFound.status,
         toStatus: updatedBooking.status,
         userId,
         custodianUserId: updatedBooking.custodianUserId || undefined,
@@ -2129,6 +2137,7 @@ export async function cancelBooking({
       BookingStatus.ONGOING,
       BookingStatus.OVERDUE,
       BookingStatus.RESERVED,
+      BookingStatus.APPROVED,
     ];
 
     if (!allowedStatusForCancel.includes(bookingFound.status)) {
@@ -2246,12 +2255,16 @@ export async function revertBookingToDraft({
         });
       });
 
-    /** User can only revert the booking to DRAFT from RESERVED */
-    if (booking.status !== BookingStatus.RESERVED) {
+    /** User can only revert the booking to DRAFT from RESERVED or APPROVED */
+    if (
+      booking.status !== BookingStatus.RESERVED &&
+      booking.status !== BookingStatus.APPROVED
+    ) {
       throw new ShelfError({
         cause: null,
         label,
-        message: "Booking can be reverted to draft only for reserved state.",
+        message:
+          "Booking can be reverted to draft only from reserved or approved state.",
       });
     }
 
@@ -2290,6 +2303,211 @@ export async function revertBookingToDraft({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while reverting the booking to draft.",
+    });
+  }
+}
+
+export async function approveBooking({
+  id,
+  organizationId,
+  hints,
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  hints: ClientHint;
+  userId: string;
+}) {
+  try {
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: {
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in current workspace?",
+        });
+      });
+
+    /** Only RESERVED bookings can be approved */
+    if (bookingFound.status !== BookingStatus.RESERVED) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Only reserved bookings can be approved.",
+      });
+    }
+
+    const updatedBooking = await db.booking.update({
+      where: { id: bookingFound.id },
+      data: { status: BookingStatus.APPROVED },
+      include: {
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+      },
+    });
+
+    // Send approval email to custodian
+    if (updatedBooking.custodianUser?.email) {
+      const custodian = updatedBooking.custodianUser
+        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        : (updatedBooking.custodianTeamMember?.name as string);
+
+      const subject = `✅ Booking approved (${updatedBooking.name}) - shelf.nu`;
+
+      const text = approvedBookingEmailContent({
+        bookingName: updatedBooking.name,
+        assetsCount: updatedBooking._count.assets,
+        custodian,
+        from: updatedBooking.from as Date,
+        to: updatedBooking.to as Date,
+        bookingId: updatedBooking.id,
+        hints,
+      });
+
+      const html = await bookingUpdatesTemplateString({
+        booking: updatedBooking,
+        heading: `Your booking has been approved: "${updatedBooking.name}".`,
+        assetCount: updatedBooking._count.assets,
+        hints,
+      });
+
+      sendEmail({
+        to: updatedBooking.custodianUser.email,
+        subject,
+        text,
+        html,
+      });
+    }
+
+    // Add activity log for booking approval
+    await createStatusTransitionNote({
+      bookingId: updatedBooking.id,
+      fromStatus: bookingFound.status,
+      toStatus: BookingStatus.APPROVED,
+      userId,
+      custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while approving the booking. Please try again.",
+    });
+  }
+}
+
+export async function rejectBooking({
+  id,
+  organizationId,
+  hints,
+  userId,
+  rejectionReason,
+}: Pick<Booking, "id" | "organizationId"> & {
+  hints: ClientHint;
+  userId: string;
+  rejectionReason: string;
+}) {
+  try {
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: {
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found. Are you sure it exists in current workspace?",
+        });
+      });
+
+    /** Only RESERVED bookings can be rejected */
+    if (bookingFound.status !== BookingStatus.RESERVED) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "Only reserved bookings can be rejected.",
+      });
+    }
+
+    const updatedBooking = await db.booking.update({
+      where: { id: bookingFound.id },
+      data: {
+        status: BookingStatus.REJECTED,
+        rejectionReason,
+      },
+      include: {
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+      },
+    });
+
+    /** Cancel any active schedulers */
+    await cancelScheduler(updatedBooking);
+
+    // Send rejection email to custodian
+    if (updatedBooking.custodianUser?.email) {
+      const custodian = updatedBooking.custodianUser
+        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        : (updatedBooking.custodianTeamMember?.name as string);
+
+      const subject = `❌ Booking rejected (${updatedBooking.name}) - shelf.nu`;
+
+      const text = rejectedBookingEmailContent({
+        bookingName: updatedBooking.name,
+        assetsCount: updatedBooking._count.assets,
+        custodian,
+        from: updatedBooking.from as Date,
+        to: updatedBooking.to as Date,
+        bookingId: updatedBooking.id,
+        hints,
+        rejectionReason,
+      });
+
+      const html = await bookingUpdatesTemplateString({
+        booking: updatedBooking,
+        heading: `Your booking has been rejected: "${updatedBooking.name}".`,
+        assetCount: updatedBooking._count.assets,
+        hints,
+        cancellationReason: rejectionReason,
+        reasonLabel: "Rejection reason",
+      });
+
+      sendEmail({
+        to: updatedBooking.custodianUser.email,
+        subject,
+        text,
+        html,
+      });
+    }
+
+    // Add activity log for booking rejection
+    await createStatusTransitionNote({
+      bookingId: updatedBooking.id,
+      fromStatus: bookingFound.status,
+      toStatus: BookingStatus.REJECTED,
+      userId,
+      custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
+
+    return updatedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while rejecting the booking. Please try again.",
     });
   }
 }

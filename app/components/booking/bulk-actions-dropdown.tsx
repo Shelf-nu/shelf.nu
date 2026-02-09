@@ -62,6 +62,7 @@ function ConditionalDropdown() {
       BookingStatus.CANCELLED,
       BookingStatus.COMPLETE,
       BookingStatus.DRAFT,
+      BookingStatus.REJECTED,
     ].includes(b.status as any)
   );
 

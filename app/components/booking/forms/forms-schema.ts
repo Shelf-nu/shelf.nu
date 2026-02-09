@@ -337,6 +337,7 @@ export function BookingFormSchema({
         }
 
         case BookingStatus.RESERVED:
+        case BookingStatus.APPROVED:
         case BookingStatus.ONGOING:
         case BookingStatus.OVERDUE: {
           // Only basic fields can be updated for active bookings
@@ -471,4 +472,11 @@ export const CancelBookingSchema = z.object({
     .string()
     .max(500, "Cancellation reason must be 500 characters or less")
     .optional(),
+});
+
+export const RejectBookingSchema = z.object({
+  rejectionReason: z
+    .string()
+    .min(1, "Rejection reason is required")
+    .max(500, "Rejection reason must be 500 characters or less"),
 });

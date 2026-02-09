@@ -33,6 +33,7 @@ const BOOKING_STATUS_TO_SHOW = [
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
   BookingStatus.RESERVED,
+  BookingStatus.APPROVED,
 ];
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
