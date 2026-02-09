@@ -80,47 +80,47 @@ export function BookingUpdatesEmailTemplate({
       </Head>
 
       <Container
-        style={{ padding: "32px 16px", textAlign: "center", maxWidth: "100%" }}
+        style={{
+          maxWidth: "600px",
+          margin: "0 auto",
+          padding: "32px 24px",
+          textAlign: "center",
+        }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            marginBottom: "32px",
-          }}
-        >
+        <div style={{ marginBottom: "32px" }}>
           <LogoForEmail />
         </div>
-        <div style={{ margin: "32px" }}>
-          <Heading as="h1" style={{ ...styles.h1 }}>
-            {heading}
-          </Heading>
-          <Heading as="h2" style={{ ...styles.h2 }}>
-            {booking.name} | {assetCount}{" "}
-            {assetCount === 1 ? "asset" : "assets"}
-          </Heading>
-          <p style={{ ...styles.p }}>
-            <span style={{ color: "#101828", fontWeight: "600" }}>
-              Custodian:
-            </span>{" "}
-            {`${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
-              booking.custodianTeamMember?.name}
-          </p>
-          <p style={{ ...styles.p }}>
-            <span style={{ color: "#101828", fontWeight: "600" }}>From:</span>{" "}
-            {fromDate}
-          </p>
-          <p style={{ ...styles.p }}>
-            <span style={{ color: "#101828", fontWeight: "600" }}>To:</span>{" "}
-            {toDate}
-          </p>
-        </div>
+
+        <Heading as="h1" style={{ ...styles.h1 }}>
+          {heading}
+        </Heading>
+        <Heading as="h2" style={{ ...styles.h2 }}>
+          {booking.name} | {assetCount} {assetCount === 1 ? "asset" : "assets"}
+        </Heading>
+        <p style={{ ...styles.p }}>
+          <span style={{ color: "#101828", fontWeight: "600" }}>
+            Custodian:
+          </span>{" "}
+          {`${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+            booking.custodianTeamMember?.name}
+        </p>
+        <p style={{ ...styles.p }}>
+          <span style={{ color: "#101828", fontWeight: "600" }}>From:</span>{" "}
+          {fromDate}
+        </p>
+        <p style={{ ...styles.p }}>
+          <span style={{ color: "#101828", fontWeight: "600" }}>To:</span>{" "}
+          {toDate}
+        </p>
 
         {grouped && (
           <div
             style={{
-              margin: "0 32px 24px",
+              margin: "24px 0",
+              backgroundColor: "#F9FAFB",
+              borderRadius: "8px",
+              border: "1px solid #EAECF0",
+              padding: "16px 20px",
               textAlign: "left",
             }}
           >
@@ -129,7 +129,9 @@ export function BookingUpdatesEmailTemplate({
                 ...styles.p,
                 fontWeight: "600",
                 color: "#101828",
-                marginBottom: "8px",
+                marginTop: "0",
+                marginBottom: "12px",
+                fontSize: "14px",
               }}
             >
               Booked items
@@ -204,9 +206,10 @@ export function BookingUpdatesEmailTemplate({
             {remainingCount > 0 && (
               <p
                 style={{
-                  fontSize: "14px",
+                  fontSize: "13px",
                   color: "#667085",
-                  marginTop: "8px",
+                  marginTop: "12px",
+                  marginBottom: "0",
                 }}
               >
                 ... and {remainingCount} more{" "}
@@ -222,7 +225,7 @@ export function BookingUpdatesEmailTemplate({
         {cancellationReason && (
           <div
             style={{
-              margin: "0 32px 24px",
+              margin: "0 0 24px",
               padding: "16px",
               borderLeft: "4px solid #F79009",
               backgroundColor: "#FFFAEB",

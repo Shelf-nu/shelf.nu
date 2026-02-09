@@ -63,6 +63,7 @@ import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { MergeInclude } from "~/utils/utils";
 import {
   BOOKING_COMMON_INCLUDE,
+  BOOKING_EMAIL_ASSETS_LIMIT,
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
@@ -750,6 +751,12 @@ export async function reserveBooking({
           ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: {
             include: {
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
               bookings: createBookingConflictConditions({
                 currentBookingId: id,
                 fromDate: from,
@@ -914,6 +921,12 @@ export async function reserveBooking({
       /** Prepare email content */
       const subject = `✅ Booking reserved (${bookingFound.name}) - shelf.nu`;
 
+      /** Limit assets for email to avoid overly long emails */
+      const emailAssets = bookingFound.assets.slice(
+        0,
+        BOOKING_EMAIL_ASSETS_LIMIT
+      );
+
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
         assetsCount: bookingFound._count.assets,
@@ -922,7 +935,7 @@ export async function reserveBooking({
         to,
         hints,
         bookingId: bookingFound.id,
-        assets: bookingFound.assets,
+        assets: emailAssets,
         organizationId: bookingFound.organizationId,
       });
 
@@ -930,7 +943,7 @@ export async function reserveBooking({
         booking: bookingFound,
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
-        assets: bookingFound.assets,
+        assets: emailAssets,
         hints,
       });
       /** END Prepare email content */
@@ -950,7 +963,7 @@ export async function reserveBooking({
           booking: bookingFound,
           heading: `Booking reservation request for ${custodian}`,
           assetCount: bookingFound._count.assets,
-          assets: bookingFound.assets,
+          assets: emailAssets,
           hints,
           isAdminEmail: true,
         });
@@ -1019,6 +1032,12 @@ export async function checkoutBooking({
           ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: {
             include: {
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
               bookings: createBookingConflictConditions({
                 currentBookingId: id,
                 fromDate: from,
@@ -1146,7 +1165,11 @@ export async function checkoutBooking({
         data: dataToUpdate,
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: true,
+          assets: {
+            include: {
+              kit: { select: { id: true, name: true } },
+            },
+          },
         },
       });
     });
@@ -1443,7 +1466,11 @@ export async function checkinBooking({
         data: dataToUpdate,
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: true,
+          assets: {
+            include: {
+              kit: { select: { id: true, name: true } },
+            },
+          },
         },
       });
     });
@@ -1562,6 +1589,12 @@ export async function checkinBooking({
         : updatedBooking.custodianTeamMember?.name ?? "";
 
       const subject = `🎉 Booking completed (${updatedBooking.name}) - shelf.nu`;
+      /** Limit assets for email to avoid overly long emails */
+      const emailAssets = updatedBooking.assets.slice(
+        0,
+        BOOKING_EMAIL_ASSETS_LIMIT
+      );
+
       const text = completedBookingEmailContent({
         bookingName: updatedBooking.name,
         assetsCount: updatedBooking._count.assets,
@@ -1570,7 +1603,7 @@ export async function checkinBooking({
         to: updatedBooking.to as Date,
         bookingId: updatedBooking.id,
         hints: hints,
-        assets: updatedBooking.assets,
+        assets: emailAssets,
         organizationId: updatedBooking.organizationId,
       });
 
@@ -1578,7 +1611,7 @@ export async function checkinBooking({
         booking: updatedBooking,
         heading: `Your booking has been completed: "${updatedBooking.name}".`,
         assetCount: updatedBooking._count.assets,
-        assets: updatedBooking.assets,
+        assets: emailAssets,
         hints,
       });
 
@@ -2171,7 +2204,11 @@ export async function cancelBooking({
         data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: true,
+          assets: {
+            include: {
+              kit: { select: { id: true, name: true } },
+            },
+          },
         },
       });
     });
@@ -2181,6 +2218,9 @@ export async function cancelBooking({
 
     if (booking.custodianUser?.email) {
       const subject = `Booking canceled (${booking.name}) - shelf.nu`;
+      /** Limit assets for email to avoid overly long emails */
+      const emailAssets = booking.assets.slice(0, BOOKING_EMAIL_ASSETS_LIMIT);
+
       const text = cancelledBookingEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
@@ -2192,7 +2232,7 @@ export async function cancelBooking({
         bookingId: booking.id,
         hints,
         cancellationReason,
-        assets: booking.assets,
+        assets: emailAssets,
         organizationId: booking.organizationId,
       });
 
@@ -2200,7 +2240,7 @@ export async function cancelBooking({
         booking: booking,
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
-        assets: booking.assets,
+        assets: emailAssets,
         hints,
         cancellationReason,
       });
