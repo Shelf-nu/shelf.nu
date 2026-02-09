@@ -886,24 +886,22 @@ export async function transferSubscriptionToCustomer({
     }
 
     // Retrieve the existing subscription with expanded price info
-    const existingSubscription = await stripe.subscriptions.retrieve(
+    const existingSubscription = (await stripe.subscriptions.retrieve(
       subscriptionId,
       { expand: ["items.data.price"] }
-    );
+    )) as Stripe.Subscription;
 
     // Capture the original renewal date before cancellation
-    const originalRenewalDate = existingSubscription.current_period_end;
+    // In newer Stripe API, current_period_end is on subscription items
+    const originalRenewalDate =
+      existingSubscription.items.data[0].current_period_end;
 
-    // Cancel the existing subscription immediately without prorating
-    // No credits are issued - the remaining value transfers to the new owner
-    await stripe.subscriptions.cancel(subscriptionId, {
-      prorate: false,
-    });
-
-    // Create new subscription for the new customer with the same plan.
+    // Create new subscription FIRST, before canceling the old one.
+    // This ensures if creation fails, the original subscription is preserved.
     // billing_cycle_anchor preserves the original renewal date so the first
     // charge happens when the previously-paid period ends.
     // proration_behavior 'none' ensures no charge for the partial period.
+    // payment_behavior 'allow_incomplete' allows creation without payment method.
     const newSubscription = await stripe.subscriptions.create({
       customer: newCustomerId,
       items: existingSubscription.items.data.map((item) => ({
@@ -912,9 +910,16 @@ export async function transferSubscriptionToCustomer({
       })),
       billing_cycle_anchor: originalRenewalDate,
       proration_behavior: "none",
+      payment_behavior: "allow_incomplete",
       metadata: {
         transferred_from_subscription: subscriptionId,
       },
+    });
+
+    // Only cancel the old subscription after the new one is successfully created
+    // No credits are issued - the remaining value transfers to the new owner
+    await stripe.subscriptions.cancel(subscriptionId, {
+      prorate: false,
     });
 
     return newSubscription;
@@ -937,4 +942,39 @@ export async function userHasActiveSubscription(
 ): Promise<boolean> {
   const subscription = await getUserActiveSubscription(userId);
   return subscription !== null;
+}
+
+/**
+ * Checks if a Stripe customer has any payment method attached
+ * Returns true if the customer has at least one payment method
+ */
+export async function customerHasPaymentMethod(
+  customerId: string
+): Promise<boolean> {
+  try {
+    if (!stripe) return false;
+
+    // Check for any attached payment methods
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      limit: 1,
+    });
+
+    if (paymentMethods.data.length > 0) {
+      return true;
+    }
+
+    // Also check legacy sources (cards added via old API)
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted) return false;
+
+    return !!customer.default_source;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to check customer payment method",
+      additionalData: { customerId },
+      label,
+    });
+  }
 }

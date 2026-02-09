@@ -9,10 +9,12 @@ import type { Organization, Prisma, TierId, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import {
   createStripeCustomer,
+  customerHasPaymentMethod,
   getUserActiveSubscription,
   premiumIsEnabled,
   transferSubscriptionToCustomer,
@@ -675,6 +677,7 @@ export async function transferOwnership({
             roles: true,
             customerId: true,
             tierId: true,
+            usedFreeTrial: true,
           },
         },
         roles: true,
@@ -729,7 +732,9 @@ export async function transferOwnership({
     }
 
     // Check if new owner already has an active subscription (BLOCK transfer)
-    if (premiumIsEnabled && transferSubscription) {
+    // This applies regardless of whether subscription transfer is requested,
+    // as we don't want two owners with separate active subscriptions
+    if (premiumIsEnabled) {
       const newOwnerActiveSubscription =
         await getUserActiveSubscription(newOwnerId);
       if (newOwnerActiveSubscription) {
@@ -801,6 +806,28 @@ export async function transferOwnership({
           await updateUserTierId(currentOwnerUserOrg.user.id, "free");
 
           subscriptionTransferred = true;
+
+          // Transfer usedFreeTrial flag if original owner used it
+          // This prevents the new owner from starting another trial
+          if (currentOwnerUserOrg.user.usedFreeTrial) {
+            await db.user.update({
+              where: { id: newOwnerId },
+              data: { usedFreeTrial: true },
+              select: { id: true },
+            });
+          }
+
+          // Check if new owner has a payment method on their Stripe customer
+          // If not, set the warning flag so they see the banner
+          const hasPaymentMethod =
+            await customerHasPaymentMethod(newOwnerCustomerId);
+          if (!hasPaymentMethod) {
+            await db.user.update({
+              where: { id: newOwnerId },
+              data: { warnForNoPaymentMethod: true },
+              select: { id: true },
+            });
+          }
         }
       }
     }
@@ -827,6 +854,28 @@ export async function transferOwnership({
         subscriptionTransferred,
       }),
     });
+
+    /** Send admin notification */
+    if (ADMIN_EMAIL) {
+      sendEmail({
+        subject: `Workspace transferred: ${currentOrganization.name}`,
+        to: ADMIN_EMAIL,
+        text: `A workspace ownership transfer has occurred.
+
+Workspace: ${currentOrganization.name}
+Workspace ID: ${currentOrganization.id}
+
+Previous Owner: ${currentOwnerUserOrg.user.firstName} ${
+          currentOwnerUserOrg.user.lastName
+        } (${currentOwnerUserOrg.user.email})
+New Owner: ${newOwnerUserOrg.user.firstName} ${
+          newOwnerUserOrg.user.lastName
+        } (${newOwnerUserOrg.user.email})
+
+Subscription transferred: ${subscriptionTransferred ? "Yes" : "No"}
+`,
+      });
+    }
 
     return {
       newOwner: newOwnerUserOrg.user,

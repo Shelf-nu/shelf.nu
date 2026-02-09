@@ -169,11 +169,7 @@ export default function TransferOwnershipCard({
 
                 <SelectContent>
                   {admins.map((admin) => (
-                    <SelectItem
-                      key={admin.id}
-                      value={admin.id}
-                      disabled={admin.hasActiveSubscription}
-                    >
+                    <SelectItem key={admin.id} value={admin.id}>
                       <span
                         className={tw(
                           admin.hasActiveSubscription && "text-gray-400"

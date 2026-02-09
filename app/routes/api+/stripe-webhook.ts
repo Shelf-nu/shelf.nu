@@ -1,3 +1,30 @@
+/**
+ * Stripe Webhook Handler
+ *
+ * Enable these events in Stripe Dashboard → Developers → Webhooks:
+ *
+ * Checkout:
+ *   - checkout.session.completed
+ *
+ * Subscriptions:
+ *   - customer.subscription.created
+ *   - customer.subscription.updated
+ *   - customer.subscription.paused
+ *   - customer.subscription.deleted
+ *   - customer.subscription.trial_will_end
+ *
+ * Invoices:
+ *   - invoice.paid
+ *   - invoice.payment_failed
+ *   - invoice.overdue
+ *   - invoice.voided
+ *   - invoice.marked_uncollectible
+ *
+ * Payment Methods:
+ *   - payment_method.attached
+ *   - payment_method.detached
+ */
+
 import { TierId } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import type Stripe from "stripe";
@@ -15,11 +42,15 @@ import { ADMIN_EMAIL, CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
+  customerHasPaymentMethod,
   fetchStripeSubscription,
+  getCustomerActiveSubscription,
   getCustomerNotificationData,
   getDataFromStripeEvent,
   getInvoiceNotificationData,
+  getStripeCustomer,
   stripe,
+  type CustomerWithSubscriptions,
 } from "~/utils/stripe.server";
 
 const subscriptionTiersPriority: Record<TierId, number> = {
@@ -83,6 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
           firstName: true,
           lastName: true,
           tierId: true,
+          warnForNoPaymentMethod: true,
         },
       })
       .catch((cause) => {
@@ -422,6 +454,21 @@ export async function action({ request }: ActionFunctionArgs) {
             });
           });
 
+        // If user was warned about missing payment method and payment fails,
+        // pause the subscription immediately instead of waiting for Stripe's retry logic.
+        // This prevents service without payment method from continuing through retry period.
+        const failedSubscriptionId =
+          failedInvoice.parent?.subscription_details?.subscription;
+        if (user.warnForNoPaymentMethod && failedSubscriptionId) {
+          await stripe.subscriptions.update(failedSubscriptionId as string, {
+            pause_collection: {
+              behavior: "void", // Void upcoming invoices while paused
+            },
+          });
+          // Note: This will trigger customer.subscription.paused webhook
+          // which handles tier downgrade
+        }
+
         // Send admin notification
         if (ADMIN_EMAIL) {
           sendEmail({
@@ -469,11 +516,12 @@ export async function action({ request }: ActionFunctionArgs) {
       case "invoice.paid": {
         const paidInvoice = event.data.object as Stripe.Invoice;
 
-        // Clear unpaid invoice flag
+        // Clear unpaid invoice flag and missing payment method warning
+        // (paying an invoice proves they have a working payment method)
         await db.user
           .update({
             where: { customerId },
-            data: { hasUnpaidInvoice: false },
+            data: { hasUnpaidInvoice: false, warnForNoPaymentMethod: false },
             select: { id: true },
           })
           .catch((cause) => {
@@ -727,6 +775,65 @@ export async function action({ request }: ActionFunctionArgs) {
               subscription,
             }),
           });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "payment_method.attached": {
+        // Clear the warning flag when user adds a payment method
+        // This is triggered when a user adds a payment method via the Stripe portal
+        await db.user
+          .update({
+            where: { customerId },
+            data: { warnForNoPaymentMethod: false },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to clear missing payment method warning",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "payment_method.detached": {
+        // When user removes a payment method, check if they still have one
+        // If they have an active subscription but no payment method, warn them
+        const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+
+        if (!hasPaymentMethod) {
+          // Check if user has an active subscription
+          const customer = (await getStripeCustomer(
+            customerId
+          )) as CustomerWithSubscriptions;
+          const activeSubscription = getCustomerActiveSubscription({
+            customer,
+          });
+
+          if (activeSubscription) {
+            // User has subscription but no payment method - set warning
+            await db.user
+              .update({
+                where: { customerId },
+                data: { warnForNoPaymentMethod: true },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to set missing payment method warning",
+                  additionalData: { customerId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
+              });
+          }
         }
 
         return new Response(null, { status: 200 });
