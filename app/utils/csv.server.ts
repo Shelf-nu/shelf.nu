@@ -8,7 +8,11 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import { parseFormData } from "@remix-run/form-data-parser";
+import {
+  MaxFileSizeExceededError,
+  parseFormData,
+} from "@remix-run/form-data-parser";
+
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
@@ -99,6 +103,18 @@ export const parseCsv = (csvData: ArrayBuffer) => {
   });
 };
 
+/** Checks if a CSV row is empty (all cells are empty or whitespace-only) */
+function isEmptyRow(row: string[]): boolean {
+  return row.every((cell) => cell.trim() === "");
+}
+
+/** Walks the cause chain to check if a MaxFileSizeExceededError is present */
+function isMaxFileSizeError(error: unknown): boolean {
+  if (error instanceof MaxFileSizeExceededError) return true;
+  const cause = (error as { cause?: unknown })?.cause;
+  return cause ? isMaxFileSizeError(cause) : false;
+}
+
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   try {
@@ -109,8 +125,28 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
 
     const csvData = await csvFile.arrayBuffer();
 
-    return await parseCsv(csvData);
+    const parsed = await parseCsv(csvData);
+
+    // Filter out empty rows (keep the header row, filter data rows)
+    if (parsed.length > 1) {
+      const [header, ...dataRows] = parsed;
+      const filteredRows = dataRows.filter((row) => !isEmptyRow(row));
+      return [header, ...filteredRows] as CSVData;
+    }
+
+    return parsed;
   } catch (cause) {
+    if (isMaxFileSizeError(cause)) {
+      throw new ShelfError({
+        cause,
+        title: "File too large",
+        message:
+          "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
+        label: "CSV",
+        shouldBeCaptured: false,
+      });
+    }
+
     throw new ShelfError({
       cause,
       message:
