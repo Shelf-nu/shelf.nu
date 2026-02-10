@@ -6,6 +6,8 @@ import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { BOOKING_INCLUDE_FOR_EMAIL } from "./constants";
 
 type BasicEmailContentArgs = {
@@ -237,69 +239,80 @@ export async function sendBookingUpdatedEmail({
   /** Email of old custodian (for custodian change scenarios) */
   oldCustodianEmail?: string;
 }) {
-  if (changes.length === 0) return;
+  try {
+    if (changes.length === 0) return;
 
-  const booking = await db.booking.findUnique({
-    where: { id: bookingId, organizationId },
-    include: BOOKING_INCLUDE_FOR_EMAIL,
-  });
-
-  if (!booking) return;
-
-  const custodian = booking.custodianUser
-    ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
-    : booking.custodianTeamMember?.name ?? "";
-
-  const subject = `📝 Booking updated (${booking.name}) - shelf.nu`;
-
-  const emailArgs: BasicEmailContentArgs = {
-    bookingName: booking.name,
-    assetsCount: booking._count.assets,
-    custodian,
-    from: booking.from!,
-    to: booking.to!,
-    bookingId: booking.id,
-    hints,
-  };
-
-  const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
-
-  const html = await bookingUpdatesTemplateString({
-    booking,
-    heading: `Your booking "${booking.name}" has been updated`,
-    assetCount: booking._count.assets,
-    hints,
-    changes,
-  });
-
-  // Send to current custodian if they have an email
-  // and they're not the one who made the edit
-  if (booking.custodianUser?.email && booking.custodianUser.id !== userId) {
-    sendEmail({
-      to: booking.custodianUser.email,
-      subject,
-      text,
-      html,
-    });
-  }
-
-  // Send to old custodian if provided and they're not the editor
-  // (the old custodian's userId was already disconnected,
-  // so we use the email directly)
-  if (oldCustodianEmail) {
-    // Look up the old custodian's user to check if they are the editor
-    const oldCustodianUser = await db.user.findFirst({
-      where: { email: oldCustodianEmail },
-      select: { id: true },
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId, organizationId },
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     });
 
-    if (!oldCustodianUser || oldCustodianUser.id !== userId) {
+    if (!booking) return;
+
+    const custodian = booking.custodianUser
+      ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+      : booking.custodianTeamMember?.name ?? "";
+
+    const subject = `📝 Booking updated (${booking.name}) - shelf.nu`;
+
+    const emailArgs: BasicEmailContentArgs = {
+      bookingName: booking.name,
+      assetsCount: booking._count.assets,
+      custodian,
+      from: booking.from!,
+      to: booking.to!,
+      bookingId: booking.id,
+      hints,
+    };
+
+    const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
+
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: `Your booking "${booking.name}" has been updated`,
+      assetCount: booking._count.assets,
+      hints,
+      changes,
+    });
+
+    // Send to current custodian if they have an email
+    // and they're not the one who made the edit
+    if (booking.custodianUser?.email && booking.custodianUser.id !== userId) {
       sendEmail({
-        to: oldCustodianEmail,
+        to: booking.custodianUser.email,
         subject,
         text,
         html,
       });
     }
+
+    // Send to old custodian if provided and they're not the editor
+    // (the old custodian's userId was already disconnected,
+    // so we use the email directly)
+    if (oldCustodianEmail) {
+      // Look up the old custodian's user to check if they are the editor
+      const oldCustodianUser = await db.user.findUnique({
+        where: { email: oldCustodianEmail },
+        select: { id: true },
+      });
+
+      if (!oldCustodianUser || oldCustodianUser.id !== userId) {
+        sendEmail({
+          to: oldCustodianEmail,
+          subject,
+          text,
+          html,
+        });
+      }
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to send booking updated email",
+        additionalData: { bookingId },
+        label: "Booking",
+      })
+    );
   }
 }

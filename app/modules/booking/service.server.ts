@@ -750,7 +750,7 @@ export async function updateBasicBooking({
 
       void sendBookingUpdatedEmail({
         bookingId: booking.id,
-        organizationId: organizationId!,
+        organizationId,
         userId,
         changes,
         hints,
