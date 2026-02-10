@@ -48,6 +48,8 @@ model User {
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
   hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
   warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
+  hasAuditAddon        Boolean @default(false) // Set via Stripe webhooks when audit add-on subscription is active
+  usedAuditTrial       Boolean @default(false) // Set once user activates 7-day free audit trial (prevents reuse)
 
   // Datetime
   createdAt DateTime @default(now())

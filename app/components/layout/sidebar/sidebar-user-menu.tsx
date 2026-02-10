@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LogOutIcon, UserPenIcon, UserRoundIcon } from "lucide-react";
+import { LogOutIcon, UserPenIcon, UserRoundIcon, Wallet } from "lucide-react";
 import { NavLink, useFetcher, useLoaderData } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {
@@ -95,6 +95,16 @@ export default function SidebarUserMenu() {
               <NavLink to="/account-details">
                 <UserRoundIcon className="size-4" />
                 Account settings
+              </NavLink>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              asChild
+              className="cursor-pointer gap-2 border-b border-gray-200 p-2"
+              onClick={closeDropdown}
+            >
+              <NavLink to="/account-details/subscription">
+                <Wallet className="size-4" />
+                Subscription
               </NavLink>
             </DropdownMenuItem>
             <DropdownMenuItem

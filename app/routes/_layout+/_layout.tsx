@@ -43,6 +43,7 @@ import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-ba
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
@@ -65,7 +66,7 @@ import {
   stripe,
   validateSubscriptionIsActive,
 } from "~/utils/stripe.server";
-import { canUseBookings } from "~/utils/subscription.server";
+import { canUseAudits, canUseBookings } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -157,6 +158,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         })
       : 0;
 
+    const orgTierLimit = await getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    });
+
     if (!organizations.length || !currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -186,6 +192,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
+        canUseAudits: canUseAudits(orgTierLimit),
         unreadUpdatesCount,
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,

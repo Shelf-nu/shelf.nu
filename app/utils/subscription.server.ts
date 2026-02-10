@@ -407,3 +407,10 @@ export async function assertUserCanInviteUsersToWorkspace({
   }
 }
 /** End Team Features */
+
+/** Audit Add-on */
+export const canUseAudits = (owner: { hasAuditAddon: boolean }) => {
+  if (!premiumIsEnabled) return true;
+  return owner.hasAuditAddon;
+};
+/** End Audit Add-on */
