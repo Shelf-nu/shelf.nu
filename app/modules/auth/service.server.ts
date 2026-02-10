@@ -200,6 +200,7 @@ async function validateNonSSOUser(email: string) {
         "This email address is associated with an SSO account. Please use SSO login instead.",
       additionalData: { email },
       label: "Auth",
+      shouldBeCaptured: false,
     });
   }
 }
@@ -229,7 +230,7 @@ export async function sendOTP(email: string) {
           : "Something went wrong while sending the OTP. Please try again later or contact support.",
       additionalData: { email },
       label,
-      shouldBeCaptured: !isRateLimitError,
+      shouldBeCaptured: isRateLimitError ? false : undefined,
     });
   }
 }
