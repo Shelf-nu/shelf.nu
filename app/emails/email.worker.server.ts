@@ -1,8 +1,9 @@
 import { transporter } from "~/emails/transporter.server";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
-import { ShelfError } from "../utils/error";
 
 // every node will execute 5 jobs(teamSize) every 3 minutes(newJobCheckIntervalSeconds),
 // increase teamSize if you need better concurrency
@@ -11,9 +12,33 @@ import { ShelfError } from "../utils/error";
 export const registerEmailWorkers = async () => {
   await scheduler.work<EmailPayloadType>(
     QueueNames.emailQueue,
-    { newJobCheckIntervalSeconds: 60 * 3, teamSize: 5 },
+    { newJobCheckIntervalSeconds: 60 * 3, teamSize: 5, includeMetadata: true },
     async (job) => {
-      await triggerEmail(job.data);
+      try {
+        await triggerEmail(job.data);
+      } catch (cause) {
+        const isLastRetry =
+          job.retrycount != null &&
+          job.retrylimit != null &&
+          job.retrycount >= job.retrylimit - 1;
+
+        if (isLastRetry) {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Email permanently failed after exhausting all retries",
+              additionalData: {
+                payload: job.data,
+                retryCount: job.retrycount,
+                retryLimit: job.retrylimit,
+              },
+              label: "Email",
+            })
+          );
+        }
+
+        throw cause;
+      }
     }
   );
 };

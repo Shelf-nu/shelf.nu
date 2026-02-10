@@ -787,6 +787,9 @@ export async function createUser(
       { maxWait: 6000, timeout: 10000 }
     );
   } catch (cause) {
+    const isUniqueViolation =
+      cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
+
     throw new ShelfError({
       cause,
       message: "We had trouble while creating your account. Please try again.",
@@ -794,6 +797,7 @@ export async function createUser(
         payload,
       },
       label,
+      shouldBeCaptured: !isUniqueViolation,
     });
   }
 }
