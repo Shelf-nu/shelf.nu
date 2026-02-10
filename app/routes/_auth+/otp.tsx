@@ -72,11 +72,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const userExists = Boolean(await findUserByEmail(email));
 
         if (!userExists) {
-          const username = await generateUniqueUsername(authSession.email);
-          await createUser({
-            ...authSession,
-            username,
-          });
+          try {
+            const username = await generateUniqueUsername(authSession.email);
+            await createUser({
+              ...authSession,
+              username,
+            });
+          } catch (createError) {
+            // Handle race condition: if a concurrent request already
+            // created this user, verify they exist and proceed.
+            // This can happen when two OTP verification requests
+            // run simultaneously for the same user.
+            const userNowExists = Boolean(await findUserByEmail(email));
+            if (!userNowExists) {
+              throw createError;
+            }
+          }
         }
 
         // Setting the auth session and redirecting user to assets page
