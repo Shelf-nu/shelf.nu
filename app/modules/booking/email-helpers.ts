@@ -1,6 +1,6 @@
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
-import type { BookingForEmail } from "~/emails/types";
+import type { BookingForEmail, EmailAsset } from "~/emails/types";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
@@ -14,7 +14,69 @@ type BasicEmailContentArgs = {
   to: Date;
   bookingId: string;
   hints: ClientHint;
+  assets?: EmailAsset[];
+  organizationId?: string;
 };
+
+/**
+ * Formats the asset list for plain-text emails.
+ * Groups assets by kit when kit info is available.
+ */
+function formatAssetListText(
+  assets: EmailAsset[],
+  totalCount: number,
+  bookingId: string,
+  organizationId?: string
+): string {
+  if (assets.length === 0) {
+    return "";
+  }
+
+  const kits = new Map<string, { name: string; assets: EmailAsset[] }>();
+  const standalone: EmailAsset[] = [];
+
+  for (const asset of assets) {
+    if (asset.kit) {
+      const existing = kits.get(asset.kit.id);
+      if (existing) {
+        existing.assets.push(asset);
+      } else {
+        kits.set(asset.kit.id, { name: asset.kit.name, assets: [asset] });
+      }
+    } else {
+      standalone.push(asset);
+    }
+  }
+
+  const lines: string[] = ["Booked items:"];
+
+  for (const kit of kits.values()) {
+    lines.push(`  Kit: ${kit.name}`);
+    for (const asset of kit.assets) {
+      lines.push(`    - ${asset.title}`);
+    }
+  }
+
+  if (standalone.length > 0 && kits.size > 0) {
+    lines.push("  Individual assets:");
+  }
+  for (const asset of standalone) {
+    const indent = kits.size > 0 ? "    " : "  ";
+    lines.push(`${indent}- ${asset.title}`);
+  }
+
+  const remaining = totalCount - assets.length;
+  if (remaining > 0) {
+    const orgParam = organizationId ? `?orgId=${organizationId}` : "";
+    lines.push(
+      `  ... and ${remaining} more ` +
+        `${remaining === 1 ? "item" : "items"} - ` +
+        `${SERVER_URL}/bookings/${bookingId}${orgParam}`
+    );
+  }
+
+  return "\n" + lines.join("\n");
+}
 
 /**
  * THis is the base content of the bookings related emails.
@@ -29,6 +91,8 @@ export const baseBookingTextEmailContent = ({
   assetsCount,
   emailContent,
   hints,
+  assets,
+  organizationId,
 }: BasicEmailContentArgs & { emailContent: string }) => {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -38,6 +102,12 @@ export const baseBookingTextEmailContent = ({
     dateStyle: "short",
     timeStyle: "short",
   }).format(to);
+
+  const assetListText =
+    assets && assets.length > 0
+      ? formatAssetListText(assets, assetsCount, bookingId, organizationId)
+      : "";
+
   return `Howdy,
 
 ${emailContent}
@@ -47,7 +117,7 @@ ${bookingName} | ${assetsCount} assets
 Custodian: ${custodian}
 From: ${fromDate}
 To: ${toDate}
-
+${assetListText}
 To view the booking, follow the link below:
 ${SERVER_URL}/bookings/${bookingId}
 
@@ -93,7 +163,8 @@ export const checkinReminderEmailContent = (args: BasicEmailContentArgs) =>
 export async function sendCheckinReminder(
   booking: BookingForEmail,
   assetCount: number,
-  hints: ClientHint
+  hints: ClientHint,
+  assets?: EmailAsset[]
 ) {
   const html = await bookingUpdatesTemplateString({
     booking,
@@ -102,6 +173,7 @@ export async function sendCheckinReminder(
       new Date()
     )}.`,
     assetCount,
+    assets,
     hints,
   });
 
@@ -118,6 +190,8 @@ export async function sendCheckinReminder(
       from: booking.from!,
       to: booking.to!,
       bookingId: booking.id,
+      assets,
+      organizationId: booking.organizationId,
     }),
     html,
   });

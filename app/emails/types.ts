@@ -17,6 +17,13 @@ export type BookingForEmail = Prisma.BookingGetPayload<{
   };
 }>;
 
+/** Asset shape included in booking notification emails */
+export type EmailAsset = {
+  id: string;
+  title: string;
+  kit?: { id: string; name: string } | null;
+};
+
 export type EmailPayloadType = {
   /** Email address of recipient */
   to: string;

@@ -1,6 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
+/** Maximum number of assets to display in booking email notifications */
+export const BOOKING_EMAIL_ASSETS_LIMIT = 25;
+
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
@@ -14,6 +17,19 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
   },
   _count: {
     select: { assets: true },
+  },
+  assets: {
+    select: {
+      id: true,
+      title: true,
+      kit: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    take: BOOKING_EMAIL_ASSETS_LIMIT,
   },
 };
 

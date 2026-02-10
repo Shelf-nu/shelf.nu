@@ -47,6 +47,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         new Date()
       )}.`,
       assetCount: booking._count.assets,
+      assets: booking.assets,
       hints: data.hints,
     });
 
@@ -63,6 +64,8 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         to: booking.to,
         bookingId: booking.id,
         hints: data.hints,
+        assets: booking.assets,
+        organizationId: booking.organizationId,
       }),
       html,
     });
@@ -95,7 +98,12 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     booking.to &&
     booking.status === BookingStatus.ONGOING
   ) {
-    await sendCheckinReminder(booking, booking._count.assets, data.hints);
+    await sendCheckinReminder(
+      booking,
+      booking._count.assets,
+      data.hints,
+      booking.assets
+    );
   }
 
   //schedule the next job
@@ -160,6 +168,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       booking,
       heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
       assetCount: booking._count.assets,
+      assets: booking.assets,
       hints: data.hints,
     });
 
@@ -176,6 +185,8 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         to: booking.to as Date,
         bookingId: booking.id,
         hints: data.hints,
+        assets: booking.assets,
+        organizationId: booking.organizationId,
       }),
       html,
     });
