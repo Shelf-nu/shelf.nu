@@ -241,6 +241,18 @@ export default function SubscriptionPage() {
 
   const hasNoSubscription = customer?.subscriptions.data.length === 0;
 
+  /** Check if user has a workspace plan (not just addon subscriptions) */
+  const hasWorkspacePlan = subscriptionsWithProducts.some((sub) =>
+    sub.items.data.some((item) => {
+      const product = item.price?.product;
+      if (product && typeof product === "object" && "metadata" in product) {
+        const tier = product.metadata?.shelf_tier;
+        return tier === "tier_1" || tier === "tier_2";
+      }
+      return false;
+    })
+  );
+
   /**
    * This handles the case when there is no subscription and custom tier is set.
    * This is some special cases only used for certain clients. Most users that have customTier also have a subscription
@@ -282,18 +294,27 @@ export default function SubscriptionPage() {
           <UnpaidInvoiceWarning invoices={openInvoices} />
         ) : null}
 
-        {hasNoSubscription ? (
-          <div className="mb-8 mt-3">
-            <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                <InfoIcon />
+        {!hasWorkspacePlan ? (
+          hasNoSubscription ? (
+            <div className="mb-8 mt-3">
+              <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+                <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                  <InfoIcon />
+                </div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  You're currently using the{" "}
+                  <span className="font-semibold">FREE</span> version of Shelf
+                </p>
               </div>
-              <p className="text-[14px] font-medium text-gray-700">
-                You’re currently using the{" "}
-                <span className="font-semibold">FREE</span> version of Shelf
-              </p>
             </div>
-          </div>
+          ) : (
+            <div className="mb-8">
+              <h3 className="text-text-lg font-semibold">
+                Choose your workspace plan
+              </h3>
+              <PricingTable prices={prices} />
+            </div>
+          )
         ) : null}
 
         <div className="mb-8 justify-between border-b pb-5 lg:flex">
@@ -305,10 +326,8 @@ export default function SubscriptionPage() {
             <CustomerPortalForm buttonText="Manage subscriptions" />
           )}
         </div>
-        {/* */}
-        {hasNoSubscription ? (
-          <PricingTable prices={prices} />
-        ) : (
+
+        {!hasNoSubscription && (
           <>
             <SubscriptionsOverview
               customer={customer}

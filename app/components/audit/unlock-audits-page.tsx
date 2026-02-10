@@ -1,4 +1,5 @@
 import type { Currency } from "@prisma/client";
+import { useState } from "react";
 import {
   CheckCircle2Icon,
   ClipboardCheckIcon,
@@ -7,6 +8,7 @@ import {
 import { useFetcher } from "react-router";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { formatCurrency } from "~/utils/currency";
+import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
 
 export function UnlockAuditsPage({
@@ -20,6 +22,9 @@ export function UnlockAuditsPage({
   monthlyPrice: PriceWithProduct | null;
   yearlyPrice: PriceWithProduct | null;
 }) {
+  const [selectedInterval, setSelectedInterval] = useState<"month" | "year">(
+    "year"
+  );
   const subscribeFetcher = useFetcher();
   const trialFetcher = useFetcher();
 
@@ -27,6 +32,9 @@ export function UnlockAuditsPage({
   const isStartingTrial = trialFetcher.state !== "idle";
 
   const canStartTrial = isOwner && !usedAuditTrial;
+
+  const selectedPrice =
+    selectedInterval === "year" ? yearlyPrice : monthlyPrice;
 
   const fmtPrice = (amountInCents: number, currency: string) =>
     formatCurrency({
@@ -86,11 +94,29 @@ export function UnlockAuditsPage({
         {/* Pricing */}
         {(monthlyPrice || yearlyPrice) && (
           <div className="mb-8 rounded-xl border border-gray-200 bg-white p-6">
-            <h3 className="mb-4 text-lg font-semibold">Pricing</h3>
+            <h3 className="mb-4 text-lg font-semibold">
+              Select your pricing plan
+            </h3>
             <div className="flex flex-wrap items-stretch gap-4">
               {monthlyPrice && (
-                <div className="flex flex-1 flex-col items-center rounded-lg border border-gray-200 p-4 text-center">
-                  <p className="mb-1 text-sm font-medium text-gray-500">
+                <button
+                  type="button"
+                  onClick={() => setSelectedInterval("month")}
+                  className={tw(
+                    "flex flex-1 cursor-pointer flex-col items-center rounded-lg p-4 text-center transition-colors",
+                    selectedInterval === "month"
+                      ? "border-2 border-primary-200 bg-primary-25"
+                      : "border border-gray-200"
+                  )}
+                >
+                  <p
+                    className={tw(
+                      "mb-1 text-sm font-medium",
+                      selectedInterval === "month"
+                        ? "text-primary-600"
+                        : "text-gray-500"
+                    )}
+                  >
                     Monthly
                   </p>
                   <p className="text-2xl font-semibold">
@@ -104,16 +130,32 @@ export function UnlockAuditsPage({
                   </p>
                   <p className="text-xs text-gray-500">Billed monthly</p>
                   <p className="mt-1 text-xs text-gray-500">per workspace</p>
-                </div>
+                </button>
               )}
               {yearlyPrice && (
-                <div className="relative flex flex-1 flex-col items-center rounded-lg border-2 border-primary-200 bg-primary-25 p-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => setSelectedInterval("year")}
+                  className={tw(
+                    "relative flex flex-1 cursor-pointer flex-col items-center rounded-lg p-4 text-center transition-colors",
+                    selectedInterval === "year"
+                      ? "border-2 border-primary-200 bg-primary-25"
+                      : "border border-gray-200"
+                  )}
+                >
                   {yearlyDiscount != null && yearlyDiscount > 0 && (
                     <span className="absolute -top-2.5 rounded-full bg-primary-500 px-2 py-0.5 text-[10px] font-semibold text-white">
                       Save {yearlyDiscount}%
                     </span>
                   )}
-                  <p className="mb-1 text-sm font-medium text-primary-600">
+                  <p
+                    className={tw(
+                      "mb-1 text-sm font-medium",
+                      selectedInterval === "year"
+                        ? "text-primary-600"
+                        : "text-gray-500"
+                    )}
+                  >
                     Yearly
                   </p>
                   <p className="text-2xl font-semibold">
@@ -133,7 +175,7 @@ export function UnlockAuditsPage({
                     )}
                   </p>
                   <p className="mt-1 text-xs text-gray-500">per workspace</p>
-                </div>
+                </button>
               )}
             </div>
           </div>
@@ -163,10 +205,14 @@ export function UnlockAuditsPage({
                 </trialFetcher.Form>
               )}
 
-              {yearlyPrice && (
+              {selectedPrice && (
                 <subscribeFetcher.Form method="post" action="/audits">
                   <input type="hidden" name="intent" value="subscribe" />
-                  <input type="hidden" name="priceId" value={yearlyPrice.id} />
+                  <input
+                    type="hidden"
+                    name="priceId"
+                    value={selectedPrice.id}
+                  />
                   <Button
                     type="submit"
                     variant={canStartTrial ? "secondary" : "primary"}
@@ -175,29 +221,14 @@ export function UnlockAuditsPage({
                   >
                     {isSubscribing
                       ? "Redirecting..."
-                      : `Subscribe yearly (${fmtPrice(
-                          yearlyPrice.unit_amount || 0,
-                          yearlyPrice.currency
-                        )}/yr)`}
-                  </Button>
-                </subscribeFetcher.Form>
-              )}
-
-              {monthlyPrice && (
-                <subscribeFetcher.Form method="post" action="/audits">
-                  <input type="hidden" name="intent" value="subscribe" />
-                  <input type="hidden" name="priceId" value={monthlyPrice.id} />
-                  <Button
-                    type="submit"
-                    variant="secondary"
-                    width="full"
-                    disabled={isSubscribing}
-                  >
-                    {isSubscribing
-                      ? "Redirecting..."
+                      : selectedInterval === "year"
+                      ? `Subscribe yearly (${fmtPrice(
+                          selectedPrice.unit_amount || 0,
+                          selectedPrice.currency
+                        )}/yr)`
                       : `Subscribe monthly (${fmtPrice(
-                          monthlyPrice.unit_amount || 0,
-                          monthlyPrice.currency
+                          selectedPrice.unit_amount || 0,
+                          selectedPrice.currency
                         )}/mo)`}
                   </Button>
                 </subscribeFetcher.Form>
