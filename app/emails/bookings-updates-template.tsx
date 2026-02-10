@@ -22,6 +22,7 @@ interface Props {
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
   cancellationReason?: string;
+  changes?: string[];
 }
 
 export function BookingUpdatesEmailTemplate({
@@ -32,6 +33,7 @@ export function BookingUpdatesEmailTemplate({
   hideViewButton = false,
   isAdminEmail = false,
   cancellationReason,
+  changes,
 }: Props) {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -109,6 +111,33 @@ export function BookingUpdatesEmailTemplate({
           </div>
         )}
 
+        {changes && changes.length > 0 && (
+          <div
+            style={{
+              textAlign: "left",
+              margin: "0 32px 24px",
+            }}
+          >
+            <p
+              style={{
+                ...styles.p,
+                fontWeight: "600",
+                color: "#101828",
+                marginBottom: "8px",
+              }}
+            >
+              What changed:
+            </p>
+            <ul style={{ margin: "0", paddingLeft: "20px" }}>
+              {changes.map((change, i) => (
+                <li key={i} style={{ ...styles.li, marginBottom: "4px" }}>
+                  {change}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {!hideViewButton && (
           <Button
             href={`${SERVER_URL}/bookings/${booking.id}?orgId=${booking.organizationId}`}
@@ -144,6 +173,7 @@ export const bookingUpdatesTemplateString = ({
   hideViewButton = false,
   isAdminEmail = false,
   cancellationReason,
+  changes,
 }: Props) =>
   render(
     <BookingUpdatesEmailTemplate
@@ -154,5 +184,6 @@ export const bookingUpdatesTemplateString = ({
       hideViewButton={hideViewButton}
       isAdminEmail={isAdminEmail}
       cancellationReason={cancellationReason}
+      changes={changes}
     />
   );
