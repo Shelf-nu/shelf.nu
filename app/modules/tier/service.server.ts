@@ -11,30 +11,17 @@ import { ShelfError } from "~/utils/error";
 
 const label: ErrorLabel = "Tier";
 
-/** User-level addon flags returned alongside tier limits */
-type UserAddonFlags = {
-  hasAuditAddon: boolean;
-  usedAuditTrial: boolean;
-  tierId: TierId;
-};
-
-export type TierLimitWithAddons = (TierLimit | CustomTierLimit) &
-  UserAddonFlags;
-
 export async function getUserTierLimit(
   id: User["id"]
-): Promise<TierLimitWithAddons> {
+): Promise<TierLimit | CustomTierLimit> {
   try {
-    const { tier, hasAuditAddon, usedAuditTrial, tierId } = await db.user
+    const { tier } = await db.user
       .findUniqueOrThrow({
         where: { id },
         select: {
           tier: {
             include: { tierLimit: true },
           },
-          hasAuditAddon: true,
-          usedAuditTrial: true,
-          tierId: true,
         },
       })
       .catch((cause) => {
@@ -46,12 +33,6 @@ export async function getUserTierLimit(
           label,
         });
       });
-
-    const addonFlags: UserAddonFlags = {
-      hasAuditAddon,
-      usedAuditTrial,
-      tierId,
-    };
 
     /**
      * If the tier is custom, we fetch the custom tier limit and return it
@@ -71,10 +52,10 @@ export async function getUserTierLimit(
           });
         })) as CustomTierLimit;
 
-      return { ...customLimit, ...addonFlags };
+      return customLimit;
     }
 
-    return { ...(tier.tierLimit as TierLimit), ...addonFlags };
+    return tier.tierLimit as TierLimit;
   } catch (cause) {
     throw new ShelfError({
       cause,

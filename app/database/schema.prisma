@@ -48,9 +48,6 @@ model User {
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
   hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
   warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
-  hasAuditAddon        Boolean @default(false) // Set via Stripe webhooks when audit add-on subscription is active
-  usedAuditTrial       Boolean @default(false) // Set once user activates 7-day free audit trial (prevents reuse)
-
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -703,6 +700,11 @@ model Organization {
   // Barcode feature (admin-managed, will later integrate with custom tier limits)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
   barcodesEnabledAt DateTime? // Track when barcode feature was enabled
+
+  // Audit add-on (per-organization, managed via Stripe subscription)
+  auditsEnabled    Boolean   @default(false) // If true, this organization can use audit functionality
+  auditsEnabledAt  DateTime? // Track when audit feature was enabled
+  usedAuditTrial   Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
 
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it

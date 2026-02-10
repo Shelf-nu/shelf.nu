@@ -14,11 +14,13 @@ export async function createAuditAddonCheckoutSession({
   userId,
   domainUrl,
   customerId,
+  organizationId,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
   domainUrl: string;
   customerId: string;
+  organizationId: string;
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -38,6 +40,9 @@ export async function createAuditAddonCheckoutSession({
       cancel_url: `${domainUrl}/audits?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
+      subscription_data: {
+        metadata: { organizationId },
+      },
     });
 
     if (!url) {
@@ -65,10 +70,12 @@ export async function createAuditAddonTrialSubscription({
   customerId,
   priceId,
   userId,
+  organizationId,
 }: {
   customerId: string;
   priceId: Stripe.Price["id"];
   userId: User["id"];
+  organizationId: string;
 }) {
   try {
     if (!stripe) {
@@ -98,7 +105,7 @@ export async function createAuditAddonTrialSubscription({
       ...(defaultPaymentMethod && {
         default_payment_method: defaultPaymentMethod,
       }),
-      metadata: { userId },
+      metadata: { userId, organizationId },
     });
 
     return { subscription, hasPaymentMethod: !!defaultPaymentMethod };
@@ -152,16 +159,16 @@ export async function getAuditAddonPrices() {
 
 /**
  * Handles audit add-on subscription webhook events.
- * Sets hasAuditAddon and usedAuditTrial flags based on subscription state.
+ * Sets auditsEnabled and usedAuditTrial flags on the Organization.
  */
 export async function handleAuditAddonWebhook({
   eventType,
   subscription,
-  customerId,
+  organizationId,
 }: {
   eventType: string;
   subscription?: Stripe.Subscription;
-  customerId: string;
+  organizationId: string;
 }) {
   switch (eventType) {
     case "checkout.session.completed":
@@ -169,10 +176,11 @@ export async function handleAuditAddonWebhook({
       const isTrialSubscription =
         subscription && !!subscription.trial_end && !!subscription.trial_start;
 
-      await db.user.update({
-        where: { customerId },
+      await db.organization.update({
+        where: { id: organizationId },
         data: {
-          hasAuditAddon: true,
+          auditsEnabled: true,
+          auditsEnabledAt: new Date(),
           ...(isTrialSubscription && { usedAuditTrial: true }),
         },
         select: { id: true },
@@ -183,18 +191,18 @@ export async function handleAuditAddonWebhook({
       const isActive =
         subscription?.status === "active" ||
         subscription?.status === "trialing";
-      await db.user.update({
-        where: { customerId },
-        data: { hasAuditAddon: isActive },
+      await db.organization.update({
+        where: { id: organizationId },
+        data: { auditsEnabled: isActive },
         select: { id: true },
       });
       break;
     }
     case "customer.subscription.paused":
     case "customer.subscription.deleted": {
-      await db.user.update({
-        where: { customerId },
-        data: { hasAuditAddon: false },
+      await db.organization.update({
+        where: { id: organizationId },
+        data: { auditsEnabled: false },
         select: { id: true },
       });
       break;

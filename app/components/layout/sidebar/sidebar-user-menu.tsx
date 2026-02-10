@@ -104,7 +104,7 @@ export default function SidebarUserMenu() {
             >
               <NavLink to="/account-details/subscription">
                 <Wallet className="size-4" />
-                Subscription
+                Subscriptions
               </NavLink>
             </DropdownMenuItem>
             <DropdownMenuItem

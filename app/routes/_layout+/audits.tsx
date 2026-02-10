@@ -16,7 +16,6 @@ import {
   getAuditAddonPrices,
 } from "~/modules/audit/addon.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -31,7 +30,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations, userOrganizations } =
+    const { organizationId, currentOrganization, userOrganizations } =
       await getSelectedOrganization({ userId, request });
 
     const currentUserRoles = userOrganizations.find(
@@ -39,27 +38,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     )?.roles;
     const isOwner = currentUserRoles?.includes("OWNER") ?? false;
 
-    const orgTierLimit = await getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    });
-
-    const hasAccess = canUseAudits(orgTierLimit);
+    const hasAccess = canUseAudits(currentOrganization);
 
     // Only fetch prices when the user doesn't have access
     const prices = hasAccess
       ? { month: null, year: null }
       : await getAuditAddonPrices();
 
-    const hasPaidSubscription = ["tier_1", "tier_2"].includes(
-      orgTierLimit.tierId
-    );
-
     return data({
       canUseAudits: hasAccess,
       isOwner,
-      usedAuditTrial: orgTierLimit.usedAuditTrial,
-      hasPaidSubscription,
+      usedAuditTrial: currentOrganization.usedAuditTrial,
       monthlyPrice: prices.month,
       yearlyPrice: prices.year,
     });
@@ -82,13 +71,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
+    const { organizationId, currentOrganization } =
+      await getSelectedOrganization({ userId, request });
+
     const user = await getUserByID(userId, {
       select: {
         customerId: true,
         firstName: true,
         lastName: true,
-        usedAuditTrial: true,
-        tierId: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -99,14 +89,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (intent === "trial") {
-      // Validate user has a paid subscription and hasn't used trial
-      if (user.usedAuditTrial) {
-        throw new Error("You have already used your free audit trial.");
-      }
-
-      if (!["tier_1", "tier_2"].includes(user.tierId)) {
+      // Validate organization hasn't already used trial
+      if (currentOrganization.usedAuditTrial) {
         throw new Error(
-          "Free trial is only available for Plus or Team subscribers."
+          "This workspace has already used the free audit trial."
         );
       }
 
@@ -115,14 +101,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId,
         priceId,
         userId,
+        organizationId,
       });
 
-      // Set flags immediately (webhook also fires as backup)
-      await db.user.update({
-        where: { id: userId },
+      // Set flags immediately on the organization (webhook also fires as backup)
+      await db.organization.update({
+        where: { id: organizationId },
         data: {
-          hasAuditAddon: true,
+          auditsEnabled: true,
           usedAuditTrial: true,
+          auditsEnabledAt: new Date(),
         },
         select: { id: true },
       });
@@ -143,6 +131,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       domainUrl,
       customerId,
+      organizationId,
     });
 
     return redirect(stripeRedirectUrl);
@@ -172,21 +161,14 @@ export const handle = {
 };
 
 export default function AuditsPage() {
-  const {
-    canUseAudits,
-    isOwner,
-    usedAuditTrial,
-    hasPaidSubscription,
-    monthlyPrice,
-    yearlyPrice,
-  } = useLoaderData<typeof loader>();
+  const { canUseAudits, isOwner, usedAuditTrial, monthlyPrice, yearlyPrice } =
+    useLoaderData<typeof loader>();
 
   if (!canUseAudits) {
     return (
       <UnlockAuditsPage
         isOwner={isOwner}
         usedAuditTrial={usedAuditTrial}
-        hasPaidSubscription={hasPaidSubscription}
         monthlyPrice={monthlyPrice}
         yearlyPrice={yearlyPrice}
       />

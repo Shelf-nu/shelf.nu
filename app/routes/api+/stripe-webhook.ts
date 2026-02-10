@@ -30,8 +30,9 @@ import { data, type ActionFunctionArgs } from "react-router";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
 import { sendSubscriptionGrantedEmail } from "~/emails/stripe/subscription-granted";
-import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
+import { sendTrialEndsSoonEmail } from "~/emails/stripe/trial-ends-soon";
 import {
   unpaidInvoiceAdminText,
   sendUnpaidInvoiceUserEmail,
@@ -203,11 +204,12 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
-          if (product?.metadata?.addon_type === "audits") {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (product?.metadata?.addon_type === "audits" && organizationId) {
             await handleAuditAddonWebhook({
               eventType: event.type,
               subscription,
-              customerId,
+              organizationId,
             });
           }
           return new Response(null, { status: 200 });
@@ -247,11 +249,12 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
-          if (product?.metadata?.addon_type === "audits") {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (product?.metadata?.addon_type === "audits" && organizationId) {
             await handleAuditAddonWebhook({
               eventType: event.type,
               subscription,
-              customerId,
+              organizationId,
             });
           }
           return new Response(null, { status: 200 });
@@ -347,11 +350,15 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
-          if (pausedProduct?.metadata?.addon_type === "audits") {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (
+            pausedProduct?.metadata?.addon_type === "audits" &&
+            organizationId
+          ) {
             await handleAuditAddonWebhook({
               eventType: event.type,
               subscription,
-              customerId,
+              organizationId,
             });
           }
           return new Response(null, { status: 200 });
@@ -413,11 +420,15 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
-          if (updatedProduct?.metadata?.addon_type === "audits") {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (
+            updatedProduct?.metadata?.addon_type === "audits" &&
+            organizationId
+          ) {
             await handleAuditAddonWebhook({
               eventType: event.type,
               subscription,
-              customerId,
+              organizationId,
             });
           }
           return new Response(null, { status: 200 });
@@ -461,6 +472,7 @@ export async function action({ request }: ActionFunctionArgs) {
       case "customer.subscription.deleted": {
         // Occurs whenever a customer's subscription ends.
         const {
+          subscription: deletedSubscription,
           customerId,
           tierId,
           productType,
@@ -468,10 +480,14 @@ export async function action({ request }: ActionFunctionArgs) {
         } = await getDataFromStripeEvent(event);
 
         if (isAddonSubscription({ tierId, productType, event })) {
-          if (deletedProduct?.metadata?.addon_type === "audits") {
+          const organizationId = deletedSubscription?.metadata?.organizationId;
+          if (
+            deletedProduct?.metadata?.addon_type === "audits" &&
+            organizationId
+          ) {
             await handleAuditAddonWebhook({
               eventType: event.type,
-              customerId,
+              organizationId,
             });
           }
           return new Response(null, { status: 200 });
@@ -634,11 +650,14 @@ export async function action({ request }: ActionFunctionArgs) {
               productType === "addon" &&
               product?.metadata?.addon_type === "audits"
             ) {
-              await db.user.update({
-                where: { customerId },
-                data: { hasAuditAddon: true },
-                select: { id: true },
-              });
+              const organizationId = subscription?.metadata?.organizationId;
+              if (organizationId) {
+                await db.organization.update({
+                  where: { id: organizationId },
+                  data: { auditsEnabled: true },
+                  select: { id: true },
+                });
+              }
             }
 
             // Only update tier for non-addon products
@@ -825,8 +844,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "customer.subscription.trial_will_end": {
         // Occurs three days before the trial period of a subscription is scheduled to end.
-        const { tierId, subscription, productType } =
-          await getDataFromStripeEvent(event);
+        const {
+          tierId,
+          subscription,
+          productType,
+          product: trialEndProduct,
+        } = await getDataFromStripeEvent(event);
 
         if (
           isAddonSubscription({
@@ -836,8 +859,19 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
-          // For audit add-on trial ending, no special action needed
-          // User still has access until trial actually ends
+          // Send trial ending email for audit add-on
+          if (
+            subscription.trial_end &&
+            trialEndProduct?.metadata?.addon_type === "audits"
+          ) {
+            const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+            void sendAuditTrialEndsSoonEmail({
+              firstName: user.firstName,
+              email: user.email,
+              hasPaymentMethod,
+              trialEndDate: new Date(subscription.trial_end * 1000),
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -846,17 +880,10 @@ export async function action({ request }: ActionFunctionArgs) {
           subscription.trial_end && subscription.trial_start;
 
         if (isTrialSubscription) {
-          sendEmail({
-            to: user.email,
-            subject: "Your shelf.nu free trial is ending soon",
-            text: trialEndsSoonText({
-              user: {
-                firstName: user?.firstName ?? null,
-                lastName: user?.lastName ?? null,
-                email: user.email,
-              },
-              subscription,
-            }),
+          void sendTrialEndsSoonEmail({
+            firstName: user.firstName,
+            email: user.email,
+            trialEndDate: new Date((subscription.trial_end as number) * 1000),
           });
         }
 

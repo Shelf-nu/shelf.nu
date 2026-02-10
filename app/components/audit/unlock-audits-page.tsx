@@ -12,13 +12,11 @@ import { Button } from "../shared/button";
 export function UnlockAuditsPage({
   isOwner,
   usedAuditTrial,
-  hasPaidSubscription,
   monthlyPrice,
   yearlyPrice,
 }: {
   isOwner: boolean;
   usedAuditTrial: boolean;
-  hasPaidSubscription: boolean;
   monthlyPrice: PriceWithProduct | null;
   yearlyPrice: PriceWithProduct | null;
 }) {
@@ -28,7 +26,7 @@ export function UnlockAuditsPage({
   const isSubscribing = subscribeFetcher.state !== "idle";
   const isStartingTrial = trialFetcher.state !== "idle";
 
-  const canStartTrial = isOwner && hasPaidSubscription && !usedAuditTrial;
+  const canStartTrial = isOwner && !usedAuditTrial;
 
   const fmtPrice = (amountInCents: number, currency: string) =>
     formatCurrency({
