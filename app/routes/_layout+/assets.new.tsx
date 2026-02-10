@@ -131,13 +131,9 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const formData = await clonedRequest.formData();
 
-    const searchParams = getCurrentSearchParams(request);
-
     const customFields = await getActiveCustomFields({
       organizationId,
-      category:
-        searchParams.get("category") ??
-        (formData.get("category") as string | null),
+      category: formData.get("category") as string | null,
     });
 
     const FormSchema = mergedSchema({
