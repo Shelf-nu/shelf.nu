@@ -183,6 +183,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           : isSelfServiceOrBase
           ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of assets is not allowed for current status of booking.",
+        shouldBeCaptured: false,
         additionalData: {
           booking,
           userId,
@@ -339,6 +340,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: isSelfServiceOrBase
           ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of assets is not allowed for current status of booking.",
+        shouldBeCaptured: false,
       });
     }
     // Get existing asset IDs from the booking
