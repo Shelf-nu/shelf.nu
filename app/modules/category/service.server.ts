@@ -129,14 +129,9 @@ export async function createCategoriesIfNotExists({
     // first we get all the categories from the assets and make then into an object where the category is the key and the value is an empty string
     const categories = new Map(
       data
-        .filter((asset) => asset.category !== "")
+        .filter((asset) => asset.category)
         .map((asset) => [asset.category, ""])
     );
-
-    // Handle the case where there are no categories
-    if (categories.has(undefined)) {
-      return {};
-    }
 
     // now we loop through the categories and check if they exist
     for (const [category, _] of categories) {
