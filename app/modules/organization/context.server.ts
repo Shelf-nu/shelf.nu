@@ -86,8 +86,8 @@ async function getSelectedOrganizationUncached({
     cookieRefreshNeeded = true;
 
     // Piggyback on the already-fetched userOrganizations query
-    const lastSelectedOrganizationId =
-      userOrganizations[0]?.user?.lastSelectedOrganizationId ?? null;
+    const user = userOrganizations[0]?.user;
+    const lastSelectedOrganizationId = user?.lastSelectedOrganizationId ?? null;
 
     if (
       lastSelectedOrganizationId &&
