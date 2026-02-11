@@ -1977,15 +1977,9 @@ export async function updateBookingAssets({
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
-      // Bulk insert into the join table in a single SQL statement instead of
-      // N individual connect operations which cause transaction timeouts
-      // for large bookings
-      await tx.$executeRaw`
-        INSERT INTO "_AssetToBooking" ("A", "B")
-        SELECT unnest(${assetIds}::text[]), ${id}
-        ON CONFLICT ("A", "B") DO NOTHING
-      `;
-
+      // Verify booking exists before inserting into the join table,
+      // so a stale/deleted booking returns a proper 404 (P2025)
+      // instead of a FK violation (P2003)
       const b = await tx.booking.findUniqueOrThrow({
         where: { id, organizationId },
         select: {
@@ -1994,6 +1988,15 @@ export async function updateBookingAssets({
           status: true,
         },
       });
+
+      // Bulk insert into the join table in a single SQL statement instead of
+      // N individual connect operations which cause transaction timeouts
+      // for large bookings
+      await tx.$executeRaw`
+        INSERT INTO "_AssetToBooking" ("A", "B")
+        SELECT unnest(${assetIds}::text[]), ${id}
+        ON CONFLICT ("A", "B") DO NOTHING
+      `;
 
       /**
        *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE
