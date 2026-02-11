@@ -9,6 +9,9 @@ import { locationDescendantsMock } from "@mocks/location-descendants";
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
 
+// why: preventing Prisma from trying to connect to a real database during tests
+vi.mock("~/database/db.server", () => ({ db: {} }));
+
 // why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
 const createDataMock = vi.hoisted(() => {
   return () =>
