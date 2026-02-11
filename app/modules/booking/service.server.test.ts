@@ -8,8 +8,8 @@ import {
 import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
-
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
+import { sendBookingUpdatedEmail } from "./email-helpers";
 import {
   createBooking,
   partialCheckinBooking,
@@ -105,6 +105,9 @@ vitest.mock("~/database/db.server", () => ({
         .fn()
         .mockResolvedValue([{ name: "Tag 1" }, { name: "Tag 2" }]),
     },
+    teamMember: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -142,6 +145,16 @@ vitest.mock("~/modules/user/service.server", () => ({
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
 }));
+
+// why: spying on booking update email calls without executing
+// actual DB lookups or email sends
+vitest.mock("./email-helpers", async () => {
+  const actual = await vitest.importActual("./email-helpers");
+  return {
+    ...actual,
+    sendBookingUpdatedEmail: vitest.fn().mockResolvedValue(undefined),
+  };
+});
 
 // why: avoiding organization admin lookups during booking notification tests
 vitest.mock("~/modules/organization/service.server", () => ({
@@ -809,6 +822,186 @@ describe("updateBasicBooking", () => {
 
     await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
       ShelfError
+    );
+  });
+
+  it("should send email when changes are detected and hints are provided", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "custodian-1",
+      custodianTeamMemberId: "team-member-1",
+      name: "Old Name",
+      description: "Old Description",
+      from: futureFromDate,
+      to: futureToDate,
+      custodianUser: {
+        id: "custodian-1",
+        email: "custodian@example.com",
+        firstName: "Custodian",
+        lastName: "User",
+      },
+      custodianTeamMember: null,
+      tags: [],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-1",
+      name: "New Name",
+    });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      name: "New Name",
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    expect(sendBookingUpdatedEmail).toHaveBeenCalledTimes(1);
+    expect(sendBookingUpdatedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "editor-1",
+        changes: expect.arrayContaining([
+          expect.stringContaining("Booking name changed"),
+        ]),
+      })
+    );
+  });
+
+  it("should not send email when no hints are provided", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "custodian-1",
+      custodianTeamMemberId: "team-member-1",
+      name: "Old Name",
+      description: null,
+      from: futureFromDate,
+      to: futureToDate,
+      custodianUser: {
+        id: "custodian-1",
+        email: "custodian@example.com",
+        firstName: "Custodian",
+        lastName: "User",
+      },
+      custodianTeamMember: null,
+      tags: [],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      name: "New Name",
+      userId: "editor-1",
+      // no hints
+    });
+
+    expect(sendBookingUpdatedEmail).not.toHaveBeenCalled();
+  });
+
+  it("should not send email when no changes are detected", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-2",
+      custodianTeamMemberId: "team-member-2",
+      name: "Updated Booking Name",
+      description: "Updated Description",
+      from: new Date("2024-02-01T09:00:00Z"),
+      to: new Date("2024-02-01T17:00:00Z"),
+      custodianUser: {
+        id: "user-2",
+        email: "custodian@example.com",
+        firstName: "Custodian",
+        lastName: "User",
+      },
+      custodianTeamMember: { id: "team-member-2", name: "TM" },
+      tags: [
+        { id: "tag-1", name: "Tag 1" },
+        { id: "tag-2", name: "Tag 2" },
+      ],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    expect(sendBookingUpdatedEmail).not.toHaveBeenCalled();
+  });
+
+  it("should pass old custodian email when custodian changes", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "old-custodian-1",
+      custodianTeamMemberId: "old-team-member-1",
+      name: "Updated Booking Name",
+      description: "Updated Description",
+      from: new Date("2024-02-01T09:00:00Z"),
+      to: new Date("2024-02-01T17:00:00Z"),
+      custodianUser: {
+        id: "old-custodian-1",
+        email: "old-custodian@example.com",
+        firstName: "Old",
+        lastName: "Custodian",
+      },
+      custodianTeamMember: {
+        id: "old-team-member-1",
+        name: "Old TM",
+        user: {
+          id: "old-custodian-1",
+          firstName: "Old",
+          lastName: "Custodian",
+        },
+      },
+      tags: [
+        { id: "tag-1", name: "Tag 1" },
+        { id: "tag-2", name: "Tag 2" },
+      ],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    //@ts-expect-error missing vitest type
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "team-member-2",
+      name: "New TM",
+      user: { id: "user-2", firstName: "New", lastName: "Custodian" },
+    });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    expect(sendBookingUpdatedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oldCustodianEmail: "old-custodian@example.com",
+      })
     );
   });
 });

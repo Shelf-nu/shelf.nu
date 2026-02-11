@@ -1312,7 +1312,7 @@ export async function revokeAccessToOrganization({
       where: { userId, organizationId },
     });
 
-    return await db.user.update({
+    const result = await db.user.update({
       where: { id: userId },
       data: {
         ...(teamMember?.id && {
@@ -1332,6 +1332,27 @@ export async function revokeAccessToOrganization({
         },
       },
     });
+
+    // Clear lastSelectedOrganizationId if it points to the revoked org.
+    // Uses raw SQL to avoid bumping updatedAt. No-op if already different.
+    // Best-effort: don't block revocation if cleanup fails.
+    try {
+      await db.$executeRaw`
+        UPDATE "User"
+        SET "lastSelectedOrganizationId" = NULL
+        WHERE "id" = ${userId}
+          AND "lastSelectedOrganizationId" = ${organizationId}
+      `;
+    } catch (cleanupError) {
+      Logger.warn(
+        "Failed to clear lastSelectedOrganizationId during access revocation",
+        userId,
+        organizationId,
+        cleanupError
+      );
+    }
+
+    return result;
   } catch (cause) {
     throw new ShelfError({
       cause,

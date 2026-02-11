@@ -387,6 +387,9 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
         organization: {
           select: ORGANIZATION_SELECT_FIELDS,
         },
+        user: {
+          select: { lastSelectedOrganizationId: true },
+        },
       },
     });
   } catch (cause) {
