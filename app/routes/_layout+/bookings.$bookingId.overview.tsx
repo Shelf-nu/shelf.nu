@@ -29,6 +29,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
   archiveBooking,
@@ -648,6 +649,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianTeamMemberId: parsedData.custodian?.id,
           tags,
           userId,
+          hints: getClientHint(request),
         });
 
         sendNotification({
@@ -900,6 +902,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           assets: asset ? [asset] : [],
         });
 
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "An asset was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
+        });
+
         sendNotification({
           title: "Asset removed",
           message: "Your asset has been removed from the booking",
@@ -993,6 +1005,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // The assets parameter is used for note content, not for actual removal
           assets: [],
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "A kit was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({
@@ -1106,6 +1128,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           lastName: user?.lastName || "",
           userId,
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "Assets and/or kits were removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({
