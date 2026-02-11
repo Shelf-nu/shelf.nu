@@ -71,7 +71,12 @@ export default function AssetsByStatusChart() {
             </div>
           </div>
         ) : (
-          <EmptyState text="No assets in database" />
+          <EmptyState
+            text="No assets yet"
+            subText="Add assets to see their status distribution here."
+            ctaTo="/assets/new"
+            ctaText="Create an asset →"
+          />
         )}
       </div>
     </div>

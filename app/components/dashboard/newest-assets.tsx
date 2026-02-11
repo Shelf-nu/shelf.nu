@@ -66,7 +66,12 @@ export default function NewestAssets() {
         </Table>
       ) : (
         <div className="h-full flex-1 rounded-b border border-gray-200">
-          <EmptyState text="No assets in database" />
+          <EmptyState
+            text="No assets yet"
+            subText="Create your first asset to start building your inventory."
+            ctaTo="/assets/new"
+            ctaText="Create an asset →"
+          />
         </div>
       )}
     </>

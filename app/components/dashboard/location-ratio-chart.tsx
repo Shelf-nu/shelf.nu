@@ -69,7 +69,12 @@ export default function LocationRatioChart() {
             </Flex>
           </div>
         ) : (
-          <EmptyState text="No assets with values in database" />
+          <EmptyState
+            text="No location data yet"
+            subText="Assign assets to locations to see the distribution here."
+            ctaTo="/locations/new"
+            ctaText="Create a location →"
+          />
         )}
       </div>
     </div>

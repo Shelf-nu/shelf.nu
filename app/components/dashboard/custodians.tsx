@@ -64,7 +64,10 @@ export default function CustodiansList() {
         </Table>
       ) : (
         <div className="h-full flex-1 rounded-b border border-gray-200 p-8">
-          <EmptyState text="No assets in custody" />
+          <EmptyState
+            text="No assets in custody"
+            subText="Assign custody of assets to team members to track who has what."
+          />
         </div>
       )}
     </>

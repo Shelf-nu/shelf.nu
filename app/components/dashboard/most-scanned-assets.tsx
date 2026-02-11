@@ -61,7 +61,10 @@ export default function MostScannedAssets() {
         </Table>
       ) : (
         <div className="flex-1 rounded-b border border-gray-200 p-8">
-          <EmptyState text="No assets scans available" />
+          <EmptyState
+            text="No scans yet"
+            subText="Scan asset QR codes to see your most scanned assets here."
+          />
         </div>
       )}
     </>
