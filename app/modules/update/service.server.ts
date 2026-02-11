@@ -128,7 +128,6 @@ export async function markUpdateAsRead({
   updateId: string;
   userId: string;
 }): Promise<void> {
-
   await db.userUpdateRead.upsert({
     where: {
       userId_updateId: {
