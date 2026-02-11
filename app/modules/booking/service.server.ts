@@ -1977,13 +1977,17 @@ export async function updateBookingAssets({
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
-      const b = await tx.booking.update({
+      // Bulk insert into the join table in a single SQL statement instead of
+      // N individual connect operations which cause transaction timeouts
+      // for large bookings
+      await tx.$executeRaw`
+        INSERT INTO "_AssetToBooking" ("A", "B")
+        SELECT unnest(${assetIds}::text[]), ${id}
+        ON CONFLICT ("A", "B") DO NOTHING
+      `;
+
+      const b = await tx.booking.findUniqueOrThrow({
         where: { id, organizationId },
-        data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
         select: {
           id: true,
           name: true,
