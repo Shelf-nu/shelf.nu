@@ -142,7 +142,7 @@ export default function QrLink() {
   const matches = useMatches();
   const currentRoute = matches[matches.length - 1];
 
-  const isLinkPage = currentRoute?.id === "routes/qr+/$qrId_.link";
+  const isLinkPage = currentRoute?.id === "routes/qr+/_private+/$qrId_.link";
 
   return (
     <>

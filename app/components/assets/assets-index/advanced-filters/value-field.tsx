@@ -40,6 +40,44 @@ import { extractQrIdFromValue } from "./helpers";
 import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
+/**
+ * Helper to filter out conflicting special values in multi-select.
+ * When user selects a positive option (e.g., "in-custody"), automatically
+ * removes the negative option (e.g., "without-custody") and vice versa.
+ *
+ * @param newSelection - The new selection array from the dropdown
+ * @param previousSelection - The previous selection array
+ * @param positiveId - The ID of the positive option (e.g., "in-custody")
+ * @param negativeId - The ID of the negative option (e.g., "without-custody")
+ * @returns Filtered selection with conflicting options removed
+ */
+function filterConflictingSelections(
+  newSelection: string[],
+  previousSelection: string[],
+  positiveId: string,
+  negativeId: string
+): string[] {
+  const hasPositive = newSelection.includes(positiveId);
+  const hasNegative = newSelection.includes(negativeId);
+
+  // No conflict
+  if (!hasPositive || !hasNegative) {
+    return newSelection;
+  }
+
+  // Both selected - remove the one that was already selected (keep newly added)
+  const hadPositive = previousSelection.includes(positiveId);
+  const hadNegative = previousSelection.includes(negativeId);
+
+  if (hadPositive && !hadNegative) {
+    // User just added negative, remove positive
+    return newSelection.filter((id) => id !== positiveId);
+  } else {
+    // User just added positive (or both are new), remove negative
+    return newSelection.filter((id) => id !== negativeId);
+  }
+}
+
 export function ValueField({
   filter,
   setFilter,
@@ -853,6 +891,10 @@ function CustodyEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search team members",
+    withValueItem: {
+      id: "in-custody",
+      name: "In custody",
+    },
     withoutValueItem: {
       id: "without-custody",
       name: "Without custody",
@@ -881,6 +923,9 @@ function CustodyEnumField({
                 {selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-custody") {
+                          return "In custody";
+                        }
                         if (id === "without-custody") {
                           return "Without custody";
                         }
@@ -902,8 +947,16 @@ function CustodyEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedTeamMemberIds) => {
-          handleChange(selectedTeamMemberIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "in-custody",
+            "without-custody"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1086,6 +1139,10 @@ function LocationEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search locations",
+    withValueItem: {
+      id: "in-location",
+      name: "In a location",
+    },
     withoutValueItem: {
       id: "without-location",
       name: "Without location",
@@ -1116,6 +1173,9 @@ function LocationEnumField({
                   : selectedIds.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-location") {
+                          return "In a location";
+                        }
                         if (id === "without-location") {
                           return "Without location";
                         }
@@ -1135,8 +1195,16 @@ function LocationEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedLocationsIds) => {
-          handleChange(selectedLocationsIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "in-location",
+            "without-location"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1199,6 +1267,10 @@ function KitEnumField({
     hideLabel: true,
     hideCounter: true,
     placeholder: "Search kits",
+    withValueItem: {
+      id: "in-kit",
+      name: "In a kit",
+    },
     withoutValueItem: {
       id: "without-kit",
       name: "Without kit",
@@ -1229,6 +1301,9 @@ function KitEnumField({
                   : selectedIds.length > 0 && data.kits && data.kits.length > 0
                   ? selectedIds
                       .map((id) => {
+                        if (id === "in-kit") {
+                          return "In a kit";
+                        }
                         if (id === "without-kit") {
                           return "Without kit";
                         }
@@ -1246,8 +1321,16 @@ function KitEnumField({
         className="z-[999999]"
         selectionMode="none"
         defaultValues={selectedIds}
-        onSelectionChange={(selectedKitsIds) => {
-          handleChange(selectedKitsIds.join(","));
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "in-kit",
+            "without-kit"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
         }}
       />
     );
@@ -1269,6 +1352,134 @@ function KitEnumField({
       triggerWrapperClassName="w-full text-gray-700"
       className="z-[999999]"
       contentLabel="Kit"
+    />
+  );
+}
+
+/** Component that handles upcoming bookings selection for both single and multi-select scenarios */
+function UpcomingBookingsEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected Booking IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    // Handle multi-select values
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "booking" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id,
+    }),
+    renderItem: (item: any) => item.name,
+    initialDataKey: "bookings",
+    countKey: "totalBookings",
+    label: "Filter by booking",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search bookings",
+    withValueItem: {
+      id: "has-booking",
+      name: "Has upcoming bookings",
+    },
+    withoutValueItem: {
+      id: "without-booking",
+      name: "No upcoming bookings",
+    },
+    disabled,
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        name={name}
+        trigger={
+          <Button
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0 &&
+                    data.bookings &&
+                    data.bookings.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        if (id === "has-booking") {
+                          return "Has upcoming bookings";
+                        }
+                        if (id === "without-booking") {
+                          return "No upcoming bookings";
+                        }
+                        const booking = data.bookings?.find((b) => b.id === id);
+                        return booking?.name || "";
+                      })
+                      .join(", ")
+                  : "Select booking"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        filterSelection={(newSelection, previousSelection) =>
+          filterConflictingSelections(
+            newSelection,
+            previousSelection,
+            "has-booking",
+            "without-booking"
+          )
+        }
+        onSelectionChange={(filteredIds) => {
+          handleChange(filteredIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      fieldName={name}
+      placeholder={disabled ? "Select a column first" : "Select booking"}
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Booking"
     />
   );
 }
@@ -1465,6 +1676,21 @@ function ValueEnumField({
     return (
       <>
         <KitEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "upcomingBookings") {
+    return (
+      <>
+        <UpcomingBookingsEnumField
           value={value}
           handleChange={handleChange}
           multiSelect={multiSelect}

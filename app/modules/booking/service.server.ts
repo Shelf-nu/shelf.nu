@@ -73,9 +73,11 @@ import {
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  sendBookingUpdatedEmail,
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  getBookingAssetsOrderBy,
   hasAssetBookingConflicts,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
@@ -410,6 +412,7 @@ export async function updateBasicBooking({
   organizationId,
   tags,
   userId,
+  hints,
 }: Partial<
   Pick<
     Booking,
@@ -426,6 +429,7 @@ export async function updateBasicBooking({
   Pick<Booking, "id" | "organizationId"> & {
     tags: { id: string }[];
     userId?: User["id"];
+    hints?: ClientHint;
   }) {
   try {
     const booking = await db.booking
@@ -456,6 +460,7 @@ export async function updateBasicBooking({
           custodianUser: {
             select: {
               id: true,
+              email: true,
               firstName: true,
               lastName: true,
             },
@@ -477,6 +482,10 @@ export async function updateBasicBooking({
           label,
         });
       });
+
+    // Capture old custodian email before the update
+    // (for custodian change scenarios)
+    const oldCustodianEmail = booking.custodianUser?.email;
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
@@ -577,12 +586,27 @@ export async function updateBasicBooking({
       : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
 
+    // Collect plain-text change descriptions for the email
+    const changes: string[] = [];
+
+    // Helper to format dates for email change descriptions
+    const formatDateForEmail = (date: Date) => {
+      if (hints) {
+        return getDateTimeFormatFromHints(hints, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(date);
+      }
+      return date.toISOString();
+    };
+
     // Check and log name changes
     if (name && name !== booking.name) {
       await createSystemBookingNote({
         bookingId: booking.id,
         content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
       });
+      changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
     }
 
     // Check and log description changes
@@ -596,6 +620,7 @@ export async function updateBasicBooking({
         bookingId: booking.id,
         content: `${userLink} changed booking description from ${descriptionChange}.`,
       });
+      changes.push("Booking description was updated");
     }
 
     // Check and log start date changes
@@ -606,6 +631,11 @@ export async function updateBasicBooking({
           booking.from
         )} to ${wrapDateForNote(from)}.`,
       });
+      changes.push(
+        `Start date changed from ${formatDateForEmail(
+          booking.from
+        )} to ${formatDateForEmail(from)}`
+      );
     }
 
     // Check and log end date changes
@@ -616,6 +646,11 @@ export async function updateBasicBooking({
           booking.to
         )} to ${wrapDateForNote(to)}.`,
       });
+      changes.push(
+        `End date changed from ${formatDateForEmail(
+          booking.to
+        )} to ${formatDateForEmail(to)}`
+      );
     }
 
     // Check and log custodian changes
@@ -623,6 +658,11 @@ export async function updateBasicBooking({
       custodianTeamMemberId &&
       custodianTeamMemberId !== booking.custodianTeamMemberId
     ) {
+      // Build custodian name helpers for the email change description
+      const oldCustodianName = booking.custodianUser
+        ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+        : booking.custodianTeamMember?.name ?? "Unknown";
+
       try {
         // Fetch new custodian details
         const newCustodian = await db.teamMember.findUnique({
@@ -661,6 +701,13 @@ export async function updateBasicBooking({
             bookingId: booking.id,
             content: custodianChangeMessage,
           });
+
+          const newCustodianName = newCustodian.user
+            ? `${newCustodian.user.firstName} ${newCustodian.user.lastName}`
+            : newCustodian.name;
+          changes.push(
+            `Custodian changed from ${oldCustodianName} to ${newCustodianName}`
+          );
         }
       } catch (_error) {
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
@@ -668,6 +715,7 @@ export async function updateBasicBooking({
           bookingId: booking.id,
           content: `${userLink} changed booking custodian assignment.`,
         });
+        changes.push("Custodian assignment was changed");
       }
     }
 
@@ -690,6 +738,25 @@ export async function updateBasicBooking({
       await createSystemBookingNote({
         bookingId: booking.id,
         content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
+      });
+      changes.push(`Tags changed from "${oldTagNames}" to "${newTagNames}"`);
+    }
+
+    // Send email notification to custodian(s) about the changes
+    if (changes.length > 0 && hints && userId) {
+      const custodianChanged =
+        custodianTeamMemberId &&
+        custodianTeamMemberId !== booking.custodianTeamMemberId;
+
+      void sendBookingUpdatedEmail({
+        bookingId: booking.id,
+        organizationId,
+        userId,
+        changes,
+        hints,
+        oldCustodianEmail: custodianChanged
+          ? oldCustodianEmail ?? undefined
+          : undefined,
       });
     }
 
@@ -1054,6 +1121,30 @@ export async function checkoutBooking({
           message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
         });
       }
+    }
+
+    /** Server-side validation: Block checkout if any assets are in custody */
+    const assetsInCustody = bookingFound.assets.filter(
+      (asset) => asset.status === AssetStatus.IN_CUSTODY
+    );
+
+    if (assetsInCustody.length > 0) {
+      const assetNames = assetsInCustody
+        .slice(0, 3)
+        .map((asset) => asset.title)
+        .join(", ");
+      const additionalCount =
+        assetsInCustody.length > 3 ? assetsInCustody.length - 3 : 0;
+      const additionalText =
+        additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Assets in custody",
+        message: `Cannot check out booking. Some assets are currently in custody: ${assetNames}${additionalText}. Please release custody first or remove these assets from the booking.`,
+        shouldBeCaptured: false,
+      });
     }
 
     /**
@@ -2075,9 +2166,11 @@ export async function cancelBooking({
   organizationId,
   hints,
   userId,
+  cancellationReason,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   userId?: string;
+  cancellationReason?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -2134,7 +2227,7 @@ export async function cancelBooking({
 
       return tx.booking.update({
         where: { id: bookingFound.id },
-        data: { status: BookingStatus.CANCELLED },
+        data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
           assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -2157,6 +2250,7 @@ export async function cancelBooking({
         to: booking.to as Date,
         bookingId: booking.id,
         hints,
+        cancellationReason,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -2164,6 +2258,7 @@ export async function cancelBooking({
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
         hints,
+        cancellationReason,
       });
 
       sendEmail({
@@ -3152,11 +3247,14 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     // Extract search parameters from request
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
-    const { search } = paramsValues;
-    const status =
-      searchParams.get("status") === "ALL"
-        ? null
-        : (searchParams.get("status") as AssetStatus | null);
+    const { search, orderBy, orderDirection } = paramsValues;
+    // const status =
+    //   searchParams.get("status") === "ALL"
+    //     ? null
+    //     : (searchParams.get("status") as AssetStatus | null);
+
+    // Get dynamic orderBy based on URL params
+    const assetsOrderBy = getBookingAssetsOrderBy(orderBy, orderDirection);
 
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -3165,31 +3263,25 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
 
-    // Build assets include with optional search and status filtering
-    let assetsInclude: Prisma.BookingInclude["assets"] =
-      BOOKING_WITH_ASSETS_INCLUDE.assets;
+    // Build assets include with optional search, status filtering, and dynamic sorting
+    const assetsWhere: Prisma.AssetWhereInput = {};
 
-    // Add WHERE clause if search or status filters are provided
-    if (search || status) {
-      const assetsWhere: Prisma.AssetWhereInput = {};
-
-      if (search) {
-        assetsWhere.title = {
-          contains: search,
-          mode: "insensitive",
-        };
-      }
-
-      // if (status) {
-      //   assetsWhere.status = status;
-      // }
-
-      assetsInclude = {
-        select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
-        orderBy: BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy,
-        where: assetsWhere,
+    if (search) {
+      assetsWhere.title = {
+        contains: search,
+        mode: "insensitive",
       };
     }
+
+    // if (status) {
+    //   assetsWhere.status = status;
+    // }
+
+    const assetsInclude: Prisma.BookingInclude["assets"] = {
+      select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
+      orderBy: assetsOrderBy,
+      ...(Object.keys(assetsWhere).length > 0 && { where: assetsWhere }),
+    };
 
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,

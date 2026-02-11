@@ -21,6 +21,8 @@ interface Props {
   hints: ClientHint;
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
+  cancellationReason?: string;
+  changes?: string[];
 }
 
 export function BookingUpdatesEmailTemplate({
@@ -30,6 +32,8 @@ export function BookingUpdatesEmailTemplate({
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
+  cancellationReason,
+  changes,
 }: Props) {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -46,7 +50,12 @@ export function BookingUpdatesEmailTemplate({
       </Head>
 
       <Container
-        style={{ padding: "32px 16px", textAlign: "center", maxWidth: "100%" }}
+        style={{
+          padding: "32px 16px",
+          textAlign: "center",
+          maxWidth: "600px",
+          margin: "0 auto",
+        }}
       >
         <div
           style={{
@@ -83,6 +92,61 @@ export function BookingUpdatesEmailTemplate({
           </p>
         </div>
 
+        {cancellationReason && (
+          <div
+            style={{
+              margin: "0 0 24px",
+              padding: "16px",
+              borderLeft: "4px solid #F79009",
+              backgroundColor: "#FFFAEB",
+              textAlign: "left",
+              borderRadius: "4px",
+            }}
+          >
+            <p
+              style={{
+                ...styles.p,
+                margin: "0 0 4px",
+                fontWeight: "600",
+              }}
+            >
+              Cancellation reason
+            </p>
+            <p style={{ ...styles.p, margin: "0" }}>{cancellationReason}</p>
+          </div>
+        )}
+
+        {changes && changes.length > 0 && (
+          <div
+            style={{
+              textAlign: "left",
+              margin: "24px 0",
+              backgroundColor: "#F9FAFB",
+              borderRadius: "8px",
+              border: "1px solid #EAECF0",
+              padding: "16px 20px",
+            }}
+          >
+            <p
+              style={{
+                ...styles.p,
+                fontWeight: "600",
+                color: "#101828",
+                marginBottom: "8px",
+              }}
+            >
+              What changed:
+            </p>
+            <ul style={{ margin: "0", paddingLeft: "20px" }}>
+              {changes.map((change, i) => (
+                <li key={i} style={{ ...styles.li, marginBottom: "4px" }}>
+                  {change}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {!hideViewButton && (
           <Button
             href={`${SERVER_URL}/bookings/${booking.id}?orgId=${booking.organizationId}`}
@@ -117,6 +181,8 @@ export const bookingUpdatesTemplateString = ({
   hints,
   hideViewButton = false,
   isAdminEmail = false,
+  cancellationReason,
+  changes,
 }: Props) =>
   render(
     <BookingUpdatesEmailTemplate
@@ -126,5 +192,7 @@ export const bookingUpdatesTemplateString = ({
       hints={hints}
       hideViewButton={hideViewButton}
       isAdminEmail={isAdminEmail}
+      cancellationReason={cancellationReason}
+      changes={changes}
     />
   );

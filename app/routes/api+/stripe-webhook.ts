@@ -1,18 +1,56 @@
+/**
+ * Stripe Webhook Handler
+ *
+ * Enable these events in Stripe Dashboard → Developers → Webhooks:
+ *
+ * Checkout:
+ *   - checkout.session.completed
+ *
+ * Subscriptions:
+ *   - customer.subscription.created
+ *   - customer.subscription.updated
+ *   - customer.subscription.paused
+ *   - customer.subscription.deleted
+ *   - customer.subscription.trial_will_end
+ *
+ * Invoices:
+ *   - invoice.paid
+ *   - invoice.payment_failed
+ *   - invoice.overdue
+ *   - invoice.voided
+ *   - invoice.marked_uncollectible
+ *
+ * Payment Methods:
+ *   - payment_method.attached
+ *   - payment_method.detached
+ */
+
 import { TierId } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
+import {
+  unpaidInvoiceAdminText,
+  unpaidInvoiceUserText,
+} from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
-import { CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
+import { ADMIN_EMAIL, CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
+  customerHasPaymentMethod,
   fetchStripeSubscription,
+  getCustomerActiveSubscription,
+  getCustomerNotificationData,
   getDataFromStripeEvent,
+  getInvoiceNotificationData,
+  getStripeCustomer,
   stripe,
+  type CustomerWithSubscriptions,
 } from "~/utils/stripe.server";
 
 const subscriptionTiersPriority: Record<TierId, number> = {
@@ -65,17 +103,46 @@ export async function action({ request }: ActionFunctionArgs) {
     );
 
     const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");
-    const eventData = event.data.object as { customer: string };
-    const customerId = eventData.customer;
+    const eventData = event.data.object as { customer: string | null };
+
+    // For payment_method.detached, customer is null on the object but available in previous_attributes
+    let customerId = eventData.customer;
+    if (!customerId && event.type === "payment_method.detached") {
+      const previousAttributes = event.data.previous_attributes as
+        | { customer?: string }
+        | undefined;
+      customerId = previousAttributes?.customer ?? null;
+    }
+
+    // If we still don't have a customerId, return early for payment method events
+    // (this can happen if the payment method was never attached to a customer)
+    if (!customerId) {
+      if (
+        event.type === "payment_method.attached" ||
+        event.type === "payment_method.detached"
+      ) {
+        return new Response(null, { status: 200 });
+      }
+      // For other events, customerId is required
+      throw new ShelfError({
+        cause: null,
+        message: "No customer ID found in event",
+        additionalData: { event: event.type },
+        label: "Stripe webhook",
+        status: 400,
+      });
+    }
+
     const user = await db.user
       .findFirstOrThrow({
-        where: { customerId },
+        where: { customerId: customerId as string },
         select: {
           id: true,
           email: true,
           firstName: true,
           lastName: true,
           tierId: true,
+          warnForNoPaymentMethod: true,
         },
       })
       .catch((cause) => {
@@ -161,7 +228,7 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.created": {
-        const { subscription, customerId, tierId, productType } =
+        const { subscription, customerId, tierId, productType, product } =
           await getDataFromStripeEvent(event);
 
         if (
@@ -180,8 +247,8 @@ export async function action({ request }: ActionFunctionArgs) {
           !!subscription.trial_end && !!subscription.trial_start;
 
         if (isTrialSubscription) {
-          /** WHen its a trial subscription, update the tier of the user */
-          const user = await db.user
+          /** When its a trial subscription, update the tier and mark trial as used */
+          const trialUser = await db.user
             .update({
               where: { customerId },
               data: {
@@ -202,8 +269,48 @@ export async function action({ request }: ActionFunctionArgs) {
 
           /** Send the TRIAL welcome email with instructions */
           void sendTeamTrialWelcomeEmail({
-            email: user.email,
+            email: trialUser.email,
           });
+        } else {
+          /**
+           * For non-trial subscriptions (e.g., admin manually created subscription),
+           * update the tier immediately without waiting for invoice payment
+           */
+          await db.user
+            .update({
+              where: { customerId },
+              data: {
+                tierId: tierId as TierId,
+              },
+              select: { id: true },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "Failed to update user tier",
+                additionalData: { customerId, tierId, event },
+                label: "Stripe webhook",
+                status: 500,
+              });
+            });
+
+          // Send email notification to user about their new subscription (deduplicated)
+          const { emailsToNotify, customerName } =
+            await getCustomerNotificationData({ customerId, user });
+
+          // Get the product name (product is already fetched in getDataFromStripeEvent)
+          const subscriptionName = product?.name || "Shelf Subscription";
+
+          for (const email of emailsToNotify) {
+            sendEmail({
+              to: email,
+              subject: "Your Shelf subscription is now active",
+              text: subscriptionGrantedText({
+                customerName,
+                subscriptionName,
+              }),
+            });
+          }
         }
 
         return new Response(null, { status: 200 });
@@ -356,6 +463,313 @@ export async function action({ request }: ActionFunctionArgs) {
         return new Response(null, { status: 200 });
       }
 
+      case "invoice.payment_failed": {
+        const failedInvoice = event.data.object as Stripe.Invoice;
+
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: true },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        // If user was warned about missing payment method and payment fails,
+        // pause the subscription immediately instead of waiting for Stripe's retry logic.
+        // This prevents service without payment method from continuing through retry period.
+        const failedSubscriptionId =
+          failedInvoice.parent?.subscription_details?.subscription;
+        if (user.warnForNoPaymentMethod && failedSubscriptionId) {
+          await stripe.subscriptions.update(failedSubscriptionId as string, {
+            pause_collection: {
+              behavior: "void", // Void upcoming invoices while paused
+            },
+          });
+          // Note: This will trigger customer.subscription.paused webhook
+          // which handles tier downgrade
+        }
+
+        // Send admin notification
+        if (ADMIN_EMAIL) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Unpaid invoice: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: failedInvoice.id,
+            }),
+          });
+        }
+
+        // Send user notification (deduplicated)
+        const {
+          emailsToNotify,
+          customerName,
+          subscriptionName,
+          amountDue,
+          dueDate,
+        } = await getInvoiceNotificationData({
+          customerId,
+          invoice: failedInvoice,
+          user,
+        });
+
+        for (const email of emailsToNotify) {
+          sendEmail({
+            to: email,
+            subject:
+              "Action needed: Payment issue with your Shelf subscription",
+            text: unpaidInvoiceUserText({
+              customerEmail: email,
+              customerName,
+              subscriptionName,
+              amountDue,
+              dueDate,
+            }),
+          });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "invoice.paid": {
+        const paidInvoice = event.data.object as Stripe.Invoice;
+
+        // Clear unpaid invoice flag and missing payment method warning
+        // (paying an invoice proves they have a working payment method)
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: false, warnForNoPaymentMethod: false },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        /**
+         * Safety net: Update user tier when a subscription invoice is paid.
+         *
+         * In most cases, the tier is already set by `customer.subscription.created`.
+         * However, this serves as a fallback for edge cases like:
+         * - Subscription created in "incomplete" state that only activates after payment
+         * - If `customer.subscription.created` event was missed or failed
+         * - Any other scenario where the tier wasn't properly set on creation
+         */
+        // In Stripe API 2026-01-28, subscription moved to parent.subscription_details
+        const subscriptionId =
+          paidInvoice.parent?.subscription_details?.subscription;
+        if (subscriptionId) {
+          const subscription = await fetchStripeSubscription(
+            subscriptionId as string
+          );
+
+          if (subscription.status === "active") {
+            const product = subscription.items.data[0].plan
+              .product as Stripe.Product;
+            const tierId = product?.metadata?.shelf_tier;
+            const productType = product?.metadata?.product_type;
+
+            // Only update tier for non-addon products
+            if (tierId && productType !== "addon") {
+              const newSubscriptionIsHigherOrEqualTier =
+                subscriptionTiersPriority[tierId as TierId] >=
+                subscriptionTiersPriority[user.tierId];
+
+              if (newSubscriptionIsHigherOrEqualTier) {
+                await db.user
+                  .update({
+                    where: { customerId },
+                    data: { tierId: tierId as TierId },
+                    select: { id: true },
+                  })
+                  .catch((cause) => {
+                    throw new ShelfError({
+                      cause,
+                      message: "Failed to update user tier from paid invoice",
+                      additionalData: { customerId, tierId, event },
+                      label: "Stripe webhook",
+                      status: 500,
+                    });
+                  });
+              }
+            }
+          }
+        }
+
+        // Only send admin notification for actual paid invoices (not $0 trial invoices)
+        if (ADMIN_EMAIL && paidInvoice.amount_paid > 0) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Invoice resolved: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: paidInvoice.id,
+            }),
+          });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "invoice.voided":
+      case "invoice.marked_uncollectible": {
+        const resolvedInvoice = event.data.object as Stripe.Invoice;
+
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: false },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        if (ADMIN_EMAIL) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Invoice resolved: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: resolvedInvoice.id,
+            }),
+          });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "invoice.overdue": {
+        const overdueInvoice = event.data.object as Stripe.Invoice;
+
+        // Mark user as having unpaid invoice
+        await db.user
+          .update({
+            where: { customerId },
+            data: { hasUnpaidInvoice: true },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update unpaid invoice flag",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        // Send admin notification
+        if (ADMIN_EMAIL) {
+          sendEmail({
+            to: ADMIN_EMAIL,
+            subject: `Invoice overdue: ${user.email}`,
+            text: unpaidInvoiceAdminText({
+              user,
+              eventType: event.type,
+              invoiceId: overdueInvoice.id,
+            }),
+          });
+        }
+
+        // Send user notification (deduplicated)
+        const {
+          emailsToNotify,
+          customerName,
+          subscriptionName,
+          amountDue,
+          dueDate,
+        } = await getInvoiceNotificationData({
+          customerId,
+          invoice: overdueInvoice,
+          user,
+        });
+
+        for (const email of emailsToNotify) {
+          sendEmail({
+            to: email,
+            subject: "Action needed: Your Shelf invoice is overdue",
+            text: unpaidInvoiceUserText({
+              customerEmail: email,
+              customerName,
+              subscriptionName,
+              amountDue,
+              dueDate,
+            }),
+          });
+        }
+
+        // Downgrade user tier if invoice is for a subscription with a tier
+        const subscriptionId =
+          overdueInvoice.parent?.subscription_details?.subscription;
+        if (subscriptionId) {
+          const subscription = await fetchStripeSubscription(
+            subscriptionId as string
+          );
+          const product = subscription.items.data[0].plan
+            .product as Stripe.Product;
+          const tierId = product?.metadata?.shelf_tier;
+          const productType = product?.metadata?.product_type;
+
+          // Only downgrade for non-addon subscription products with a tier
+          if (tierId && productType !== "addon") {
+            const subscriptionTierIsHigherOrEqual =
+              subscriptionTiersPriority[tierId as TierId] >=
+              subscriptionTiersPriority[user.tierId];
+
+            if (subscriptionTierIsHigherOrEqual) {
+              await db.user
+                .update({
+                  where: { customerId },
+                  data: { tierId: TierId.free },
+                  select: { id: true },
+                })
+                .catch((cause) => {
+                  throw new ShelfError({
+                    cause,
+                    message:
+                      "Failed to downgrade user tier for overdue invoice",
+                    additionalData: { customerId, tierId, event },
+                    label: "Stripe webhook",
+                    status: 500,
+                  });
+                });
+
+              // Reset branding when downgrading from Plus (tier_1) to Free
+              if (user.tierId === TierId.tier_1) {
+                await resetPersonalWorkspaceBranding(user.id);
+              }
+            }
+          }
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
       case "customer.subscription.trial_will_end": {
         // Occurs three days before the trial period of a subscription is scheduled to end.
         const { tierId, subscription, productType } =
@@ -389,6 +803,65 @@ export async function action({ request }: ActionFunctionArgs) {
               subscription,
             }),
           });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "payment_method.attached": {
+        // Clear the warning flag when user adds a payment method
+        // This is triggered when a user adds a payment method via the Stripe portal
+        await db.user
+          .update({
+            where: { customerId },
+            data: { warnForNoPaymentMethod: false },
+            select: { id: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to clear missing payment method warning",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+              status: 500,
+            });
+          });
+
+        return new Response(null, { status: 200 });
+      }
+
+      case "payment_method.detached": {
+        // When user removes a payment method, check if they still have one
+        // If they have an active subscription but no payment method, warn them
+        const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+
+        if (!hasPaymentMethod) {
+          // Check if user has an active subscription
+          const customer = (await getStripeCustomer(
+            customerId
+          )) as CustomerWithSubscriptions;
+          const activeSubscription = getCustomerActiveSubscription({
+            customer,
+          });
+
+          if (activeSubscription) {
+            // User has subscription but no payment method - set warning
+            await db.user
+              .update({
+                where: { customerId },
+                data: { warnForNoPaymentMethod: true },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to set missing payment method warning",
+                  additionalData: { customerId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
+              });
+          }
         }
 
         return new Response(null, { status: 200 });

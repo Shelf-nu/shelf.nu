@@ -18,6 +18,7 @@ import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import {
   BookingFormSchema,
+  CancelBookingSchema,
   ExtendBookingSchema,
 } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
@@ -28,6 +29,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
   archiveBooking,
   cancelBooking,
@@ -103,7 +106,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const { page, perPageParam } = paramsValues;
+  const { page, perPageParam, orderDirection } = paramsValues;
+  // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
+  const orderBy =
+    paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -201,47 +207,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
     const enhancedBooking = booking;
 
-    // Sort assets by booking context priority
-    enhancedBooking.assets = sortBookingAssets(
+    // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
+    // For other sort options, the database orderBy is sufficient
+    const isStatusSort = !orderBy || orderBy === "status";
+    if (isStatusSort) {
+      enhancedBooking.assets = sortBookingAssets(
+        enhancedBooking.assets,
+        partialCheckinDetails
+      );
+    }
+
+    // Use helper to group assets by kit and sort them
+    const sortedAssets = groupAndSortAssetsByKit(
       enhancedBooking.assets,
-      partialCheckinDetails
+      orderBy,
+      orderDirection
     );
 
-    // Group assets by kitId for pagination purposes
-    const assetsByKit: Record<
-      string,
-      Array<(typeof enhancedBooking.assets)[0]>
-    > = {};
-    const individualAssets: Array<(typeof enhancedBooking.assets)[0]> = [];
-
-    enhancedBooking.assets.forEach((asset) => {
-      if (asset.kitId) {
-        if (!assetsByKit[asset.kitId]) {
-          assetsByKit[asset.kitId] = [];
-        }
-        assetsByKit[asset.kitId].push(asset);
-      } else {
-        individualAssets.push(asset);
-      }
-    });
-
-    // Create pagination items where each kit or individual asset is one item
+    // Convert sorted assets to pagination items (kits grouped, individual assets separate)
     const paginationItems: Array<{
       type: "kit" | "asset";
       id: string;
       assets: Array<(typeof enhancedBooking.assets)[0]>;
-    }> = [
-      ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
-        type: "kit" as const,
-        id: kitId,
-        assets,
-      })),
-      ...individualAssets.map((asset) => ({
-        type: "asset" as const,
-        id: asset.id,
-        assets: [asset],
-      })),
-    ];
+    }> = [];
+
+    const processedKitIds = new Set<string>();
+    for (const asset of sortedAssets) {
+      if (asset.kitId && asset.kit) {
+        // Kit asset - group with other assets from same kit
+        if (!processedKitIds.has(asset.kitId)) {
+          processedKitIds.add(asset.kitId);
+          const kitAssets = sortedAssets.filter((a) => a.kitId === asset.kitId);
+          paginationItems.push({
+            type: "kit",
+            id: asset.kitId,
+            assets: kitAssets,
+          });
+        }
+      } else {
+        // Individual asset
+        paginationItems.push({
+          type: "asset",
+          id: asset.id,
+          assets: [asset],
+        });
+      }
+    }
 
     // Calculate pagination
     const totalPaginationItems = paginationItems.length;
@@ -456,14 +467,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ...teamMembersData,
         teamMembersForForm,
         bookingFlags,
-        totalKits: Object.keys(assetsByKit).length,
+        totalKits: paginationItems.filter((item) => item.type === "kit").length,
         totalValue: calculateTotalValueOfAssets({
           assets: enhancedBooking.assets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
         /** Assets inside the booking without kits */
-        assetsCount: individualAssets.length,
+        assetsCount: paginationItems.filter((item) => item.type === "asset")
+          .length,
         totalAssets: totalBookingAssets,
         allCategories,
         tags,
@@ -637,6 +649,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianTeamMemberId: parsedData.custodian?.id,
           tags,
           userId,
+          hints: getClientHint(request),
         });
 
         sendNotification({
@@ -889,6 +902,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           assets: asset ? [asset] : [],
         });
 
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "An asset was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
+        });
+
         sendNotification({
           title: "Asset removed",
           message: "Your asset has been removed from the booking",
@@ -913,11 +936,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "cancel": {
+        const { cancellationReason } = parseData(
+          formData,
+          CancelBookingSchema,
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
         const cancelledBooking = await cancelBooking({
           id,
           organizationId,
           hints: getClientHint(request),
           userId: user.id,
+          cancellationReason,
         });
 
         const actor = wrapUserLinkForNote({
@@ -930,7 +961,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           cancelledBooking.name.trim()
         );
         await createNotes({
-          content: `${actor} cancelled booking ${cancelledBookingLink}.`,
+          content: `${actor} cancelled booking ${cancelledBookingLink}.${
+            cancellationReason ? `\n\nReason: ${cancellationReason}` : ""
+          }`,
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
@@ -972,6 +1005,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // The assets parameter is used for note content, not for actual removal
           assets: [],
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "A kit was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({
@@ -1085,6 +1128,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           lastName: user?.lastName || "",
           userId,
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "Assets and/or kits were removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({

@@ -93,6 +93,8 @@ import { Logger } from "~/utils/logger";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
+  wrapAssetsWithDataForNote,
+  wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
@@ -133,6 +135,7 @@ import {
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createAssetCategoryChangeNote,
   createAssetDescriptionChangeNote,
@@ -1449,6 +1452,52 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+
+      // Create location activity notes
+      const userLink = wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+      const assetData = [{ id: asset.id, title: asset.title }];
+
+      if (newLocation) {
+        const newLocLink = wrapLinkForNote(
+          `/locations/${newLocation.id}`,
+          newLocation.name
+        );
+        const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+        const movedFrom = currentLocation
+          ? ` Moved from ${wrapLinkForNote(
+              `/locations/${currentLocation.id}`,
+              currentLocation.name
+            )}.`
+          : "";
+        await createSystemLocationNote({
+          locationId: newLocation.id,
+          content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
+          userId,
+        });
+      }
+
+      if (currentLocation && currentLocation.id !== newLocation?.id) {
+        const prevLocLink = wrapLinkForNote(
+          `/locations/${currentLocation.id}`,
+          currentLocation.name
+        );
+        const assetMarkup = wrapAssetsWithDataForNote(assetData, "removed");
+        const movedTo = newLocation
+          ? ` Moved to ${wrapLinkForNote(
+              `/locations/${newLocation.id}`,
+              newLocation.name
+            )}.`
+          : "";
+        await createSystemLocationNote({
+          locationId: currentLocation.id,
+          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
+          userId,
+        });
+      }
     }
 
     if (assetBeforeUpdate && trackedFieldUpdates) {
@@ -3480,36 +3529,116 @@ export async function bulkUpdateAssetLocation({
         })
       : null;
 
+    // Filter out assets already at the target location
+    const assetsToUpdate = assets.filter(
+      (a) => a.location?.id !== newLocation?.id
+    );
+
     await db.$transaction(async (tx) => {
-      /** Updating location of assets to newLocation */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { locationId: newLocation?.id ? newLocation.id : null },
-      });
+      if (assetsToUpdate.length > 0) {
+        /** Updating location of assets to newLocation */
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
+          data: { locationId: newLocation?.id ? newLocation.id : null },
+        });
 
-      /** Creating notes for the assets */
-      await tx.note.createMany({
-        data: assets.map((asset) => {
-          const isRemoving = !newLocationId;
+        /** Creating notes for the assets */
+        await tx.note.createMany({
+          data: assetsToUpdate.map((asset) => {
+            const isRemoving = !newLocationId;
 
-          const content = getLocationUpdateNoteContent({
-            currentLocation: asset.location,
-            newLocation,
-            userId,
-            firstName: user?.firstName ?? "",
-            lastName: user?.lastName ?? "",
-            isRemoving,
-          });
+            const content = getLocationUpdateNoteContent({
+              currentLocation: asset.location,
+              newLocation,
+              userId,
+              firstName: user?.firstName ?? "",
+              lastName: user?.lastName ?? "",
+              isRemoving,
+            });
 
-          return {
-            content,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          };
-        }),
-      });
+            return {
+              content,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
     });
+
+    // Create location activity notes
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    // Filter out assets already at the target location
+    const actuallyChanged = assets.filter(
+      (a) => a.location?.id !== newLocation?.id
+    );
+    const assetData = actuallyChanged.map((a) => ({
+      id: a.id,
+      title: a.title,
+    }));
+
+    // Group assets by their previous location
+    const byPrevLocation = new Map<
+      string,
+      { name: string; assets: typeof assetData }
+    >();
+    for (const asset of actuallyChanged) {
+      if (!asset.location) continue;
+      const existing = byPrevLocation.get(asset.location.id);
+      if (existing) {
+        existing.assets.push({ id: asset.id, title: asset.title });
+      } else {
+        byPrevLocation.set(asset.location.id, {
+          name: asset.location.name,
+          assets: [{ id: asset.id, title: asset.title }],
+        });
+      }
+    }
+
+    // Note on the new location
+    if (newLocation && assetData.length > 0) {
+      const newLocLink = wrapLinkForNote(
+        `/locations/${newLocation.id}`,
+        newLocation.name
+      );
+      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+
+      const prevLocLinks = [...byPrevLocation.entries()].map(([id, { name }]) =>
+        wrapLinkForNote(`/locations/${id}`, name)
+      );
+      const movedFromSuffix =
+        prevLocLinks.length > 0
+          ? ` Moved from ${prevLocLinks.join(", ")}.`
+          : "";
+
+      await createSystemLocationNote({
+        locationId: newLocation.id,
+        content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
+        userId,
+      });
+    }
+
+    // Removal notes on previous locations
+    for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
+      const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+      const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
+      const movedToSuffix = newLocation
+        ? ` Moved to ${wrapLinkForNote(
+            `/locations/${newLocation.id}`,
+            newLocation.name
+          )}.`
+        : "";
+      await createSystemLocationNote({
+        locationId: locId,
+        content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
+        userId,
+      });
+    }
 
     return true;
   } catch (cause) {

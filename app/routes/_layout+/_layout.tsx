@@ -37,7 +37,9 @@ import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { SequentialIdMigrationModal } from "~/components/sequential-id-migration-modal";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
+import { MissingPaymentMethodBanner } from "~/components/subscription/missing-payment-method-banner";
 import { NoSubscription } from "~/components/subscription/no-subscription";
+import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
@@ -88,6 +90,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         skipSubscriptionCheck: true,
         sso: true,
         tierId: true,
+        hasUnpaidInvoice: true,
+        warnForNoPaymentMethod: true,
         roles: { select: { id: true, name: true } },
         userOrganizations: {
           where: {
@@ -178,10 +182,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
+        scannerCameraId: userPrefsCookie.scannerCameraId as string | undefined,
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         unreadUpdatesCount,
+        hasUnpaidInvoice: user.hasUnpaidInvoice,
+        warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
@@ -228,6 +235,8 @@ export default function App() {
   useCrisp();
   const {
     disabledTeamOrg,
+    hasUnpaidInvoice,
+    warnForNoPaymentMethod,
     minimizedSidebar,
     needsSequentialIdMigration,
     currentOrganizationId,
@@ -248,6 +257,8 @@ export default function App() {
         <AtomsResetHandler />
         <AppSidebar id="navigation" />
         <SidebarInset id="main-content" tabIndex={-1}>
+          {warnForNoPaymentMethod ? <MissingPaymentMethodBanner /> : null}
+          {hasUnpaidInvoice ? <UnpaidInvoiceBanner /> : null}
           {disabledTeamOrg ? (
             <NoSubscription />
           ) : workspaceSwitching ? (

@@ -7,8 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Development
 
 - `npm run dev` - Start development server on port 3000
-- `npm run test` - Run Vitest unit tests
+- `npm run test -- --run` - Run Vitest unit tests (always use `--run` flag to prevent watch mode)
 - `npm run validate` - Run all tests, linting, and typecheck (use before commits)
+
+**IMPORTANT:** When running tests manually, ALWAYS use the `--run` flag (e.g., `npm run test -- --run`) to run tests once and exit. Without `--run`, Vitest runs in watch mode which consumes excessive memory. Never run multiple test processes in parallel as this can freeze the system.
 
 ### Code Quality
 
@@ -82,6 +84,124 @@ app/
 - **Reusable Components**: Organized by feature/domain in `app/components/`
 - **Form Handling**: Remix Form with client-side validation
 - **UI Primitives**: Radix UI components with Tailwind styling
+- **Date Display**: Always use the `DateS` component (`app/components/shared/date.tsx`) for displaying dates in the UI. Do not use raw `toLocaleDateString()` or other custom date formatting.
+
+### Deprecated Components
+
+- **DropdownMenu** (`app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
+
+### Form Validation Pattern (Required)
+
+**IMPORTANT:** All forms MUST display server-side validation errors as a fallback. Client-side validation can fail or be bypassed, so server-side errors must always be shown to users.
+
+**Why This Matters:**
+
+- Client-side validation can be bypassed (disabled JS, modified requests)
+- Zod schemas may behave differently on client vs server (e.g., date comparisons)
+- Users must always see meaningful error messages, never generic "Something went wrong"
+
+**Implementation Steps:**
+
+1. **Import required utilities:**
+
+```typescript
+import { useActionData } from "react-router";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
+```
+
+2. **Get validation errors from action data:**
+
+```typescript
+// Inside your component
+const actionData = useActionData<DataOrErrorResponse>();
+
+/** This handles server side errors in case client side validation fails */
+const validationErrors = getValidationErrors<typeof yourZodSchema>(
+  actionData?.error
+);
+```
+
+3. **Display server errors as fallback in each input:**
+
+```typescript
+<Input
+  name={zo.fields.fieldName()}
+  error={
+    validationErrors?.fieldName?.message || zo.errors.fieldName()?.message
+  }
+  // ... other props
+/>
+```
+
+**Complete Example:**
+
+```typescript
+// Schema definition
+export const myFormSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().email("Invalid email"),
+  date: z.coerce.date().min(new Date(), "Date must be in the future"),
+});
+
+// Component
+export default function MyForm() {
+  const zo = useZorm("MyForm", myFormSchema);
+
+  const actionData = useActionData<DataOrErrorResponse>();
+  const validationErrors = getValidationErrors<typeof myFormSchema>(
+    actionData?.error
+  );
+
+  return (
+    <Form method="POST">
+      <Input
+        name={zo.fields.name()}
+        error={validationErrors?.name?.message || zo.errors.name()?.message}
+        label="Name"
+      />
+      <Input
+        name={zo.fields.email()}
+        error={validationErrors?.email?.message || zo.errors.email()?.message}
+        label="Email"
+      />
+      <Input
+        type="datetime-local"
+        name={zo.fields.date()}
+        error={validationErrors?.date?.message || zo.errors.date()?.message}
+        label="Date"
+      />
+      <Button type="submit">Submit</Button>
+    </Form>
+  );
+}
+```
+
+**Working Examples:**
+
+- Reminder dialog: `app/components/asset-reminder/set-or-edit-reminder-dialog.tsx`
+- Booking form: `app/components/booking/forms/edit-booking-form.tsx`
+
+### Accessibility
+
+All UI implementations must meet **WCAG 2.1 AA** as a minimum. This includes:
+
+- Sufficient color contrast ratios (4.5:1 for normal text, 3:1 for large text)
+- All interactive elements must be keyboard accessible
+- Form inputs must have associated labels
+- Use `aria-describedby` to link inputs to helper/error text
+- Meaningful alt text for images and icons
+- Focus indicators must be visible
+
+### Code Abstraction
+
+- When you notice duplicated code patterns across multiple files or functions,
+  abstract them into reusable helper functions
+- Before implementing new functionality, check if similar logic already exists
+  that can be extracted and reused
+- Keep helper functions focused on a single responsibility
+- Place shared helpers near the code that uses them, or in a shared utils file
+  if used across multiple modules
 
 ### Key Business Features
 

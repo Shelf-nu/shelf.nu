@@ -86,6 +86,15 @@ type Props = ModelFilterProps & {
     id: string;
     name: string;
   };
+
+  /**
+   * A special item that will be added to the list in dropdown, this item can be used to filter items
+   * that have a value, like "In custody" or "Has location" etc.
+   */
+  withValueItem?: {
+    id: string;
+    name: string;
+  };
 };
 
 export default function DynamicSelect({
@@ -113,6 +122,7 @@ export default function DynamicSelect({
   hidden = false,
   hideShowAll = false,
   withoutValueItem,
+  withValueItem,
   popoverZIndexClassName,
   ...hookProps
 }: Props) {
@@ -152,20 +162,30 @@ export default function DynamicSelect({
     [excludeItems, itemsWithCreated]
   );
 
-  // Create array that includes withoutValueItem if provided
+  // Create array that includes special items if provided
   const allItemsToRender = useMemo(() => {
-    if (!withoutValueItem) return itemsToRender;
+    const specialItems: ModelFilterItem[] = [];
 
-    // Add withoutValueItem at the beginning
-    return [
-      {
+    if (withValueItem) {
+      specialItems.push({
+        id: withValueItem.id,
+        name: withValueItem.name,
+        metadata: {},
+      });
+    }
+
+    if (withoutValueItem) {
+      specialItems.push({
         id: withoutValueItem.id,
         name: withoutValueItem.name,
         metadata: {},
-      },
-      ...itemsToRender,
-    ];
-  }, [withoutValueItem, itemsToRender]);
+      });
+    }
+
+    if (specialItems.length === 0) return itemsToRender;
+
+    return [...specialItems, ...itemsToRender];
+  }, [withValueItem, withoutValueItem, itemsToRender]);
 
   function handleItemChange(id: string) {
     const isDeselecting = allowClear && selectedValue === id;
@@ -342,35 +362,64 @@ export default function DynamicSelect({
                     modelName={model.name}
                   />
                 )}
-                {/* Show withoutValueItem only when there's no search query */}
-                {withoutValueItem && searchQuery === "" && (
+                {/* Show special items only when there's no search query */}
+                {(withValueItem || withoutValueItem) && searchQuery === "" && (
                   <>
                     <div className="h-2 w-full bg-gray-50" />
-                    <div
-                      key={withoutValueItem.id}
-                      className={tw(
-                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                        withoutValueItem.id === selectedValue && "bg-gray-100"
-                      )}
-                      role="option"
-                      aria-selected={withoutValueItem.id === selectedValue}
-                      tabIndex={0}
-                      onClick={() => {
-                        handleItemChange(withoutValueItem.id);
-                      }}
-                      onKeyDown={handleActivationKeyPress(() =>
-                        handleItemChange(withoutValueItem.id)
-                      )}
-                    >
-                      <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
-                        {withoutValueItem.name}
-                      </span>
-                      <When truthy={withoutValueItem.id === selectedValue}>
-                        <span className="h-auto w-[18px] text-primary">
-                          <CheckIcon />
+                    {withValueItem && (
+                      <div
+                        key={withValueItem.id}
+                        className={tw(
+                          "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                          withValueItem.id === selectedValue && "bg-gray-100"
+                        )}
+                        role="option"
+                        aria-selected={withValueItem.id === selectedValue}
+                        tabIndex={0}
+                        onClick={() => {
+                          handleItemChange(withValueItem.id);
+                        }}
+                        onKeyDown={handleActivationKeyPress(() =>
+                          handleItemChange(withValueItem.id)
+                        )}
+                      >
+                        <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
+                          {withValueItem.name}
                         </span>
-                      </When>
-                    </div>
+                        <When truthy={withValueItem.id === selectedValue}>
+                          <span className="h-auto w-[18px] text-primary">
+                            <CheckIcon />
+                          </span>
+                        </When>
+                      </div>
+                    )}
+                    {withoutValueItem && (
+                      <div
+                        key={withoutValueItem.id}
+                        className={tw(
+                          "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                          withoutValueItem.id === selectedValue && "bg-gray-100"
+                        )}
+                        role="option"
+                        aria-selected={withoutValueItem.id === selectedValue}
+                        tabIndex={0}
+                        onClick={() => {
+                          handleItemChange(withoutValueItem.id);
+                        }}
+                        onKeyDown={handleActivationKeyPress(() =>
+                          handleItemChange(withoutValueItem.id)
+                        )}
+                      >
+                        <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
+                          {withoutValueItem.name}
+                        </span>
+                        <When truthy={withoutValueItem.id === selectedValue}>
+                          <span className="h-auto w-[18px] text-primary">
+                            <CheckIcon />
+                          </span>
+                        </When>
+                      </div>
+                    )}
                     <div className="h-2 w-full bg-gray-50" />
                   </>
                 )}
