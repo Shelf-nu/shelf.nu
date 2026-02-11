@@ -133,6 +133,11 @@ export async function createCategoriesIfNotExists({
         .map((asset) => [asset.category, ""])
     );
 
+    // Handle the case where there are no categories
+    if (categories.has(undefined)) {
+      return {};
+    }
+
     // now we loop through the categories and check if they exist
     for (const [category, _] of categories) {
       const trimmedCategory = (category as string).trim();
