@@ -3,8 +3,9 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, parseData, safeRedirect } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -19,11 +20,39 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    // Persist to database for cross-device workspace persistence
-    await db.user.update({
-      where: { id: userId },
-      data: { lastSelectedOrganizationId: organizationId },
+    // Verify the user is a member of the target organization
+    const membership = await db.userOrganization.findUnique({
+      where: {
+        userId_organizationId: { userId, organizationId },
+      },
+      select: { id: true },
     });
+
+    if (!membership) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not a member of this organization.",
+        status: 403,
+        label: "Organization",
+      });
+    }
+
+    // Best-effort persist to database for cross-device workspace persistence.
+    // Uses raw SQL to avoid bumping the User.updatedAt timestamp.
+    try {
+      await db.$executeRaw`
+        UPDATE "User"
+        SET "lastSelectedOrganizationId" = ${organizationId}
+        WHERE "id" = ${userId}
+      `;
+    } catch (cause) {
+      Logger.warn(
+        "Failed to persist lastSelectedOrganizationId",
+        userId,
+        organizationId,
+        cause
+      );
+    }
 
     return redirect(safeRedirect(redirectTo), {
       headers: [

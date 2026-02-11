@@ -1,6 +1,5 @@
 import { createCookie } from "react-router";
 import { getRequestCache } from "@server/request-cache.server";
-import { db } from "~/database/db.server";
 import {
   destroyCookie,
   parseCookie,
@@ -32,6 +31,7 @@ type SelectedOrganization = {
   organizations: OrganizationFromUser[];
   userOrganizations: Awaited<ReturnType<typeof getUserOrganizations>>;
   currentOrganization: OrganizationFromUser;
+  cookieRefreshNeeded: boolean;
 };
 
 type SelectedOrganizationCache = Map<string, Promise<SelectedOrganization>>;
@@ -76,23 +76,27 @@ async function getSelectedOrganizationUncached({
   const organizations = userOrganizations.map((uo) => uo.organization);
   const userOrganizationIds = organizations.map((org) => org.id);
 
+  // Track whether we need to refresh the cookie (fallback was used)
+  let cookieRefreshNeeded = false;
+
   // If the organizationId is not set or the user is not part of the organization,
   // fall back to the last selected organization from the database (cross-device persistence),
   // then to the personal organization, then to the first available organization
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-    // Try to use the last selected organization from the database
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { lastSelectedOrganizationId: true },
-    });
+    cookieRefreshNeeded = true;
+
+    // Piggyback on the already-fetched userOrganizations query
+    const lastSelectedOrganizationId =
+      userOrganizations[0]?.user?.lastSelectedOrganizationId ?? null;
 
     if (
-      user?.lastSelectedOrganizationId &&
-      userOrganizationIds.includes(user.lastSelectedOrganizationId)
+      lastSelectedOrganizationId &&
+      userOrganizationIds.includes(lastSelectedOrganizationId)
     ) {
-      organizationId = user.lastSelectedOrganizationId;
+      // DB field is valid — cross-device persistence working
+      organizationId = lastSelectedOrganizationId;
     } else {
-      // Fall back to personal organization, then first available
+      // DB field is null or points to an org the user lost access to
       const personalOrg = organizations.find((org) => org.type === "PERSONAL");
       organizationId = personalOrg?.id ?? userOrganizationIds[0];
     }
@@ -123,6 +127,7 @@ async function getSelectedOrganizationUncached({
     organizations,
     userOrganizations,
     currentOrganization: nonNullCurrentOrganization,
+    cookieRefreshNeeded,
   };
 }
 

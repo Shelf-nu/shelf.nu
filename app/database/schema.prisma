@@ -50,6 +50,7 @@ model User {
   warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
 
   // Last selected organization for cross-device workspace persistence
+  lastSelectedOrganization   Organization? @relation("lastSelectedOrg", fields: [lastSelectedOrganizationId], references: [id], onDelete: SetNull)
   lastSelectedOrganizationId String?
 
   // Datetime
@@ -105,8 +106,9 @@ model User {
 
   @@unique([email, username])
   @@index([firstName, lastName])
-  // Index for foreign key
+  // Indexes for foreign keys
   @@index([tierId])
+  @@index([lastSelectedOrganizationId])
 }
 
 model UserContact {
@@ -716,7 +718,8 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
-  assetFilterPresets AssetFilterPreset[]
+  assetFilterPresets  AssetFilterPreset[]
+  usersWithLastSelected User[] @relation("lastSelectedOrg")
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
