@@ -84,6 +84,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       {
         message:
           "Invalid request. Please try again. If the issue persists, contact support.",
+        shouldBeCaptured: false,
       }
     );
 
@@ -91,7 +92,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
       case "request-otp": {
         const { email } = parseData(
           await request.formData(),
-          ForgotPasswordSchema
+          ForgotPasswordSchema,
+          { shouldBeCaptured: false }
         );
 
         /** We are going to get the user to make sure it exists and is confirmed
@@ -134,7 +136,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
       case "confirm-otp": {
         const { email, otp, password } = parseData(
           await request.clone().formData(),
-          OtpSchema
+          OtpSchema,
+          { shouldBeCaptured: false }
         );
 
         // Attempt to verify the OTP
