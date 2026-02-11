@@ -1989,14 +1989,21 @@ export async function updateBookingAssets({
         },
       });
 
-      // Bulk insert into the join table in a single SQL statement instead of
-      // N individual connect operations which cause transaction timeouts
-      // for large bookings
-      await tx.$executeRaw`
-        INSERT INTO "_AssetToBooking" ("A", "B")
-        SELECT unnest(${assetIds}::text[]), ${id}
-        ON CONFLICT ("A", "B") DO NOTHING
-      `;
+      await Promise.all([
+        // Bulk insert into the join table in a single SQL statement instead of
+        // N individual connect operations which cause transaction timeouts
+        // for large bookings
+        tx.$executeRaw`
+          INSERT INTO "_AssetToBooking" ("A", "B")
+          SELECT unnest(${assetIds}::text[]), ${id}
+          ON CONFLICT ("A", "B") DO NOTHING
+        `,
+        // Touch updatedAt since the raw INSERT doesn't update the booking row
+        tx.booking.update({
+          where: { id },
+          data: { updatedAt: new Date() },
+        }),
+      ]);
 
       /**
        *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE
