@@ -50,7 +50,12 @@ export function BookingUpdatesEmailTemplate({
       </Head>
 
       <Container
-        style={{ padding: "32px 16px", textAlign: "center", maxWidth: "100%" }}
+        style={{
+          padding: "32px 16px",
+          textAlign: "center",
+          maxWidth: "600px",
+          margin: "0 auto",
+        }}
       >
         <div
           style={{
@@ -90,7 +95,7 @@ export function BookingUpdatesEmailTemplate({
         {cancellationReason && (
           <div
             style={{
-              margin: "0 32px 24px",
+              margin: "0 0 24px",
               padding: "16px",
               borderLeft: "4px solid #F79009",
               backgroundColor: "#FFFAEB",
@@ -115,7 +120,11 @@ export function BookingUpdatesEmailTemplate({
           <div
             style={{
               textAlign: "left",
-              margin: "0 32px 24px",
+              margin: "24px 0",
+              backgroundColor: "#F9FAFB",
+              borderRadius: "8px",
+              border: "1px solid #EAECF0",
+              padding: "16px 20px",
             }}
           >
             <p

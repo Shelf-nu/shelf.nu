@@ -1007,6 +1007,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
         });
 
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "A kit was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
+        });
+
         sendNotification({
           title: "Kit removed",
           message: "Your kit has been removed from the booking",
@@ -1118,6 +1128,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           lastName: user?.lastName || "",
           userId,
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "Assets and/or kits were removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({
