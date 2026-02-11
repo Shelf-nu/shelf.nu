@@ -128,33 +128,30 @@ export async function markUpdateAsRead({
   updateId: string;
   userId: string;
 }): Promise<void> {
-  await db.$transaction(async (prisma) => {
-    // Create read record if it doesn't exist
-    await prisma.userUpdateRead.upsert({
-      where: {
-        userId_updateId: {
-          userId,
-          updateId,
-        },
-      },
-      create: {
+
+  await db.userUpdateRead.upsert({
+    where: {
+      userId_updateId: {
         userId,
         updateId,
       },
-      update: {
-        readAt: new Date(),
-      },
-    });
+    },
+    create: {
+      userId,
+      updateId,
+    },
+    update: {
+      readAt: new Date(),
+    },
+  });
 
-    // Increment view count
-    await prisma.update.update({
-      where: { id: updateId },
-      data: {
-        viewCount: {
-          increment: 1,
-        },
+  await db.update.update({
+    where: { id: updateId },
+    data: {
+      viewCount: {
+        increment: 1,
       },
-    });
+    },
   });
 }
 
