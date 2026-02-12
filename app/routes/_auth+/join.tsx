@@ -96,7 +96,8 @@ export async function action({ request }: ActionFunctionArgs) {
       case "POST": {
         const { email, password } = parseData(
           await request.formData(),
-          JoinFormSchema
+          JoinFormSchema,
+          { shouldBeCaptured: false }
         );
         // Block signup if domain uses SSO
         await validateNonSSOSignup(email);

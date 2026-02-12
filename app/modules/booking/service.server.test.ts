@@ -62,6 +62,7 @@ afterAll(() => {
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    $executeRaw: vitest.fn().mockResolvedValue(0),
     booking: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -1018,7 +1019,7 @@ describe("updateBookingAssets", () => {
   };
 
   it("should update booking assets successfully for DRAFT booking", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
     const mockBooking = {
       id: "booking-1",
@@ -1026,7 +1027,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.DRAFT,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -1036,19 +1037,11 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalledWith({
+    expect(db.booking.findUniqueOrThrow).toHaveBeenCalledWith({
       where: { id: "booking-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }, { id: "asset-2" }],
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-        status: true,
-      },
+      select: { id: true, name: true, status: true },
     });
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(result).toEqual(mockBooking);
   });
 
@@ -1061,7 +1054,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -1071,7 +1064,7 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
@@ -1088,7 +1081,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.OVERDUE,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -1098,7 +1091,7 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
@@ -1115,7 +1108,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -1124,7 +1117,7 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(params);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
@@ -1145,7 +1138,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -1155,7 +1148,7 @@ describe("updateBookingAssets", () => {
 
     await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalled();
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
@@ -1169,7 +1162,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -1184,7 +1177,7 @@ describe("updateBookingAssets", () => {
 
     await updateBookingAssets(params);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalled();
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
@@ -1198,7 +1191,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.RESERVED,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -1207,16 +1200,16 @@ describe("updateBookingAssets", () => {
 
     await updateBookingAssets(params);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 
-  it("should throw ShelfError when booking update fails", async () => {
+  it("should throw ShelfError when booking lookup fails", async () => {
     expect.assertions(1);
 
     //@ts-expect-error missing vitest type
-    db.booking.update.mockRejectedValue(new Error("Database error"));
+    db.booking.findUniqueOrThrow.mockRejectedValue(new Error("Database error"));
 
     await expect(
       updateBookingAssets(mockUpdateBookingAssetsParams)
