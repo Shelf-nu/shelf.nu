@@ -74,7 +74,8 @@ export async function action({ request }: ActionFunctionArgs) {
       case "POST": {
         const { domain } = parseData(
           await request.formData(),
-          SSOLoginFormSchema
+          SSOLoginFormSchema,
+          { shouldBeCaptured: false }
         );
         const url = await signInWithSSO(domain);
 
