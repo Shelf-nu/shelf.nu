@@ -285,11 +285,17 @@ export async function action({ request }: ActionFunctionArgs) {
               });
             });
 
-          /** Send the TRIAL welcome email with instructions */
-          void sendTeamTrialWelcomeEmail({
-            firstName: trialUser.firstName,
-            email: trialUser.email,
-          });
+          // Only send the welcome email if the subscription was created
+          // via Stripe Checkout. Direct-created subscriptions (from our
+          // action) already send the email — metadata flag prevents dupes.
+          const createdByAction =
+            subscription.metadata?.createdByAction === "true";
+          if (!createdByAction) {
+            void sendTeamTrialWelcomeEmail({
+              firstName: trialUser.firstName,
+              email: trialUser.email,
+            });
+          }
         } else {
           /**
            * For non-trial subscriptions (e.g., admin manually created subscription),
@@ -630,6 +636,9 @@ export async function action({ request }: ActionFunctionArgs) {
          * - Subscription created in "incomplete" state that only activates after payment
          * - If `customer.subscription.created` event was missed or failed
          * - Any other scenario where the tier wasn't properly set on creation
+         *
+         * Iterates ALL subscription items to handle bundled subscriptions
+         * (tier + audit addon in a single subscription).
          */
         // In Stripe API 2026-01-28, subscription moved to parent.subscription_details
         const subscriptionId =
@@ -640,48 +649,50 @@ export async function action({ request }: ActionFunctionArgs) {
           );
 
           if (subscription.status === "active") {
-            const product = subscription.items.data[0].plan
-              .product as Stripe.Product;
-            const tierId = product?.metadata?.shelf_tier;
-            const productType = product?.metadata?.product_type;
+            // Iterate all items to find tier and addon products
+            for (const item of subscription.items.data) {
+              const product = item.plan.product as Stripe.Product;
+              const tierId = product?.metadata?.shelf_tier;
+              const productType = product?.metadata?.product_type;
 
-            // Handle audit add-on invoice paid as safety net
-            if (
-              productType === "addon" &&
-              product?.metadata?.addon_type === "audits"
-            ) {
-              const organizationId = subscription?.metadata?.organizationId;
-              if (organizationId) {
-                await db.organization.update({
-                  where: { id: organizationId },
-                  data: { auditsEnabled: true },
-                  select: { id: true },
-                });
-              }
-            }
-
-            // Only update tier for non-addon products
-            if (tierId && productType !== "addon") {
-              const newSubscriptionIsHigherOrEqualTier =
-                subscriptionTiersPriority[tierId as TierId] >=
-                subscriptionTiersPriority[user.tierId];
-
-              if (newSubscriptionIsHigherOrEqualTier) {
-                await db.user
-                  .update({
-                    where: { customerId },
-                    data: { tierId: tierId as TierId },
+              // Handle audit add-on invoice paid as safety net
+              if (
+                productType === "addon" &&
+                product?.metadata?.addon_type === "audits"
+              ) {
+                const organizationId = subscription?.metadata?.organizationId;
+                if (organizationId) {
+                  await db.organization.update({
+                    where: { id: organizationId },
+                    data: { auditsEnabled: true },
                     select: { id: true },
-                  })
-                  .catch((cause) => {
-                    throw new ShelfError({
-                      cause,
-                      message: "Failed to update user tier from paid invoice",
-                      additionalData: { customerId, tierId, event },
-                      label: "Stripe webhook",
-                      status: 500,
-                    });
                   });
+                }
+              }
+
+              // Update tier for non-addon products
+              if (tierId && productType !== "addon") {
+                const newSubscriptionIsHigherOrEqualTier =
+                  subscriptionTiersPriority[tierId as TierId] >=
+                  subscriptionTiersPriority[user.tierId];
+
+                if (newSubscriptionIsHigherOrEqualTier) {
+                  await db.user
+                    .update({
+                      where: { customerId },
+                      data: { tierId: tierId as TierId },
+                      select: { id: true },
+                    })
+                    .catch((cause) => {
+                      throw new ShelfError({
+                        cause,
+                        message: "Failed to update user tier from paid invoice",
+                        additionalData: { customerId, tierId, event },
+                        label: "Stripe webhook",
+                        status: 500,
+                      });
+                    });
+                }
               }
             }
           }

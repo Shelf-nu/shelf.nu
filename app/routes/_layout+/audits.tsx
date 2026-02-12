@@ -14,6 +14,7 @@ import {
   createAuditAddonCheckoutSession,
   createAuditAddonTrialSubscription,
   getAuditAddonPrices,
+  getAuditSubscriptionInfo,
 } from "~/modules/audit/addon.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -27,7 +28,7 @@ export const meta = () => [{ title: appendToMetaTitle("Audits") }];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { userId } = authSession;
+  const { userId, email } = authSession;
 
   try {
     const { organizationId, currentOrganization, userOrganizations } =
@@ -45,12 +46,40 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ? { month: null, year: null }
       : await getAuditAddonPrices();
 
+    // Fetch current subscription info when trial expired (paused sub)
+    const trialExpired = currentOrganization.usedAuditTrial && !hasAccess;
+
+    let auditSubInfo: {
+      interval: "month" | "year";
+      amount: number;
+      currency: string;
+      status: string;
+    } | null = null;
+
+    if (trialExpired) {
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          email: true,
+          customerId: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
+      const customerId = await getOrCreateCustomerId({
+        ...user,
+        email: user.email || email,
+      });
+      auditSubInfo = await getAuditSubscriptionInfo({ customerId });
+    }
+
     return data({
       canUseAudits: hasAccess,
       isOwner,
       usedAuditTrial: currentOrganization.usedAuditTrial,
       monthlyPrice: prices.month,
       yearlyPrice: prices.year,
+      auditSubInfo,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -161,8 +190,14 @@ export const handle = {
 };
 
 export default function AuditsPage() {
-  const { canUseAudits, isOwner, usedAuditTrial, monthlyPrice, yearlyPrice } =
-    useLoaderData<typeof loader>();
+  const {
+    canUseAudits,
+    isOwner,
+    usedAuditTrial,
+    monthlyPrice,
+    yearlyPrice,
+    auditSubInfo,
+  } = useLoaderData<typeof loader>();
 
   if (!canUseAudits) {
     return (
@@ -171,6 +206,7 @@ export default function AuditsPage() {
         usedAuditTrial={usedAuditTrial}
         monthlyPrice={monthlyPrice}
         yearlyPrice={yearlyPrice}
+        auditSubInfo={auditSubInfo}
       />
     );
   }

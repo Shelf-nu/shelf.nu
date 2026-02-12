@@ -18,6 +18,8 @@ import { InvoiceHistory } from "~/components/subscription/invoice-history";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
+import { db } from "~/database/db.server";
+import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { useUserData } from "~/hooks/use-user-data";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
@@ -26,12 +28,13 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
-
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
   getStripePricesAndProducts,
   createStripeCheckoutSession,
+  createTeamTrialSubscription,
+  generateReturnUrl,
   getCustomerOpenInvoices,
   getCustomerPaidInvoices,
   getCustomerUpcomingInvoices,
@@ -169,12 +172,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    const { priceId, intent, shelfTier } = parseData(
+    const { priceId, intent, shelfTier, auditPriceId } = parseData(
       await request.formData(),
       z.object({
         priceId: z.string(),
         intent: z.enum(["trial", "subscribe"]),
         shelfTier: z.enum(["tier_1", "tier_2"]),
+        auditPriceId: z.string().optional(),
       })
     );
 
@@ -193,13 +197,48 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
     const domainUrl = getDomainUrl(request);
 
+    if (intent === "trial") {
+      // Create subscription directly via Stripe API — no checkout needed
+      await createTeamTrialSubscription({
+        customerId,
+        priceId,
+        userId,
+        auditPriceId,
+      });
+
+      // Update user tier and mark trial as used
+      await db.user.update({
+        where: { id: userId },
+        data: { tierId: shelfTier, usedFreeTrial: true },
+        select: { id: true },
+      });
+
+      // Send welcome email (fire-and-forget)
+      void sendTeamTrialWelcomeEmail({
+        firstName: user.firstName,
+        email,
+      });
+
+      const returnUrl = await generateReturnUrl({
+        userId,
+        shelfTier,
+        intent,
+        domainUrl,
+        hasAuditAddon: !!auditPriceId,
+      });
+
+      return redirect(returnUrl);
+    }
+
+    // intent === "subscribe" — go through Stripe Checkout as before
     const stripeRedirectUrl = await createStripeCheckoutSession({
       userId,
       priceId,
       domainUrl,
-      customerId: customerId,
+      customerId,
       intent,
       shelfTier,
+      auditPriceId,
     });
 
     return redirect(stripeRedirectUrl);

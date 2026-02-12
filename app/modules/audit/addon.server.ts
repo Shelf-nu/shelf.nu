@@ -102,6 +102,11 @@ export async function createAuditAddonTrialSubscription({
       customer: customerId,
       items: [{ price: priceId }],
       trial_period_days: 7,
+      trial_settings: {
+        end_behavior: {
+          missing_payment_method: "pause",
+        },
+      },
       ...(defaultPaymentMethod && {
         default_payment_method: defaultPaymentMethod,
       }),
@@ -154,6 +159,156 @@ export async function getAuditAddonPrices() {
       message: "Something went wrong while fetching audit add-on prices.",
       label,
     });
+  }
+}
+
+/**
+ * Links an existing audit add-on subscription item to a newly created organization.
+ * Used during workspace creation when the team checkout included audits.
+ *
+ * Finds the customer's active/trialing subscription that contains an audit addon item,
+ * updates the subscription metadata with the organizationId, and enables audits on the org.
+ */
+export async function linkAuditAddonToOrganization({
+  customerId,
+  organizationId,
+}: {
+  customerId: string;
+  organizationId: string;
+}) {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { customerId, organizationId },
+        label,
+      });
+    }
+
+    // Find subscriptions for this customer (no deep expansion —
+    // Stripe list API only allows 4 levels, and
+    // data.items.data.price.product would be 5)
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+    });
+
+    // Check each active/trialing subscription's items by retrieving products
+    let auditSubscription: Stripe.Subscription | undefined;
+    for (const sub of subscriptions.data) {
+      if (sub.status !== "active" && sub.status !== "trialing") continue;
+
+      for (const item of sub.items.data) {
+        const productId =
+          typeof item.price.product === "string"
+            ? item.price.product
+            : item.price.product?.id;
+        if (!productId) continue;
+
+        const product = await stripe.products.retrieve(productId);
+        if (
+          product.metadata?.product_type === "addon" &&
+          product.metadata?.addon_type === "audits"
+        ) {
+          auditSubscription = sub;
+          break;
+        }
+      }
+      if (auditSubscription) break;
+    }
+
+    if (!auditSubscription) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "No active subscription with audit addon found for this customer",
+        additionalData: { customerId, organizationId },
+        label,
+      });
+    }
+
+    const isTrialing = auditSubscription.status === "trialing";
+
+    // Update subscription metadata with the organizationId
+    await stripe.subscriptions.update(auditSubscription.id, {
+      metadata: {
+        ...auditSubscription.metadata,
+        organizationId,
+      },
+    });
+
+    // Enable audits on the organization
+    await db.organization.update({
+      where: { id: organizationId },
+      data: {
+        auditsEnabled: true,
+        auditsEnabledAt: new Date(),
+        ...(isTrialing && { usedAuditTrial: true }),
+      },
+      select: { id: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while linking audit add-on to organization.",
+      additionalData: { customerId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Fetches the current audit add-on subscription info for a customer.
+ * Returns the billing interval and price, or null if no subscription found.
+ */
+export async function getAuditSubscriptionInfo({
+  customerId,
+}: {
+  customerId: string;
+}): Promise<{
+  interval: "month" | "year";
+  amount: number;
+  currency: string;
+  status: string;
+} | null> {
+  try {
+    if (!stripe) return null;
+
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+    });
+
+    // Check each subscription's items by retrieving the product separately
+    for (const sub of subscriptions.data) {
+      for (const item of sub.items.data) {
+        const productId =
+          typeof item.price.product === "string"
+            ? item.price.product
+            : item.price.product?.id;
+        if (!productId) continue;
+
+        const product = await stripe.products.retrieve(productId);
+        if (
+          product.metadata?.product_type === "addon" &&
+          product.metadata?.addon_type === "audits"
+        ) {
+          return {
+            interval:
+              (item.price.recurring?.interval as "month" | "year") || "year",
+            amount: item.price.unit_amount || 0,
+            currency: item.price.currency,
+            status: sub.status,
+          };
+        }
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
   }
 }
 
