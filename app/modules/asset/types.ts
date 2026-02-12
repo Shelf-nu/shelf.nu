@@ -156,6 +156,8 @@ export type AdvancedIndexAsset = Pick<
         childCount?: number;
       })
     | null;
+  firstScanLocation: string | null;
+  lastScanLocation: string | null;
   custody: {
     custodian: {
       name: string;

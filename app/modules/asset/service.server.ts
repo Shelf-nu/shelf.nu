@@ -2961,6 +2961,34 @@ export async function updateAssetBookingAvailability({
   }
 }
 
+export async function disposeAsset({
+  id,
+  organizationId,
+  disposedAt,
+}: {
+  id: string;
+  organizationId: string;
+  disposedAt: Date;
+}) {
+  try {
+    return await db.asset.update({
+      where: { id, organizationId },
+      data: {
+        status: AssetStatus.DISPOSED,
+        disposedAt,
+        availableToBook: false,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to mark asset as disposed.",
+      additionalData: { id, organizationId, disposedAt },
+      label,
+    });
+  }
+}
+
 export async function updateAssetsWithBookingCustodians<T extends Asset>(
   assets: T[]
 ) {

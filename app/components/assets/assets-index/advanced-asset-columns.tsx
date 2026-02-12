@@ -266,6 +266,16 @@ export function AdvancedIndexColumn({
         />
       );
 
+    case "firstScanLocation":
+      return (
+        <TextColumn value={item.firstScanLocation ?? <EmptyTableValue />} />
+      );
+
+    case "lastScanLocation":
+      return (
+        <TextColumn value={item.lastScanLocation ?? <EmptyTableValue />} />
+      );
+
     case "kit":
       return (
         <TextColumn

@@ -366,8 +366,17 @@ export const buildCsvExportDataFromAssets = ({
   if (!assets.length) return [];
 
   // Get visible columns in the correct order
+  const alwaysIncludeColumns = new Set<FixedField>([
+    "firstScanLocation",
+    "lastScanLocation",
+  ]);
+
   const visibleColumns = columns
-    .filter((col) => col.visible && col.name !== "actions")
+    .filter(
+      (col) =>
+        col.name !== "actions" &&
+        (col.visible || alwaysIncludeColumns.has(col.name as FixedField))
+    )
     .sort((a, b) => a.position - b.position);
 
   // Create headers row using column names
@@ -412,6 +421,12 @@ export const buildCsvExportDataFromAssets = ({
             break;
           case "location":
             value = asset.location?.name;
+            break;
+          case "firstScanLocation":
+            value = asset.firstScanLocation ?? "";
+            break;
+          case "lastScanLocation":
+            value = asset.lastScanLocation ?? "";
             break;
           case "kit":
             value = asset.kit?.name;

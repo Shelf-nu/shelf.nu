@@ -314,15 +314,22 @@ export default function AssetDetailsPage() {
   const { roles } = useUserRoleHelper();
 
   const items = [
-    { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
-    { to: "bookings", content: "Bookings" },
+    { to: `/assets/${asset.id}/overview`, content: "Overview" },
+    { to: `/assets/${asset.id}/activity`, content: "Activity" },
+    { to: `/assets/${asset.id}/bookings`, content: "Bookings" },
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    })
+      ? [{ to: `/assets/${asset.id}/depreciation`, content: "Depreciation" }]
+      : []),
     ...(userHasPermission({
       roles,
       entity: PermissionEntity.assetReminders,
       action: PermissionAction.read,
     })
-      ? [{ to: "reminders", content: "Reminders" }]
+      ? [{ to: `/assets/${asset.id}/reminders`, content: "Reminders" }]
       : []),
   ];
 

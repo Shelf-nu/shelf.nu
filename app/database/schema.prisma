@@ -34,19 +34,19 @@ model Image {
 }
 
 model User {
-  id                    String  @id @default(cuid())
-  email                 String  @unique
-  username              String  @unique @default(cuid())
-  firstName             String?
-  lastName              String?
-  profilePicture        String?
-  usedFreeTrial         Boolean @default(false)
-  onboarded             Boolean @default(false)
-  customerId            String? @unique // Stripe customer id
-  sso                   Boolean @default(false)
-  createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
-  skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
-  hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
+  id                     String  @id @default(cuid())
+  email                  String  @unique
+  username               String  @unique @default(cuid())
+  firstName              String?
+  lastName               String?
+  profilePicture         String?
+  usedFreeTrial          Boolean @default(false)
+  onboarded              Boolean @default(false)
+  customerId             String? @unique // Stripe customer id
+  sso                    Boolean @default(false)
+  createdWithInvite      Boolean @default(false) // Set to true if the user was created by being invited to a workspace
+  skipSubscriptionCheck  Boolean @default(false) // Set to true if the user has opted out of subscription checks
+  hasUnpaidInvoice       Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
   warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
 
   // Last selected organization for cross-device workspace persistence
@@ -177,6 +177,7 @@ model Asset {
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
   sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  disposedAt          DateTime?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -194,15 +195,16 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody      Custody?
-  notes        Note[]
-  qrCodes      Qr[]
-  barcodes     Barcode[]
-  reports      ReportFound[]
-  tags         Tag[]
-  customFields AssetCustomFieldValue[]
-  bookings     Booking[]
-  reminders    AssetReminder[]
+  custody           Custody?
+  notes             Note[]
+  qrCodes           Qr[]
+  barcodes          Barcode[]
+  reports           ReportFound[]
+  tags              Tag[]
+  customFields      AssetCustomFieldValue[]
+  bookings          Booking[]
+  reminders         AssetReminder[]
+  assetDepreciation AssetDepreciation?
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -225,6 +227,30 @@ enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
   CHECKED_OUT
+  DISPOSED
+}
+
+enum DepreciationPeriod {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+model AssetDepreciation {
+  id String @id @default(cuid())
+
+  depreciationRate Float
+  period           DepreciationPeriod
+  startDate        DateTime
+  residualValue    Float              @default(0)
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
 }
 
 model AssetFilterPreset {
@@ -710,16 +736,16 @@ model Organization {
   invites           Invite[]
   userOrganizations UserOrganization[]
 
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  customFields       CustomField[]
-  images             Image[]              @relation("owner")
-  bookings           Booking[]
-  kits               Kit[]
-  assetIndexSettings AssetIndexSettings[]
-  assetReminders     AssetReminder[]
-  assetFilterPresets  AssetFilterPreset[]
-  usersWithLastSelected User[] @relation("lastSelectedOrg")
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  customFields          CustomField[]
+  images                Image[]              @relation("owner")
+  bookings              Booking[]
+  kits                  Kit[]
+  assetIndexSettings    AssetIndexSettings[]
+  assetReminders        AssetReminder[]
+  assetFilterPresets    AssetFilterPreset[]
+  usersWithLastSelected User[]               @relation("lastSelectedOrg")
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)

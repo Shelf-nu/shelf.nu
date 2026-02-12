@@ -25,6 +25,8 @@ export const userFriendlyAssetStatus = (status: ExtendedAssetStatus) => {
       return "In custody";
     case AssetStatus.CHECKED_OUT:
       return "Checked out";
+    case AssetStatus.DISPOSED:
+      return "Disposed";
     case "PARTIALLY_CHECKED_IN":
       return "Already checked in";
     default:
@@ -42,6 +44,8 @@ export const assetStatusColorMap = (
       return BADGE_COLORS.blue;
     case AssetStatus.CHECKED_OUT:
       return BADGE_COLORS.violet;
+    case AssetStatus.DISPOSED:
+      return BADGE_COLORS.gray;
     default:
       // AVAILABLE
       return BADGE_COLORS.green;

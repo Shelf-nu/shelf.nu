@@ -19,6 +19,13 @@ import { CrispButton } from "../marketing/crisp";
 import When from "../when/when";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
+type LabelVariant = "preview" | "print-12mm";
+
+const PRINT_LABEL_HEIGHT_MM = 12;
+const PRINT_LABEL_WIDTH_MM = 30;
+const MM_TO_PX_DPI = 96;
+const PRINT_DPI = 360;
+const PRINT_SCALE = PRINT_DPI / MM_TO_PX_DPI;
 
 export interface CodeType {
   id: string;
@@ -77,7 +84,8 @@ export const CodePreview = ({
   sequentialId,
   showShelfBranding,
 }: CodePreviewProps) => {
-  const captureDivRef = useRef<HTMLImageElement>(null);
+  const previewDivRef = useRef<HTMLDivElement>(null);
+  const printDivRef = useRef<HTMLDivElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService } = useUserRoleHelper();
@@ -196,18 +204,20 @@ export const CodePreview = ({
   }, [item, selectedCode]);
 
   function downloadCode(e: MouseEvent<HTMLButtonElement>) {
-    const captureDiv = captureDivRef.current;
+    const captureDiv = printDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 
     if (captureDiv && downloadBtn) {
       e.preventDefault();
 
+      const scale = selectedCode?.type === "qr" ? PRINT_SCALE : 2;
+
       const options = {
-        height: captureDiv.offsetHeight * 2,
-        width: captureDiv.offsetWidth * 2,
+        height: captureDiv.offsetHeight * scale,
+        width: captureDiv.offsetWidth * scale,
         cacheBust: true,
         style: {
-          transform: `scale(${2})`,
+          transform: `scale(${scale})`,
           transformOrigin: "top left",
           width: `${captureDiv.offsetWidth}px`,
           height: `${captureDiv.offsetHeight}px`,
@@ -232,9 +242,9 @@ export const CodePreview = ({
   }
 
   const printCode = useReactToPrint({
-    contentRef: captureDivRef,
+    contentRef: printDivRef,
     onBeforePrint: () => {
-      const container = captureDivRef.current;
+      const container = printDivRef.current;
       if (!container) return Promise.resolve();
       return waitForImagesToLoad(container);
     },
@@ -307,16 +317,47 @@ export const CodePreview = ({
       <div className="flex w-full justify-center pt-6">
         {selectedCode?.type === "qr" ? (
           <QrLabel
-            ref={captureDivRef}
+            ref={previewDivRef}
             data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
             title={item.name}
             qrIdDisplayPreference={organization?.qrIdDisplayPreference}
             sequentialId={sequentialId}
             showShelfBranding={resolvedShowShelfBranding}
+            organizationName={organization?.name}
+            variant="preview"
           />
         ) : selectedCode?.type === "barcode" ? (
           <BarcodeLabel
-            ref={captureDivRef}
+            ref={previewDivRef}
+            data={selectedCode.barcodeData}
+            title={item.name}
+            showShelfBranding={resolvedShowShelfBranding}
+          />
+        ) : null}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          left: "-9999px",
+          top: "-9999px",
+        }}
+        aria-hidden="true"
+      >
+        {selectedCode?.type === "qr" ? (
+          <QrLabel
+            ref={printDivRef}
+            data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
+            title={item.name}
+            qrIdDisplayPreference={organization?.qrIdDisplayPreference}
+            sequentialId={sequentialId}
+            showShelfBranding={false}
+            organizationName={organization?.name}
+            organizationImageId={organization?.imageId}
+            variant="print-12mm"
+          />
+        ) : selectedCode?.type === "barcode" ? (
+          <BarcodeLabel
+            ref={printDivRef}
             data={selectedCode.barcodeData}
             title={item.name}
             showShelfBranding={resolvedShowShelfBranding}
@@ -372,6 +413,9 @@ interface QrLabelProps {
   qrIdDisplayPreference?: string;
   sequentialId?: string | null;
   showShelfBranding?: boolean;
+  organizationName?: string;
+  organizationImageId?: string | null;
+  variant?: LabelVariant;
 }
 
 export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
@@ -382,7 +426,121 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
       qrIdDisplayPreference,
       sequentialId,
       showShelfBranding = true,
+      organizationName,
+      organizationImageId,
+      variant = "preview",
     } = props ?? {};
+    if (variant === "print-12mm") {
+      const labelId =
+        qrIdDisplayPreference === "SAM_ID" && sequentialId
+          ? sequentialId
+          : data?.qr?.id;
+      const displayOrgName = organizationName || title;
+      const logoSrc = organizationImageId
+        ? `/api/image/${organizationImageId}`
+        : null;
+
+      return (
+        <div
+          style={{
+            width: `${PRINT_LABEL_WIDTH_MM}mm`,
+            height: `${PRINT_LABEL_HEIGHT_MM}mm`,
+            display: "flex",
+            alignItems: "center",
+            gap: "1.5mm",
+            borderRadius: "2mm",
+            border: "0.2mm solid #E3E4E8",
+            padding: "1mm 1.2mm",
+            backgroundColor: "white",
+            boxSizing: "border-box",
+          }}
+          ref={ref}
+        >
+          <div
+            style={{
+              width: "9mm",
+              height: "9mm",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <img
+              src={data?.qr?.src}
+              alt={`${data?.qr?.size}-shelf-qr-code.png`}
+              style={{ width: "9mm", height: "9mm" }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              lineHeight: 1.1,
+              color: "black",
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                fontSize: "5pt",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Property of
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "1mm",
+                minWidth: 0,
+              }}
+            >
+              {logoSrc ? (
+                <img
+                  src={logoSrc}
+                  alt={`${displayOrgName} logo`}
+                  style={{
+                    width: "4mm",
+                    height: "4mm",
+                    objectFit: "contain",
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
+              <div
+                style={{
+                  fontSize: "7pt",
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  maxWidth: "100%",
+                }}
+              >
+                {displayOrgName}
+              </div>
+            </div>
+            <div
+              style={{
+                fontSize: "6pt",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "100%",
+              }}
+            >
+              {labelId}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         style={{

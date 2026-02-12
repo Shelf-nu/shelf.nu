@@ -79,7 +79,13 @@ export default function BulkDownloadQrDialog({
     if (!apiResponse) return;
 
     try {
-      const { assets, qrIdDisplayPreference, showShelfBranding } = apiResponse;
+      const {
+        assets,
+        qrIdDisplayPreference,
+        showShelfBranding,
+        organizationName,
+        organizationImageId,
+      } = apiResponse;
 
       const zip = new JSZip();
       const qrFolder = zip.folder("qr-codes");
@@ -93,13 +99,20 @@ export default function BulkDownloadQrDialog({
             qrIdDisplayPreference={qrIdDisplayPreference}
             sequentialId={asset.sequentialId}
             showShelfBranding={showShelfBranding}
+            organizationName={organizationName}
+            organizationImageId={organizationImageId}
+            variant="print-12mm"
           />
         )
       );
 
+      const mmToPx = (mm: number) => Math.round((mm / 25.4) * 360);
+      const labelWidthPx = mmToPx(30);
+      const labelHeightPx = mmToPx(12);
+
       const toBlobOptions = {
-        width: 300,
-        height: 300,
+        width: labelWidthPx,
+        height: labelHeightPx,
         backgroundColor: "white",
         style: {
           display: "flex",

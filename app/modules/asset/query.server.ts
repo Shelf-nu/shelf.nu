@@ -1652,6 +1652,42 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHERE q."assetId" = a.id
         LIMIT 1
       ) AS "qrId",
+      (
+        SELECT CASE
+          WHEN s."latitude" IS NOT NULL AND s."longitude" IS NOT NULL
+            THEN CONCAT(s."latitude", ', ', s."longitude")
+          ELSE NULL
+        END
+        FROM public."Scan" s
+        WHERE s."rawQrId" = (
+          SELECT q.id
+          FROM public."Qr" q
+          WHERE q."assetId" = a.id
+          LIMIT 1
+        )
+        AND s."latitude" IS NOT NULL
+        AND s."longitude" IS NOT NULL
+        ORDER BY s."createdAt" ASC
+        LIMIT 1
+      ) AS "firstScanLocation",
+      (
+        SELECT CASE
+          WHEN s."latitude" IS NOT NULL AND s."longitude" IS NOT NULL
+            THEN CONCAT(s."latitude", ', ', s."longitude")
+          ELSE NULL
+        END
+        FROM public."Scan" s
+        WHERE s."rawQrId" = (
+          SELECT q.id
+          FROM public."Qr" q
+          WHERE q."assetId" = a.id
+          LIMIT 1
+        )
+        AND s."latitude" IS NOT NULL
+        AND s."longitude" IS NOT NULL
+        ORDER BY s."createdAt" DESC
+        LIMIT 1
+      ) AS "lastScanLocation",
       a.title AS "assetTitle",
       a.description AS "assetDescription",
       a."sequentialId" AS "assetSequentialId",
@@ -1852,6 +1888,8 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
             )
             ELSE NULL
           END,
+          'firstScanLocation', aq."firstScanLocation",
+          'lastScanLocation', aq."lastScanLocation",
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
           'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
