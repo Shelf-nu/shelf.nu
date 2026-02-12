@@ -75,6 +75,7 @@ export async function assertUserCanExportAssets({
         "Your user cannot export assets. Please update your subscription to unlock this feature.",
       additionalData: { organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -120,6 +121,7 @@ export async function assertUserCanImportAssets({
       message: "You are not allowed to import assets",
       additionalData: { organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 }

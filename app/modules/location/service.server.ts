@@ -875,14 +875,9 @@ export async function createLocationsIfNotExists({
     // first we get all the locations from the assets and make then into an object where the category is the key and the value is an empty string
     const locations = new Map(
       data
-        .filter((asset) => asset.location !== "")
+        .filter((asset) => asset.location)
         .map((asset) => [asset.location, ""])
     );
-
-    // Handle the case where there are no teamMembers
-    if (locations.has(undefined)) {
-      return {};
-    }
 
     // now we loop through the locations and check if they exist
     for (const [location, _] of locations) {

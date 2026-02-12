@@ -76,7 +76,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       case "POST": {
         const { email, password, redirectTo } = parseData(
           await request.formData(),
-          LoginFormSchema
+          LoginFormSchema,
+          { shouldBeCaptured: false }
         );
 
         const authSession = await signInWithEmail(email, password);

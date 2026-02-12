@@ -89,6 +89,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         customerId: true,
         usedFreeTrial: true,
         sso: true,
+        onboarded: true,
+        createdWithInvite: true,
+        hasUnpaidInvoice: true,
+        warnForNoPaymentMethod: true,
         customTierLimit: {
           select: {
             maxOrganizations: true,
@@ -250,6 +254,7 @@ export const action = async ({
           "createCustomerId",
           "deleteUser",
           "toggleSubscriptionCheck",
+          "toggleBooleanField",
         ]),
       })
     );
@@ -365,6 +370,29 @@ export const action = async ({
         });
         break;
       }
+      case "toggleBooleanField": {
+        const { fieldName, fieldValue } = parseData(
+          await request.formData(),
+          z.object({
+            fieldName: z.enum(["hasUnpaidInvoice", "warnForNoPaymentMethod"]),
+            fieldValue: z.string().transform((val) => val === "true"),
+          })
+        );
+
+        await db.user.update({
+          where: { id: shelfUserId },
+          data: { [fieldName]: fieldValue },
+          select: { id: true },
+        });
+
+        sendNotification({
+          title: "Field updated",
+          message: `${fieldName} has been set to ${fieldValue}`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
     }
 
     return payload(null);
@@ -429,6 +457,23 @@ export default function Area51UserPage() {
             skipSubscriptionCheck={user.skipSubscriptionCheck}
           />
         );
+      case "hasUnpaidInvoice":
+        return (
+          <BooleanToggleForm
+            fieldName="hasUnpaidInvoice"
+            fieldValue={user.hasUnpaidInvoice}
+          />
+        );
+      case "warnForNoPaymentMethod":
+        return (
+          <BooleanToggleForm
+            fieldName="warnForNoPaymentMethod"
+            fieldValue={user.warnForNoPaymentMethod}
+          />
+        );
+      case "createdAt":
+      case "updatedAt":
+        return <DateS date={value as string | Date} />;
       default:
         return typeof value === "string"
           ? value
@@ -626,6 +671,41 @@ function SubscriptionCheckUpdateForm({
         defaultChecked={skipSubscriptionCheck}
         disabled={disabled}
       />
+    </fetcher.Form>
+  );
+}
+
+function BooleanToggleForm({
+  fieldName,
+  fieldValue,
+}: {
+  fieldName: string;
+  fieldValue: boolean;
+}) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        void fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="toggleBooleanField" />
+      <input type="hidden" name="fieldName" value={fieldName} />
+
+      <select
+        style={{ all: "revert" }}
+        disabled={disabled}
+        defaultValue={String(fieldValue)}
+        name="fieldValue"
+      >
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+      {disabled && <Spinner />}
     </fetcher.Form>
   );
 }

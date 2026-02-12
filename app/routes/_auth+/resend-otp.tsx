@@ -27,7 +27,8 @@ export async function action({ request }: ActionFunctionArgs) {
               .refine(validEmail, () => ({
                 message: "Please enter a valid email",
               })),
-          })
+          }),
+          { shouldBeCaptured: false }
         );
 
         await sendOTP(email);

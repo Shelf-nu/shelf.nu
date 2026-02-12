@@ -73,6 +73,7 @@ import {
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  sendBookingUpdatedEmail,
   sendCheckinReminder,
 } from "./email-helpers";
 import {
@@ -411,6 +412,7 @@ export async function updateBasicBooking({
   organizationId,
   tags,
   userId,
+  hints,
 }: Partial<
   Pick<
     Booking,
@@ -427,6 +429,7 @@ export async function updateBasicBooking({
   Pick<Booking, "id" | "organizationId"> & {
     tags: { id: string }[];
     userId?: User["id"];
+    hints?: ClientHint;
   }) {
   try {
     const booking = await db.booking
@@ -457,6 +460,7 @@ export async function updateBasicBooking({
           custodianUser: {
             select: {
               id: true,
+              email: true,
               firstName: true,
               lastName: true,
             },
@@ -478,6 +482,10 @@ export async function updateBasicBooking({
           label,
         });
       });
+
+    // Capture old custodian email before the update
+    // (for custodian change scenarios)
+    const oldCustodianEmail = booking.custodianUser?.email;
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
@@ -578,12 +586,27 @@ export async function updateBasicBooking({
       : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
 
+    // Collect plain-text change descriptions for the email
+    const changes: string[] = [];
+
+    // Helper to format dates for email change descriptions
+    const formatDateForEmail = (date: Date) => {
+      if (hints) {
+        return getDateTimeFormatFromHints(hints, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(date);
+      }
+      return date.toISOString();
+    };
+
     // Check and log name changes
     if (name && name !== booking.name) {
       await createSystemBookingNote({
         bookingId: booking.id,
         content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
       });
+      changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
     }
 
     // Check and log description changes
@@ -597,6 +620,7 @@ export async function updateBasicBooking({
         bookingId: booking.id,
         content: `${userLink} changed booking description from ${descriptionChange}.`,
       });
+      changes.push("Booking description was updated");
     }
 
     // Check and log start date changes
@@ -607,6 +631,11 @@ export async function updateBasicBooking({
           booking.from
         )} to ${wrapDateForNote(from)}.`,
       });
+      changes.push(
+        `Start date changed from ${formatDateForEmail(
+          booking.from
+        )} to ${formatDateForEmail(from)}`
+      );
     }
 
     // Check and log end date changes
@@ -617,6 +646,11 @@ export async function updateBasicBooking({
           booking.to
         )} to ${wrapDateForNote(to)}.`,
       });
+      changes.push(
+        `End date changed from ${formatDateForEmail(
+          booking.to
+        )} to ${formatDateForEmail(to)}`
+      );
     }
 
     // Check and log custodian changes
@@ -624,6 +658,11 @@ export async function updateBasicBooking({
       custodianTeamMemberId &&
       custodianTeamMemberId !== booking.custodianTeamMemberId
     ) {
+      // Build custodian name helpers for the email change description
+      const oldCustodianName = booking.custodianUser
+        ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+        : booking.custodianTeamMember?.name ?? "Unknown";
+
       try {
         // Fetch new custodian details
         const newCustodian = await db.teamMember.findUnique({
@@ -662,6 +701,13 @@ export async function updateBasicBooking({
             bookingId: booking.id,
             content: custodianChangeMessage,
           });
+
+          const newCustodianName = newCustodian.user
+            ? `${newCustodian.user.firstName} ${newCustodian.user.lastName}`
+            : newCustodian.name;
+          changes.push(
+            `Custodian changed from ${oldCustodianName} to ${newCustodianName}`
+          );
         }
       } catch (_error) {
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
@@ -669,6 +715,7 @@ export async function updateBasicBooking({
           bookingId: booking.id,
           content: `${userLink} changed booking custodian assignment.`,
         });
+        changes.push("Custodian assignment was changed");
       }
     }
 
@@ -691,6 +738,25 @@ export async function updateBasicBooking({
       await createSystemBookingNote({
         bookingId: booking.id,
         content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
+      });
+      changes.push(`Tags changed from "${oldTagNames}" to "${newTagNames}"`);
+    }
+
+    // Send email notification to custodian(s) about the changes
+    if (changes.length > 0 && hints && userId) {
+      const custodianChanged =
+        custodianTeamMemberId &&
+        custodianTeamMemberId !== booking.custodianTeamMemberId;
+
+      void sendBookingUpdatedEmail({
+        bookingId: booking.id,
+        organizationId,
+        userId,
+        changes,
+        hints,
+        oldCustodianEmail: custodianChanged
+          ? oldCustodianEmail ?? undefined
+          : undefined,
       });
     }
 
@@ -1911,19 +1977,33 @@ export async function updateBookingAssets({
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
-      const b = await tx.booking.update({
+      // Verify booking exists before inserting into the join table,
+      // so a stale/deleted booking returns a proper 404 (P2025)
+      // instead of a FK violation (P2003)
+      const b = await tx.booking.findUniqueOrThrow({
         where: { id, organizationId },
-        data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
         select: {
           id: true,
           name: true,
           status: true,
         },
       });
+
+      await Promise.all([
+        // Bulk insert into the join table in a single SQL statement instead of
+        // N individual connect operations which cause transaction timeouts
+        // for large bookings
+        tx.$executeRaw`
+          INSERT INTO "_AssetToBooking" ("A", "B")
+          SELECT unnest(${assetIds}::text[]), ${id}
+          ON CONFLICT ("A", "B") DO NOTHING
+        `,
+        // Touch updatedAt since the raw INSERT doesn't update the booking row
+        tx.booking.update({
+          where: { id },
+          data: { updatedAt: new Date() },
+        }),
+      ]);
 
       /**
        *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE

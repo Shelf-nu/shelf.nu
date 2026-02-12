@@ -42,7 +42,10 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { getSelectedOrganization } from "~/modules/organization/context.server";
+import {
+  getSelectedOrganization,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
@@ -132,8 +135,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /** There could be a case when you get removed from an organization while browsing it.
      * In this case what we do is we set the current organization to the first one in the list
      */
-    const { organizationId, organizations, currentOrganization } =
-      await getSelectedOrganization({ userId: authSession.userId, request });
+    const {
+      organizationId,
+      organizations,
+      currentOrganization,
+      cookieRefreshNeeded,
+    } = await getSelectedOrganization({
+      userId: authSession.userId,
+      request,
+    });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
     // Get current user's organization role for updates filtering
@@ -202,7 +212,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             })),
       }),
       {
-        headers: [setCookie(await userPrefs.serialize(userPrefsCookie))],
+        headers: [
+          setCookie(await userPrefs.serialize(userPrefsCookie)),
+          ...(cookieRefreshNeeded
+            ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
+            : []),
+        ],
       }
     );
   } catch (cause) {

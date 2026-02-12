@@ -222,12 +222,20 @@ export async function sendOTP(email: string) {
   } catch (cause) {
     // @ts-expect-error
     const isRateLimitError = cause.code === "over_email_send_rate_limit";
+    const fallbackMessage =
+      "Something went wrong while sending the OTP. Please try again later or contact support.";
+
+    // AuthRetryableFetchError (e.g. from 504 timeout) can have "{}" as message,
+    // so we validate the message is actually useful before showing it to users
+    const hasUsableMessage =
+      (cause instanceof AuthError || isLikeShelfError(cause)) &&
+      cause.message &&
+      cause.message !== "{}" &&
+      !cause.message.startsWith("{");
+
     throw new ShelfError({
       cause,
-      message:
-        cause instanceof AuthError || isLikeShelfError(cause)
-          ? cause.message
-          : "Something went wrong while sending the OTP. Please try again later or contact support.",
+      message: hasUsableMessage ? cause.message : fallbackMessage,
       additionalData: { email },
       label,
       shouldBeCaptured: isRateLimitError ? false : undefined,
