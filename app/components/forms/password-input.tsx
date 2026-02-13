@@ -16,7 +16,7 @@ export default function PasswordInput(props: InputProps) {
       <span
         className="absolute right-[14px] top-[35px] flex h-6 w-[20px] cursor-pointer flex-col items-end justify-center text-gray-500"
         role="button"
-        tabIndex={0}
+        tabIndex={-1}
         onClick={togglePasswordVisibility}
         onKeyDown={handleActivationKeyPress(togglePasswordVisibility)}
       >

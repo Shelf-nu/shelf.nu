@@ -372,8 +372,9 @@ function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
 /**
  * Displays a truncated plain-text preview of the asset description and shows
  * the full markdown-rendered content inside a tooltip on hover.
+ * Description column component - exported for reuse in other index pages
  */
-function DescriptionColumn({ value }: { value: string }) {
+export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();

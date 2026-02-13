@@ -19,6 +19,7 @@ import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import { db } from "~/database/db.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
@@ -294,6 +295,7 @@ export default function OrgPage() {
                     <span className="font-semibold">{key}</span>:{" "}
                     {typeof value === "string" ? value : null}
                     {typeof value === "boolean" ? String(value) : null}
+                    {value instanceof Date ? <DateS date={value} /> : null}
                   </li>
                 )
             )}

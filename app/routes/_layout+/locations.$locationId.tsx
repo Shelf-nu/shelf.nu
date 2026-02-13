@@ -75,21 +75,22 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const [{ location }, hierarchy, childLocations] = await Promise.all([
-      getLocation({
-        organizationId,
-        id: locationId,
-        page,
-        perPage,
-        search,
-        orderBy,
-        orderDirection,
-        userOrganizations,
-        request,
-      }),
-      getLocationHierarchy({ organizationId, locationId }),
-      getLocationDescendantsTree({ organizationId, locationId }),
-    ]);
+    const [{ location, totalAssetsWithinLocation }, hierarchy, childLocations] =
+      await Promise.all([
+        getLocation({
+          organizationId,
+          id: locationId,
+          page,
+          perPage,
+          search,
+          orderBy,
+          orderDirection,
+          userOrganizations,
+          request,
+        }),
+        getLocationHierarchy({ organizationId, locationId }),
+        getLocationDescendantsTree({ organizationId, locationId }),
+      ]);
 
     const allBreadcrumbs = hierarchy.map(({ id, name }) => ({ id, name }));
     const parentBreadcrumbs =
@@ -125,6 +126,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         mapData,
         breadcrumbs: parentBreadcrumbs,
         childLocations,
+        totalAssetsWithinLocation,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -189,8 +191,13 @@ type LocationBreadcrumb = {
 };
 
 export default function LocationPage() {
-  const { location, mapData, breadcrumbs, childLocations } =
-    useLoaderData<typeof loader>();
+  const {
+    location,
+    mapData,
+    breadcrumbs,
+    childLocations,
+    totalAssetsWithinLocation,
+  } = useLoaderData<typeof loader>();
 
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
@@ -231,6 +238,7 @@ export default function LocationPage() {
       >
         <ActionsDropdown
           location={{ ...location, childCount: childLocations?.length }}
+          assetCount={totalAssetsWithinLocation}
         />
       </Header>
 

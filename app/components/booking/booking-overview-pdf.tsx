@@ -188,8 +188,23 @@ const BookingPDFPreview = ({
             margin: 0;
             padding: 0;
           }
-
-      }`}
+          .booking-assets-table {
+            border-collapse: separate !important;
+            border-spacing: 0 !important;
+          }
+          .booking-assets-table th,
+          .booking-assets-table td {
+            border-right: 1px solid #d1d5db !important;
+            border-bottom: 1px solid #d1d5db !important;
+          }
+          .booking-assets-table thead th {
+            border-top: 1px solid #d1d5db !important;
+          }
+          .booking-assets-table th:first-child,
+          .booking-assets-table td:first-child {
+            border-left: 1px solid #d1d5db !important;
+          }
+        }`}
       </style>
       <div
         className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
@@ -282,7 +297,7 @@ const BookingPDFPreview = ({
           </When>
         </section>
 
-        <table className="w-full border-collapse border border-gray-300">
+        <table className="booking-assets-table w-full border border-gray-300">
           <thead>
             <tr>
               <th className="w-10 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">

@@ -1,5 +1,6 @@
 import type {
   Asset,
+  AuditSession,
   Category,
   Currency,
   Kit,
@@ -20,9 +21,11 @@ import type {
   BasicUserName,
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
+export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
+  wrapLinkForNote,
   wrapUserLinkForNote,
   wrapTagForNote,
 } from "~/utils/markdoc-wrappers";
@@ -478,4 +481,104 @@ export async function createAssetValuationChangeNote({
     userId,
     assetId,
   });
+}
+
+/**
+ * Create asset notes when assets are added to an audit
+ */
+export async function createAssetNotesForAuditAddition({
+  assetIds,
+  userId,
+  audit,
+}: {
+  assetIds: Asset["id"][];
+  userId: User["id"];
+  audit: Pick<AuditSession, "id" | "name">;
+}) {
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true },
+    });
+
+    if (!user || assetIds.length === 0) return;
+
+    const userLink = wrapUserLinkForNote({
+      id: user.id,
+      firstName: user.firstName ?? "",
+      lastName: user.lastName ?? "",
+    });
+
+    const auditLink = wrapLinkForNote(
+      `/audits/${audit.id}/overview`,
+      audit.name
+    );
+
+    const content = `${userLink} added asset to audit ${auditLink}.`;
+
+    await createNotes({
+      content,
+      type: "UPDATE",
+      userId,
+      assetIds,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating asset notes for audit addition",
+      additionalData: { userId, assetIds, auditId: audit.id },
+      label,
+    });
+  }
+}
+
+/**
+ * Create asset notes when assets are removed from an audit
+ */
+export async function createAssetNotesForAuditRemoval({
+  assetIds,
+  userId,
+  audit,
+}: {
+  assetIds: Asset["id"][];
+  userId: User["id"];
+  audit: Pick<AuditSession, "id" | "name">;
+}) {
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true },
+    });
+
+    if (!user || assetIds.length === 0) return;
+
+    const userLink = wrapUserLinkForNote({
+      id: user.id,
+      firstName: user.firstName ?? "",
+      lastName: user.lastName ?? "",
+    });
+
+    const auditLink = wrapLinkForNote(
+      `/audits/${audit.id}/overview`,
+      audit.name
+    );
+
+    const content = `${userLink} removed asset from audit ${auditLink}.`;
+
+    await createNotes({
+      content,
+      type: "UPDATE",
+      userId,
+      assetIds,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating asset notes for audit removal",
+      additionalData: { userId, assetIds, auditId: audit.id },
+      label,
+    });
+  }
 }

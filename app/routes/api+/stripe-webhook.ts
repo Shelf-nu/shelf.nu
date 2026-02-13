@@ -30,13 +30,15 @@ import { data, type ActionFunctionArgs } from "react-router";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
-import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
-import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
+import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
+import { sendSubscriptionGrantedEmail } from "~/emails/stripe/subscription-granted";
+import { sendTrialEndsSoonEmail } from "~/emails/stripe/trial-ends-soon";
 import {
   unpaidInvoiceAdminText,
-  unpaidInvoiceUserText,
+  sendUnpaidInvoiceUserEmail,
 } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { ADMIN_EMAIL, CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -202,6 +204,14 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (product?.metadata?.addon_type === "audits" && organizationId) {
+            await handleAuditAddonWebhook({
+              eventType: event.type,
+              subscription,
+              organizationId,
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -239,6 +249,14 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (product?.metadata?.addon_type === "audits" && organizationId) {
+            await handleAuditAddonWebhook({
+              eventType: event.type,
+              subscription,
+              organizationId,
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -246,53 +264,71 @@ export async function action({ request }: ActionFunctionArgs) {
         const isTrialSubscription =
           !!subscription.trial_end && !!subscription.trial_start;
 
+        // Only update tier if the new subscription is higher priority
+        // than the user's current tier. This prevents downgrading
+        // custom plan users when a regular subscription is created.
+        const newSubIsHigherTier =
+          subscriptionTiersPriority[tierId as TierId] >
+          subscriptionTiersPriority[user.tierId];
+
         if (isTrialSubscription) {
           /** When its a trial subscription, update the tier and mark trial as used */
-          const trialUser = await db.user
-            .update({
-              where: { customerId },
-              data: {
-                tierId: tierId as TierId,
-                usedFreeTrial: true,
-              },
-              select: { email: true },
-            })
-            .catch((cause) => {
-              throw new ShelfError({
-                cause,
-                message: "Failed to update user tier",
-                additionalData: { customerId, tierId, event },
-                label: "Stripe webhook",
-                status: 500,
+          if (newSubIsHigherTier) {
+            await db.user
+              .update({
+                where: { customerId },
+                data: {
+                  tierId: tierId as TierId,
+                  usedFreeTrial: true,
+                },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to update user tier",
+                  additionalData: { customerId, tierId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
               });
-            });
+          }
 
-          /** Send the TRIAL welcome email with instructions */
-          void sendTeamTrialWelcomeEmail({
-            email: trialUser.email,
-          });
+          // Only send the welcome email if the subscription was created
+          // via Stripe Checkout. Direct-created subscriptions (from our
+          // action) already send the email — metadata flag prevents dupes.
+          const createdByAction =
+            subscription.metadata?.createdByAction === "true";
+          if (!createdByAction) {
+            void sendTeamTrialWelcomeEmail({
+              firstName: user.firstName,
+              email: user.email,
+            });
+          }
         } else {
           /**
            * For non-trial subscriptions (e.g., admin manually created subscription),
            * update the tier immediately without waiting for invoice payment
            */
-          await db.user
-            .update({
-              where: { customerId },
-              data: {
-                tierId: tierId as TierId,
-              },
-              select: { id: true },
-            })
-            .catch((cause) => {
-              throw new ShelfError({
-                cause,
-                message: "Failed to update user tier",
-                additionalData: { customerId, tierId, event },
-                label: "Stripe webhook",
-                status: 500,
+          if (newSubIsHigherTier) {
+            await db.user
+              .update({
+                where: { customerId },
+                data: {
+                  tierId: tierId as TierId,
+                },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to update user tier",
+                  additionalData: { customerId, tierId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
               });
-            });
+          }
 
           // Send email notification to user about their new subscription (deduplicated)
           const { emailsToNotify, customerName } =
@@ -302,13 +338,10 @@ export async function action({ request }: ActionFunctionArgs) {
           const subscriptionName = product?.name || "Shelf Subscription";
 
           for (const email of emailsToNotify) {
-            sendEmail({
-              to: email,
-              subject: "Your Shelf subscription is now active",
-              text: subscriptionGrantedText({
-                customerName,
-                subscriptionName,
-              }),
+            void sendSubscriptionGrantedEmail({
+              email,
+              customerName,
+              subscriptionName,
             });
           }
         }
@@ -318,8 +351,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "customer.subscription.paused": {
         /** THis typically handles expiring of subscription */
-        const { subscription, customerId, tierId, productType } =
-          await getDataFromStripeEvent(event);
+        const {
+          subscription,
+          customerId,
+          tierId,
+          productType,
+          product: pausedProduct,
+        } = await getDataFromStripeEvent(event);
 
         if (
           isAddonSubscription({
@@ -329,6 +367,17 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (
+            pausedProduct?.metadata?.addon_type === "audits" &&
+            organizationId
+          ) {
+            await handleAuditAddonWebhook({
+              eventType: event.type,
+              subscription,
+              organizationId,
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -372,8 +421,13 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.updated": {
-        const { subscription, customerId, tierId, productType } =
-          await getDataFromStripeEvent(event);
+        const {
+          subscription,
+          customerId,
+          tierId,
+          productType,
+          product: updatedProduct,
+        } = await getDataFromStripeEvent(event);
 
         if (
           isAddonSubscription({
@@ -383,6 +437,17 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (
+            updatedProduct?.metadata?.addon_type === "audits" &&
+            organizationId
+          ) {
+            await handleAuditAddonWebhook({
+              eventType: event.type,
+              subscription,
+              organizationId,
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -423,10 +488,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "customer.subscription.deleted": {
         // Occurs whenever a customer's subscription ends.
-        const { customerId, tierId, productType } =
-          await getDataFromStripeEvent(event);
+        const {
+          subscription: deletedSubscription,
+          customerId,
+          tierId,
+          productType,
+          product: deletedProduct,
+        } = await getDataFromStripeEvent(event);
 
         if (isAddonSubscription({ tierId, productType, event })) {
+          const organizationId = deletedSubscription?.metadata?.organizationId;
+          if (
+            deletedProduct?.metadata?.addon_type === "audits" &&
+            organizationId
+          ) {
+            await handleAuditAddonWebhook({
+              eventType: event.type,
+              organizationId,
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -524,17 +604,14 @@ export async function action({ request }: ActionFunctionArgs) {
         });
 
         for (const email of emailsToNotify) {
-          sendEmail({
-            to: email,
+          void sendUnpaidInvoiceUserEmail({
+            customerEmail: email,
+            customerName,
+            subscriptionName,
+            amountDue,
+            dueDate,
             subject:
               "Action needed: Payment issue with your Shelf subscription",
-            text: unpaidInvoiceUserText({
-              customerEmail: email,
-              customerName,
-              subscriptionName,
-              amountDue,
-              dueDate,
-            }),
           });
         }
 
@@ -570,6 +647,9 @@ export async function action({ request }: ActionFunctionArgs) {
          * - Subscription created in "incomplete" state that only activates after payment
          * - If `customer.subscription.created` event was missed or failed
          * - Any other scenario where the tier wasn't properly set on creation
+         *
+         * Iterates ALL subscription items to handle bundled subscriptions
+         * (tier + audit addon in a single subscription).
          */
         // In Stripe API 2026-01-28, subscription moved to parent.subscription_details
         const subscriptionId =
@@ -580,33 +660,50 @@ export async function action({ request }: ActionFunctionArgs) {
           );
 
           if (subscription.status === "active") {
-            const product = subscription.items.data[0].plan
-              .product as Stripe.Product;
-            const tierId = product?.metadata?.shelf_tier;
-            const productType = product?.metadata?.product_type;
+            // Iterate all items to find tier and addon products
+            for (const item of subscription.items.data) {
+              const product = item.plan.product as Stripe.Product;
+              const tierId = product?.metadata?.shelf_tier;
+              const productType = product?.metadata?.product_type;
 
-            // Only update tier for non-addon products
-            if (tierId && productType !== "addon") {
-              const newSubscriptionIsHigherOrEqualTier =
-                subscriptionTiersPriority[tierId as TierId] >=
-                subscriptionTiersPriority[user.tierId];
-
-              if (newSubscriptionIsHigherOrEqualTier) {
-                await db.user
-                  .update({
-                    where: { customerId },
-                    data: { tierId: tierId as TierId },
+              // Handle audit add-on invoice paid as safety net
+              if (
+                productType === "addon" &&
+                product?.metadata?.addon_type === "audits"
+              ) {
+                const organizationId = subscription?.metadata?.organizationId;
+                if (organizationId) {
+                  await db.organization.update({
+                    where: { id: organizationId },
+                    data: { auditsEnabled: true },
                     select: { id: true },
-                  })
-                  .catch((cause) => {
-                    throw new ShelfError({
-                      cause,
-                      message: "Failed to update user tier from paid invoice",
-                      additionalData: { customerId, tierId, event },
-                      label: "Stripe webhook",
-                      status: 500,
-                    });
                   });
+                }
+              }
+
+              // Update tier for non-addon products
+              if (tierId && productType !== "addon") {
+                const newSubscriptionIsHigherOrEqualTier =
+                  subscriptionTiersPriority[tierId as TierId] >=
+                  subscriptionTiersPriority[user.tierId];
+
+                if (newSubscriptionIsHigherOrEqualTier) {
+                  await db.user
+                    .update({
+                      where: { customerId },
+                      data: { tierId: tierId as TierId },
+                      select: { id: true },
+                    })
+                    .catch((cause) => {
+                      throw new ShelfError({
+                        cause,
+                        message: "Failed to update user tier from paid invoice",
+                        additionalData: { customerId, tierId, event },
+                        label: "Stripe webhook",
+                        status: 500,
+                      });
+                    });
+                }
               }
             }
           }
@@ -710,16 +807,13 @@ export async function action({ request }: ActionFunctionArgs) {
         });
 
         for (const email of emailsToNotify) {
-          sendEmail({
-            to: email,
+          void sendUnpaidInvoiceUserEmail({
+            customerEmail: email,
+            customerName,
+            subscriptionName,
+            amountDue,
+            dueDate,
             subject: "Action needed: Your Shelf invoice is overdue",
-            text: unpaidInvoiceUserText({
-              customerEmail: email,
-              customerName,
-              subscriptionName,
-              amountDue,
-              dueDate,
-            }),
           });
         }
 
@@ -772,8 +866,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "customer.subscription.trial_will_end": {
         // Occurs three days before the trial period of a subscription is scheduled to end.
-        const { tierId, subscription, productType } =
-          await getDataFromStripeEvent(event);
+        const {
+          tierId,
+          subscription,
+          productType,
+          product: trialEndProduct,
+        } = await getDataFromStripeEvent(event);
 
         if (
           isAddonSubscription({
@@ -783,6 +881,19 @@ export async function action({ request }: ActionFunctionArgs) {
             additionalData: { subscription },
           })
         ) {
+          // Send trial ending email for audit add-on
+          if (
+            subscription.trial_end &&
+            trialEndProduct?.metadata?.addon_type === "audits"
+          ) {
+            const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+            void sendAuditTrialEndsSoonEmail({
+              firstName: user.firstName,
+              email: user.email,
+              hasPaymentMethod,
+              trialEndDate: new Date(subscription.trial_end * 1000),
+            });
+          }
           return new Response(null, { status: 200 });
         }
 
@@ -791,17 +902,10 @@ export async function action({ request }: ActionFunctionArgs) {
           subscription.trial_end && subscription.trial_start;
 
         if (isTrialSubscription) {
-          sendEmail({
-            to: user.email,
-            subject: "Your shelf.nu free trial is ending soon",
-            text: trialEndsSoonText({
-              user: {
-                firstName: user?.firstName ?? null,
-                lastName: user?.lastName ?? null,
-                email: user.email,
-              },
-              subscription,
-            }),
+          void sendTrialEndsSoonEmail({
+            firstName: user.firstName,
+            email: user.email,
+            trialEndDate: new Date((subscription.trial_end as number) * 1000),
           });
         }
 

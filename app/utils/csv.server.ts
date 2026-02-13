@@ -834,6 +834,26 @@ export async function exportBookingNotesToCsv({
   });
 }
 
+export async function exportAuditNotesToCsv({
+  request,
+  auditId,
+  organizationId,
+}: {
+  request: Request;
+  auditId: string;
+  organizationId: string;
+}) {
+  return exportNotesToCsv<Prisma.AuditNoteWhereInput>({
+    request,
+    where: {
+      auditSessionId: auditId,
+      auditSession: { organizationId },
+    },
+    findMany: (args) =>
+      db.auditNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  });
+}
+
 export async function exportLocationNotesToCsv({
   request,
   locationId,

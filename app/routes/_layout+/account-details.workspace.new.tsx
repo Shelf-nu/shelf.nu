@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Currency } from "@prisma/client";
 import {
   MaxFileSizeExceededError,
@@ -20,17 +21,23 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
+import { sendEmail } from "~/emails/mail.server";
+import { linkAuditAddonToOrganization } from "~/modules/audit/addon.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ADMIN_EMAIL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
+import { getOrCreateCustomerId } from "~/utils/stripe.server";
 import { assertUserCanCreateMoreOrganizations } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -139,10 +146,67 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currency,
     });
 
+    // Link audit addon to new org if checkout included audits.
+    // This must not block workspace creation — if it fails, we log,
+    // notify the admin, and let the user continue.
+    const url = new URL(request.url);
+    const includesAudits = url.searchParams.get("includesAudits") === "true";
+    let auditLinkFailed = false;
+
+    if (includesAudits) {
+      try {
+        const user = await getUserByID(userId, {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            customerId: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const customerId = await getOrCreateCustomerId(user);
+        await linkAuditAddonToOrganization({
+          customerId,
+          organizationId: newOrg.id,
+        });
+      } catch (cause) {
+        auditLinkFailed = true;
+
+        Logger.error(
+          new ShelfError({
+            cause,
+            message:
+              "Failed to link audit addon to new organization during workspace creation",
+            additionalData: { userId, organizationId: newOrg.id },
+            label: "Stripe",
+          })
+        );
+
+        // Notify admin so they can resolve manually
+        void sendEmail({
+          to: ADMIN_EMAIL,
+          subject: "ACTION REQUIRED: Audit addon linking failed",
+          text: [
+            "A user created a workspace with an audit addon subscription,",
+            "but the addon could not be linked automatically.",
+            "",
+            `User ID: ${userId}`,
+            `Organization ID: ${newOrg.id}`,
+            "",
+            "Please link the audit addon to this organization manually.",
+          ].join("\n"),
+        });
+      }
+    }
+
     sendNotification({
       title: "Workspace created",
-      message: "Your workspace has been created successfully",
-      icon: { name: "success", variant: "success" },
+      message: auditLinkFailed
+        ? "Your workspace was created, but we couldn't activate the audit addon. An admin will contact you shortly to resolve this."
+        : "Your workspace has been created successfully",
+      icon: auditLinkFailed
+        ? { name: "trash", variant: "error" }
+        : { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
 

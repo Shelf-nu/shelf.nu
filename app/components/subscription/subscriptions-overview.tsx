@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { InfoIcon } from "lucide-react";
+import { useRouteLoaderData } from "react-router";
 import type Stripe from "stripe";
+import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import { CustomerPortalForm } from "./customer-portal-form";
@@ -195,6 +197,16 @@ function Item({
     return item.price?.nickname || "Subscription";
   }, [subscriptionPrice, item.price]);
 
+  // Look up workspace name from layout data for addon subscriptions
+  const layoutData = useRouteLoaderData<typeof layoutLoader>(
+    "routes/_layout+/_layout"
+  );
+  const workspaceName = useMemo(() => {
+    const orgId = subscription.metadata?.organizationId;
+    if (!orgId || !layoutData?.organizations) return null;
+    return layoutData.organizations.find((o) => o.id === orgId)?.name ?? null;
+  }, [subscription.metadata, layoutData?.organizations]);
+
   const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
   const costPerPrice = item?.price?.unit_amount
     ? (item?.price?.unit_amount * (item?.quantity || 1)) / 100
@@ -219,6 +231,9 @@ function Item({
       formatSubscriptionStatus(subscription.status),
       interval === "year" ? "Yearly billing" : "Monthly billing",
     ];
+    if (workspaceName) {
+      arr.push(`Workspace: ${workspaceName}`);
+    }
     if (isLegacyPricing) {
       arr.unshift(
         <div className="flex items-center gap-1">
@@ -227,7 +242,14 @@ function Item({
       );
     }
     return arr;
-  }, [planTier, productName, interval, subscription.status, isLegacyPricing]);
+  }, [
+    planTier,
+    productName,
+    interval,
+    subscription.status,
+    isLegacyPricing,
+    workspaceName,
+  ]);
 
   function renderSubscriptionCost() {
     /** Cost for singular price. To get the total we still need to multiply by quantity */

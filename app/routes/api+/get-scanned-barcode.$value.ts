@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -68,7 +69,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     // Decode the URL-encoded barcode value
     const value = decodeURIComponent(encodedValue);
 
-    const { assetExtraInclude, kitExtraInclude } = parseData(
+    const { assetExtraInclude, kitExtraInclude, auditSessionId } = parseData(
       searchParams,
       z.object({
         assetExtraInclude: z
@@ -93,10 +94,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
               throw new Error("Invalid JSON input for kitExtraInclude");
             }
           }),
+        auditSessionId: z.string().optional(),
       })
     ) as {
       assetExtraInclude: Prisma.AssetInclude | undefined;
       kitExtraInclude: Prisma.KitInclude | undefined;
+      auditSessionId?: string;
     };
 
     const include = {
@@ -139,11 +142,52 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
+    // If audit session ID provided, fetch the auditAssetId and counts
+    let auditAssetId: string | undefined;
+    let auditNotesCount = 0;
+    let auditImagesCount = 0;
+    if (auditSessionId && barcode.asset?.id) {
+      const auditAsset = await db.auditAsset.findFirst({
+        where: {
+          auditSessionId,
+          assetId: barcode.asset.id,
+        },
+        select: { id: true },
+      });
+      auditAssetId = auditAsset?.id;
+      if (auditAssetId) {
+        const [notesCount, imagesCount] = await Promise.all([
+          db.auditNote.count({
+            where: {
+              auditSessionId,
+              auditAssetId,
+            },
+          }),
+          db.auditImage.count({
+            where: {
+              auditSessionId,
+              auditAssetId,
+            },
+          }),
+        ]);
+        auditNotesCount = notesCount;
+        auditImagesCount = imagesCount;
+      }
+    }
+
     return data(
       payload({
         barcode: {
           ...barcode,
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
+          asset: barcode.asset
+            ? {
+                ...barcode.asset,
+                auditAssetId,
+                auditNotesCount,
+                auditImagesCount,
+              }
+            : undefined,
         },
       })
     );
