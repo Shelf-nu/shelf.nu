@@ -325,6 +325,12 @@ export default function BookingsIndexPage({
               <BulkActionsDropdown />
             )
           }
+          customEmptyStateContent={{
+            title: "No bookings yet",
+            text: "Bookings let your team reserve assets for specific dates. Create a booking to schedule equipment checkouts and returns.",
+            newButtonRoute: "/bookings/new",
+            newButtonContent: "Create your first booking",
+          }}
           ItemComponent={ListBookingsContent}
           headerChildren={
             <>

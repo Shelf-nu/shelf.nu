@@ -329,6 +329,12 @@ export default function KitsIndexPage() {
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
             bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            customEmptyStateContent={{
+              title: "No kits yet",
+              text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",
+              newButtonRoute: "/kits/new",
+              newButtonContent: "Create your first kit",
+            }}
             headerChildren={
               <>
                 <Th>Category</Th>

@@ -92,7 +92,12 @@ export default function AssetsByCategoryChart() {
             </div>
           </div>
         ) : (
-          <EmptyState text="No assets in database" />
+          <EmptyState
+            text="No assets yet"
+            subText="Add assets and assign categories to see the breakdown here."
+            ctaTo="/assets/new"
+            ctaText="Create an asset →"
+          />
         )}
       </div>
     </div>

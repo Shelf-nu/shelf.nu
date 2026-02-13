@@ -358,7 +358,14 @@ export default function AssetIndexPage() {
           </>
         </When>
       </Header>
-      <AssetsList />
+      <AssetsList
+        customEmptyState={{
+          title: "No assets yet",
+          text: "Assets are the core of your inventory. Create your first asset to start tracking equipment, devices, or anything your team manages.",
+          newButtonRoute: "/assets/new",
+          newButtonContent: "Create your first asset",
+        }}
+      />
     </div>
   );
 }

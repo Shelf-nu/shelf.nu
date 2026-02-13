@@ -75,7 +75,10 @@ export default function InventoryValueChart() {
             </div>
           </div>
         ) : (
-          <EmptyState text="No assets with values exists in database" />
+          <EmptyState
+            text="No asset values yet"
+            subText="Add valuations to your assets to see your total inventory value here."
+          />
         )}
       </div>
     </div>

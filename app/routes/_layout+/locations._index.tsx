@@ -111,6 +111,12 @@ export default function LocationsIndexPage() {
           bulkActions={
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
           }
+          customEmptyStateContent={{
+            title: "No locations yet",
+            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+            newButtonRoute: "/locations/new",
+            newButtonContent: "Create your first location",
+          }}
           ItemComponent={ListItemContent}
           headerChildren={
             <>
