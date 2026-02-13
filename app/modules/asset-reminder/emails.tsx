@@ -10,6 +10,7 @@ import {
   Text,
 } from "@react-email/components";
 import colors from "tailwindcss/colors";
+import { CustomEmailFooter } from "~/emails/components/custom-footer";
 import { LogoForEmail } from "~/emails/logo";
 import { styles } from "~/emails/styles";
 import { SERVER_URL } from "~/utils/env";
@@ -20,6 +21,7 @@ type AssetAlertEmailProps = {
   reminder: AssetReminder;
   workspaceName: string;
   isOwner?: boolean;
+  customEmailFooter?: string | null;
 };
 
 export function assetAlertEmailText({
@@ -28,12 +30,13 @@ export function assetAlertEmailText({
   reminder,
   workspaceName,
   isOwner,
+  customEmailFooter,
 }: AssetAlertEmailProps) {
   const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
 
   const note = isOwner
     ? `You are receiving this email because the original person was removed from workspace ${workspaceName}.`
-    : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}. 
+    : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}.
 If you think you weren't supposed to have received this email please contact the owner of the workspace.`;
 
   return `Asset reminder notice
@@ -51,7 +54,7 @@ ${reminder.message}
 ${SERVER_URL}/assets/${asset.id}
 
 ${note}
-
+${customEmailFooter ? `\n---\n${customEmailFooter}` : ""}
 Thanks,
 The Shelf Team
 `;
@@ -74,6 +77,7 @@ function AssetAlertEmailTemplate({
   user,
   workspaceName,
   isOwner,
+  customEmailFooter,
 }: AssetAlertEmailProps) {
   const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
 
@@ -192,6 +196,8 @@ function AssetAlertEmailTemplate({
               </Text>
             </>
           )}
+
+          <CustomEmailFooter footerText={customEmailFooter} />
 
           <div
             style={{

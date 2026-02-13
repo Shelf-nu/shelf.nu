@@ -18,6 +18,7 @@ type BasicEmailContentArgs = {
   to: Date;
   bookingId: string;
   hints: ClientHint;
+  customEmailFooter?: string | null;
 };
 
 /**
@@ -33,6 +34,7 @@ export const baseBookingTextEmailContent = ({
   assetsCount,
   emailContent,
   hints,
+  customEmailFooter,
 }: BasicEmailContentArgs & { emailContent: string }) => {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -54,7 +56,7 @@ To: ${toDate}
 
 To view the booking, follow the link below:
 ${SERVER_URL}/bookings/${bookingId}
-
+${customEmailFooter ? `\n---\n${customEmailFooter}` : ""}
 Thanks,
 The Shelf Team
 `;
@@ -122,6 +124,7 @@ export async function sendCheckinReminder(
       from: booking.from!,
       to: booking.to!,
       bookingId: booking.id,
+      customEmailFooter: booking.organization.customEmailFooter,
     }),
     html,
   });
@@ -263,6 +266,7 @@ export async function sendBookingUpdatedEmail({
       to: booking.to!,
       bookingId: booking.id,
       hints,
+      customEmailFooter: booking.organization.customEmailFooter,
     };
 
     const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
