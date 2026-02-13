@@ -51,6 +51,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         message: "Email settings are not available for personal workspaces.",
         label: "Settings",
         shouldBeCaptured: false,
+        status: 403,
       });
     }
 

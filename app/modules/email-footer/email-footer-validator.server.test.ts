@@ -47,6 +47,30 @@ describe("validateEmailFooter", () => {
     expect(result.error).toContain("evil.com");
   });
 
+  it.each([
+    "evil.dev",
+    "evil.app",
+    "evil.xyz",
+    "evil.info",
+    "evil.ai",
+    "evil.site",
+    "evil.cloud",
+    "evil.tech",
+    "evil.store",
+    "evil.online",
+    "evil.uk",
+    "evil.de",
+    "evil.tv",
+    "evil.gg",
+    "evil.ly",
+    "evil.to",
+  ])("blocks bare domain with TLD: %s", (domain) => {
+    const result = validateEmailFooter(`Visit ${domain} for more`);
+    expect(result.isValid).toBe(false);
+    expect(result.error).toContain("URLs");
+    expect(result.error).toContain(domain);
+  });
+
   it("blocks phishing patterns", () => {
     const result = validateEmailFooter("Please verify your account now");
     expect(result.isValid).toBe(false);

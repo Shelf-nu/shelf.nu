@@ -35,7 +35,7 @@ const PHISHING_PATTERNS = [
 const URL_PATTERNS = [
   /https?:\/\/[^\s]+/gi, // HTTP(S) URLs
   /www\.[^\s]+\.[a-z]{2,}/gi, // www.example.com
-  /(?<![@\w])[a-z0-9-]+\.(com|org|net|io|co)(\/[^\s]*)?(?=\s|$)/gi, // bare domains, NOT emails
+  /(?<![@\w])[a-z0-9-]+\.(com|org|net|io|co|dev|app|xyz|info|biz|me|us|uk|ca|au|de|fr|ru|cn|in|br|site|online|tech|store|shop|cloud|ai|gg|tv|cc|ly|to)(\/[^\s]*)?(?=\s|$)/gi, // bare domains, NOT emails
 ];
 
 /**
