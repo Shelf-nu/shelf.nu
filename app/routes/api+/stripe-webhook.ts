@@ -264,26 +264,35 @@ export async function action({ request }: ActionFunctionArgs) {
         const isTrialSubscription =
           !!subscription.trial_end && !!subscription.trial_start;
 
+        // Only update tier if the new subscription is higher priority
+        // than the user's current tier. This prevents downgrading
+        // custom plan users when a regular subscription is created.
+        const newSubIsHigherTier =
+          subscriptionTiersPriority[tierId as TierId] >
+          subscriptionTiersPriority[user.tierId];
+
         if (isTrialSubscription) {
           /** When its a trial subscription, update the tier and mark trial as used */
-          const trialUser = await db.user
-            .update({
-              where: { customerId },
-              data: {
-                tierId: tierId as TierId,
-                usedFreeTrial: true,
-              },
-              select: { email: true, firstName: true },
-            })
-            .catch((cause) => {
-              throw new ShelfError({
-                cause,
-                message: "Failed to update user tier",
-                additionalData: { customerId, tierId, event },
-                label: "Stripe webhook",
-                status: 500,
+          if (newSubIsHigherTier) {
+            await db.user
+              .update({
+                where: { customerId },
+                data: {
+                  tierId: tierId as TierId,
+                  usedFreeTrial: true,
+                },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to update user tier",
+                  additionalData: { customerId, tierId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
               });
-            });
+          }
 
           // Only send the welcome email if the subscription was created
           // via Stripe Checkout. Direct-created subscriptions (from our
@@ -292,8 +301,8 @@ export async function action({ request }: ActionFunctionArgs) {
             subscription.metadata?.createdByAction === "true";
           if (!createdByAction) {
             void sendTeamTrialWelcomeEmail({
-              firstName: trialUser.firstName,
-              email: trialUser.email,
+              firstName: user.firstName,
+              email: user.email,
             });
           }
         } else {
@@ -301,23 +310,25 @@ export async function action({ request }: ActionFunctionArgs) {
            * For non-trial subscriptions (e.g., admin manually created subscription),
            * update the tier immediately without waiting for invoice payment
            */
-          await db.user
-            .update({
-              where: { customerId },
-              data: {
-                tierId: tierId as TierId,
-              },
-              select: { id: true },
-            })
-            .catch((cause) => {
-              throw new ShelfError({
-                cause,
-                message: "Failed to update user tier",
-                additionalData: { customerId, tierId, event },
-                label: "Stripe webhook",
-                status: 500,
+          if (newSubIsHigherTier) {
+            await db.user
+              .update({
+                where: { customerId },
+                data: {
+                  tierId: tierId as TierId,
+                },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to update user tier",
+                  additionalData: { customerId, tierId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
               });
-            });
+          }
 
           // Send email notification to user about their new subscription (deduplicated)
           const { emailsToNotify, customerName } =
