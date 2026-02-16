@@ -249,7 +249,9 @@ export async function createUserOrAttachOrg({
       );
 
       if (!authAccount) {
-        authAccount = await confirmExistingAuthAccount(email, password);
+        authAccount = await confirmExistingAuthAccount(email, password).catch(
+          () => null
+        );
       }
 
       if (!authAccount) {
