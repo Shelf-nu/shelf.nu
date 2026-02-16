@@ -1,6 +1,6 @@
 import { Button } from "../shared/button";
 
-export function EmptyState({
+export function DashboardEmptyState({
   text,
   subText,
   ctaTo,
@@ -15,7 +15,8 @@ export function EmptyState({
     <div className="flex size-full min-h-[200px] flex-col items-center justify-center gap-2">
       <img
         src="/static/images/empty-state.svg"
-        alt="Empty state"
+        alt=""
+        aria-hidden="true"
         className="h-auto w-[45px]"
       />
       <div className="text-center font-semibold text-gray-900">{text}</div>

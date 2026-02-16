@@ -3,7 +3,7 @@ import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { formatCurrency } from "~/utils/currency";
-import { EmptyState } from "./empty-state";
+import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 import { InfoTooltip } from "../shared/info-tooltip";
 
@@ -75,7 +75,7 @@ export default function InventoryValueChart() {
             </div>
           </div>
         ) : (
-          <EmptyState
+          <DashboardEmptyState
             text="No asset values yet"
             subText="Add valuations to your assets to see your total inventory value here."
           />

@@ -3,7 +3,7 @@ import { DonutChart } from "@tremor/react";
 import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { EmptyState } from "./empty-state";
+import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
@@ -92,11 +92,11 @@ export default function AssetsByCategoryChart() {
             </div>
           </div>
         ) : (
-          <EmptyState
+          <DashboardEmptyState
             text="No assets yet"
             subText="Add assets and assign categories to see the breakdown here."
             ctaTo="/assets/new"
-            ctaText="Create an asset →"
+            ctaText="Create an asset"
           />
         )}
       </div>

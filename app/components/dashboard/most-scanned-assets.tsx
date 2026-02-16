@@ -1,7 +1,7 @@
 import type { Asset } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { EmptyState } from "./empty-state";
+import { DashboardEmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { Button } from "../shared/button";
@@ -61,7 +61,7 @@ export default function MostScannedAssets() {
         </Table>
       ) : (
         <div className="flex-1 rounded-b border border-gray-200 p-8">
-          <EmptyState
+          <DashboardEmptyState
             text="No scans yet"
             subText="Scan asset QR codes to see your most scanned assets here."
           />

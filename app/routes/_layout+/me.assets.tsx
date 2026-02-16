@@ -48,7 +48,7 @@ export default function MyAssets() {
     <AssetsList
       disableTeamMemberFilter
       disableBulkActions
-      customEmptyState={{
+      customEmptyStateContent={{
         title: "No assets",
         text: "You have not created any assets yet and no assets are assigned to you.",
       }}

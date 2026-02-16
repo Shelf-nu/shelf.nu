@@ -52,7 +52,7 @@ export default function UserAssetsPage() {
     <AssetsList
       disableTeamMemberFilter
       disableBulkActions
-      customEmptyState={{
+      customEmptyStateContent={{
         title: "No assets in custody",
         text: "This user currently has no assets in their custody.",
       }}

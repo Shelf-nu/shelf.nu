@@ -1,11 +1,12 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useLoaderData } from "react-router";
 
 import { useSearchParams } from "~/hooks/search-params";
 import type { SearchableIndexResponse } from "~/modules/types";
+import { NON_FILTER_PARAMS } from "~/utils/filter-params";
 import { tw } from "~/utils/tw";
-import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
+
 export interface CustomEmptyState {
   className?: string;
   customContent?: {
@@ -13,7 +14,7 @@ export interface CustomEmptyState {
     text: ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
-    buttonProps?: any;
+    buttonProps?: Partial<ComponentProps<typeof Button>>;
   };
   modelName?: {
     singular: string;
@@ -21,40 +22,25 @@ export interface CustomEmptyState {
   };
 }
 
-/** Params that are NOT user-applied filters */
-const NON_FILTER_PARAMS = new Set([
-  "s",
-  "page",
-  "getAll",
-  "scanId",
-  "redirectTo",
-  "sortBy",
-  "orderBy",
-  "orderDirection",
-  "index",
-]);
-
 export const EmptyState = ({
   className,
   customContent,
   modelName,
 }: CustomEmptyState) => {
-  const { search, modelName: modelNameData } =
-    useLoaderData<SearchableIndexResponse>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    search,
+    modelName: modelNameData,
+    hasActiveFilters,
+  } = useLoaderData<SearchableIndexResponse>();
+  const [, setSearchParams] = useSearchParams();
   const singular = modelName?.singular || modelNameData.singular;
   const plural = modelName?.plural || modelNameData.plural;
-
-  // Detect column/advanced filters (URL params that aren't search, pagination, or sorting)
-  const hasColumnFilters = Array.from(searchParams.keys()).some(
-    (key) => !NON_FILTER_PARAMS.has(key)
-  );
 
   // When there's an active search OR filter, always show contextual "no results"
   // messaging — even if customContent is provided. customContent is only
   // used for the true zero-data state (nothing active, nothing in DB).
   const hasSearch = !!search;
-  const isFiltered = hasSearch || hasColumnFilters;
+  const isFiltered = hasSearch || !!hasActiveFilters;
 
   const filteredTexts = hasSearch
     ? {
@@ -66,12 +52,66 @@ export const EmptyState = ({
         p: `No ${plural} match the applied filters. Try adjusting or clearing your filters.`,
       };
 
-  const zeroDataTexts = customContent
-    ? null
-    : {
-        title: `No ${plural} on database`,
-        p: `What are you waiting for? Create your first ${singular} now!`,
-      };
+  const zeroDataTexts = {
+    title: `No ${plural} on database`,
+    p: `What are you waiting for? Create your first ${singular} now!`,
+  };
+
+  /** Determine which "clear" button to show */
+  const clearButton = (() => {
+    if (!isFiltered) return null;
+
+    if (hasSearch && hasActiveFilters) {
+      // Both search and filters active — single "Clear All" button
+      return (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setSearchParams(() => new URLSearchParams());
+          }}
+        >
+          Clear All
+        </Button>
+      );
+    }
+
+    if (hasSearch) {
+      return (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("s");
+              return next;
+            });
+          }}
+        >
+          Clear Search
+        </Button>
+      );
+    }
+
+    // Only filters active
+    return (
+      <Button
+        variant="secondary"
+        onClick={() => {
+          setSearchParams((prev) => {
+            const next = new URLSearchParams();
+            prev.forEach((value, key) => {
+              if (NON_FILTER_PARAMS.has(key)) {
+                next.append(key, value);
+              }
+            });
+            return next;
+          });
+        }}
+      >
+        Clear Filters
+      </Button>
+    );
+  })();
 
   return (
     <div
@@ -83,7 +123,8 @@ export const EmptyState = ({
       <div className="flex flex-col items-center">
         <img
           src="/static/images/empty-state.svg"
-          alt="Empty state"
+          alt=""
+          aria-hidden="true"
           className="h-auto w-[172px]"
         />
         {isFiltered ? (
@@ -103,54 +144,26 @@ export const EmptyState = ({
         ) : (
           <div>
             <div className="text-text-lg font-semibold text-gray-900">
-              {zeroDataTexts!.title}
+              {zeroDataTexts.title}
             </div>
-            <p className="text-gray-600">{zeroDataTexts!.p}</p>
+            <p className="text-gray-600">{zeroDataTexts.p}</p>
           </div>
         )}
       </div>
       <div className="flex justify-center gap-3">
-        {isFiltered ? (
-          hasSearch ? (
-            <ClearSearch
-              buttonProps={{
-                variant: "secondary",
-              }}
-            >
-              Clear Search
-            </ClearSearch>
-          ) : (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSearchParams((prev) => {
-                  const keysToDelete: string[] = [];
-                  prev.forEach((_value, key) => {
-                    if (!NON_FILTER_PARAMS.has(key)) {
-                      keysToDelete.push(key);
-                    }
-                  });
-                  keysToDelete.forEach((key) => prev.delete(key));
-                  return prev;
-                });
-              }}
-            >
-              Clear Filters
-            </Button>
-          )
-        ) : (
-          customContent?.newButtonRoute && (
-            <Button
-              to={customContent.newButtonRoute}
-              aria-label={`new ${singular}`}
-              {...(customContent?.buttonProps || undefined)}
-            >
-              {customContent?.newButtonContent
-                ? customContent.newButtonContent
-                : `New ${singular}`}
-            </Button>
-          )
-        )}
+        {isFiltered
+          ? clearButton
+          : customContent?.newButtonRoute && (
+              <Button
+                to={customContent.newButtonRoute}
+                aria-label={`new ${singular}`}
+                {...(customContent?.buttonProps || undefined)}
+              >
+                {customContent?.newButtonContent
+                  ? customContent.newButtonContent
+                  : `New ${singular}`}
+              </Button>
+            )}
       </div>
     </div>
   );

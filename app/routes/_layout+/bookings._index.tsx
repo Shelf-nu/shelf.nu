@@ -44,6 +44,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -114,6 +115,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
       userId,
     });
+
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
 
     /** We only do that when we are on the index page */
     if (filters && redirectNeeded) {
@@ -201,6 +204,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        hasActiveFilters,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members
