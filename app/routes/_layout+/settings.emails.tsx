@@ -189,6 +189,10 @@ export default function EmailSettingsPage() {
               <span className="font-medium">Access:</span> Access revocation
               notices
             </li>
+            <li>
+              <span className="font-medium">Audits:</span> Assignment,
+              cancelled, completed, reminder, overdue notifications
+            </li>
           </ul>
         </div>
 

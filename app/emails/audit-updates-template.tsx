@@ -9,6 +9,7 @@ import {
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
+import { CustomEmailFooter } from "./components/custom-footer";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 
@@ -24,6 +25,7 @@ export interface AuditForEmail {
   organizationId: string;
   organization: {
     name: string;
+    customEmailFooter?: string | null;
     owner: {
       email: string;
     };
@@ -178,6 +180,8 @@ export function AuditUpdatesEmailTemplate({
             )}
           </div>
         )}
+
+        <CustomEmailFooter footerText={audit.organization.customEmailFooter} />
 
         <div
           style={{

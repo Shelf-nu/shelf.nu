@@ -16,6 +16,7 @@ type BasicAuditEmailContentArgs = {
   hints: ClientHint;
   auditId: string;
   organizationId?: string;
+  customEmailFooter?: string | null;
 };
 
 /**
@@ -31,6 +32,7 @@ export const baseAuditTextEmailContent = ({
   hints,
   auditId,
   organizationId,
+  customEmailFooter,
   emailContent,
 }: BasicAuditEmailContentArgs & { emailContent: string }) => {
   const dueDateText = dueDate
@@ -51,7 +53,7 @@ Created by: ${creatorName}
 ${dueDateText}${description ? `Description: ${description}\n` : ""}
 To view the audit, follow the link below:
 ${SERVER_URL}/audits/${auditId}/overview${orgQuery}
-
+${customEmailFooter ? `\n---\n${customEmailFooter}\n` : ""}
 Thanks,
 The Shelf Team
 `;
@@ -174,6 +176,7 @@ export async function sendAuditAssignedEmail({
         dueDate: audit.dueDate,
         hints,
         auditId: audit.id,
+        customEmailFooter: audit.organization.customEmailFooter,
       }),
       html,
     });
@@ -239,6 +242,7 @@ export function sendAuditCancelledEmails({
           dueDate: audit.dueDate,
           hints,
           auditId: audit.id,
+          customEmailFooter: audit.organization.customEmailFooter,
         }),
         html,
       });
@@ -321,6 +325,7 @@ export function sendAuditCompletedEmail({
           hints,
           auditId: audit.id,
           organizationId: audit.organizationId,
+          customEmailFooter: audit.organization.customEmailFooter,
           completedAt,
           wasOverdue,
         }),
@@ -400,6 +405,7 @@ export function sendAuditReminderEmail({
           dueDate: audit.dueDate,
           hints,
           auditId: audit.id,
+          customEmailFooter: audit.organization.customEmailFooter,
           timeframe,
         }),
         html,
@@ -469,6 +475,7 @@ export function sendAuditOverdueEmail({
           dueDate: audit.dueDate,
           hints,
           auditId: audit.id,
+          customEmailFooter: audit.organization.customEmailFooter,
         }),
         html,
       });

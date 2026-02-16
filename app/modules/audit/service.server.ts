@@ -1403,6 +1403,7 @@ export async function completeAuditSession({
         organization: {
           select: {
             name: true,
+            customEmailFooter: true,
             owner: {
               select: { email: true },
             },
