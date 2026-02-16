@@ -988,6 +988,7 @@ export async function reserveBooking({
         to,
         hints,
         bookingId: bookingFound.id,
+        customEmailFooter: bookingFound.organization.customEmailFooter,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -1632,6 +1633,7 @@ export async function checkinBooking({
         to: updatedBooking.to as Date,
         bookingId: updatedBooking.id,
         hints: hints,
+        customEmailFooter: updatedBooking.organization.customEmailFooter,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -2265,6 +2267,7 @@ export async function cancelBooking({
         bookingId: booking.id,
         hints,
         cancellationReason,
+        customEmailFooter: booking.organization.customEmailFooter,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -2539,6 +2542,7 @@ export async function extendBooking({
         hints,
         bookingId: updatedBooking.id,
         oldToDate: booking.to,
+        customEmailFooter: updatedBooking.organization.customEmailFooter,
       });
 
       const { format } = getDateTimeFormatFromHints(hints, {
@@ -3199,6 +3203,7 @@ export async function deleteBooking(
         to: b.to as Date,
         bookingId: b.id,
         hints: hints,
+        customEmailFooter: b.organization.customEmailFooter,
       });
       const html = await bookingUpdatesTemplateString({
         booking: b,
@@ -4015,6 +4020,7 @@ export async function bulkCancelBookings({
           to: b.to as Date,
           bookingId: b.id,
           hints: hints,
+          customEmailFooter: b.organization.customEmailFooter,
         });
 
         const html = await bookingUpdatesTemplateString({

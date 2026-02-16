@@ -366,7 +366,7 @@ Before committing tests:
 
 ## Git and Version control
 
-- add and commit automatically whenever a task is finished
+- **NEVER stage (`git add`) or commit files automatically.** Only stage or commit when the user explicitly asks you to do so.
 - Always use Conventional Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - use descriptive commit messages that capture the full scope of the changes
 - **IMPORTANT: Each line in the commit message body must be ≤ 100 characters**
