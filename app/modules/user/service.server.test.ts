@@ -297,9 +297,19 @@ const newUserMock = {
   organizations: [{ id: ORGANIZATION_ID }],
 };
 
+/**
+ * Tests for the invite acceptance flow in `createUserOrAttachOrg`.
+ *
+ * Covers the fallback logic that handles the "limbo" state: a user who signed
+ * up but never confirmed their email has a Supabase auth account but no Prisma
+ * User record. When they later accept a team invite, `createEmailAuthAccount`
+ * fails (email exists), so we fall back to `confirmExistingAuthAccount` to
+ * confirm the existing auth account and create the Prisma User.
+ */
 describe(createUserOrAttachOrg.name, () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // Default: no existing Prisma user, no existing auth user
     // @ts-expect-error missing vitest type
     db.user.findFirst.mockResolvedValue(null);
     // @ts-expect-error missing vitest type
@@ -314,6 +324,7 @@ describe(createUserOrAttachOrg.name, () => {
     server.events.removeAllListeners();
   });
 
+  /** Happy path: brand-new user with no prior Supabase account */
   it("creates a new user when no Prisma user and no Supabase account exists", async () => {
     const result = await createUserOrAttachOrg({
       email: USER_EMAIL,
@@ -328,6 +339,7 @@ describe(createUserOrAttachOrg.name, () => {
     expect(db.user.create).toHaveBeenCalled();
   });
 
+  /** The "limbo" bug: unconfirmed Supabase account exists, no Prisma User */
   it("falls back to confirming existing auth account when createEmailAuthAccount fails", async () => {
     // Override: createEmailAuthAccount fails (email already in Supabase)
     server.use(
@@ -365,6 +377,7 @@ describe(createUserOrAttachOrg.name, () => {
     expect(db.user.create).toHaveBeenCalled();
   });
 
+  /** No auth account can be created or found — user gets a clear error */
   it("throws when both createEmailAuthAccount and confirmExistingAuthAccount fail", async () => {
     // createEmailAuthAccount fails
     server.use(
@@ -394,6 +407,7 @@ describe(createUserOrAttachOrg.name, () => {
     ).rejects.toThrow("We are facing some issue with your account");
   });
 
+  /** Existing user accepting invite for a new org — no auth changes needed */
   it("attaches org to existing Prisma user without creating a new auth account", async () => {
     const existingUser = {
       id: USER_ID,

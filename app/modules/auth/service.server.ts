@@ -37,6 +37,17 @@ export async function createEmailAuthAccount(email: string, password: string) {
   }
 }
 
+/**
+ * Looks up an existing Supabase auth account by email and confirms it.
+ *
+ * Used as a fallback during invite acceptance when `createEmailAuthAccount`
+ * fails because the email already exists in Supabase (e.g. user signed up
+ * but never confirmed their email). The invite JWT serves as proof of email
+ * ownership, making direct confirmation safe.
+ *
+ * @returns The confirmed auth user, or `null` if no auth account exists
+ *          for the given email.
+ */
 export async function confirmExistingAuthAccount(
   email: string,
   password: string
