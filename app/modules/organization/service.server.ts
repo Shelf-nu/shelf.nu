@@ -259,6 +259,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
   showShelfBranding,
+  customEmailFooter,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
   name?: string;
@@ -272,6 +273,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   showShelfBranding?: Organization["showShelfBranding"];
+  customEmailFooter?: string | null;
 }) {
   try {
     const data = {
@@ -284,6 +286,7 @@ export async function updateOrganization({
       ...(typeof showShelfBranding === "boolean" && {
         showShelfBranding,
       }),
+      ...(customEmailFooter !== undefined && { customEmailFooter }),
       ...(ssoDetails && {
         ssoDetails: {
           update: ssoDetails,
@@ -373,6 +376,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
+  customEmailFooter: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
