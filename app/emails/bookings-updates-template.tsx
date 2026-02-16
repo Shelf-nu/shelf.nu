@@ -9,6 +9,7 @@ import {
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
+import { CustomEmailFooter } from "./components/custom-footer";
 import { AdminFooter, UserFooter } from "./components/footers";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
@@ -159,6 +160,10 @@ export function BookingUpdatesEmailTemplate({
             View booking in app
           </Button>
         )}
+
+        <CustomEmailFooter
+          footerText={booking.organization.customEmailFooter}
+        />
 
         {isAdminEmail ? (
           <AdminFooter booking={booking} />
