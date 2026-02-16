@@ -19,47 +19,55 @@ export * from "../server";
 // === start: register scheduler and workers ===
 schedulerService
   .init()
-  .then(async () => {
-    await registerBookingWorkers().catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while registering booking workers.",
-          label: "Scheduler",
-        })
-      );
-    });
-
-    await regierAssetWorkers().catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while registering asset workers.",
-          label: "Scheduler",
-        })
-      );
-    });
-
-    await registerEmailWorkers().catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while registering email workers.",
-          label: "Scheduler",
-        })
-      );
-    });
-
-    await registerAuditWorkers().catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Something went wrong while registering audit workers.",
-          label: "Scheduler",
-        })
-      );
-    });
-  })
+  .then(() =>
+    Promise.all([
+      registerBookingWorkers()
+        .then(() => console.log("Booking workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Something went wrong while registering booking workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      regierAssetWorkers()
+        .then(() => console.log("Asset workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while registering asset workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      registerEmailWorkers()
+        .then(() => console.log("Email workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while registering email workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      registerAuditWorkers()
+        .then(() => console.log("Audit workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while registering audit workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+    ])
+  )
   .finally(() => {
     // eslint-disable-next-line no-console
     console.log("Scheduler and workers registration completed");
