@@ -1,4 +1,4 @@
-import { Roles, AssetIndexMode } from "@prisma/client";
+import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
 
 import { matchRequestUrl, rest } from "msw";
 import { server } from "@mocks";
@@ -7,6 +7,7 @@ import {
   SUPABASE_AUTH_TOKEN_API,
   SUPABASE_AUTH_ADMIN_USER_API,
   authSession,
+  authAccount,
 } from "@mocks/handlers";
 import {
   ORGANIZATION_ID,
@@ -19,8 +20,8 @@ import { db } from "~/database/db.server";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
   createUserAccountForTesting,
+  createUserOrAttachOrg,
   defaultUserCategories,
-  // defaultUserCategories,
 } from "./service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 
@@ -31,8 +32,10 @@ import { defaultFields } from "../asset-index-settings/helpers";
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    $queryRaw: vitest.fn().mockResolvedValue([]),
     user: {
       create: vitest.fn().mockResolvedValue({}),
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     organization: {
       findFirst: vitest.fn().mockResolvedValue({
@@ -43,6 +46,11 @@ vitest.mock("~/database/db.server", () => ({
       upsert: vitest.fn().mockResolvedValue({}),
     },
   },
+}));
+
+// why: ensureAssetIndexModeForRole has its own db dependencies unrelated to user creation
+vitest.mock("~/modules/asset-index-settings/service.server", () => ({
+  ensureAssetIndexModeForRole: vitest.fn().mockResolvedValue(undefined),
 }));
 
 const username = `test-user-${USER_ID}`;
@@ -280,5 +288,136 @@ describe(createUserAccountForTesting.name, () => {
     expect(result).toEqual(authSession);
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     expect(fetchAuthTokenAPI.size).toEqual(1);
+  });
+});
+
+const newUserMock = {
+  id: USER_ID,
+  email: USER_EMAIL,
+  organizations: [{ id: ORGANIZATION_ID }],
+};
+
+describe(createUserOrAttachOrg.name, () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // @ts-expect-error missing vitest type
+    db.user.findFirst.mockResolvedValue(null);
+    // @ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([]);
+    // @ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue(newUserMock);
+    // @ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback: any) => callback(db));
+  });
+
+  afterEach(() => {
+    server.events.removeAllListeners();
+  });
+
+  it("creates a new user when no Prisma user and no Supabase account exists", async () => {
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Test",
+      createdWithInvite: true,
+    });
+
+    expect(result.id).toBe(USER_ID);
+    expect(db.user.create).toHaveBeenCalled();
+  });
+
+  it("falls back to confirming existing auth account when createEmailAuthAccount fails", async () => {
+    // Override: createEmailAuthAccount fails (email already in Supabase)
+    server.use(
+      rest.post(
+        `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
+        async (_req, res, ctx) =>
+          res.once(
+            ctx.status(400),
+            ctx.json({ message: "User already registered", status: 400 })
+          )
+      ),
+      // confirmExistingAuthAccount calls updateUserById (PUT)
+      rest.put(
+        `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}/:id`,
+        async (_req, res, ctx) =>
+          res.once(ctx.status(200), ctx.json(authAccount))
+      )
+    );
+
+    // confirmExistingAuthAccount queries auth.users to find existing account
+    // @ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ id: USER_ID }]);
+
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Test",
+      createdWithInvite: true,
+    });
+
+    expect(result.id).toBe(USER_ID);
+    expect(db.$queryRaw).toHaveBeenCalled();
+    expect(db.user.create).toHaveBeenCalled();
+  });
+
+  it("throws when both createEmailAuthAccount and confirmExistingAuthAccount fail", async () => {
+    // createEmailAuthAccount fails
+    server.use(
+      rest.post(
+        `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
+        async (_req, res, ctx) =>
+          res.once(
+            ctx.status(400),
+            ctx.json({ message: "User already registered", status: 400 })
+          )
+      )
+    );
+
+    // confirmExistingAuthAccount finds no auth user → returns null
+    // @ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(
+      createUserOrAttachOrg({
+        email: USER_EMAIL,
+        organizationId: ORGANIZATION_ID,
+        roles: [OrganizationRoles.BASE],
+        password: USER_PASSWORD,
+        firstName: "Test",
+        createdWithInvite: true,
+      })
+    ).rejects.toThrow("We are facing some issue with your account");
+  });
+
+  it("attaches org to existing Prisma user without creating a new auth account", async () => {
+    const existingUser = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      firstName: "Existing",
+      lastName: "User",
+      sso: false,
+      userOrganizations: [],
+    };
+
+    // @ts-expect-error missing vitest type
+    db.user.findFirst.mockResolvedValueOnce(existingUser);
+
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(result.id).toBe(USER_ID);
+    expect(db.userOrganization.upsert).toHaveBeenCalled();
+    expect(db.user.create).not.toHaveBeenCalled();
   });
 });

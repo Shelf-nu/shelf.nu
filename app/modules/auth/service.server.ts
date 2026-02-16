@@ -37,6 +37,44 @@ export async function createEmailAuthAccount(email: string, password: string) {
   }
 }
 
+export async function confirmExistingAuthAccount(
+  email: string,
+  password: string
+) {
+  try {
+    const result = await db.$queryRaw<{ id: string }[]>`
+      SELECT id FROM auth.users
+      WHERE email = ${email.toLowerCase()}
+      LIMIT 1
+    `;
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
+      result[0].id,
+      {
+        email_confirm: true,
+        password,
+      }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    return data.user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to confirm existing auth account",
+      additionalData: { email },
+      label,
+    });
+  }
+}
+
 export async function signUpWithEmailPass(email: string, password: string) {
   try {
     const { data, error } = await getSupabaseAdmin().auth.signUp({
