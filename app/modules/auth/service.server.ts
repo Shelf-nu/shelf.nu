@@ -37,6 +37,55 @@ export async function createEmailAuthAccount(email: string, password: string) {
   }
 }
 
+/**
+ * Looks up an existing Supabase auth account by email and confirms it.
+ *
+ * Used as a fallback during invite acceptance when `createEmailAuthAccount`
+ * fails because the email already exists in Supabase (e.g. user signed up
+ * but never confirmed their email). The invite JWT serves as proof of email
+ * ownership, making direct confirmation safe.
+ *
+ * @returns The confirmed auth user, or `null` if no auth account exists
+ *          for the given email.
+ */
+export async function confirmExistingAuthAccount(
+  email: string,
+  password: string
+) {
+  try {
+    const result = await db.$queryRaw<{ id: string }[]>`
+      SELECT id FROM auth.users
+      WHERE email = ${email.toLowerCase()}
+      LIMIT 1
+    `;
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
+      result[0].id,
+      {
+        email_confirm: true,
+        password,
+      }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    return data.user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to confirm existing auth account",
+      additionalData: { email },
+      label,
+    });
+  }
+}
+
 export async function signUpWithEmailPass(email: string, password: string) {
   try {
     const { data, error } = await getSupabaseAdmin().auth.signUp({
