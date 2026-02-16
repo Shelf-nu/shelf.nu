@@ -730,6 +730,9 @@ model Organization {
   // Branding preference for downloadable labels
   showShelfBranding Boolean @default(true)
 
+  // Custom footer text appended to workspace emails
+  customEmailFooter String? @db.VarChar(500)
+
   // Indexes for foreign keys
   @@index([userId])
   @@index([ssoDetailsId])

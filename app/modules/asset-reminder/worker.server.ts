@@ -29,7 +29,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
       mainImageExpiration: true,
     },
   },
-  organization: { select: { name: true } },
+  organization: { select: { name: true, customEmailFooter: true } },
 } satisfies Prisma.AssetReminderInclude;
 
 type UserToEmail = Pick<User, "email" | "firstName" | "lastName"> & {
@@ -108,6 +108,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           reminder,
           workspaceName: reminder.organization.name,
           isOwner: user.isOwner,
+          customEmailFooter: reminder.organization.customEmailFooter,
         });
 
         sendEmail({
@@ -119,6 +120,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             reminder,
             workspaceName: reminder.organization.name,
             isOwner: user.isOwner,
+            customEmailFooter: reminder.organization.customEmailFooter,
           }),
           html,
         });
