@@ -24,6 +24,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
+  confirmExistingAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
@@ -237,22 +238,31 @@ export async function createUserOrAttachOrg({
       select: USER_WITH_SSO_DETAILS_SELECT,
     });
 
-    /**
-     * If user does not exist, create a new user and attach the org to it
-     * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
-     * This will always fail because we need them to confirm their email before we create a user in shelf
-     */
+    // If no Prisma User exists, create one.
+    // First try creating a fresh auth account. If that fails (email already
+    // exists in Supabase from a previous unconfirmed signup), fall back to
+    // confirming the existing auth account. The invite JWT (sent to the
+    // user's email) serves as proof of email ownership.
     if (!shelfUser?.id) {
-      const authAccount = await createEmailAuthAccount(email, password).catch(
-        (cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
-            label,
-          });
-        }
+      let authAccount = await createEmailAuthAccount(email, password).catch(
+        () => null
       );
+
+      if (!authAccount) {
+        authAccount = await confirmExistingAuthAccount(email, password).catch(
+          () => null
+        );
+      }
+
+      if (!authAccount) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "We are facing some issue with your account. " +
+            "Please try again or contact support.",
+          label,
+        });
+      }
 
       const newUser = await createUser({
         email,
