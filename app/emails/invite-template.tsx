@@ -6,11 +6,11 @@ import {
   render,
   Container,
   Section,
-  Img,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
+import { CustomEmailFooter } from "./components/custom-footer";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 
@@ -32,7 +32,9 @@ export function InvitationEmailTemplate({
         <title>Invitation to join Shelf</title>
       </Head>
 
-      <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
+      <Container
+        style={{ padding: "32px 16px", maxWidth: "600px", margin: "0 auto" }}
+      >
         <LogoForEmail />
 
         <div style={{ paddingTop: "8px" }}>
@@ -98,6 +100,11 @@ export function InvitationEmailTemplate({
             Thanks, <br />
             The Shelf team
           </Text>
+
+          <CustomEmailFooter
+            footerText={invite.organization.customEmailFooter}
+          />
+
           <Text style={{ fontSize: "14px", color: "#344054" }}>
             This is an automatic email sent from shelf.nu to{" "}
             <span style={{ color: emailPrimaryColor }}>
