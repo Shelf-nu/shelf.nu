@@ -101,6 +101,23 @@ All HTML emails must follow the design established in
 - **Send wrapper function** with `try/catch` + `Logger.error` + `ShelfError`
 - **Closing**: `The Shelf Team`
 
+### Disabled State for Form Submissions
+
+Always use the `useDisabled` hook from `~/hooks/use-disabled` to disable buttons during form submission. Do **not** use `useNavigation` directly to check `navigation.state`.
+
+```typescript
+import { useDisabled } from "~/hooks/use-disabled";
+
+// Inside component:
+const disabled = useDisabled();
+// For fetcher forms, pass the fetcher:
+const disabled = useDisabled(fetcher);
+
+<Button type="submit" disabled={disabled}>
+  {disabled ? "Saving..." : "Save"}
+</Button>
+```
+
 ### Deprecated Components
 
 - **DropdownMenu** (`app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.

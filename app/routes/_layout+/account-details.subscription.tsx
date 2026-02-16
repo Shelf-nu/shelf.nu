@@ -26,7 +26,7 @@ import { getUserTierLimit } from "~/modules/tier/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -187,6 +187,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
+        usedFreeTrial: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -198,6 +199,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const domainUrl = getDomainUrl(request);
 
     if (intent === "trial") {
+      // Prevent duplicate trials — UI hides the button but this
+      // guards against double-submits and direct POST requests
+      if (user.usedFreeTrial) {
+        throw new ShelfError({
+          cause: null,
+          message: "You have already used your free trial.",
+          label: "Subscription",
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
       // Create subscription directly via Stripe API — no checkout needed
       await createTeamTrialSubscription({
         customerId,
