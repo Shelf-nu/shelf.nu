@@ -73,7 +73,14 @@ export async function resolveUserAndOrgForSsoCallback({
 
     // If user exists, check if they're trying to convert from email to SSO
     if (user) {
-      const authUser = await getAuthUserById(user.id);
+      // getAuthUserById throws on 404 (e.g. SCIM-provisioned users have no
+      // Supabase auth account yet). Treat "not found" as null.
+      let authUser;
+      try {
+        authUser = await getAuthUserById(user.id);
+      } catch {
+        authUser = null;
+      }
 
       if (authUser?.app_metadata?.provider === "email") {
         throw new ShelfError({
