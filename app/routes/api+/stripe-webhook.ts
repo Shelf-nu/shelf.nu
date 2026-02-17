@@ -27,7 +27,7 @@
 
 import { TierId } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
@@ -38,7 +38,11 @@ import {
 } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
-import { ADMIN_EMAIL, CUSTOM_INSTALL_CUSTOMERS } from "~/utils/env";
+import {
+  ADMIN_EMAIL,
+  CUSTOM_INSTALL_CUSTOMERS,
+  STRIPE_WEBHOOK_ENDPOINT_SECRET,
+} from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -94,13 +98,51 @@ function isAddonSubscription({
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const payload = await request.text();
-    const sig = request.headers.get("stripe-signature") as string;
+    const sig = request.headers.get("stripe-signature");
 
-    const event = stripe.webhooks.constructEvent(
-      payload,
-      sig,
-      process.env.STRIPE_WEBHOOK_ENDPOINT_SECRET
-    );
+    if (!sig) {
+      throw new ShelfError({
+        cause: null,
+        message: "Missing stripe-signature header",
+        label: "Stripe webhook",
+        status: 400,
+        shouldBeCaptured: true,
+      });
+    }
+
+    if (!STRIPE_WEBHOOK_ENDPOINT_SECRET) {
+      throw new ShelfError({
+        cause: null,
+        message: "STRIPE_WEBHOOK_ENDPOINT_SECRET is not configured",
+        label: "Stripe webhook",
+        status: 500,
+        shouldBeCaptured: true,
+      });
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = await stripe.webhooks.constructEventAsync(
+        payload,
+        sig,
+        STRIPE_WEBHOOK_ENDPOINT_SECRET
+      );
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message:
+          cause instanceof Stripe.errors.StripeSignatureVerificationError
+            ? "Stripe webhook signature verification failed"
+            : "Failed to construct Stripe webhook event",
+        label: "Stripe webhook",
+        status: 400,
+        shouldBeCaptured: true,
+        additionalData: {
+          errorType:
+            cause instanceof Error ? cause.constructor.name : typeof cause,
+        },
+      });
+    }
 
     const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");
     const eventData = event.data.object as { customer: string | null };
