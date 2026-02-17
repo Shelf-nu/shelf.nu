@@ -257,6 +257,12 @@ export const DISABLE_SSO =
     isRequired: false,
   }) === "true" || false;
 
+export const DEFAULT_SSO_DOMAIN =
+  getEnv("DEFAULT_SSO_DOMAIN", {
+    isSecret: false,
+    isRequired: false,
+  }) || "";
+
 export const SEND_ONBOARDING_EMAIL =
   getEnv("SEND_ONBOARDING_EMAIL", {
     isSecret: false,
