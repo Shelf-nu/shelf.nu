@@ -53,6 +53,8 @@ describe("getBookingSettingsForOrganization", () => {
         tagsRequired: false,
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
+        requireExplicitCheckinForAdmin: false,
+        requireExplicitCheckinForSelfService: false,
         organizationId: mockOrganizationId,
       },
       select: {
@@ -61,6 +63,8 @@ describe("getBookingSettingsForOrganization", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(mockBookingSettingsData);
@@ -90,6 +94,8 @@ describe("getBookingSettingsForOrganization", () => {
         tagsRequired: false,
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
+        requireExplicitCheckinForAdmin: false,
+        requireExplicitCheckinForSelfService: false,
         organizationId: mockOrganizationId,
       },
       select: {
@@ -98,6 +104,8 @@ describe("getBookingSettingsForOrganization", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(defaultSettings);
@@ -158,6 +166,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -186,6 +196,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -214,6 +226,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -242,6 +256,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -278,6 +294,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -308,6 +326,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -341,6 +361,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -369,6 +391,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -464,6 +488,8 @@ describe("updateBookingSettings", () => {
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);

@@ -1185,6 +1185,9 @@ model BookingSettings {
   maxBookingLength               Int? // Maximum booking length in hours. NULL means no limit
   maxBookingLengthSkipClosedDays Boolean @default(false) // If true, the max booking length will skip closed days
 
+  requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
+  requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
+
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String       @unique
