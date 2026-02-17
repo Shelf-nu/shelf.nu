@@ -68,9 +68,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+    // For check-in, self-service users are allowed when the booking is
+    // ongoing or overdue (check-in eligible states). The generic
+    // canUserManageBookingAssets blocks self-service on non-draft bookings,
+    // but that restriction is for adding/removing assets, not for checking in.
+    const isCheckinEligible =
+      booking.status === "ONGOING" || booking.status === "OVERDUE";
+    const canCheckin =
+      isSelfService && isCheckinEligible
+        ? true
+        : canUserManageBookingAssets(booking, isSelfService);
 
-    if (!canManageAssets) {
+    if (!canCheckin) {
       throw new ShelfError({
         cause: null,
         message:

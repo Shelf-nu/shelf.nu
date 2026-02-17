@@ -762,6 +762,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn": {
+        // Enforce explicit check-in requirement based on role and settings
+        if (
+          role === OrganizationRoles.ADMIN &&
+          bookingSettings.requireExplicitCheckinForAdmin
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed to quick check-in",
+            message:
+              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+        if (
+          role === OrganizationRoles.SELF_SERVICE &&
+          bookingSettings.requireExplicitCheckinForSelfService
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed to quick check-in",
+            message:
+              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+
         // Extract specific asset IDs if provided (for enhanced completion messaging)
         const specificAssetIds = formData.getAll(
           "specificAssetIds[]"
