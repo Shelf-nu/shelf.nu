@@ -7,7 +7,6 @@ import {
   createUser,
   revokeAccessToOrganization,
 } from "~/modules/user/service.server";
-import { randomUsernameFromEmail } from "~/utils/user";
 import { ScimError } from "./errors.server";
 import { parseScimFilter } from "./filters.server";
 import { userToScimResource } from "./mappers.server";
@@ -183,7 +182,7 @@ export async function createScimUser(
   // via SSO, the SSO callback will create the auth account and link it
   // to this Shelf user by updating the user ID.
   const placeholderId = randomUUID();
-  const username = randomUsernameFromEmail(email);
+  const username = email.split("@")[0];
 
   const newUser = await createUser({
     userId: placeholderId,
