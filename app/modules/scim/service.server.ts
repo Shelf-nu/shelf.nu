@@ -1,4 +1,4 @@
-import { createId } from "@paralleldrive/cuid2";
+import { randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
@@ -182,7 +182,7 @@ export async function createScimUser(
   // We do NOT create a Supabase auth account here. When the user signs in
   // via SSO, the SSO callback will create the auth account and link it
   // to this Shelf user by updating the user ID.
-  const placeholderId = createId();
+  const placeholderId = randomUUID();
   const username = randomUsernameFromEmail(email);
 
   const newUser = await createUser({
