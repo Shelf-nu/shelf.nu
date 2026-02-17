@@ -69,13 +69,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     // For check-in, self-service users are allowed when the booking is
-    // ongoing or overdue (check-in eligible states). The generic
-    // canUserManageBookingAssets blocks self-service on non-draft bookings,
-    // but that restriction is for adding/removing assets, not for checking in.
+    // ongoing or overdue (check-in eligible states) AND they are the
+    // custodian. The generic canUserManageBookingAssets blocks self-service
+    // on non-draft bookings, but that restriction is for adding/removing
+    // assets, not for checking in.
     const isCheckinEligible =
       booking.status === "ONGOING" || booking.status === "OVERDUE";
+    const isCustodian = booking.custodianUserId === userId;
     const canCheckin =
-      isSelfService && isCheckinEligible
+      isSelfService && isCheckinEligible && isCustodian
         ? true
         : canUserManageBookingAssets(booking, isSelfService);
 
