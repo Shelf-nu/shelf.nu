@@ -25,7 +25,7 @@
  *   - payment_method.detached
  */
 
-import { data, type ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import {
   handleCheckoutCompleted,
   handleInvoiceOverdue,
@@ -45,7 +45,6 @@ import {
   PaymentMethodWithoutCustomerResponse,
 } from "~/modules/stripe-webhook/helpers.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -100,6 +99,8 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response(null, { status: 200 });
     }
     const reason = makeShelfError(cause);
-    return data(error(reason), { status: reason.status });
+    // Return minimal body to avoid leaking sensitive Stripe event data
+    // from additionalData. The ShelfError is still captured server-side.
+    return new Response(null, { status: reason.status });
   }
 }
