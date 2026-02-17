@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { CustomTierLimit, Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -7,6 +8,7 @@ import type {
 import { data, redirect, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
+import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { CrispButton } from "~/components/marketing/crisp";
 import { Button } from "~/components/shared/button";
 
@@ -292,6 +294,7 @@ export default function SubscriptionPage() {
     isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
 
   const hasNoSubscription = customer?.subscriptions.data.length === 0;
+  const [pricingOpen, setPricingOpen] = useState(false);
 
   /** Check if user has a workspace plan (not just addon subscriptions) */
   const hasWorkspacePlan = subscriptionsWithProducts.some((sub) =>
@@ -349,20 +352,64 @@ export default function SubscriptionPage() {
         {!hasWorkspacePlan ? (
           <div className="mb-8">
             {hasNoSubscription ? (
-              <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
-                <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                  <InfoIcon />
+              <>
+                <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
+                  <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                    <InfoIcon />
+                  </div>
+                  <p className="text-[14px] font-medium text-gray-700">
+                    You're currently using the{" "}
+                    <span className="font-semibold">FREE</span> version of Shelf
+                  </p>
                 </div>
-                <p className="text-[14px] font-medium text-gray-700">
-                  You're currently using the{" "}
-                  <span className="font-semibold">FREE</span> version of Shelf
-                </p>
-              </div>
-            ) : null}
-            <h3 className="text-text-lg font-semibold">
-              Choose your workspace plan
-            </h3>
-            <PricingTable prices={prices} />
+                <h3 className="text-text-lg font-semibold">
+                  Choose your workspace plan
+                </h3>
+                <PricingTable prices={prices} />
+              </>
+            ) : (
+              <>
+                <div className="mb-2 mt-3 flex items-center justify-between gap-3 rounded border border-gray-300 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                      <InfoIcon />
+                    </div>
+                    <div>
+                      <p className="text-[14px] font-medium text-gray-700">
+                        You have no workspace plan
+                      </p>
+                      <p className="text-[13px] text-gray-500">
+                        Upgrade to a workspace plan to unlock the full potential
+                        of Shelf alongside your add-ons.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    className="whitespace-nowrap"
+                    onClick={() => setPricingOpen(true)}
+                  >
+                    View workspace plans
+                  </Button>
+                </div>
+                <DialogPortal>
+                  <Dialog
+                    open={pricingOpen}
+                    onClose={() => setPricingOpen(false)}
+                    className="h-[90vh] w-[90vw]"
+                    title={
+                      <h3 className="text-text-lg font-semibold">
+                        Choose your workspace plan
+                      </h3>
+                    }
+                  >
+                    <div className="p-6">
+                      <PricingTable prices={prices} />
+                    </div>
+                  </Dialog>
+                </DialogPortal>
+              </>
+            )}
           </div>
         ) : null}
 
