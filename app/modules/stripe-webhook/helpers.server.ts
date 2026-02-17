@@ -129,7 +129,7 @@ export async function constructVerifiedWebhookEvent(request: Request): Promise<{
       message: "Missing stripe-signature header",
       label: "Stripe webhook",
       status: 400,
-      shouldBeCaptured: true,
+      shouldBeCaptured: false,
     });
   }
 
