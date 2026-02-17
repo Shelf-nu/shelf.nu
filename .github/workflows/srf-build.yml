@@ -3,10 +3,10 @@ name: 🐳 SRF Build and Push
 on:
   push:
     branches:
-      - dev
+      - main
   pull_request:
     branches:
-      - dev
+      - main
 
 permissions:
   actions: write
@@ -40,7 +40,6 @@ jobs:
             ${{ runner.os }}-buildx-
 
       - name: 👋 Log in to the Container registry
-        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -53,9 +52,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/dev' }}
-            type=ref,suffix=-{{sha}},event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,event=push
             type=ref,event=pr
+            type=sha,event=pr
 
       - name: 🛠 Build and push Docker image
         uses: docker/build-push-action@v5
@@ -63,7 +63,7 @@ jobs:
           context: .
           file: Dockerfile.image
           platforms: linux/amd64
-          push: ${{ github.event_name == 'push' }}
+          push: true
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
