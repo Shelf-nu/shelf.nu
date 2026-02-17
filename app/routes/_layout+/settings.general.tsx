@@ -33,6 +33,7 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
+import { generateScimToken } from "~/modules/scim/auth.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { resolveShowShelfBranding } from "~/utils/branding";
@@ -68,58 +69,72 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    const [user, tierLimit, admins, ownerSubscriptionInfo] = await Promise.all([
-      db.user
-        .findUniqueOrThrow({
-          where: {
-            id: userId,
-          },
-          select: {
-            firstName: true,
-            tierId: true,
-            userOrganizations: {
-              include: {
-                organization: {
-                  include: {
-                    ssoDetails: true,
-                    _count: {
-                      select: {
-                        assets: true,
-                        members: true,
-                        locations: true,
+    const [user, tierLimit, admins, ownerSubscriptionInfo, scimTokens] =
+      await Promise.all([
+        db.user
+          .findUniqueOrThrow({
+            where: {
+              id: userId,
+            },
+            select: {
+              firstName: true,
+              tierId: true,
+              userOrganizations: {
+                include: {
+                  organization: {
+                    include: {
+                      ssoDetails: true,
+                      _count: {
+                        select: {
+                          assets: true,
+                          members: true,
+                          locations: true,
+                        },
                       },
-                    },
-                    owner: {
-                      select: {
-                        id: true,
-                        firstName: true,
-                        lastName: true,
-                        profilePicture: true,
+                      owner: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          profilePicture: true,
+                        },
                       },
                     },
                   },
                 },
               },
             },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "User not found",
-            additionalData: { userId, organizationId },
-            label: "Settings",
-          });
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "User not found",
+              additionalData: { userId, organizationId },
+              label: "Settings",
+            });
+          }),
+        /* Check the tier limit */
+        getOrganizationTierLimit({
+          organizationId,
+          organizations,
         }),
-      /* Check the tier limit */
-      getOrganizationTierLimit({
-        organizationId,
-        organizations,
-      }),
-      getOrganizationAdmins({ organizationId }),
-      // Get subscription info for the workspace owner (for transfer dialog)
-      getOwnerSubscriptionInfo(currentOrganization.userId),
-    ]);
+        getOrganizationAdmins({ organizationId }),
+        // Get subscription info for the workspace owner (for transfer dialog)
+        getOwnerSubscriptionInfo(currentOrganization.userId),
+        // Load SCIM tokens for SSO-enabled organizations
+        currentOrganization.enabledSso
+          ? db.scimToken.findMany({
+              where: { organizationId, revokedAt: null },
+              select: {
+                id: true,
+                label: true,
+                lastUsedAt: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: "desc" },
+            })
+          : Promise.resolve([]),
+      ]);
 
     const header: HeaderData = {
       title: "General",
@@ -156,6 +171,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ownerSubscriptionInfo,
       ownerOtherTeamWorkspacesCount,
       premiumIsEnabled,
+      scimTokens: scimTokens.map((t) => ({
+        id: t.id,
+        label: t.label,
+        createdAt: t.createdAt.toISOString(),
+        lastUsedAt: t.lastUsedAt?.toISOString() ?? null,
+      })),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -212,7 +233,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { intent } = parseData(
       formData,
       z.object({
-        intent: z.enum(["general", "permissions", "sso", "transfer-ownership"]),
+        intent: z.enum([
+          "general",
+          "permissions",
+          "sso",
+          "transfer-ownership",
+          "generateScimToken",
+          "revokeScimToken",
+        ]),
       }),
       {
         additionalData: {
@@ -417,6 +445,73 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect("/assets");
       }
+      case "generateScimToken": {
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to manage SCIM tokens.",
+            label: "SCIM",
+          });
+        }
+
+        if (!currentOrganization.enabledSso) {
+          throw new ShelfError({
+            cause: null,
+            message: "SSO is not enabled for this organization.",
+            label: "SCIM",
+          });
+        }
+
+        const { label: tokenLabel } = parseData(
+          formData,
+          z.object({ label: z.string().min(1, "Label is required") }),
+          { additionalData: { userId, organizationId } }
+        );
+
+        const { rawToken, tokenHash } = generateScimToken();
+
+        await db.scimToken.create({
+          data: {
+            tokenHash,
+            label: tokenLabel,
+            organizationId,
+            createdById: userId,
+          },
+        });
+
+        return payload({ rawToken });
+      }
+      case "revokeScimToken": {
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to manage SCIM tokens.",
+            label: "SCIM",
+          });
+        }
+
+        const { tokenId } = parseData(
+          formData,
+          z.object({ tokenId: z.string() }),
+          { additionalData: { userId, organizationId } }
+        );
+
+        await db.scimToken.update({
+          where: { id: tokenId },
+          data: { revokedAt: new Date() },
+        });
+
+        sendNotification({
+          title: "SCIM token revoked",
+          message: "The SCIM token has been revoked successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect("/settings/general");
+      }
       default: {
         throw new ShelfError({
           cause: null,
@@ -434,13 +529,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { organization, canExportAssets } = useLoaderData<typeof loader>();
+  const { organization, canExportAssets, scimTokens } =
+    useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
       <WorkspaceEditForms
         name={organization.name}
         currency={organization.currency}
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
+        scimTokens={scimTokens}
       />
 
       <Card className={tw("mb-0")}>
