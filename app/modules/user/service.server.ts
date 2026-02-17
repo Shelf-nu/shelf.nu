@@ -681,6 +681,7 @@ export async function createUser(
     lastName?: User["lastName"];
     isSSO?: boolean;
     createdWithInvite?: boolean;
+    skipPersonalOrg?: boolean;
   }
 ) {
   const {
@@ -693,12 +694,14 @@ export async function createUser(
     lastName,
     isSSO,
     createdWithInvite,
+    skipPersonalOrg,
   } = payload;
 
   /**
    * We only create a personal org if the signup is not disabled
-   * */
-  const shouldCreatePersonalOrg = !config.disableSignup;
+   * and the caller hasn't opted out (e.g. SCIM provisioning)
+   */
+  const shouldCreatePersonalOrg = !skipPersonalOrg && !config.disableSignup;
 
   try {
     return await db.$transaction(
