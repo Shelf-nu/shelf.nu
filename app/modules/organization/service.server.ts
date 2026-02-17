@@ -4,16 +4,25 @@ import {
   OrganizationType,
   Roles,
 } from "@prisma/client";
-import type { Organization, Prisma, User } from "@prisma/client";
+import type { Organization, Prisma, TierId, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import {
+  createStripeCustomer,
+  customerHasPaymentMethod,
+  getUserActiveSubscription,
+  premiumIsEnabled,
+  transferSubscriptionToCustomer,
+} from "~/utils/stripe.server";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
+import { updateUserTierId } from "../tier/service.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -250,6 +259,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
   showShelfBranding,
+  customEmailFooter,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
   name?: string;
@@ -263,6 +273,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   showShelfBranding?: Organization["showShelfBranding"];
+  customEmailFooter?: string | null;
 }) {
   try {
     const data = {
@@ -275,6 +286,7 @@ export async function updateOrganization({
       ...(typeof showShelfBranding === "boolean" && {
         showShelfBranding,
       }),
+      ...(customEmailFooter !== undefined && { customEmailFooter }),
       ...(ssoDetails && {
         ssoDetails: {
           update: ssoDetails,
@@ -362,6 +374,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
+  customEmailFooter: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
@@ -377,6 +390,9 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
         roles: true,
         organization: {
           select: ORGANIZATION_SELECT_FIELDS,
+        },
+        user: {
+          select: { lastSelectedOrganizationId: true },
         },
       },
     });
@@ -609,10 +625,13 @@ export async function transferOwnership({
   currentOrganization,
   newOwnerId,
   userId,
+  transferSubscription = false,
 }: {
   currentOrganization: Pick<Organization, "id" | "name" | "type">;
   newOwnerId: User["id"];
   userId: User["id"];
+  /** Whether to transfer the owner's subscription to the new owner */
+  transferSubscription?: boolean;
 }) {
   try {
     if (currentOrganization.type === OrganizationType.PERSONAL) {
@@ -644,6 +663,7 @@ export async function transferOwnership({
      * To transfer ownership, we need to:
      * 1. Update the owner of the organization
      * 2. Update the role of both users in the current organization
+     * 3. Optionally transfer the subscription
      */
     const userOrganization = await db.userOrganization.findMany({
       where: {
@@ -662,6 +682,9 @@ export async function transferOwnership({
             lastName: true,
             email: true,
             roles: true,
+            customerId: true,
+            tierId: true,
+            usedFreeTrial: true,
           },
         },
         roles: true,
@@ -715,6 +738,26 @@ export async function transferOwnership({
       });
     }
 
+    // Check if new owner already has an active subscription (BLOCK transfer)
+    // This applies regardless of whether subscription transfer is requested,
+    // as we don't want two owners with separate active subscriptions
+    if (premiumIsEnabled) {
+      const newOwnerActiveSubscription =
+        await getUserActiveSubscription(newOwnerId);
+      if (newOwnerActiveSubscription) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Cannot transfer ownership to a user who already has an active subscription.",
+          label,
+        });
+      }
+    }
+
+    // Track subscription transfer info for emails
+    let subscriptionTransferred = false;
+    const currentOwnerTierId: TierId = currentOwnerUserOrg.user.tierId;
+
     await db.$transaction(async (tx) => {
       /** Update the owner of the organization */
       await tx.organization.update({
@@ -737,6 +780,72 @@ export async function transferOwnership({
       });
     });
 
+    // Handle subscription transfer AFTER the ownership transfer succeeds
+    // Wrapped in try/catch to ensure ownership transfer completes even if subscription transfer fails
+    let subscriptionTransferError: Error | null = null;
+    if (premiumIsEnabled && transferSubscription) {
+      try {
+        const currentOwnerSubscription = await getUserActiveSubscription(
+          currentOwnerUserOrg.user.id
+        );
+
+        if (currentOwnerSubscription) {
+          // Ensure new owner has a Stripe customer ID
+          let newOwnerCustomerId: string | null | undefined =
+            newOwnerUserOrg.user.customerId;
+          if (!newOwnerCustomerId) {
+            newOwnerCustomerId = await createStripeCustomer({
+              email: newOwnerUserOrg.user.email,
+              name: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+              userId: newOwnerId,
+            });
+          }
+
+          if (newOwnerCustomerId) {
+            // Transfer the subscription to the new customer in Stripe
+            await transferSubscriptionToCustomer({
+              subscriptionId: currentOwnerSubscription.id,
+              newCustomerId: newOwnerCustomerId,
+            });
+
+            // Update tiers in database
+            // New owner gets the transferred tier
+            await updateUserTierId(newOwnerId, currentOwnerTierId);
+
+            // Downgrade current owner to free
+            await updateUserTierId(currentOwnerUserOrg.user.id, "free");
+
+            subscriptionTransferred = true;
+
+            // Transfer usedFreeTrial flag if original owner used it
+            // This prevents the new owner from starting another trial
+            if (currentOwnerUserOrg.user.usedFreeTrial) {
+              await db.user.update({
+                where: { id: newOwnerId },
+                data: { usedFreeTrial: true },
+                select: { id: true },
+              });
+            }
+
+            // Check if new owner has a payment method on their Stripe customer
+            // If not, set the warning flag so they see the banner
+            const hasPaymentMethod =
+              await customerHasPaymentMethod(newOwnerCustomerId);
+            if (!hasPaymentMethod) {
+              await db.user.update({
+                where: { id: newOwnerId },
+                data: { warnForNoPaymentMethod: true },
+                select: { id: true },
+              });
+            }
+          }
+        }
+      } catch (error) {
+        // Capture the error but don't throw - ownership transfer should still succeed
+        subscriptionTransferError = error as Error;
+      }
+    }
+
     /** Send email to new owner */
     sendEmail({
       subject: `🎉 You're now the Owner of ${currentOrganization.name} - Shelf`,
@@ -744,6 +853,7 @@ export async function transferOwnership({
       text: newOwnerEmailText({
         newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
         workspaceName: currentOrganization.name,
+        subscriptionTransferred,
       }),
     });
 
@@ -755,11 +865,50 @@ export async function transferOwnership({
         previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
         newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
         workspaceName: currentOrganization.name,
+        subscriptionTransferred,
       }),
     });
 
+    /** Send admin notification */
+    if (ADMIN_EMAIL) {
+      const subscriptionStatus = subscriptionTransferError
+        ? `Failed - ${subscriptionTransferError.message}`
+        : subscriptionTransferred
+        ? "Yes"
+        : "No (not requested)";
+
+      sendEmail({
+        subject: subscriptionTransferError
+          ? `⚠️ Workspace transferred with errors: ${currentOrganization.name}`
+          : `Workspace transferred: ${currentOrganization.name}`,
+        to: ADMIN_EMAIL,
+        text: `A workspace ownership transfer has occurred.
+
+Workspace: ${currentOrganization.name}
+Workspace ID: ${currentOrganization.id}
+
+Previous Owner: ${currentOwnerUserOrg.user.firstName} ${
+          currentOwnerUserOrg.user.lastName
+        } (${currentOwnerUserOrg.user.email})
+New Owner: ${newOwnerUserOrg.user.firstName} ${
+          newOwnerUserOrg.user.lastName
+        } (${newOwnerUserOrg.user.email})
+
+Subscription transferred: ${subscriptionStatus}
+${
+  subscriptionTransferError
+    ? `\nError details: ${
+        subscriptionTransferError.stack || subscriptionTransferError.message
+      }`
+    : ""
+}`,
+      });
+    }
+
     return {
       newOwner: newOwnerUserOrg.user,
+      subscriptionTransferred,
+      subscriptionTransferError: subscriptionTransferError?.message,
     };
   } catch (cause) {
     throw new ShelfError({

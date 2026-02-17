@@ -108,6 +108,7 @@ export async function resolveUserAction(
           },
           select: {
             name: true,
+            customEmailFooter: true,
           },
         })
         .catch((cause) => {
@@ -122,7 +123,10 @@ export async function resolveUserAction(
       sendEmail({
         to: user.email,
         subject: `Access to ${org.name} has been revoked`,
-        text: revokeAccessEmailText({ orgName: org.name }),
+        text: revokeAccessEmailText({
+          orgName: org.name,
+          customEmailFooter: org.customEmailFooter,
+        }),
       });
 
       sendNotification({

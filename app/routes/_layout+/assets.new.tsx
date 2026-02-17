@@ -121,11 +121,19 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const searchParams = getCurrentSearchParams(request);
+    /** Here we need to clone the request as we need 2 different streams:
+     * 1. Access form data for creating asset
+     * 2. Access form data via upload handler to be able to upload the file
+     *
+     * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
+     */
+    const clonedRequest = request.clone();
+
+    const formData = await clonedRequest.formData();
 
     const customFields = await getActiveCustomFields({
       organizationId,
-      category: searchParams.get("category"),
+      category: formData.get("category") as string | null,
     });
 
     const FormSchema = mergedSchema({
@@ -139,16 +147,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
         options: cf.options,
       })),
     });
-
-    /** Here we need to clone the request as we need 2 different streams:
-     * 1. Access form data for creating asset
-     * 2. Access form data via upload handler to be able to upload the file
-     *
-     * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
-     */
-    const clonedRequest = request.clone();
-
-    const formData = await clonedRequest.formData();
 
     const payload = parseData(formData, FormSchema);
 

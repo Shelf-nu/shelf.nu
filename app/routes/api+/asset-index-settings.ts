@@ -82,7 +82,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const columnsSchema = generateColumnsSchema(customFieldsNames);
 
-        const parsedData = parseData(formData, columnsSchema);
+        const parsedData = parseData(formData, columnsSchema, {
+          // Stale custom field references (e.g. deleted cf) cause
+          // expected validation failures that aren't actionable
+          shouldBeCaptured: false,
+        });
 
         // Ensure the parsed columns match the Column type
         const typedColumns: Column[] = parsedData.columns.map((column) => ({

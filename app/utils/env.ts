@@ -125,7 +125,7 @@ export function initEnv() {
 /**
  * Server env
  */
-export const SERVER_URL = getEnv("SERVER_URL");
+export const SERVER_URL = getEnv("SERVER_URL").replace(/\/+$/, "");
 export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
@@ -144,6 +144,10 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
   isSecret: true,
   isRequired: false,
 });
+export const STRIPE_WEBHOOK_ENDPOINT_SECRET = getEnv(
+  "STRIPE_WEBHOOK_ENDPOINT_SECRET",
+  { isSecret: true, isRequired: false }
+);
 export const SMTP_PWD = getEnv("SMTP_PWD", { allowEmpty: true });
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_PORT = getEnv("SMTP_PORT", {

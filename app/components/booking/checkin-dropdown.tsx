@@ -15,12 +15,14 @@ type CheckinDropdownProps = {
   disabled?: boolean;
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   portalContainer?: HTMLElement;
+  requireExplicitCheckin?: boolean;
 };
 
 export default function CheckinDropdown({
   disabled,
   booking,
   portalContainer,
+  requireExplicitCheckin,
 }: CheckinDropdownProps) {
   const {
     ref: dropdownRef,
@@ -32,6 +34,21 @@ export default function CheckinDropdown({
 
   function closeMenu() {
     setOpen(false);
+  }
+
+  // When explicit check-in is required, render a single button that navigates
+  // directly to the explicit check-in page (no dropdown, no quick check-in)
+  if (requireExplicitCheckin) {
+    return (
+      <Button
+        disabled={disabled}
+        className="grow"
+        size="sm"
+        to={`/bookings/${booking.id}/overview/checkin-assets`}
+      >
+        Check-in
+      </Button>
+    );
   }
 
   return (

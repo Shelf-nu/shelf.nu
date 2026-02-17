@@ -46,6 +46,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import {
+  getOwnerSubscriptionInfo,
+  premiumIsEnabled,
+} from "~/utils/stripe.server";
+import {
   canExportAssets,
   canHideShelfBranding,
 } from "~/utils/subscription.server";
@@ -64,7 +68,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    const [user, tierLimit, admins] = await Promise.all([
+    const [user, tierLimit, admins, ownerSubscriptionInfo] = await Promise.all([
       db.user
         .findUniqueOrThrow({
           where: {
@@ -113,6 +117,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizations,
       }),
       getOrganizationAdmins({ organizationId }),
+      // Get subscription info for the workspace owner (for transfer dialog)
+      getOwnerSubscriptionInfo(currentOrganization.userId),
     ]);
 
     const header: HeaderData = {
@@ -128,6 +134,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (currentOrganization.type === OrganizationType.TEAM ||
         user.tierId === "tier_1");
 
+    // Count owner's other team workspaces (for warning about tier downgrade)
+    const ownerOtherTeamWorkspacesCount = await db.organization.count({
+      where: {
+        userId: currentOrganization.userId,
+        type: OrganizationType.TEAM,
+        id: { not: currentOrganization.id },
+      },
+    });
+
     return payload({
       header,
       organization: currentOrganization,
@@ -138,6 +153,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       isPersonalWorkspace:
         currentOrganization.type === OrganizationType.PERSONAL,
       admins,
+      ownerSubscriptionInfo,
+      ownerOtherTeamWorkspacesCount,
+      premiumIsEnabled,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -387,6 +405,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           currentOrganization,
           newOwnerId: parsedData.newOwner,
           userId: authSession.userId,
+          transferSubscription: parsedData.transferSubscription,
         });
 
         sendNotification({

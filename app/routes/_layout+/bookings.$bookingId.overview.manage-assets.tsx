@@ -65,6 +65,7 @@ import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -76,6 +77,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -181,6 +183,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           : isSelfServiceOrBase
           ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of assets is not allowed for current status of booking.",
+        shouldBeCaptured: false,
         additionalData: {
           booking,
           userId,
@@ -337,6 +340,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: isSelfServiceOrBase
           ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of assets is not allowed for current status of booking.",
+        shouldBeCaptured: false,
       });
     }
     // Get existing asset IDs from the booking
@@ -425,6 +429,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         userId: authSession.userId,
         organizationId,
         assets: removedAssets,
+      });
+    }
+
+    // Send email to custodian about asset changes
+    const assetChanges: string[] = [];
+    if (newAssetIds.length > 0) {
+      assetChanges.push("Assets were added to the booking");
+    }
+    if (removedAssetIds.length > 0) {
+      assetChanges.push("Assets were removed from the booking");
+    }
+    if (assetChanges.length > 0) {
+      assetChanges.push("View booking activity for full details");
+      void sendBookingUpdatedEmail({
+        bookingId,
+        organizationId,
+        userId: authSession.userId,
+        changes: assetChanges,
+        hints: getClientHint(request),
       });
     }
 

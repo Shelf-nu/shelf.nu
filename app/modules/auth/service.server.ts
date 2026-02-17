@@ -37,6 +37,55 @@ export async function createEmailAuthAccount(email: string, password: string) {
   }
 }
 
+/**
+ * Looks up an existing Supabase auth account by email and confirms it.
+ *
+ * Used as a fallback during invite acceptance when `createEmailAuthAccount`
+ * fails because the email already exists in Supabase (e.g. user signed up
+ * but never confirmed their email). The invite JWT serves as proof of email
+ * ownership, making direct confirmation safe.
+ *
+ * @returns The confirmed auth user, or `null` if no auth account exists
+ *          for the given email.
+ */
+export async function confirmExistingAuthAccount(
+  email: string,
+  password: string
+) {
+  try {
+    const result = await db.$queryRaw<{ id: string }[]>`
+      SELECT id FROM auth.users
+      WHERE email = ${email.toLowerCase()}
+      LIMIT 1
+    `;
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
+      result[0].id,
+      {
+        email_confirm: true,
+        password,
+      }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    return data.user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to confirm existing auth account",
+      additionalData: { email },
+      label,
+    });
+  }
+}
+
 export async function signUpWithEmailPass(email: string, password: string) {
   try {
     const { data, error } = await getSupabaseAdmin().auth.signUp({
@@ -200,6 +249,7 @@ async function validateNonSSOUser(email: string) {
         "This email address is associated with an SSO account. Please use SSO login instead.",
       additionalData: { email },
       label: "Auth",
+      shouldBeCaptured: false,
     });
   }
 }
@@ -221,15 +271,23 @@ export async function sendOTP(email: string) {
   } catch (cause) {
     // @ts-expect-error
     const isRateLimitError = cause.code === "over_email_send_rate_limit";
+    const fallbackMessage =
+      "Something went wrong while sending the OTP. Please try again later or contact support.";
+
+    // AuthRetryableFetchError (e.g. from 504 timeout) can have "{}" as message,
+    // so we validate the message is actually useful before showing it to users
+    const hasUsableMessage =
+      (cause instanceof AuthError || isLikeShelfError(cause)) &&
+      cause.message &&
+      cause.message !== "{}" &&
+      !cause.message.startsWith("{");
+
     throw new ShelfError({
       cause,
-      message:
-        cause instanceof AuthError || isLikeShelfError(cause)
-          ? cause.message
-          : "Something went wrong while sending the OTP. Please try again later or contact support.",
+      message: hasUsableMessage ? cause.message : fallbackMessage,
       additionalData: { email },
       label,
-      shouldBeCaptured: !isRateLimitError,
+      shouldBeCaptured: isRateLimitError ? false : undefined,
     });
   }
 }

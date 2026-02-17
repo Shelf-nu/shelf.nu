@@ -54,6 +54,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -66,6 +67,7 @@ import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -149,6 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         message: isSelfServiceOrBase
           ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of kits is not allowed for current status of booking.",
+        shouldBeCaptured: false,
       });
     }
 
@@ -297,6 +300,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         message: isSelfServiceOrBase
           ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
           : "Changing of kits is not allowed for current status of booking.",
+        shouldBeCaptured: false,
       });
     }
 
@@ -423,6 +427,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         kitIds: removedKitIds,
         kits: removedKits.map((kit) => ({ id: kit.id, name: kit.name })),
         organizationId,
+      });
+    }
+
+    // Send email to custodian about kit changes
+    const kitChanges: string[] = [];
+    if (newAssetIds.length > 0) {
+      kitChanges.push("Kits were added to the booking");
+    }
+    if (removedKitIds.length > 0) {
+      kitChanges.push("Kits were removed from the booking");
+    }
+    if (kitChanges.length > 0) {
+      kitChanges.push("View booking activity for full details");
+      void sendBookingUpdatedEmail({
+        bookingId,
+        organizationId,
+        userId,
+        changes: kitChanges,
+        hints: getClientHint(request),
       });
     }
 

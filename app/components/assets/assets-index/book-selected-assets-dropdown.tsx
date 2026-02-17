@@ -15,7 +15,7 @@ import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isSelectingAllItems } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -62,8 +62,13 @@ function ConditionalActionsDropdown() {
   }`;
 
   const disabledReason = useMemo(() => {
+    // Filter out the ALL_SELECTED_KEY marker which is not a real asset
+    const realAssets = selectedAssets.filter(
+      (asset) => asset.id !== ALL_SELECTED_KEY
+    );
+
     /** If any asset is part of a kit. */
-    const someAssetsPartOfKit = selectedAssets.some((asset) => !!asset.kit);
+    const someAssetsPartOfKit = realAssets.some((asset) => !!asset.kit);
     if (someAssetsPartOfKit) {
       return {
         reason:
@@ -72,7 +77,7 @@ function ConditionalActionsDropdown() {
     }
 
     /** If any asset is marked as unavailable. */
-    const someAssetsMarkedUnavailable = selectedAssets.some(
+    const someAssetsMarkedUnavailable = realAssets.some(
       (asset) => !asset.availableToBook
     );
     if (someAssetsMarkedUnavailable) {
