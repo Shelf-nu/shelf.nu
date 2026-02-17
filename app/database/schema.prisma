@@ -104,6 +104,10 @@ model User {
 
   assetFilterPresets AssetFilterPreset[]
 
+  // Role change audit log
+  roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
+  roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
+
   @@unique([email, username])
   @@index([firstName, lastName])
   // Indexes for foreign keys
@@ -720,6 +724,7 @@ model Organization {
   assetReminders     AssetReminder[]
   assetFilterPresets  AssetFilterPreset[]
   usersWithLastSelected User[] @relation("lastSelectedOrg")
+  roleChangeLogs     RoleChangeLog[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1421,4 +1426,26 @@ model UserUpdateRead {
   @@index([userId])
   @@index([updateId])
   @@index([readAt])
+}
+
+model RoleChangeLog {
+  id           String            @id @default(cuid())
+  previousRole OrganizationRoles
+  newRole      OrganizationRoles
+  createdAt    DateTime          @default(now())
+
+  // Who was changed
+  user   User   @relation("roleChangeTarget", fields: [userId], references: [id])
+  userId String
+
+  // Who performed the change
+  changedBy   User   @relation("roleChangeActor", fields: [changedById], references: [id])
+  changedById String
+
+  // Which organization
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  @@index([userId, organizationId])
+  @@index([organizationId, createdAt])
 }

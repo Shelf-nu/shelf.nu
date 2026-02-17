@@ -549,6 +549,7 @@ export async function getPaginatedAndFilterableSettingInvites({
       email: invite.inviteeEmail,
       status: invite.status,
       role: organizationRolesMap[invite?.roles[0]],
+      roleEnum: invite?.roles[0],
       userId: null,
       sso: false,
       inviteMessage: invite.inviteMessage,

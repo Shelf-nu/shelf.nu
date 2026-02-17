@@ -100,14 +100,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId);
+    return await resolveUserAction(request, organizationId, userId, role);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -172,6 +172,7 @@ export default function UserPage() {
               </Button>
             )}
             role={userOrgRole}
+            roleEnum={user.userOrganizations[0].roles[0]}
           />
         </AbsolutePositionedHeaderActions>
       </When>

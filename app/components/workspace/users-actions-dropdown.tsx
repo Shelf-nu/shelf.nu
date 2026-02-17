@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { InviteStatuses, User } from "@prisma/client";
+import type { InviteStatuses, OrganizationRoles, User } from "@prisma/client";
 import { useFetcher } from "react-router";
 import {
   PenIcon,
@@ -31,6 +31,7 @@ export function TeamUsersActionsDropdown({
   isSSO,
   customTrigger,
   role,
+  roleEnum,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
@@ -40,6 +41,7 @@ export function TeamUsersActionsDropdown({
   isSSO: boolean;
   customTrigger?: (disabled: boolean) => ReactNode;
   role: UserFriendlyRoles;
+  roleEnum: OrganizationRoles;
 }) {
   const fetcher = useFetcher();
   const disabled = useDisabled(fetcher);
@@ -179,7 +181,7 @@ export function TeamUsersActionsDropdown({
       {userId ? (
         <ChangeRoleDialog
           userId={userId}
-          currentRole={role}
+          currentRoleEnum={roleEnum}
           isSSO={isSSO}
           open={changeRoleOpen}
           onOpenChange={setChangeRoleOpen}

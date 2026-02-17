@@ -1377,15 +1377,24 @@ export async function revokeAccessToOrganization({
  * Changes a user's role in an organization in-place.
  * This is the same pattern used by ownership transfer and SCIM sync.
  * Does NOT affect TeamMember, Custody, or Booking records.
+ *
+ * Caller role validation:
+ * - Only OWNER can promote/demote ADMINs
+ * - Cannot assign OWNER role
+ * - Cannot change the OWNER's role
+ *
+ * Returns the target user's previous role alongside the updated record.
  */
 export async function changeUserRole({
   userId,
   organizationId,
   newRole,
+  callerRole,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   newRole: OrganizationRoles;
+  callerRole: OrganizationRoles;
 }) {
   try {
     if (newRole === OrganizationRoles.OWNER) {
@@ -1413,7 +1422,9 @@ export async function changeUserRole({
       });
     }
 
-    if (userOrg.roles.includes(OrganizationRoles.OWNER)) {
+    const currentRole = userOrg.roles[0];
+
+    if (currentRole === OrganizationRoles.OWNER) {
       throw new ShelfError({
         cause: null,
         message:
@@ -1422,7 +1433,35 @@ export async function changeUserRole({
       });
     }
 
-    return await db.userOrganization.update({
+    /** Only OWNER can promote someone to ADMIN */
+    if (
+      newRole === OrganizationRoles.ADMIN &&
+      callerRole !== OrganizationRoles.OWNER
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Insufficient permissions",
+        message: "Only the workspace owner can promote users to Administrator.",
+        label,
+        status: 403,
+      });
+    }
+
+    /** Only OWNER can change an ADMIN's role */
+    if (
+      currentRole === OrganizationRoles.ADMIN &&
+      callerRole !== OrganizationRoles.OWNER
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Insufficient permissions",
+        message: "Only the workspace owner can change an Administrator's role.",
+        label,
+        status: 403,
+      });
+    }
+
+    const updated = await db.userOrganization.update({
       where: {
         userId_organizationId: {
           userId,
@@ -1433,6 +1472,8 @@ export async function changeUserRole({
         roles: { set: [newRole] },
       },
     });
+
+    return { ...updated, previousRole: currentRole };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1441,6 +1482,7 @@ export async function changeUserRole({
         : "Failed to change user role",
       additionalData: { userId, organizationId, newRole },
       label,
+      status: isLikeShelfError(cause) ? cause.status : undefined,
     });
   }
 }
@@ -1452,10 +1494,18 @@ export async function changeUserRole({
  *   - [x] Tag
  *   - [x] Location
  *   - [x] CustomField
- *   - [x] Invite
+ *   - [x] Invite (skippable via `skipInvites`)
  *   - [x] Booking
  *   - [x] Image
  *   - [x] Kit
+ *   - [x] AssetReminder
+ *
+ * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
+ * transferred — their userId represents authorship, not ownership.
+ *
+ * Invites can be skipped via `skipInvites` (used during demotion) because
+ * inviterId represents "who sent this" (authorship), not ownership.
+ *
  * Required to be used inside a transaction
  */
 export async function transferEntitiesToNewOwner({
@@ -1463,11 +1513,13 @@ export async function transferEntitiesToNewOwner({
   id,
   newOwnerId,
   organizationId,
+  skipInvites = false,
 }: {
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   id: User["id"];
   newOwnerId: User["id"];
   organizationId: Organization["id"];
+  skipInvites?: boolean;
 }) {
   /** Update assets */
   await tx.asset.updateMany({
@@ -1524,16 +1576,18 @@ export async function transferEntitiesToNewOwner({
     },
   });
 
-  /** Update invites */
-  await tx.invite.updateMany({
-    where: {
-      inviterId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      inviterId: newOwnerId,
-    },
-  });
+  /** Update invites (skipped during demotion — inviterId is authorship) */
+  if (!skipInvites) {
+    await tx.invite.updateMany({
+      where: {
+        inviterId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        inviterId: newOwnerId,
+      },
+    });
+  }
 
   /** Update bookings */
   await tx.booking.updateMany({
@@ -1570,6 +1624,17 @@ export async function transferEntitiesToNewOwner({
 
   /** Update kits */
   await tx.kit.updateMany({
+    where: {
+      createdById: id,
+      organizationId: organizationId,
+    },
+    data: {
+      createdById: newOwnerId,
+    },
+  });
+
+  /** Update asset reminders */
+  await tx.assetReminder.updateMany({
     where: {
       createdById: id,
       organizationId: organizationId,

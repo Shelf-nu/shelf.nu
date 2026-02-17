@@ -11,9 +11,19 @@ import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import { isDemotion } from "~/utils/roles";
 import { randomUsernameFromEmail } from "~/utils/user";
-import { changeUserRole, revokeAccessToOrganization } from "./service.server";
-import { revokeAccessEmailText } from "../invite/helpers";
+import {
+  changeUserRole,
+  revokeAccessToOrganization,
+  transferEntitiesToNewOwner,
+} from "./service.server";
+import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
 import { createInvite } from "../invite/service.server";
 
 /**
@@ -23,7 +33,8 @@ import { createInvite } from "../invite/service.server";
 export async function resolveUserAction(
   request: Request,
   organizationId: string,
-  userId: string
+  userId: string,
+  callerRole: OrgRolesEnum
 ) {
   const formData = await request.formData();
 
@@ -264,11 +275,24 @@ export async function resolveUserAction(
       return payload(null);
     }
     case "changeRole": {
-      const { userId: targetUserId, role: newRole } = parseData(
+      await validatePermission({
+        roles: [callerRole],
+        action: PermissionAction.changeRole,
+        entity: PermissionEntity.teamMember,
+        organizationId,
+        userId,
+      });
+
+      const {
+        userId: targetUserId,
+        role: newRole,
+        transferToUserId,
+      } = parseData(
         formData,
         z.object({
           userId: z.string(),
           role: z.nativeEnum(OrgRolesEnum),
+          transferToUserId: z.string().optional(),
         }),
         {
           additionalData: {
@@ -286,13 +310,83 @@ export async function resolveUserAction(
         });
       }
 
+      /** Fetch the target's current role to detect demotion */
+      const targetUserOrg = await db.userOrganization.findFirst({
+        where: { userId: targetUserId, organizationId },
+      });
+
+      if (!targetUserOrg) {
+        throw new ShelfError({
+          cause: null,
+          message: "User is not a member of this organization",
+          label: "Team",
+        });
+      }
+
+      const currentRole = targetUserOrg.roles[0];
+
+      /** Transfer entities on demotion */
+      if (isDemotion(currentRole, newRole)) {
+        const org = await db.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { userId: true },
+        });
+
+        const recipientId = transferToUserId || org.userId;
+
+        await db.$transaction(async (tx) => {
+          await transferEntitiesToNewOwner({
+            tx,
+            id: targetUserId,
+            newOwnerId: recipientId,
+            organizationId,
+            skipInvites: true,
+          });
+        });
+      }
+
+      /** Change the role (includes caller-role validation) */
       await changeUserRole({
         userId: targetUserId,
         organizationId,
         newRole,
+        callerRole,
       });
 
+      /** Log the role change for auditing */
+      await db.roleChangeLog.create({
+        data: {
+          userId: targetUserId,
+          changedById: userId,
+          organizationId,
+          previousRole: currentRole,
+          newRole,
+        },
+      });
+
+      /** Send email notification to the affected user */
+      const [targetUser, org] = await Promise.all([
+        db.user.findUniqueOrThrow({
+          where: { id: targetUserId },
+          select: { email: true },
+        }),
+        db.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { name: true, customEmailFooter: true },
+        }),
+      ]);
+
       const roleName = organizationRolesMap[newRole] || newRole;
+
+      sendEmail({
+        to: targetUser.email,
+        subject: `Your role in ${org.name} has been changed`,
+        text: roleChangeEmailText({
+          orgName: org.name,
+          newRole: roleName,
+          customEmailFooter: org.customEmailFooter,
+        }),
+      });
 
       sendNotification({
         title: "Role updated",
@@ -301,7 +395,7 @@ export async function resolveUserAction(
         senderId: userId,
       });
 
-      return redirect("/settings/team/users");
+      return payload(null);
     }
     default: {
       throw new ShelfError({

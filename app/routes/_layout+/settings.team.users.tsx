@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { InviteStatuses } from "@prisma/client";
+import type { InviteStatuses, OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -113,14 +113,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId);
+    return await resolveUserAction(request, organizationId, userId, role);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -233,6 +233,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
             isSSO={item.sso || false}
             role={item.role}
+            roleEnum={item.roleEnum as OrganizationRoles}
           />
         ) : null}
       </Td>
