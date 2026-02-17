@@ -730,13 +730,11 @@ const WorkspaceScimTokensSection = ({
             </code>
           </div>
           <AlertDialogFooter>
+            <Button variant="secondary" onClick={handleCopy}>
+              {copied ? "Copied!" : "Copy to clipboard"}
+            </Button>
             <AlertDialogAction asChild>
-              <Button variant="secondary" onClick={handleCopy}>
-                {copied ? "Copied!" : "Copy to clipboard"}
-              </Button>
-            </AlertDialogAction>
-            <AlertDialogAction asChild>
-              <Button onClick={() => setRevealedToken(null)}>Done</Button>
+              <Button>Done</Button>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -24,7 +24,7 @@ function hashToken(rawToken: string): string {
  * Authenticates a SCIM request by validating the Bearer token.
  * Returns the organization ID the token is scoped to.
  *
- * @throws {ScimError} 401 if the token is missing, invalid, or revoked
+ * @throws {ScimError} 401 if the token is missing or invalid
  */
 export async function authenticateScimRequest(
   request: Request
@@ -39,11 +39,11 @@ export async function authenticateScimRequest(
 
   const scimToken = await db.scimToken.findUnique({
     where: { tokenHash },
-    select: { id: true, organizationId: true, revokedAt: true },
+    select: { id: true, organizationId: true },
   });
 
-  if (!scimToken || scimToken.revokedAt) {
-    throw new ScimError("Invalid or revoked token", 401);
+  if (!scimToken) {
+    throw new ScimError("Invalid token", 401);
   }
 
   // Update lastUsedAt (fire-and-forget, don't block the request)

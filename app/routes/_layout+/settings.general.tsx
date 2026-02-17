@@ -124,7 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // Load SCIM tokens for SSO-enabled organizations
         currentOrganization.enabledSso
           ? db.scimToken.findMany({
-              where: { organizationId, revokedAt: null },
+              where: { organizationId },
               select: {
                 id: true,
                 label: true,
@@ -498,14 +498,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           { additionalData: { userId, organizationId } }
         );
 
-        await db.scimToken.update({
+        await db.scimToken.delete({
           where: { id: tokenId },
-          data: { revokedAt: new Date() },
         });
 
         sendNotification({
-          title: "SCIM token revoked",
-          message: "The SCIM token has been revoked successfully",
+          title: "SCIM token deleted",
+          message: "The SCIM token has been deleted successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });

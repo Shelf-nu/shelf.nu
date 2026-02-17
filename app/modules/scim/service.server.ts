@@ -1,11 +1,7 @@
-import { randomBytes } from "crypto";
+import { createId } from "@paralleldrive/cuid2";
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
-import {
-  createEmailAuthAccount,
-  confirmExistingAuthAccount,
-} from "~/modules/auth/service.server";
 import { createTeamMember } from "~/modules/team-member/service.server";
 import {
   createUser,
@@ -182,24 +178,15 @@ export async function createScimUser(
     return userToScimResource(updatedUser, true);
   }
 
-  // User doesn't exist — create in Supabase + Shelf DB
-  const randomPassword = randomBytes(32).toString("base64");
-
-  let authUser;
-  try {
-    authUser = await createEmailAuthAccount(email, randomPassword);
-  } catch {
-    // Fallback: user may exist in Supabase but not in Shelf DB
-    authUser = await confirmExistingAuthAccount(email, randomPassword);
-    if (!authUser) {
-      throw new ScimError("Failed to create authentication account", 500);
-    }
-  }
-
+  // User doesn't exist — create in Shelf DB only.
+  // We do NOT create a Supabase auth account here. When the user signs in
+  // via SSO, the SSO callback will create the auth account and link it
+  // to this Shelf user by updating the user ID.
+  const placeholderId = createId();
   const username = randomUsernameFromEmail(email);
 
   const newUser = await createUser({
-    userId: authUser.id,
+    userId: placeholderId,
     email,
     username,
     firstName,
