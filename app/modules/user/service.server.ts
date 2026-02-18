@@ -1390,11 +1390,13 @@ export async function changeUserRole({
   organizationId,
   newRole,
   callerRole,
+  tx: client = db,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   newRole: OrganizationRoles;
   callerRole: OrganizationRoles;
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
   try {
     if (newRole === OrganizationRoles.OWNER) {
@@ -1406,7 +1408,7 @@ export async function changeUserRole({
       });
     }
 
-    const userOrg = await db.userOrganization.findFirst({
+    const userOrg = await client.userOrganization.findFirst({
       where: {
         userId,
         organizationId,
@@ -1461,7 +1463,7 @@ export async function changeUserRole({
       });
     }
 
-    const updated = await db.userOrganization.update({
+    const updated = await client.userOrganization.update({
       where: {
         userId_organizationId: {
           userId,

@@ -342,27 +342,46 @@ export async function resolveUserAction(
             organizationId,
             skipInvites: true,
           });
+
+          await changeUserRole({
+            userId: targetUserId,
+            organizationId,
+            newRole,
+            callerRole,
+            tx,
+          });
+
+          await tx.roleChangeLog.create({
+            data: {
+              userId: targetUserId,
+              changedById: userId,
+              organizationId,
+              previousRole: currentRole,
+              newRole,
+            },
+          });
+        });
+      } else {
+        await db.$transaction(async (tx) => {
+          await changeUserRole({
+            userId: targetUserId,
+            organizationId,
+            newRole,
+            callerRole,
+            tx,
+          });
+
+          await tx.roleChangeLog.create({
+            data: {
+              userId: targetUserId,
+              changedById: userId,
+              organizationId,
+              previousRole: currentRole,
+              newRole,
+            },
+          });
         });
       }
-
-      /** Change the role (includes caller-role validation) */
-      await changeUserRole({
-        userId: targetUserId,
-        organizationId,
-        newRole,
-        callerRole,
-      });
-
-      /** Log the role change for auditing */
-      await db.roleChangeLog.create({
-        data: {
-          userId: targetUserId,
-          changedById: userId,
-          organizationId,
-          previousRole: currentRole,
-          newRole,
-        },
-      });
 
       /** Send email notification to the affected user */
       const [targetUser, org] = await Promise.all([

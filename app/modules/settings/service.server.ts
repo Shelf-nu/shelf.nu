@@ -1,5 +1,5 @@
 import { InviteStatuses } from "@prisma/client";
-import type { Prisma, Organization } from "@prisma/client";
+import type { Prisma, Organization, OrganizationRoles } from "@prisma/client";
 
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
@@ -21,7 +21,7 @@ export interface TeamMembersWithUserOrInvite {
   email: string;
   status: InviteStatuses;
   role: UserFriendlyRoles;
-  roleEnum: string;
+  roleEnum: OrganizationRoles;
   userId: string | null;
   sso: boolean;
   custodies?: number;

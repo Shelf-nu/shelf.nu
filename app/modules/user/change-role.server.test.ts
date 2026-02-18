@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
@@ -13,8 +14,6 @@ vi.mock("~/database/db.server", () => ({
     },
   },
 }));
-
-// @vitest-environment node
 
 const ORG_ID = "org-1";
 const USER_ID = "user-1";

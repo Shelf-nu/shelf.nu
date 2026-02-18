@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import type { InviteStatuses } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -242,7 +242,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
             isSSO={item.sso || false}
             role={item.role}
-            roleEnum={item.roleEnum as OrganizationRoles}
+            roleEnum={item.roleEnum}
           />
         ) : null}
       </Td>

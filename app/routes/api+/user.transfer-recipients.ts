@@ -20,7 +20,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       userId,
       request,
       entity: PermissionEntity.teamMember,
-      action: PermissionAction.update,
+      action: PermissionAction.changeRole,
     });
 
     const url = new URL(request.url);
