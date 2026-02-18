@@ -239,7 +239,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           "sso",
           "transfer-ownership",
           "generateScimToken",
-          "revokeScimToken",
+          "deleteScimToken",
         ]),
       }),
       {
@@ -482,7 +482,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return payload({ rawToken });
       }
-      case "revokeScimToken": {
+      case "deleteScimToken": {
         if (role !== OrganizationRoles.OWNER) {
           throw new ShelfError({
             cause: null,

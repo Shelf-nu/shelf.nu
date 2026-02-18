@@ -28,7 +28,6 @@ import { Card } from "../shared/card";
 import { DateS } from "../shared/date";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -597,10 +596,11 @@ const WorkspaceScimTokensSection = ({
   const { organization } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
-  const revokeFetcher = useFetcher({ key: "revokeScimToken" });
+  const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tokenToDelete, setTokenToDelete] = useState<ScimTokenItem | null>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
   // Extract the raw token from the generate action response
@@ -664,18 +664,13 @@ const WorkspaceScimTokensSection = ({
                       )}
                     </td>
                     <td className="py-3 text-right">
-                      <revokeFetcher.Form method="post">
-                        <input type="hidden" name="tokenId" value={token.id} />
-                        <Button
-                          type="submit"
-                          variant="secondary"
-                          name="intent"
-                          value="revokeScimToken"
-                          className="text-error-500 hover:text-error-600"
-                        >
-                          Revoke
-                        </Button>
-                      </revokeFetcher.Form>
+                      <Button
+                        variant="secondary"
+                        className="text-error-500 hover:text-error-600"
+                        onClick={() => setTokenToDelete(token)}
+                      >
+                        Delete
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -710,6 +705,47 @@ const WorkspaceScimTokensSection = ({
         </generateFetcher.Form>
       </Card>
 
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={!!tokenToDelete}
+        onOpenChange={(open) => {
+          if (!open) setTokenToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete SCIM token</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the token &ldquo;
+              {tokenToDelete?.label}&rdquo;? Any SCIM integration using this
+              token will stop working immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="secondary" onClick={() => setTokenToDelete(null)}>
+              Cancel
+            </Button>
+            <deleteFetcher.Form method="post">
+              <input
+                type="hidden"
+                name="tokenId"
+                value={tokenToDelete?.id ?? ""}
+              />
+              <Button
+                type="submit"
+                variant="primary"
+                name="intent"
+                value="deleteScimToken"
+                className="bg-error-500 hover:bg-error-600"
+                onClick={() => setTokenToDelete(null)}
+              >
+                Delete
+              </Button>
+            </deleteFetcher.Form>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Token reveal dialog */}
       <AlertDialog
         open={!!revealedToken}
@@ -733,9 +769,7 @@ const WorkspaceScimTokensSection = ({
             <Button variant="secondary" onClick={handleCopy}>
               {copied ? "Copied!" : "Copy to clipboard"}
             </Button>
-            <AlertDialogAction asChild>
-              <Button>Done</Button>
-            </AlertDialogAction>
+            <Button onClick={() => setRevealedToken(null)}>Done</Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
