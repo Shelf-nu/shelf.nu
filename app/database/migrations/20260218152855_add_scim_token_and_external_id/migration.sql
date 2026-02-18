@@ -8,10 +8,8 @@ CREATE TABLE "ScimToken" (
     "label" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "createdById" TEXT NOT NULL,
-    "revokedAt" TIMESTAMP(3),
-    "lastUsedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "lastUsedAt" TIMESTAMP(3),
 
     CONSTRAINT "ScimToken_pkey" PRIMARY KEY ("id")
 );

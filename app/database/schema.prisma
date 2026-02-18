@@ -803,12 +803,8 @@ model ScimToken {
   organizationId String
 
   createdById String // User ID of the admin who created this token
-
-  revokedAt  DateTime?
-  lastUsedAt DateTime?
-
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  lastUsedAt DateTime?
 
   @@index([organizationId])
 }

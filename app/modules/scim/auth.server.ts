@@ -46,8 +46,7 @@ export async function authenticateScimRequest(
     throw new ScimError("Invalid token", 401);
   }
 
-  // Update lastUsedAt (fire-and-forget, don't block the request)
-  void db.scimToken.update({
+  await db.scimToken.update({
     where: { id: scimToken.id },
     data: { lastUsedAt: new Date() },
   });
