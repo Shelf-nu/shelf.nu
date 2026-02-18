@@ -2,7 +2,7 @@ import { Text, Flex, ProgressCircle } from "@tremor/react";
 import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { EmptyState } from "./empty-state";
+import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 import { InfoTooltip } from "../shared/info-tooltip";
 
@@ -69,7 +69,12 @@ export default function LocationRatioChart() {
             </Flex>
           </div>
         ) : (
-          <EmptyState text="No assets with values in database" />
+          <DashboardEmptyState
+            text="No location data yet"
+            subText="Assign assets to locations to see the distribution here."
+            ctaTo="/locations/new"
+            ctaText="Create a location"
+          />
         )}
       </div>
     </div>

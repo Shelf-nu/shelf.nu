@@ -14,6 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
@@ -118,6 +119,7 @@ export async function simpleModeLoader({
   }
 
   const searchParams = getCurrentSearchParams(request);
+  const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
   /** Query tierLimit, assets & Asset index settings */
@@ -240,6 +242,7 @@ export async function simpleModeLoader({
       perPage,
       totalPages,
       modelName,
+      hasActiveFilters,
       canImportAssets:
         canImportAssets(tierLimit) &&
         (await hasPermission({
@@ -313,6 +316,7 @@ export async function advancedModeLoader({
   const searchParams = filters
     ? currentFilterParams
     : getCurrentSearchParams(request);
+  const hasActiveFilters = computeHasActiveFilters(searchParams);
   const allSelectedEntries = searchParams.getAll(
     "getAll"
   ) as AllowedModelNames[];
@@ -475,6 +479,7 @@ export async function advancedModeLoader({
       perPage,
       totalPages,
       modelName,
+      hasActiveFilters,
       canImportAssets:
         canImportAssets(tierLimit) &&
         (await hasPermission({

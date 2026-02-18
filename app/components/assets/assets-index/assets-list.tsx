@@ -43,12 +43,12 @@ import { CategoryBadge } from "../category-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
 export const AssetsList = ({
-  customEmptyState,
+  customEmptyStateContent,
   disableTeamMemberFilter,
   disableBulkActions,
   wrapperClassName,
 }: {
-  customEmptyState?: ListProps["customEmptyStateContent"];
+  customEmptyStateContent?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
   wrapperClassName?: string;
@@ -189,7 +189,7 @@ export const AssetsList = ({
                 )
               }
               customEmptyStateContent={
-                customEmptyState ? customEmptyState : undefined
+                customEmptyStateContent ? customEmptyStateContent : undefined
               }
               headerChildren={headerChildren}
             />
