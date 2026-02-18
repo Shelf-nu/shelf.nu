@@ -1,7 +1,7 @@
 import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { EmptyState } from "./empty-state";
+import { DashboardEmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
@@ -66,7 +66,12 @@ export default function NewestAssets() {
         </Table>
       ) : (
         <div className="h-full flex-1 rounded-b border border-gray-200">
-          <EmptyState text="No assets in database" />
+          <DashboardEmptyState
+            text="No assets yet"
+            subText="Create your first asset to start building your inventory."
+            ctaTo="/assets/new"
+            ctaText="Create an asset"
+          />
         </div>
       )}
     </>

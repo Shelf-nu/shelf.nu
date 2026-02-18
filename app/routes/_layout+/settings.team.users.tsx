@@ -27,7 +27,8 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { computeHasActiveFilters } from "~/utils/filter-params";
+import { error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -67,6 +68,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return redirect("/settings/general");
     }
 
+    const searchParams = getCurrentSearchParams(request);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
+
     const { page, perPage, search, items, totalItems, totalPages } =
       await getPaginatedAndFilterableSettingUsers({
         organizationId,
@@ -91,6 +95,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       search,
       totalPages,
       modelName,
+      hasActiveFilters,
       organization,
       searchFieldLabel: "Search by name or email",
       searchFieldTooltip: {
@@ -185,6 +190,10 @@ export default function UserTeamSetting() {
 
         <List
           className="overflow-x-visible md:overflow-x-auto"
+          customEmptyStateContent={{
+            title: "No team members yet",
+            text: "Invite team members to collaborate on asset management within your workspace.",
+          }}
           ItemComponent={UserRow}
           headerChildren={
             <>

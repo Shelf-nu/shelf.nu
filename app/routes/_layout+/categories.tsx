@@ -31,6 +31,7 @@ import {
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import {
   payload,
   error,
@@ -58,6 +59,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search } = getParamsValues(searchParams);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
@@ -87,6 +89,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        hasActiveFilters,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -167,6 +170,12 @@ export default function CategoriesPage() {
           bulkActions={
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
           }
+          customEmptyStateContent={{
+            title: "No categories yet",
+            text: "Categories help you organize assets by type. Create categories to group and filter your inventory.",
+            newButtonRoute: "/categories/new",
+            newButtonContent: "Create your first category",
+          }}
           ItemComponent={CategoryItem}
           headerChildren={
             <>
