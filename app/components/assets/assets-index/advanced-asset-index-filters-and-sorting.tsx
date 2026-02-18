@@ -281,7 +281,7 @@ function AdvancedFilter() {
 
                         {filter.name && (
                           <>
-                            <div className="w-[50px] shrink-0">
+                            <div className="w-[62px] shrink-0">
                               <OperatorSelector
                                 filter={filter}
                                 setFilter={(operator) => {
