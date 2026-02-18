@@ -31,6 +31,7 @@ import {
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import {
   assertIsDelete,
   payload,
@@ -60,6 +61,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search } = getParamsValues(searchParams);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
     const { tags, totalTags } = await getTags({
@@ -89,6 +91,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        hasActiveFilters,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -175,6 +178,12 @@ export default function CategoriesPage() {
           bulkActions={
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
           }
+          customEmptyStateContent={{
+            title: "No tags yet",
+            text: "Tags let you label assets with flexible keywords. Create tags to add custom metadata to your inventory.",
+            newButtonRoute: "/tags/new",
+            newButtonContent: "Create your first tag",
+          }}
           ItemComponent={TagItem}
           headerChildren={
             <>

@@ -7,7 +7,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
-import { EmptyState } from "./empty-state";
+import { DashboardEmptyState } from "./empty-state";
 import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Table, Td, Tr } from "../table";
@@ -64,7 +64,10 @@ export default function CustodiansList() {
         </Table>
       ) : (
         <div className="h-full flex-1 rounded-b border border-gray-200 p-8">
-          <EmptyState text="No assets in custody" />
+          <DashboardEmptyState
+            text="No assets in custody"
+            subText="Assign custody of assets to team members to track who has what."
+          />
         </div>
       )}
     </>

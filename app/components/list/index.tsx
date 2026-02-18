@@ -14,6 +14,7 @@ import { ListItem } from "./list-item";
 import ListTitle from "./list-title";
 import { Pagination } from "./pagination";
 import { ExportAssetsButton } from "../assets/assets-index/export-assets-button";
+import type { Button } from "../shared/button";
 import { Table } from "../table";
 import When from "../when/when";
 
@@ -62,7 +63,7 @@ export type ListProps = {
     text: ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
-    buttonProps?: any;
+    buttonProps?: Partial<React.ComponentProps<typeof Button>>;
   };
   emptyStateClassName?: string;
   /**
