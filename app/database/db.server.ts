@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 import { delay } from "../utils/delay";
 import { NODE_ENV } from "../utils/env";
+import { isPrismaTransientError } from "../utils/error";
 import { Logger } from "../utils/logger";
 
 export type ExtendedPrismaClient = ReturnType<typeof getNewPrismaClient>;
@@ -11,24 +12,6 @@ let db: ExtendedPrismaClient;
 declare global {
   // eslint-disable-next-line no-var
   var __db__: ExtendedPrismaClient;
-}
-
-const PRISMA_TRANSIENT_CODES = new Set([
-  "P2024", // Timed out fetching a new connection from the connection pool
-  "P1001", // Can't reach database server
-  "P1002", // The database server was reached but timed out
-  "P1008", // Operations timed out
-  "P1017", // Server has closed the connection
-]);
-
-function isPrismaRetryableError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof (error as { code: unknown }).code === "string" &&
-    PRISMA_TRANSIENT_CODES.has((error as { code: string }).code)
-  );
 }
 
 const MAX_RETRIES = 2;
@@ -55,12 +38,16 @@ function getNewPrismaClient() {
               try {
                 return await query(args);
               } catch (error) {
-                if (isPrismaRetryableError(error) && attempt <= MAX_RETRIES) {
+                if (isPrismaTransientError(error) && attempt <= MAX_RETRIES) {
                   const delayMs = BASE_DELAY_MS * attempt;
                   Logger.warn(
-                    `Prisma transient error (attempt ${attempt}/${
+                    `Prisma transient error [${
+                      (error as { code: string }).code
+                    }] (attempt ${attempt}/${
                       MAX_RETRIES + 1
-                    }), retrying in ${delayMs}ms...`
+                    }), retrying in ${delayMs}ms: ${
+                      error instanceof Error ? error.message : "unknown"
+                    }`
                   );
                   await delay(delayMs);
                   continue;

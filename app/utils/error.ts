@@ -261,7 +261,7 @@ export function isNotFoundError(
  * Prisma error codes that indicate transient/connection issues
  * rather than actual data problems.
  */
-const PRISMA_TRANSIENT_ERROR_CODES = new Set([
+export const PRISMA_TRANSIENT_ERROR_CODES = new Set([
   "P2024", // Timed out fetching a new connection from the connection pool
   "P1001", // Can't reach database server
   "P1002", // The database server was reached but timed out
