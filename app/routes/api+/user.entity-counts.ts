@@ -3,7 +3,7 @@ import { data } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams } from "~/utils/http.server";
+import { error, getParams, payload } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -80,18 +80,20 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       assetReminders +
       images;
 
-    return {
-      assets,
-      categories,
-      tags,
-      locations,
-      customFields,
-      bookings,
-      kits,
-      assetReminders,
-      images,
-      total,
-    };
+    return data(
+      payload({
+        assets,
+        categories,
+        tags,
+        locations,
+        customFields,
+        bookings,
+        kits,
+        assetReminders,
+        images,
+        total,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

@@ -23,7 +23,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../shared/modal";
-import When from "../when/when";
 
 const roleOptions: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -54,13 +53,11 @@ interface TransferRecipient {
 export function ChangeRoleDialog({
   userId,
   currentRoleEnum,
-  isSSO,
   open,
   onOpenChange,
 }: {
   userId: User["id"];
   currentRoleEnum: OrganizationRoles;
-  isSSO: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -225,13 +222,6 @@ export function ChangeRoleDialog({
                     </PopoverContent>
                   </PopoverPortal>
                 </Popover>
-
-                <When truthy={isSSO}>
-                  <p className="mt-3 text-sm text-warning-600">
-                    This user is managed via SSO. Their role may be overwritten
-                    on the next SSO sync.
-                  </p>
-                </When>
 
                 {showDemotion ? (
                   <div className="mt-4 rounded-md border border-warning-200 bg-warning-25 p-3">

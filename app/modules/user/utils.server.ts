@@ -335,6 +335,23 @@ export async function resolveUserAction(
 
         const recipientId = transferToUserId || org.userId;
 
+        /** Validate that the transfer recipient is a member of this org */
+        if (transferToUserId) {
+          const recipientOrg = await db.userOrganization.findFirst({
+            where: { userId: transferToUserId, organizationId },
+          });
+
+          if (!recipientOrg) {
+            throw new ShelfError({
+              cause: null,
+              message:
+                "Transfer recipient is not a member of this organization",
+              label: "Team",
+              additionalData: { transferToUserId, organizationId },
+            });
+          }
+        }
+
         await db.$transaction(async (tx) => {
           await transferEntitiesToNewOwner({
             tx,

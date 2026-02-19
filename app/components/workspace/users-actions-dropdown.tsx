@@ -195,7 +195,6 @@ export function TeamUsersActionsDropdown({
         <ChangeRoleDialog
           userId={userId}
           currentRoleEnum={roleEnum}
-          isSSO={isSSO}
           open={changeRoleOpen}
           onOpenChange={setChangeRoleOpen}
         />

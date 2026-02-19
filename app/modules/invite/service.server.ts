@@ -5,7 +5,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { InviteStatuses } from "@prisma/client";
+import { InviteStatuses, OrganizationRoles } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
@@ -542,18 +542,21 @@ export async function getPaginatedAndFilterableSettingInvites({
     /**
      * Create the same structure for the invites
      */
-    const items = invites.map((invite) => ({
-      id: invite.id,
-      name: invite.inviteeTeamMember.name,
-      img: "/static/images/default_pfp.jpg",
-      email: invite.inviteeEmail,
-      status: invite.status,
-      role: organizationRolesMap[invite?.roles[0]],
-      roleEnum: invite?.roles[0],
-      userId: null,
-      sso: false,
-      inviteMessage: invite.inviteMessage,
-    }));
+    const items = invites.map((invite) => {
+      const roleEnum = invite.roles[0] ?? OrganizationRoles.BASE;
+      return {
+        id: invite.id,
+        name: invite.inviteeTeamMember.name,
+        img: "/static/images/default_pfp.jpg",
+        email: invite.inviteeEmail,
+        status: invite.status,
+        role: organizationRolesMap[roleEnum],
+        roleEnum,
+        userId: null,
+        sso: false,
+        inviteMessage: invite.inviteMessage,
+      };
+    });
     const totalItems = totalItemsGrouped.length;
     const totalPages = Math.ceil(totalItems / perPage);
 

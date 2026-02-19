@@ -52,12 +52,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       },
     });
 
-    return userOrgs.map((uo) => ({
-      id: uo.user.id,
-      name: `${uo.user.firstName ?? ""} ${uo.user.lastName ?? ""}`.trim(),
-      email: uo.user.email,
-      isOwner: uo.roles.includes(OrganizationRoles.OWNER),
-    }));
+    return data(
+      userOrgs.map((uo) => ({
+        id: uo.user.id,
+        name: `${uo.user.firstName ?? ""} ${uo.user.lastName ?? ""}`.trim(),
+        email: uo.user.email,
+        isOwner: uo.roles.includes(OrganizationRoles.OWNER),
+      }))
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
