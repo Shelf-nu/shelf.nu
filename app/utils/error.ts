@@ -145,7 +145,8 @@ export type FailureReason = {
     | 405 // method not allowed
     | 409 // conflict
     | 499 // client closed request
-    | 500; // internal server error
+    | 500 // internal server error
+    | 503; // service unavailable
 };
 
 export type ErrorLabel = FailureReason["label"];
@@ -257,6 +258,49 @@ export function isNotFoundError(
 }
 
 /**
+ * Prisma error codes that indicate transient/connection issues
+ * rather than actual data problems.
+ */
+const PRISMA_TRANSIENT_ERROR_CODES = new Set([
+  "P2024", // Timed out fetching a new connection from the connection pool
+  "P1001", // Can't reach database server
+  "P1002", // The database server was reached but timed out
+  "P1008", // Operations timed out
+  "P1017", // Server has closed the connection
+]);
+
+/**
+ * Checks if an error is a Prisma transient/connection error
+ * that should NOT be reported as a domain-specific "not found" error.
+ */
+export function isPrismaTransientError(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null) return false;
+  if ("code" in cause && typeof cause.code === "string") {
+    return PRISMA_TRANSIENT_ERROR_CODES.has(cause.code);
+  }
+  if (cause instanceof Error) {
+    const msg = cause.message.toLowerCase();
+    return (
+      msg.includes("timed out fetching a new connection") ||
+      msg.includes("can't reach database server")
+    );
+  }
+  return false;
+}
+
+/**
+ * Walks the cause chain of an error to detect if a transient
+ * Prisma error is buried inside ShelfError wrappers.
+ */
+function hasTransientCause(error: unknown): boolean {
+  if (isPrismaTransientError(error)) return true;
+  if (typeof error === "object" && error !== null && "cause" in error) {
+    return hasTransientCause((error as { cause: unknown }).cause);
+  }
+  return false;
+}
+
+/**
  * This function is used to check if the error is a zod validation error.
  */
 export function isZodValidationError(cause: unknown) {
@@ -279,6 +323,21 @@ export function makeShelfError(
       message: "The request was cancelled before it could complete.",
       shouldBeCaptured: false,
       status: 499,
+    });
+  }
+
+  // Detect transient DB errors buried in ShelfError wrappers.
+  // This prevents misleading messages like "User not found" when the
+  // real issue is a connection pool timeout (P2024).
+  if (hasTransientCause(cause)) {
+    return new ShelfError({
+      cause,
+      message:
+        "We're experiencing temporary database connectivity issues. Please try again in a moment.",
+      label: "DB",
+      additionalData,
+      shouldBeCaptured: true,
+      status: 503,
     });
   }
 
