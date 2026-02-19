@@ -7,6 +7,7 @@ import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { roleChangeTemplateString } from "~/emails/role-change-template";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
@@ -396,13 +397,22 @@ export async function resolveUserAction(
       ]);
 
       const roleName = organizationRolesMap[newRole] || newRole;
+      const previousRoleName = organizationRolesMap[currentRole] || currentRole;
 
       sendEmail({
         to: targetUser.email,
         subject: `Your role in ${org.name} has been changed`,
         text: roleChangeEmailText({
           orgName: org.name,
+          previousRole: previousRoleName,
           newRole: roleName,
+          customEmailFooter: org.customEmailFooter,
+        }),
+        html: await roleChangeTemplateString({
+          orgName: org.name,
+          previousRole: previousRoleName,
+          newRole: roleName,
+          recipientEmail: targetUser.email,
           customEmailFooter: org.customEmailFooter,
         }),
       });

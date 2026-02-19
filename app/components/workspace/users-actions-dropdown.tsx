@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import type { InviteStatuses, OrganizationRoles, User } from "@prisma/client";
+import type { InviteStatuses, User } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { useFetcher } from "react-router";
 import {
   PenIcon,
@@ -17,6 +18,7 @@ import {
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { ChangeRoleDialog } from "./change-role-dialog";
 import { Button } from "../shared/button";
@@ -48,6 +50,7 @@ export function TeamUsersActionsDropdown({
   const { ref, open, setOpen } = useControlledDropdownMenu();
   const currentUser = useUserData();
   const isCurrentUser = currentUser?.id === userId;
+  const { isAdministrator } = useUserRoleHelper();
 
   const [changeRoleOpen, setChangeRoleOpen] = useState(false);
 
@@ -142,6 +145,16 @@ export function TeamUsersActionsDropdown({
                   disabled={
                     isCurrentUser
                       ? { reason: "You cannot change your own role" }
+                      : isSSO
+                      ? {
+                          reason:
+                            "This user is managed via SSO. Role changes must be made through your identity provider.",
+                        }
+                      : isAdministrator && roleEnum === OrganizationRoles.ADMIN
+                      ? {
+                          reason:
+                            "Only the workspace owner can change an Administrator's role.",
+                        }
                       : disabled
                   }
                   onClick={() => {
