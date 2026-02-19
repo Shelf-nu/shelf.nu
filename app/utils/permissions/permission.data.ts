@@ -15,6 +15,7 @@ export enum PermissionAction {
   manageAssets = "manage-assets",
   custody = "custody",
   manageKits = "manage-kits",
+  changeRole = "change-role",
 }
 export enum PermissionEntity {
   asset = "asset",
@@ -207,6 +208,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
       PermissionAction.delete,
+      PermissionAction.changeRole,
     ],
     [PermissionEntity.teamMemberProfile]: [PermissionAction.read],
     [PermissionEntity.workspace]: [
@@ -327,6 +329,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
       PermissionAction.delete,
+      PermissionAction.changeRole,
     ],
     [PermissionEntity.teamMemberProfile]: [PermissionAction.read],
     [PermissionEntity.workspace]: [
