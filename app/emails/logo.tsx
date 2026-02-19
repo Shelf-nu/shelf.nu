@@ -7,6 +7,7 @@ export function LogoForEmail() {
   return (
     <div style={{ margin: "0 auto", display: "flex" }}>
       <Img
+        // TODO: replace SERVER_URL with CDN URL for self-hosted/open-source compatibility
         src={`${SERVER_URL}/static/images/logo-full-color(x2).png`}
         alt="Shelf's logo"
         width="auto"

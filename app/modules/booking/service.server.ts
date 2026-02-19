@@ -815,7 +815,12 @@ export async function reserveBooking({
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: {
-            include: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              mainImage: true,
+              category: { select: { name: true } },
               bookings: createBookingConflictConditions({
                 currentBookingId: id,
                 fromDate: from,
@@ -996,6 +1001,7 @@ export async function reserveBooking({
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
         hints,
+        assets: bookingFound.assets,
       });
       /** END Prepare email content */
 
@@ -1016,6 +1022,7 @@ export async function reserveBooking({
           assetCount: bookingFound._count.assets,
           hints,
           isAdminEmail: true,
+          assets: bookingFound.assets,
         });
 
         sendEmail({
