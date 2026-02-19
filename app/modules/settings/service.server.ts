@@ -1,5 +1,5 @@
 import { InviteStatuses } from "@prisma/client";
-import type { Prisma, Organization } from "@prisma/client";
+import type { Prisma, Organization, OrganizationRoles } from "@prisma/client";
 
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
@@ -21,6 +21,7 @@ export interface TeamMembersWithUserOrInvite {
   email: string;
   status: InviteStatuses;
   role: UserFriendlyRoles;
+  roleEnum: OrganizationRoles;
   userId: string | null;
   sso: boolean;
   custodies?: number;
@@ -100,6 +101,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         email: um.user.email,
         status: "ACCEPTED",
         role: organizationRolesMap[um.roles[0]],
+        roleEnum: um.roles[0],
         userId: um.user.id,
         sso: um.user.sso,
         custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,

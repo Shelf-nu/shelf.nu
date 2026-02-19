@@ -189,6 +189,10 @@ export default function EmailSettingsPage() {
               <span className="font-medium">Access:</span> Access revocation
               notices
             </li>
+            <li>
+              <span className="font-medium">Role changes:</span> Role change
+              notifications
+            </li>
           </ul>
         </div>
 
