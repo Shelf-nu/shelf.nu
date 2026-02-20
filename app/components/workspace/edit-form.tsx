@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type Organization,
   type Currency,
@@ -600,7 +600,10 @@ const WorkspaceScimTokensSection = ({
   const generateDisabled = useDisabled(generateFetcher);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [tokenToDelete, setTokenToDelete] = useState<ScimTokenItem | null>(null);
+  const [dismissedToken, setDismissedToken] = useState<string | null>(null);
+  const [tokenToDelete, setTokenToDelete] = useState<ScimTokenItem | null>(
+    null
+  );
   const labelInputRef = useRef<HTMLInputElement>(null);
 
   // Extract the raw token from the generate action response
@@ -609,11 +612,18 @@ const WorkspaceScimTokensSection = ({
     | undefined;
   const newToken = generateData?.rawToken;
 
-  // Show dialog when a new token is generated
-  if (newToken && newToken !== revealedToken) {
+  // Show dialog when a new token is generated (but not if already dismissed)
+  if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
     setRevealedToken(newToken);
     setCopied(false);
   }
+
+  // Close delete confirmation dialog after successful deletion
+  useEffect(() => {
+    if (deleteFetcher.state === "idle" && deleteFetcher.data) {
+      setTokenToDelete(null);
+    }
+  }, [deleteFetcher.state, deleteFetcher.data]);
 
   const handleCopy = useCallback(() => {
     if (revealedToken) {
@@ -737,7 +747,6 @@ const WorkspaceScimTokensSection = ({
                 name="intent"
                 value="deleteScimToken"
                 className="bg-error-500 hover:bg-error-600"
-                onClick={() => setTokenToDelete(null)}
               >
                 Delete
               </Button>
@@ -750,7 +759,10 @@ const WorkspaceScimTokensSection = ({
       <AlertDialog
         open={!!revealedToken}
         onOpenChange={(open) => {
-          if (!open) setRevealedToken(null);
+          if (!open) {
+            setDismissedToken(revealedToken);
+            setRevealedToken(null);
+          }
         }}
       >
         <AlertDialogContent>
@@ -769,7 +781,14 @@ const WorkspaceScimTokensSection = ({
             <Button variant="secondary" onClick={handleCopy}>
               {copied ? "Copied!" : "Copy to clipboard"}
             </Button>
-            <Button onClick={() => setRevealedToken(null)}>Done</Button>
+            <Button
+              onClick={() => {
+                setDismissedToken(revealedToken);
+                setRevealedToken(null);
+              }}
+            >
+              Done
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
