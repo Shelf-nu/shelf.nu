@@ -28,7 +28,6 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
     select: {
       id: true,
       title: true,
-      mainImage: true,
       category: {
         select: {
           name: true,
@@ -51,6 +50,9 @@ type BookingForReservationEmail = Prisma.BookingGetPayload<{
  */
 export type ReservationEmailAsset =
   BookingForReservationEmail["assets"][number];
+
+/** Max number of assets to display in booking email notifications */
+export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
 
 /** Common relations to include in a booking */
 export const BOOKING_COMMON_INCLUDE = {

@@ -6,7 +6,10 @@ import {
   Container,
   Heading,
 } from "@react-email/components";
-import type { ReservationEmailAsset } from "~/modules/booking/constants";
+import {
+  BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT,
+  type ReservationEmailAsset,
+} from "~/modules/booking/constants";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
@@ -118,41 +121,41 @@ export function BookingUpdatesEmailTemplate({
             >
               Booked items:
             </p>
-            {assets.slice(0, 10).map((asset) => (
-              <div
-                key={asset.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "6px 0",
-                  borderBottom: "1px solid #EAECF0",
-                }}
-              >
-                <span
+            {assets
+              .slice(0, BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT)
+              .map((asset) => (
+                <div
+                  key={asset.id}
                   style={{
-                    ...styles.p,
-                    margin: "0",
-                    color: "#101828",
-                    fontWeight: "500",
+                    padding: "6px 0",
+                    borderBottom: "1px solid #EAECF0",
                   }}
                 >
-                  {asset.title}
-                </span>
-                {asset.category?.name && (
                   <span
                     style={{
                       ...styles.p,
-                      margin: "0 0 0 8px",
-                      color: "#667085",
-                      fontSize: "13px",
+                      margin: "0",
+                      color: "#101828",
+                      fontWeight: "500",
                     }}
                   >
-                    · {asset.category.name}
+                    {asset.title}
                   </span>
-                )}
-              </div>
-            ))}
-            {assets.length > 10 && (
+                  {asset.category?.name && (
+                    <span
+                      style={{
+                        ...styles.p,
+                        margin: "0 0 0 8px",
+                        color: "#667085",
+                        fontSize: "13px",
+                      }}
+                    >
+                      · {asset.category.name}
+                    </span>
+                  )}
+                </div>
+              ))}
+            {assets.length > BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT && (
               <p
                 style={{
                   ...styles.p,
@@ -161,7 +164,13 @@ export function BookingUpdatesEmailTemplate({
                   marginTop: "8px",
                 }}
               >
-                and {assets.length - 10} more...
+                and {assets.length - BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT} more —{" "}
+                <a
+                  href={`${SERVER_URL}/bookings/${booking.id}?orgId=${booking.organizationId}`}
+                  style={{ color: "#EF6820" }}
+                >
+                  View full booking
+                </a>
               </p>
             )}
           </div>

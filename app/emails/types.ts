@@ -1,15 +1,8 @@
 import type { Prisma } from "@prisma/client";
-import type {
-  BOOKING_INCLUDE_FOR_EMAIL,
-  BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
-} from "~/modules/booking/constants";
+import type { BOOKING_INCLUDE_FOR_EMAIL } from "~/modules/booking/constants";
 
 export type BookingForEmail = Prisma.BookingGetPayload<{
   include: typeof BOOKING_INCLUDE_FOR_EMAIL;
-}>;
-
-export type BookingForReservationEmail = Prisma.BookingGetPayload<{
-  include: typeof BOOKING_INCLUDE_FOR_RESERVATION_EMAIL;
 }>;
 
 export type EmailPayloadType = {

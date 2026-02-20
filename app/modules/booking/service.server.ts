@@ -64,6 +64,7 @@ import type { MergeInclude } from "~/utils/utils";
 import {
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
+  BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
@@ -813,14 +814,11 @@ export async function reserveBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          ...BOOKING_INCLUDE_FOR_EMAIL,
+          ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
           assets: {
             select: {
-              id: true,
-              title: true,
+              ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.assets.select,
               status: true,
-              mainImage: true,
-              category: { select: { name: true } },
               bookings: createBookingConflictConditions({
                 currentBookingId: id,
                 fromDate: from,
