@@ -3164,6 +3164,16 @@ export async function deleteBooking(
       },
     });
 
+    if (!currentBooking) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "The booking you are trying to delete does not exist or has already been deleted.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
     const activeBooking =
       currentBooking &&
       (currentBooking.status === BookingStatus.OVERDUE ||
