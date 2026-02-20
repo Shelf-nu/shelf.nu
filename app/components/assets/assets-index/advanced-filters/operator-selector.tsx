@@ -6,6 +6,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { ChevronRight } from "~/components/icons/library";
 import type { DisabledProp } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
 import { handleActivationKeyPress } from "~/utils/keyboard";
@@ -147,10 +148,13 @@ export function OperatorSelector({
         <Button
           variant="secondary"
           title={operatorsMap[operator][1]}
-          className="w-[50px] font-normal"
+          className="w-[62px] font-normal"
           disabled={disabled}
         >
-          {operatorsMap[operator][0]}
+          <span className="flex items-center gap-3">
+            <ChevronRight className="mt-px inline-block rotate-90 text-gray-600" />
+            <span className="ml-[6px]">{operatorsMap[operator][0]}</span>
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverPortal>

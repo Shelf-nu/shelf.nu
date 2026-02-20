@@ -46,6 +46,7 @@ import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -78,6 +79,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
     const view = searchParams.get("view") ?? "table";
     const {
       filters,
@@ -185,6 +187,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         search,
+        hasActiveFilters,
         searchFieldLabel: "Search kits",
         teamMembers,
         totalTeamMembers,
@@ -329,6 +332,12 @@ export default function KitsIndexPage() {
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
             bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            customEmptyStateContent={{
+              title: "No kits yet",
+              text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",
+              newButtonRoute: "/kits/new",
+              newButtonContent: "Create your first kit",
+            }}
             headerChildren={
               <>
                 <Th>Category</Th>

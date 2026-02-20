@@ -1,20 +1,8 @@
 import type { Prisma } from "@prisma/client";
+import type { BOOKING_INCLUDE_FOR_EMAIL } from "~/modules/booking/constants";
 
 export type BookingForEmail = Prisma.BookingGetPayload<{
-  include: {
-    custodianTeamMember: true;
-    custodianUser: true;
-    organization: {
-      include: {
-        owner: {
-          select: { email: true };
-        };
-      };
-    };
-    _count: {
-      select: { assets: true };
-    };
-  };
+  include: typeof BOOKING_INCLUDE_FOR_EMAIL;
 }>;
 
 export type EmailPayloadType = {

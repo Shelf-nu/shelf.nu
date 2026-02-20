@@ -193,6 +193,10 @@ export default function EmailSettingsPage() {
               <span className="font-medium">Audits:</span> Assignment,
               cancelled, completed, reminder, overdue notifications
             </li>
+            <li>
+              <span className="font-medium">Role changes:</span> Role change
+              notifications
+            </li>
           </ul>
         </div>
 
