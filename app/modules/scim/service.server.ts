@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createTeamMember } from "~/modules/team-member/service.server";
 import {
   createUser,
@@ -244,9 +245,15 @@ export async function replaceScimUser(
     throw new ScimError("User not found", 404);
   }
 
+  const newEmail = (input.userName || input.emails?.[0]?.value)?.toLowerCase();
   const firstName = input.name?.givenName ?? null;
   const lastName = input.name?.familyName ?? null;
   const externalId = input.externalId ?? null;
+
+  // Update email if changed
+  if (newEmail && newEmail !== user.email) {
+    await updateUserEmail(userId, user.email, newEmail);
+  }
 
   // Update user attributes
   await db.user.update({
@@ -259,8 +266,9 @@ export async function replaceScimUser(
   });
 
   // Update team member name if exists
+  const currentEmail = newEmail || user.email;
   const teamMemberName =
-    [firstName, lastName].filter(Boolean).join(" ") || user.email;
+    [firstName, lastName].filter(Boolean).join(" ") || currentEmail;
   await db.teamMember.updateMany({
     where: { userId, organizationId },
     data: { name: teamMemberName },
@@ -328,6 +336,8 @@ export async function patchScimUser(
         await reactivateUser(userId, organizationId, name);
         isActive = true;
       }
+    } else if (op.path === "userName") {
+      updateData.email = String(op.value ?? "").toLowerCase();
     } else if (op.path === "name.givenName") {
       updateData.firstName = String(op.value ?? "");
     } else if (op.path === "name.familyName") {
@@ -359,10 +369,20 @@ export async function patchScimUser(
           updateData.lastName = String(name.familyName ?? "");
         }
       }
+      if ("userName" in val) {
+        updateData.email = String(val.userName ?? "").toLowerCase();
+      }
       if ("externalId" in val) {
         updateData.scimExternalId = String(val.externalId ?? "");
       }
     }
+  }
+
+  // Handle email change via updateUserEmail (uniqueness + Supabase sync)
+  if (typeof updateData.email === "string" && updateData.email !== user.email) {
+    await updateUserEmail(userId, user.email, updateData.email as string);
+    // Remove from updateData since updateUserEmail already persisted it
+    delete updateData.email;
   }
 
   // Apply accumulated updates
@@ -430,6 +450,49 @@ export async function deactivateScimUser(
 // ──────────────────────────────────────────────
 // HELPERS
 // ──────────────────────────────────────────────
+
+/**
+ * Updates a user's email in both Shelf DB and Supabase auth.
+ * Throws 409 if the new email is already taken by another user.
+ * Silently skips the Supabase auth update for SCIM-provisioned users
+ * who haven't logged in yet (no Supabase auth account).
+ */
+async function updateUserEmail(
+  userId: string,
+  currentEmail: string,
+  newEmail: string
+): Promise<void> {
+  if (newEmail === currentEmail) return;
+
+  const conflict = await db.user.findUnique({
+    where: { email: newEmail },
+    select: { id: true },
+  });
+
+  if (conflict) {
+    throw new ScimError(
+      `Email "${newEmail}" is already in use`,
+      409,
+      "uniqueness"
+    );
+  }
+
+  await db.user.update({
+    where: { id: userId },
+    data: { email: newEmail },
+  });
+
+  // Update Supabase auth email if the user has an auth account.
+  // SCIM-provisioned users who haven't logged in via SSO yet won't
+  // have one, so we silently skip on error.
+  try {
+    await getSupabaseAdmin().auth.admin.updateUserById(userId, {
+      email: newEmail,
+    });
+  } catch {
+    // No Supabase auth account — expected for pre-SSO users
+  }
+}
 
 /**
  * Re-adds a previously deactivated user to the organization.
