@@ -276,3 +276,31 @@ export type ErrorResponse = ReturnType<typeof error>;
 export type DataOrErrorResponse<T extends ResponsePayload = ResponsePayload> =
   | ErrorResponse
   | DataResponse<T>;
+
+/**
+ * Builds a Content-Disposition header value safe for non-ASCII filenames.
+ * Uses RFC 5987 filename* parameter for Unicode support, with an
+ * ASCII-only filename as fallback for older clients.
+ */
+export function buildContentDisposition(
+  name: string | null | undefined,
+  opts: { fallback: string; suffix?: string }
+): string {
+  const { fallback, suffix = "" } = opts;
+  const source = name && name.trim().length > 0 ? name : fallback;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
+  const fullName = `${source}${suffix}-${timestamp}.csv`;
+
+  // ASCII-safe version: strip non-ASCII, replace unsafe chars
+  const asciiName =
+    fullName
+      .replace(/[^\x20-\x7E]/g, "_")
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .replace(/\s+/g, " ")
+      .trim() || `${fallback}${suffix}-${timestamp}.csv`;
+
+  // RFC 5987 encoded version for modern browsers
+  const encodedName = encodeURIComponent(fullName).replace(/%20/g, " ");
+
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
+}

@@ -13,6 +13,7 @@ import {
   error,
   getParams,
   parseData,
+  buildContentDisposition,
 } from "./http.server";
 import { Logger } from "./logger";
 import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
@@ -388,5 +389,121 @@ describe(parseData.name, () => {
         },
       });
     }
+  });
+});
+
+describe(buildContentDisposition.name, () => {
+  // why: freeze time so the timestamp in filenames is deterministic
+  beforeEach(() => {
+    vitest.useFakeTimers();
+    vitest.setSystemTime(new Date("2024-06-15T12:30:45.123Z"));
+  });
+
+  afterEach(() => {
+    vitest.useRealTimers();
+  });
+
+  it("should produce a valid header for plain ASCII names", () => {
+    const result = buildContentDisposition("My Booking", {
+      fallback: "booking",
+      suffix: "-activity",
+    });
+
+    expect(result).toBe(
+      'attachment; filename="My Booking-activity-2024-06-15T1230.csv"; ' +
+        "filename*=UTF-8''My Booking-activity-2024-06-15T1230.csv"
+    );
+  });
+
+  it("should replace non-ASCII characters with underscores in the ASCII filename", () => {
+    const result = buildContentDisposition("ทดสอบ", {
+      fallback: "booking",
+      suffix: "-activity",
+    });
+
+    // ASCII filename should have underscores instead of Thai chars
+    expect(result).toContain('filename="_____-activity-');
+    // filename* should have the percent-encoded Thai characters
+    expect(result).toContain("filename*=UTF-8''");
+    expect(result).toContain("%E0%B8%97");
+  });
+
+  it("should handle CJK characters", () => {
+    const result = buildContentDisposition("测试资产", {
+      fallback: "asset",
+      suffix: "-activity",
+    });
+
+    expect(result).toContain('filename="____-activity-');
+    expect(result).toContain("filename*=UTF-8''");
+    expect(result).toContain("%E6%B5%8B");
+  });
+
+  it("should handle accented Latin characters", () => {
+    const result = buildContentDisposition("café résumé", {
+      fallback: "asset",
+    });
+
+    expect(result).toContain('filename="caf_ r_sum_-');
+    expect(result).toContain("filename*=UTF-8''caf%C3%A9 r%C3%A9sum%C3%A9-");
+  });
+
+  it("should use fallback when name is null", () => {
+    const result = buildContentDisposition(null, {
+      fallback: "booking",
+      suffix: "-activity",
+    });
+
+    expect(result).toContain('filename="booking-activity-');
+  });
+
+  it("should use fallback when name is undefined", () => {
+    const result = buildContentDisposition(undefined, {
+      fallback: "location",
+    });
+
+    expect(result).toContain('filename="location-');
+  });
+
+  it("should use fallback when name is empty string", () => {
+    const result = buildContentDisposition("  ", {
+      fallback: "asset",
+      suffix: "-activity",
+    });
+
+    expect(result).toContain('filename="asset-activity-');
+  });
+
+  it("should replace filesystem-special characters in the ASCII filename", () => {
+    const result = buildContentDisposition('file/name:with*special?"chars', {
+      fallback: "asset",
+    });
+
+    // The special chars should be replaced with hyphens
+    expect(result).toContain('filename="file-name-with-special--chars-');
+    // The filename* should have the original chars percent-encoded
+    expect(result).toContain("filename*=UTF-8''");
+  });
+
+  it("should work without suffix option", () => {
+    const result = buildContentDisposition("My Asset", {
+      fallback: "asset",
+    });
+
+    expect(result).toContain('filename="My Asset-2024-06-15T1230.csv"');
+  });
+
+  it("should produce a header that does not throw when used in a Response", () => {
+    const header = buildContentDisposition("ทดสอบ", {
+      fallback: "booking",
+      suffix: "-activity",
+    });
+
+    // This should not throw TypeError: Cannot convert argument to a ByteString
+    expect(() => {
+      new Response("test", {
+        headers: { "content-disposition": header },
+      });
+    }).not.toThrow();
   });
 });
