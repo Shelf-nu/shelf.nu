@@ -126,6 +126,27 @@ async function loader({ params }: LoaderFunctionArgs) {
 }
 ```
 
+## Transient Database Errors
+
+Prisma can throw transient errors (e.g. `P2024`, `P1001`, `P1002`, `P1008`, `P1017`) when the database connection pool is exhausted, the server is unreachable, or an operation times out. These are infrastructure issues, not data problems.
+
+Two layers handle these errors automatically:
+
+### 1. Client-level retry (`db.server.ts`)
+
+The Prisma client extension retries any transient error up to **2 times** with linear backoff (500ms, 1000ms). This is transparent to service code — no changes needed in loaders, actions, or service functions.
+
+### 2. Error classification (`makeShelfError`)
+
+If retries are exhausted and the transient error propagates up wrapped inside one or more `ShelfError` layers, `makeShelfError` walks the entire cause chain via `hasTransientCause`. When it detects a buried transient error it returns a **503 Service Unavailable** with a generic connectivity message instead of copying the misleading domain-level message (e.g. "User not found").
+
+### What this means for service code
+
+No changes are required in service-level `catch` blocks. Both layers are centralized:
+
+- `db.server.ts` handles the retry loop
+- `makeShelfError` (called in every route catch block) handles the final classification
+
 ## Utils
 
 ### `ShelfError` class

@@ -1,4 +1,9 @@
-import { ShelfError, isLikeShelfError, makeShelfError } from "./error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  isPrismaTransientError,
+  makeShelfError,
+} from "./error";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -33,6 +38,81 @@ describe(makeShelfError.name, () => {
       });
     });
   });
+  describe("cause is a transient Prisma error", () => {
+    it("should return a 503 DB error for a direct P2024 cause", () => {
+      const cause = Object.assign(new Error("Connection pool timeout"), {
+        code: "P2024",
+      });
+
+      const error = makeShelfError(cause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      expect(error.message).toContain("temporary database connectivity");
+    });
+
+    it("should return a 503 DB error when P2024 is wrapped in a ShelfError", () => {
+      const prismaError = Object.assign(new Error("Connection pool timeout"), {
+        code: "P2024",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "User",
+        message: "The user you are trying to access does not exist",
+        status: 404,
+      });
+
+      const error = makeShelfError(wrappedCause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      expect(error.message).not.toContain("does not exist");
+      expect(error.cause).toBe(wrappedCause);
+    });
+
+    it("should return a 503 DB error when P2024 is nested two ShelfError layers deep", () => {
+      const prismaError = Object.assign(new Error("Connection pool timeout"), {
+        code: "P2024",
+      });
+      const innerCause = new ShelfError({
+        cause: prismaError,
+        label: "User",
+        message: "The user you are trying to access does not exist",
+        status: 404,
+      });
+      const outerCause = new ShelfError({
+        cause: innerCause,
+        label: "Booking",
+        message: "Booking not found",
+        status: 404,
+      });
+
+      const error = makeShelfError(outerCause);
+
+      expect(error.status).toEqual(503);
+      expect(error.label).toEqual("DB");
+      expect(error.message).toContain("temporary database connectivity");
+    });
+
+    it("should preserve domain errors for genuine P2025 (not found)", () => {
+      const prismaError = Object.assign(new Error("Record not found"), {
+        code: "P2025",
+      });
+      const wrappedCause = new ShelfError({
+        cause: prismaError,
+        label: "User",
+        message: "The user you are trying to access does not exist",
+        status: 404,
+      });
+
+      const error = makeShelfError(wrappedCause);
+
+      expect(error.status).toEqual(404);
+      expect(error.label).toEqual("User");
+      expect(error.message).toContain("does not exist");
+    });
+  });
+
   describe("cause is unknown", () => {
     it("should forward additionalData", () => {
       const cause = new Error("I am an error");
@@ -314,5 +394,39 @@ describe(ShelfError.name, () => {
 
       expect(error.title).toBeUndefined();
     });
+  });
+});
+
+describe(isPrismaTransientError.name, () => {
+  it.each(["P2024", "P1001", "P1002", "P1008", "P1017"])(
+    "should return true for transient error code %s",
+    (code) => {
+      const error = Object.assign(new Error("some error"), { code });
+      expect(isPrismaTransientError(error)).toBe(true);
+    }
+  );
+
+  it("should return false for P2025 (not found)", () => {
+    const error = Object.assign(new Error("Record not found"), {
+      code: "P2025",
+    });
+    expect(isPrismaTransientError(error)).toBe(false);
+  });
+
+  it("should return false for null", () => {
+    expect(isPrismaTransientError(null)).toBe(false);
+  });
+
+  it("should return false for a plain Error without code", () => {
+    expect(isPrismaTransientError(new Error("something"))).toBe(false);
+  });
+
+  it.each([
+    "Timed out fetching a new connection from the connection pool",
+    "Timed out fetching a new connection from the pool",
+    "Can't reach database server at host:5432",
+  ])("should detect transient error by message: %s", (message) => {
+    const error = new Error(message);
+    expect(isPrismaTransientError(error)).toBe(true);
   });
 });
