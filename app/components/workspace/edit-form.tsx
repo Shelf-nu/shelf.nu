@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   type Organization,
   type Currency,
@@ -616,14 +616,10 @@ const WorkspaceScimTokensSection = ({
   if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
     setRevealedToken(newToken);
     setCopied(false);
-  }
-
-  // Close delete confirmation dialog after successful deletion
-  useEffect(() => {
-    if (deleteFetcher.state === "idle" && deleteFetcher.data) {
-      setTokenToDelete(null);
+    if (labelInputRef.current) {
+      labelInputRef.current.value = "";
     }
-  }, [deleteFetcher.state, deleteFetcher.data]);
+  }
 
   const handleCopy = useCallback(() => {
     if (revealedToken) {
@@ -735,22 +731,21 @@ const WorkspaceScimTokensSection = ({
             <Button variant="secondary" onClick={() => setTokenToDelete(null)}>
               Cancel
             </Button>
-            <deleteFetcher.Form method="post">
-              <input
-                type="hidden"
-                name="tokenId"
-                value={tokenToDelete?.id ?? ""}
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                name="intent"
-                value="deleteScimToken"
-                className="bg-error-500 hover:bg-error-600"
-              >
-                Delete
-              </Button>
-            </deleteFetcher.Form>
+            <Button
+              variant="primary"
+              className="bg-error-500 hover:bg-error-600"
+              onClick={async () => {
+                if (tokenToDelete) {
+                  await deleteFetcher.submit(
+                    { intent: "deleteScimToken", tokenId: tokenToDelete.id },
+                    { method: "post" }
+                  );
+                  setTokenToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
