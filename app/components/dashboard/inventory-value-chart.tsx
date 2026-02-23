@@ -6,7 +6,6 @@ import { formatCurrency } from "~/utils/currency";
 import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 
-
 export default function InventoryValueChart() {
   const { currency, totalAssets, totalValuation, valueKnownAssets, locale } =
     useLoaderData<typeof loader>();

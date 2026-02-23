@@ -9,11 +9,11 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
+import { ClickableTr } from "./clickable-tr";
 import { DashboardEmptyState } from "./empty-state";
 import { PremiumFeatureTeaser } from "../home/premium-feature-teaser";
 import { Button } from "../shared/button";
 
-import { ClickableTr } from "./clickable-tr";
 import { Table, Td, Tr } from "../table";
 
 export default function CustodiansList() {
@@ -34,7 +34,11 @@ export default function CustodiansList() {
         </span>
         <div className="flex items-center gap-2">
           {!isPersonal && (
-            <Button to="/settings/team" variant="block-link-gray" className="!mt-0 text-xs">
+            <Button
+              to="/settings/team"
+              variant="block-link-gray"
+              className="!mt-0 text-xs"
+            >
               View all
             </Button>
           )}

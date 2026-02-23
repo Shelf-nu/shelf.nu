@@ -34,7 +34,10 @@ export default function LocationDistribution() {
         <Table className="flex-1">
           <tbody>
             {locationDistribution.map((loc: any) => (
-              <ClickableTr key={loc.locationId} to={`/locations/${loc.locationId}`}>
+              <ClickableTr
+                key={loc.locationId}
+                to={`/locations/${loc.locationId}`}
+              >
                 <Td className="w-full">
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center justify-between">
@@ -50,7 +53,9 @@ export default function LocationDistribution() {
                       <div
                         className="h-1.5 rounded-full bg-primary-500"
                         style={{
-                          width: `${maxCount > 0 ? (loc.assetCount / maxCount) * 100 : 0}%`,
+                          width: `${
+                            maxCount > 0 ? (loc.assetCount / maxCount) * 100 : 0
+                          }%`,
                         }}
                       />
                     </div>

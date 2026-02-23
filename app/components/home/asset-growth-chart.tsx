@@ -6,7 +6,6 @@ import { DashboardEmptyState } from "../dashboard/empty-state";
 import FallbackLoading from "../dashboard/fallback-loading";
 import { Button } from "../shared/button";
 
-
 export default function AssetGrowthChart() {
   const { assetGrowthData, totalAssets } = useLoaderData<typeof loader>();
 
@@ -30,7 +29,11 @@ export default function AssetGrowthChart() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button to="/assets" variant="block-link-gray" className="!mt-0 text-xs">
+          <Button
+            to="/assets"
+            variant="block-link-gray"
+            className="!mt-0 text-xs"
+          >
             View all
           </Button>
         </div>

@@ -1,7 +1,7 @@
 import { useRouteLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/_layout";
-import { useCurrentOrganization } from "./use-current-organization";
 import { isPersonalOrg } from "~/utils/organization";
+import { useCurrentOrganization } from "./use-current-organization";
 
 /**
  * Returns whether the current organization can use bookings.

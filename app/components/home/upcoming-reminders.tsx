@@ -1,9 +1,9 @@
 import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/home";
+import { ClickableTr } from "../dashboard/clickable-tr";
 import { DashboardEmptyState } from "../dashboard/empty-state";
 import { Button } from "../shared/button";
 
-import { ClickableTr } from "../dashboard/clickable-tr";
 import { Table, Td } from "../table";
 
 /** Format alert date: "Jan 15" or "Today, 3:00 PM" */
@@ -16,7 +16,10 @@ function formatAlertDate(date: string | Date): string {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate()
   ) {
-    return `Today, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+    return `Today, ${d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
   }
 
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });

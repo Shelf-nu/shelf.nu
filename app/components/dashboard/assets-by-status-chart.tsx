@@ -8,7 +8,6 @@ import FallbackLoading from "./fallback-loading";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
-
 export default function AssetsByStatusChart() {
   const { assetsByStatus } = useLoaderData<typeof loader>();
 
@@ -21,7 +20,11 @@ export default function AssetsByStatusChart() {
           Assets by status
         </span>
         <div className="flex items-center gap-2">
-          <Button to="/assets" variant="block-link-gray" className="!mt-0 text-xs">
+          <Button
+            to="/assets"
+            variant="block-link-gray"
+            className="!mt-0 text-xs"
+          >
             View all
           </Button>
         </div>

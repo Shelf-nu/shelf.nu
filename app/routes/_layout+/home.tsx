@@ -216,9 +216,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // Cookie
-      userPrefs
-        .parse(request.headers.get("Cookie"))
-        .then((c: any) => c || {}),
+      userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
     ]);
 
     /** Calculate the total value and count of assets that have value added */
@@ -279,9 +277,7 @@ export const meta: MetaFunction<typeof loader> = () => [
   { title: appendToMetaTitle("Home") },
 ];
 
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: styles },
-];
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const handle = {
   breadcrumb: () => <Link to="/home">Home</Link>,

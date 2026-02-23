@@ -1,13 +1,13 @@
 import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/home";
+import { ClickableTr } from "./clickable-tr";
 import { DashboardEmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
 
-import { ClickableTr } from "./clickable-tr";
 import { Td, Table, Tr } from "../table";
 
 export default function NewestAssets() {
@@ -19,7 +19,11 @@ export default function NewestAssets() {
           Newest assets
         </span>
         <div className="flex items-center gap-2">
-          <Button to="/assets" variant="block-link-gray" className="!mt-0 text-xs">
+          <Button
+            to="/assets"
+            variant="block-link-gray"
+            className="!mt-0 text-xs"
+          >
             View all
           </Button>
         </div>

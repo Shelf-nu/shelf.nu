@@ -1,11 +1,11 @@
 import { useLoaderData } from "react-router";
 import { useCanUseBookings } from "~/hooks/use-can-use-bookings";
 import type { loader } from "~/routes/_layout+/home";
-import { DashboardEmptyState } from "../dashboard/empty-state";
 import { PremiumFeatureTeaser } from "./premium-feature-teaser";
+import { ClickableTr } from "../dashboard/clickable-tr";
+import { DashboardEmptyState } from "../dashboard/empty-state";
 import { Button } from "../shared/button";
 
-import { ClickableTr } from "../dashboard/clickable-tr";
 import { Table, Td } from "../table";
 
 /** Resolve custodian display name from booking data */
@@ -39,7 +39,11 @@ export default function OverdueBookings() {
             </span>
           )}
           {canUseBookings && (
-            <Button to="/bookings" variant="block-link-gray" className="!mt-0 text-xs">
+            <Button
+              to="/bookings"
+              variant="block-link-gray"
+              className="!mt-0 text-xs"
+            >
               View all
             </Button>
           )}
@@ -73,7 +77,9 @@ export default function OverdueBookings() {
                         <span className="text-xs text-gray-500">
                           {custodian && (
                             <>
-                              <span className="font-medium text-gray-700">{custodian}</span>
+                              <span className="font-medium text-gray-700">
+                                {custodian}
+                              </span>
                               {" · "}
                             </>
                           )}
@@ -84,7 +90,11 @@ export default function OverdueBookings() {
                             </>
                           )}
                           <span className="font-medium text-error-600">
-                            Due {new Date(booking.to).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            Due{" "}
+                            {new Date(booking.to).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })}
                           </span>
                         </span>
                       </div>
