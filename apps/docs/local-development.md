@@ -4,11 +4,48 @@ This guide covers everything you need to know for developing Shelf.nu locally af
 
 ## Prerequisites ✅
 
-- ✅ **Node.js** (v20 or higher)
-- ✅ **npm** or **yarn**
+- ✅ **Node.js** (>=22.20.0)
+- ✅ **pnpm** (9.15.4+) — install via `corepack enable && corepack prepare pnpm@9.15.4 --activate`
 - ✅ **Git**
 - ✅ **Supabase project** configured ([Setup Guide](./supabase-setup.md))
-- ✅ **`.env` file** with Supabase credentials
+- ✅ **`.env` file** with Supabase credentials (place in **monorepo root**, copy from `.env.example`)
+
+---
+
+## Monorepo Overview 📦
+
+Shelf.nu is organized as a **pnpm + Turborepo monorepo**. All commands use `pnpm` instead of `npm`.
+
+| Package                    | Path                  | Description                            |
+| -------------------------- | --------------------- | -------------------------------------- |
+| `@shelf/webapp`            | `apps/webapp/`        | Remix web application                  |
+| `@shelf/docs`              | `apps/docs/`          | VitePress documentation site           |
+| `@shelf/database`          | `packages/database/`  | Prisma client factory and shared types |
+| `@shelf/typescript-config` | `tooling/typescript/` | Shared TypeScript configurations       |
+
+Commands are scoped to specific packages using `pnpm --filter <package>` or run across the entire monorepo with `pnpm turbo <task>`.
+
+**Convenience shortcuts** follow the `<app>:<task>` pattern and are available at the root:
+
+```bash
+# Webapp
+pnpm webapp:dev        # Start webapp dev server
+pnpm webapp:build      # Build webapp for production
+pnpm webapp:test       # Run webapp unit tests
+pnpm webapp:validate   # Run all webapp checks (lint, typecheck, format, tests)
+
+# Docs
+pnpm docs:dev          # Start docs dev server
+pnpm docs:build        # Build docs for production
+pnpm docs:preview      # Preview docs production build
+
+# Database
+pnpm webapp:setup               # Generate Prisma client and deploy migrations
+pnpm db:generate         # Generate Prisma client after schema changes
+pnpm db:prepare-migration # Create new database migration
+pnpm db:deploy-migration  # Apply migrations and regenerate client
+pnpm db:reset            # Reset database (destructive!)
+```
 
 ---
 
@@ -21,8 +58,8 @@ This guide covers everything you need to know for developing Shelf.nu locally af
 git clone https://github.com/Shelf-nu/shelf.nu.git
 cd shelf.nu
 
-# Install dependencies
-npm install
+# Install dependencies (uses pnpm workspaces)
+pnpm install
 ```
 
 ### 2. Setup Local SSL (Optional but Recommended) 🔒
@@ -51,19 +88,19 @@ choco install mkcert
 # Install local CA
 mkcert -install
 
-# Create certificate directory
-mkdir .cert
+# Create certificate directory inside the webapp folder
+mkdir apps/webapp/.cert
 
 # Generate certificates for localhost
-mkcert -key-file .cert/key.pem -cert-file .cert/cert.pem localhost 127.0.0.1 ::1
+mkcert -key-file apps/webapp/.cert/key.pem -cert-file apps/webapp/.cert/cert.pem localhost 127.0.0.1 ::1
 ```
 
 #### Alternative: Disable SSL
 
-If you prefer to run without SSL, edit `vite.config.ts` and remove these lines:
+If you prefer to run without SSL, edit `apps/webapp/vite.config.ts` and remove these lines:
 
 ```ts
-// Remove or comment out these lines in vite.config.ts
+// Remove or comment out these lines in apps/webapp/vite.config.ts
 https: {
   key: "./.cert/key.pem",
   cert: "./.cert/cert.pem",
@@ -75,13 +112,13 @@ https: {
 This command sets up your database schema and runs initial migrations:
 
 ```bash
-npm run setup
+pnpm webapp:setup
 ```
 
 ### 4. Start Development Server
 
 ```bash
-npm run dev
+pnpm webapp:dev
 ```
 
 **With SSL enabled:** Your app will be available at: `https://localhost:3000` 🔒  
@@ -123,38 +160,37 @@ Understanding Shelf's tech stack will help you develop effectively:
 ### Development
 
 ```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run start        # Start production server
-npm run typecheck    # Run TypeScript checks
+pnpm webapp:dev      # Start development server
+pnpm webapp:build    # Build webapp for production
+pnpm turbo build     # Build all packages for production
+pnpm webapp:start    # Start production server
+pnpm turbo typecheck # Run TypeScript checks (all packages)
 ```
 
 ### Database
 
 ```bash
-npm run setup                    # Initial database setup
-npm run db:prepare-migration     # Create new migration
-npm run db:deploy-migration      # Apply migrations
-npm run db:migrate               # Run migrations in dev
-npm run db:reset                 # Reset database (careful!)
-npm run db:seed                  # Seed database with sample data
+pnpm webapp:setup               # Initial database setup
+pnpm db:prepare-migration # Create new migration
+pnpm db:deploy-migration  # Apply migrations and regenerate client
+pnpm db:reset            # Reset database (careful!)
 ```
 
 ### Code Quality
 
 ```bash
-npm run lint         # Run ESLint
-npm run format       # Format code with Prettier
-npm run validate     # Run all checks (lint, typecheck, format)
+pnpm turbo lint        # Run ESLint (all packages)
+pnpm run format        # Format code with Prettier
+pnpm webapp:validate   # Run all checks (lint, typecheck, format, tests)
 ```
 
 ### Testing
 
 ```bash
-npm run test                # Run unit tests
-npm run test:e2e           # Run end-to-end tests
-npm run test:e2e:dev       # Run E2E tests in dev mode
-npm run test:e2e:install   # Install Playwright browsers
+pnpm webapp:test -- --run                    # Run unit tests (always use --run flag)
+pnpm --filter @shelf/webapp test:e2e         # Run end-to-end tests
+pnpm --filter @shelf/webapp test:e2e:dev     # Run E2E tests in dev mode
+pnpm --filter @shelf/webapp test:e2e:install # Install Playwright browsers
 ```
 
 ---
@@ -166,28 +202,28 @@ npm run test:e2e:install   # Install Playwright browsers
 1. **Update Prisma Schema**
 
    ```bash
-   # Edit app/database/schema.prisma
+   # Edit packages/database/prisma/schema.prisma
    ```
 
 2. **Create Migration**
 
    ```bash
-   npm run db:prepare-migration
+   pnpm db:prepare-migration
    ```
 
 3. **Apply Migration**
    ```bash
-   npm run db:deploy-migration
+   pnpm db:deploy-migration
    ```
 
 ### Adding New Features
 
 1. **Create your feature files** in appropriate directories:
 
-   - `app/routes/` - New pages/routes
-   - `app/components/` - Reusable components
-   - `app/utils/` - Utility functions
-   - `app/modules/` - Business logic modules
+   - `apps/webapp/app/routes/` - New pages/routes
+   - `apps/webapp/app/components/` - Reusable components
+   - `apps/webapp/app/utils/` - Utility functions
+   - `apps/webapp/app/modules/` - Business logic modules
 
 2. **Follow the established patterns**:
 
@@ -198,8 +234,8 @@ npm run test:e2e:install   # Install Playwright browsers
 
 3. **Test your changes**:
    ```bash
-   npm run validate  # Check code quality
-   npm run test      # Run tests
+   pnpm webapp:validate       # Check code quality
+   pnpm webapp:test -- --run  # Run tests
    ```
 
 ---
@@ -208,36 +244,46 @@ npm run test:e2e:install   # Install Playwright browsers
 
 ```
 shelf.nu/
-├── app/
-│   ├── components/          # Reusable UI components
-│   ├── database/           # Prisma schema and migrations
-│   ├── modules/            # Business logic modules
-│   ├── routes/             # Remix routes (pages)
-│   ├── styles/             # CSS and styling
-│   ├── utils/              # Utility functions
-│   └── root.tsx           # App root component
-├── docs/                   # Documentation
-├── public/                 # Static assets
-├── tests/                  # Test files
-├── .env.example           # Environment variables template
-└── package.json           # Dependencies and scripts
+├── .env.example                     # Environment variables template (copy to .env)
+├── turbo.json                       # Turborepo pipeline config
+├── pnpm-workspace.yaml              # Workspace package definitions
+├── pnpm-lock.yaml                   # Lockfile (committed)
+├── apps/
+│   ├── webapp/                      # @shelf/webapp — Remix app
+│   │   ├── app/
+│   │   │   ├── components/          # Reusable UI components
+│   │   │   ├── database/            # DB client (re-exports @shelf/database)
+│   │   │   ├── modules/             # Business logic modules
+│   │   │   ├── routes/              # Remix routes (pages)
+│   │   │   ├── utils/               # Utility functions
+│   │   │   └── root.tsx             # App root component
+│   │   └── package.json
+│   └── docs/                        # @shelf/docs — VitePress documentation
+├── packages/
+│   └── database/                    # @shelf/database — Prisma client + types
+│       ├── prisma/
+│       │   ├── schema.prisma        # Database schema
+│       │   └── migrations/          # Database migrations
+│       └── src/client.ts            # createDatabaseClient() factory
+└── tooling/
+    └── typescript/                  # Shared tsconfig bases
 ```
 
 ### Key Directories
 
-**`app/routes/`** - Each file becomes a route in your app:
+**`apps/webapp/app/routes/`** - Each file becomes a route in your app:
 
 - `_index.tsx` → `/`
 - `assets._index.tsx` → `/assets`
 - `assets.new.tsx` → `/assets/new`
 
-**`app/components/`** - Reusable React components:
+**`apps/webapp/app/components/`** - Reusable React components:
 
 - Follow atomic design principles
 - Include TypeScript props interfaces
 - Use Tailwind for styling
 
-**`app/modules/`** - Business logic organized by domain:
+**`apps/webapp/app/modules/`** - Business logic organized by domain:
 
 - `auth/` - Authentication logic
 - `asset/` - Asset management
@@ -247,7 +293,7 @@ shelf.nu/
 
 ## Environment Configuration 🔧
 
-Your `.env` file should include all necessary variables. Here are the development-specific ones:
+Your `.env` file lives at the **monorepo root** (not inside `apps/webapp/`). Copy `.env.example` to `.env` and fill in your values. Here are the development-specific ones:
 
 ```bash
 # Development server (adjust based on SSL setup)
@@ -274,7 +320,7 @@ SESSION_SECRET="your-local-session-secret"
 **View your data:**
 
 ```bash
-npx prisma studio
+pnpm --filter @shelf/webapp exec prisma studio
 ```
 
 This opens a web interface to browse your database.
@@ -282,30 +328,24 @@ This opens a web interface to browse your database.
 **Reset database (destructive!):**
 
 ```bash
-npm run db:reset
-```
-
-**Seed with sample data:**
-
-```bash
-npm run db:seed
+pnpm db:reset
 ```
 
 ### Creating Migrations
 
-When you modify `schema.prisma`:
+When you modify `packages/database/prisma/schema.prisma`:
 
 1. **Prepare migration:**
 
    ```bash
-   npm run db:prepare-migration
+   pnpm db:prepare-migration
    ```
 
-2. **Review the generated SQL** in `app/database/migrations/`
+2. **Review the generated SQL** in `packages/database/prisma/migrations/`
 
 3. **Apply migration:**
    ```bash
-   npm run db:deploy-migration
+   pnpm db:deploy-migration
    ```
 
 ---
@@ -315,8 +355,7 @@ When you modify `schema.prisma`:
 ### Unit Testing with Vitest
 
 ```bash
-npm run test        # Run all unit tests
-npm run test:watch  # Run tests in watch mode
+pnpm webapp:test -- --run   # Run all unit tests
 ```
 
 Create test files alongside your components:
@@ -330,8 +369,8 @@ components/
 ### End-to-End Testing with Playwright
 
 ```bash
-npm run test:e2e:install  # Install browsers (first time)
-npm run test:e2e:dev      # Run tests in development
+pnpm --filter @shelf/webapp test:e2e:install  # Install browsers (first time)
+pnpm --filter @shelf/webapp test:e2e:dev      # Run tests in development
 ```
 
 E2E tests are in the `tests/e2e/` directory.
@@ -353,11 +392,11 @@ lsof -ti:3000 | xargs kill -9
 
 - Make sure you ran `mkcert -install` to install the local CA
 - Regenerate certificates: `mkcert -key-file .cert/key.pem -cert-file .cert/cert.pem localhost`
-- Or disable SSL by removing the `https` section from `vite.config.ts`
+- Or disable SSL by removing the `https` section from `apps/webapp/vite.config.ts`
 
 **Database connection errors:**
 
-- Check your `.env` database URLs
+- Check your root `.env` database URLs
 - Verify Supabase project is running
 - Ensure you have the correct password
 
@@ -365,8 +404,8 @@ lsof -ti:3000 | xargs kill -9
 
 ```bash
 # Clear node modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
 ```
 
 ### Development Tools
@@ -374,19 +413,19 @@ npm install
 **Database inspection:**
 
 ```bash
-npx prisma studio  # Visual database browser
+pnpm --filter @shelf/webapp exec prisma studio  # Visual database browser
 ```
 
 **Type checking:**
 
 ```bash
-npm run typecheck  # Check for TypeScript errors
+pnpm turbo typecheck  # Check for TypeScript errors
 ```
 
 **Code formatting:**
 
 ```bash
-npm run format     # Auto-format all code
+pnpm run format     # Auto-format all code
 ```
 
 ---

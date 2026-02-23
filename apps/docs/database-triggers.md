@@ -40,7 +40,7 @@ ORDER BY event_object_table, trigger_name;
 **Event**: `AFTER INSERT`  
 **Function**: `create_user_contact_on_user_insert()`
 
-**Migration File**: [`20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table`](https://github.com/Shelf-nu/shelf.nu/tree/main/app/database/migrations/20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table/migration.sql)
+**Migration File**: [`20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table`](https://github.com/Shelf-nu/shelf.nu/tree/main/packages/database/prisma/migrations/20250617074555_create_trigger_that_create_user_contact_on_insert_in_user_table/migration.sql)
 
 **What it does**:
 
@@ -61,7 +61,7 @@ When adding new triggers to the project:
 1. **Create an empty Prisma migration**:
 
    ```bash
-   npm run db:prepare-migration
+   pnpm --filter @shelf/webapp db:prepare-migration
    ```
 
 2. **Add the trigger SQL** to the migration file:

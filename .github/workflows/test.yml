@@ -36,22 +36,23 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
-        with:
-          useLockFile: false
+      - name: 📦 Install pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+      - name: 📥 Install deps
+        run: pnpm install
 
       - name: 🔬 Lint
-        run: npm run lint
+        run: pnpm turbo lint
 
   typecheck:
     needs: authorize
@@ -62,22 +63,23 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
-        with:
-          useLockFile: false
+      - name: 📦 Install pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+      - name: 📥 Install deps
+        run: pnpm install
 
       - name: 🔎 Type check
-        run: npm run typecheck --if-present
+        run: pnpm turbo typecheck
 
   vitest:
     needs: authorize
@@ -88,68 +90,20 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
-        with:
-          useLockFile: false
+      - name: 📦 Install pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+      - name: 📥 Install deps
+        run: pnpm install
 
       - name: ⚡ Run vitest
-        run: npm run test
-
-  # playwright:
-  #   needs: authorize
-  #   name: 🎭 Playwright
-  #   timeout-minutes: 60
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: 🛑 Cancel Previous Runs
-  #       uses: styfle/cancel-workflow-action@0.11.0
-
-  #     - name: ⬇️ Checkout repo
-  #       uses: actions/checkout@v3
-  #       with:
-  #         ref: ${{ github.event.pull_request.head.sha || github.ref }}
-
-  #     - name: 🔑 Make envfile
-  #       uses: SpicyPizza/create-envfile@v2.0
-  #       with:
-  #         envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-  #         envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
-  #         envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-  #         envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  #         envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
-  #         envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  #         file_name: .env
-
-  #     - name: ⎔ Setup node
-  #       uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 18
-
-  #     - name: 📥 Download deps
-  #       uses: bahmutov/npm-install@v1
-
-  #     - name: 📥 Install Playwright Browsers
-  #       run: npm run test:e2e:install
-
-  #     - name: ⚙️ Build
-  #       run: npm run build
-
-  #     - name: Run Playwright tests
-  #       run: npx playwright test
-
-  #     - uses: actions/upload-artifact@v3
-  #       if: always()
-  #       with:
-  #         name: playwright-report
-  #         path: playwright-report/
-  #         retention-days: 30
+        run: pnpm --filter @shelf/webapp test -- --run

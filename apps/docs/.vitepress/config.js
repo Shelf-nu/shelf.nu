@@ -9,19 +9,7 @@ export default {
   // Favicon
   head: [["link", { rel: "icon", href: "/favicon.ico" }]],
 
-  // Isolate VitePress from main app
-  vite: {
-    // Don't process the main app
-    exclude: ["../app/**", "../server/**", "../public/**"],
-    // Only include docs-related files
-    include: ["**/*.md", "**/*.vue"],
-    // Reset resolve to avoid conflicts with main app
-    resolve: {
-      alias: {},
-    },
-  },
-
-  // Markdown configuration (merged from duplicate keys)
+  // Markdown configuration
   markdown: {
     // Line numbers in code blocks
     lineNumbers: true,
@@ -187,7 +175,7 @@ export default {
 
     // Edit this page link
     editLink: {
-      pattern: "https://github.com/Shelf-nu/shelf.nu/edit/main/docs/:path",
+      pattern: "https://github.com/Shelf-nu/shelf.nu/edit/main/apps/docs/:path",
       text: "Edit this page on GitHub",
     },
 

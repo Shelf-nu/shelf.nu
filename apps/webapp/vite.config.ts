@@ -12,6 +12,10 @@ const createHash = init({
 const buildHash = process.env.BUILD_HASH || createHash();
 
 export default defineConfig({
+  envDir: "../..",
+  ssr: {
+    noExternal: ["@shelf/database"],
+  },
   server: {
     port: 3000,
     https: {
@@ -48,8 +52,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      ".prisma/client/index-browser":
-        "./node_modules/.prisma/client/index-browser.js",
+      ".prisma/client/index-browser": "@prisma/client/index-browser",
       // Use lottie_light version to avoid eval warnings
       "lottie-web": "lottie-web/build/player/lottie_light.js",
     },
@@ -57,11 +60,7 @@ export default defineConfig({
   plugins: [
     cjsInterop({
       // List of CJS dependencies that require interop
-      dependencies: [
-        "react-microsoft-clarity",
-        "@markdoc/markdoc",
-        "react-to-print",
-      ],
+      dependencies: ["react-microsoft-clarity", "@markdoc/markdoc"],
     }),
     reactRouterHonoServer({
       serverEntryPoint: "./server/index.ts",

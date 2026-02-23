@@ -5,7 +5,7 @@ This guide will walk you through setting up Supabase for your Shelf.nu applicati
 ## Prerequisites ✅
 
 - A [Supabase account](https://supabase.com/) (free tier available)
-- Access to your `.env` file in your local Shelf.nu project
+- Access to your `.env` file at the **monorepo root** of your local Shelf.nu project
 
 ---
 
@@ -201,7 +201,7 @@ Shelf needs several storage buckets for file uploads. For each bucket below:
 
 ## Step 6: Complete Your .env File 📝
 
-Your `.env` should now look like this:
+Your `.env` at the **monorepo root** should now look like this:
 
 ```bash
 # Database connections
@@ -336,8 +336,8 @@ Your Supabase setup is complete! You should now have:
 Now you can return to the main setup and run:
 
 ```bash
-npm run setup
-npm run dev
+pnpm --filter @shelf/webapp setup
+pnpm turbo dev --filter=@shelf/webapp
 ```
 
 **With SSL:** Your Shelf.nu app will be available at `https://localhost:3000` 🔒  

@@ -6,7 +6,7 @@
 # Learn more: https://community.fly.io/t/sqlite-not-getting-setup-properly/4386
 
 # Deploy database schema
-npm run db:deploy
+pnpm run db:deploy
 
 # Start the app
-npm run start
+pnpm run start

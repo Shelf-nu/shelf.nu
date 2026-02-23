@@ -55,18 +55,18 @@ docker run -d \
 > [!CAUTION]
 > During development involving Dockerfile changes, make sure to **address the correct Dockerfile** in your builds:
 >
-> - Fly.io will be built via `Dockerfile`
-> - ghcr.io will be built via `Dockerfile.image`
+> - Fly.io will be built via `apps/webapp/Dockerfile`
+> - ghcr.io will be built via `apps/webapp/Dockerfile.image`
 
-By default both Fly.io and Docker will build via `Dockerfile` unless specifically instructed. Learn more [about Fly.io Config](https://fly.io/docs/reference/configuration/#specify-a-dockerfile) and [Docker image builds](https://docs.docker.com/reference/cli/docker/image/build/#file).
+By default both Fly.io and Docker will build via `apps/webapp/Dockerfile` unless specifically instructed. Learn more [about Fly.io Config](https://fly.io/docs/reference/configuration/#specify-a-dockerfile) and [Docker image builds](https://docs.docker.com/reference/cli/docker/image/build/#file).
 
-In order to build a local Docker image just as the one we provide for self-hosting, you'll have to build `Dockerfile.image` using buildx as follows:
+In order to build a local Docker image just as the one we provide for self-hosting, you'll have to build `apps/webapp/Dockerfile.image` using buildx as follows:
 
 ```bash
 docker buildx build \
    --platform linux/amd64,linux/arm64 \
    --tag shelf-local \
-   --file Dockerfile.image .
+   --file apps/webapp/Dockerfile.image .
 ```
 
 Then running the locally-built image should be as simple as:

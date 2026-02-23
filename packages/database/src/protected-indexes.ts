@@ -31,7 +31,7 @@ export function protectIndexesInMigration(): void {
     // Get the directory path using ESM compatible approach
     const currentFilePath = fileURLToPath(import.meta.url);
     const currentDir = path.dirname(currentFilePath);
-    const migrationsDir = path.join(currentDir, "migrations");
+    const migrationsDir = path.join(currentDir, "..", "prisma", "migrations");
 
     const migrations = fs
       .readdirSync(migrationsDir)

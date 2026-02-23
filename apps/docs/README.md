@@ -22,8 +22,8 @@ The Shelf.nu documentation is now hosted at **[docs.shelf.nu](https://docs.shelf
 This folder still contains the source files for the documentation site. If you want to:
 
 - **Contribute to docs** - Edit the `.md` files in this folder
-- **Run docs locally** - Use `npm run docs:dev`
-- **Build docs** - Use `npm run docs:build`
+- **Run docs locally** - Use `pnpm --filter @shelf/docs dev`
+- **Build docs** - Use `pnpm --filter @shelf/docs build`
 
 ---
 

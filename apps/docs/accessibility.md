@@ -224,7 +224,7 @@ All interactive elements must have accessible names:
 Run color contrast tests:
 
 ```bash
-npm run test app/utils/color-contrast.test.ts
+pnpm --filter @shelf/webapp test app/utils/color-contrast.test.ts -- --run
 ```
 
 ### Manual Testing

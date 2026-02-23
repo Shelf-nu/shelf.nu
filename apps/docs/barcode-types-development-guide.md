@@ -23,7 +23,7 @@ Adding a new barcode type requires changes in **15+ files** across the codebase.
 
 #### 1.1 Update Prisma Schema
 
-**File:** `app/database/schema.prisma`
+**File:** `packages/database/prisma/schema.prisma`
 
 ```prisma
 enum BarcodeType {
@@ -38,7 +38,7 @@ enum BarcodeType {
 #### 1.2 Create Database Migration
 
 ```bash
-npx prisma migrate dev --name add-new-barcode-type
+pnpm --filter @shelf/webapp exec prisma migrate dev --name add-new-barcode-type
 ```
 
 ### 2. Validation Layer Updates
