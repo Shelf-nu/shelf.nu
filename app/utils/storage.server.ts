@@ -289,16 +289,16 @@ export async function uploadFile(
     // Return just the path string for backward compatibility
     return data.path;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
+      message: isShelfError
         ? cause.message
         : "Something went wrong while uploading the file. Please try again or contact support.",
       additionalData: { filename, contentType, bucketName },
       label,
-      shouldBeCaptured: isLikeShelfError(cause)
-        ? cause.shouldBeCaptured
-        : undefined,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
     });
   }
 }
@@ -427,7 +427,7 @@ export async function parseFileFormData({
  * `FormDataParseError`, hiding the nested ShelfError. This helper lets
  * callers recover the original message, `title`, and `shouldBeCaptured` flag.
  */
-function findShelfErrorInCause(error: unknown): ShelfError | null {
+export function findShelfErrorInCause(error: unknown): ShelfError | null {
   if (isLikeShelfError(error)) {
     return error;
   }
