@@ -1055,7 +1055,7 @@ export async function reserveBooking({
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
-      cause: null,
+      cause,
       label,
       message: isLikeShelfError(cause)
         ? cause.message
