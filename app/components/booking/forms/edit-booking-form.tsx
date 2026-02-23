@@ -92,7 +92,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const hints = useHints();
 
   // Fetch working hours for validation
-  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const workingHoursData = useWorkingHours();
   const { workingHours, isLoading: isLoadingWorkingHours } = workingHoursData;
 
   const disabled = isProcessing || bookingStatus?.isArchived;

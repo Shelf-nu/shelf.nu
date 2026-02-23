@@ -1,9 +1,9 @@
-import type { TeamMember } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createCustodianSchema } from "~/modules/custody/schema";
+import type { KitIndexLoaderData } from "~/routes/_layout+/kits._index";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -19,7 +19,7 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignKitCustody", BulkAssignKitCustodySchema);
 
   const { isSelfService } = useUserRoleHelper();
-  const { teamMembers } = useLoaderData<{ teamMembers: TeamMember[] }>();
+  const { currentUserTeamMember } = useLoaderData<KitIndexLoaderData>();
 
   return (
     <BulkUpdateDialogContent
@@ -37,37 +37,39 @@ export default function BulkAssignCustodyDialog() {
           <div className="relative z-50 mb-8">
             <input type="hidden" value="bulk-assign-custody" name="intent" />
 
-            <DynamicSelect
-              hidden={isSelfService}
-              defaultValue={
-                isSelfService && teamMembers?.length > 0
-                  ? JSON.stringify({
-                      id: teamMembers[0].id,
-                      name: resolveTeamMemberName(teamMembers[0]),
-                    })
-                  : undefined
-              }
-              disabled={disabled || isSelfService}
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              fieldName="custodian"
-              contentLabel="Team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-              placeholder="Select a team member"
-              closeOnSelect
-              transformItem={(item) => ({
-                ...item,
-                id: JSON.stringify({
-                  id: item.id,
-                  name: resolveTeamMemberName(item),
-                }),
-              })}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-            />
+            {isSelfService && currentUserTeamMember ? (
+              <input
+                type="hidden"
+                name="custodian"
+                value={JSON.stringify({
+                  id: currentUserTeamMember.id,
+                  name: resolveTeamMemberName(currentUserTeamMember),
+                })}
+              />
+            ) : (
+              <DynamicSelect
+                disabled={disabled}
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                fieldName="custodian"
+                contentLabel="Team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
+                placeholder="Select a team member"
+                closeOnSelect
+                transformItem={(item) => ({
+                  ...item,
+                  id: JSON.stringify({
+                    id: item.id,
+                    name: resolveTeamMemberName(item),
+                  }),
+                })}
+                renderItem={(item) => resolveTeamMemberName(item, true)}
+              />
+            )}
             {zo.errors.custodian()?.message ? (
               <p className="text-sm text-error-500">
                 {zo.errors.custodian()?.message}

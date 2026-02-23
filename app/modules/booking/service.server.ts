@@ -1055,7 +1055,7 @@ export async function reserveBooking({
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
-      cause: null,
+      cause,
       label,
       message: isLikeShelfError(cause)
         ? cause.message
@@ -3155,20 +3155,31 @@ export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
-  try {
-    const { id, organizationId } = booking;
-    const currentBooking = await db.booking.findUnique({
-      where: { id, organizationId },
-      include: {
-        assets: {
-          select: {
-            id: true,
-            kitId: true,
-          },
+  const { id, organizationId } = booking;
+  const currentBooking = await db.booking.findUnique({
+    where: { id, organizationId },
+    include: {
+      assets: {
+        select: {
+          id: true,
+          kitId: true,
         },
       },
-    });
+    },
+  });
 
+  if (!currentBooking) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "The booking you are trying to delete does not exist or has already been deleted.",
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  try {
     const activeBooking =
       currentBooking &&
       (currentBooking.status === BookingStatus.OVERDUE ||
