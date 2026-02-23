@@ -57,17 +57,27 @@ export function useAuditScanPersistence({
 }: UseAuditScanPersistenceProps) {
   /**
    * Monitor scanned items and persist new ones to the database.
+   *
+   * React Router fetchers are single-flight: each `.submit()` aborts any
+   * in-flight request. So we only submit ONE item per effect run (when the
+   * fetcher is idle). Subsequent renders will pick up the next item.
    */
   useEffect(() => {
     if (!auditSession || isRestoringRef.current) {
       return;
     }
 
+    // Only submit when fetcher is idle to avoid aborting in-flight requests
+    if (scanPersistFetcher.state !== "idle") {
+      return;
+    }
+
     const expectedAssetIds = new Set(expectedAssets.map((asset) => asset.id));
 
-    Object.entries(scannedItems).forEach(([qrId, item]) => {
+    // Find the first un-persisted, resolved item and submit it
+    for (const [qrId, item] of Object.entries(scannedItems)) {
       if (!item || !item.data || !item.type || item.error) {
-        return;
+        continue;
       }
 
       const assetId = item.data.id;
@@ -77,7 +87,7 @@ export function useAuditScanPersistence({
         persistedItemsRef.current.has(assetId) ||
         pendingPersistsRef.current.has(assetId)
       ) {
-        return;
+        continue;
       }
 
       // Mark as pending
@@ -91,12 +101,13 @@ export function useAuditScanPersistence({
       formData.append("assetId", assetId);
       formData.append("isExpected", String(isExpected));
 
-      // Use React Router fetcher for POST request
+      // Submit only one item per effect run — next render will handle the rest
       void scanPersistFetcher.submit(formData, {
         method: "POST",
         action: "/api/audits/record-scan",
       });
-    });
+      return;
+    }
   }, [
     scannedItems,
     auditSession,

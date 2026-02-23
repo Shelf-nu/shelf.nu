@@ -38,6 +38,7 @@ import {
 } from "~/components/scanner/drawer/generic-item-row";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
+import { Spinner } from "~/components/shared/spinner";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
 
@@ -67,6 +68,7 @@ type AuditDrawerProps = {
   contextLabel: string;
   contextName: string;
   expectedAssets: AuditScannedItem[];
+  pendingScanCount?: number;
   isLoading?: boolean;
   defaultExpanded?: boolean;
   className?: string;
@@ -133,6 +135,7 @@ export function AuditDrawer({
   contextLabel,
   contextName,
   expectedAssets,
+  pendingScanCount = 0,
   isLoading,
   defaultExpanded,
   className,
@@ -248,22 +251,30 @@ export function AuditDrawer({
           {stats.unexpectedCount > 0 &&
             ` • ${stats.unexpectedCount} unexpected`}
         </span>
-        <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
-          <Progress
-            aria-label={`Audit progress: ${stats.foundCount} of ${stats.totalExpected} assets found`}
-            value={
-              stats.totalExpected > 0
-                ? (stats.foundCount / stats.totalExpected) * 100
-                : 0
-            }
-          />
-        </span>
+        {pendingScanCount > 0 ? (
+          <span className="flex items-center gap-1.5 text-xs text-gray-500">
+            Saving scans: {pendingScanCount} remaining
+            <Spinner className="size-3" />
+          </span>
+        ) : (
+          <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+            <Progress
+              aria-label={`Audit progress: ${stats.foundCount} of ${stats.totalExpected} assets found`}
+              value={
+                stats.totalExpected > 0
+                  ? (stats.foundCount / stats.totalExpected) * 100
+                  : 0
+              }
+            />
+          </span>
+        )}
       </div>
     );
   }, [
     contextLabel,
     contextName,
     auditSession,
+    pendingScanCount,
     stats.foundCount,
     stats.totalExpected,
     stats.unexpectedCount,

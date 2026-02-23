@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-export const ActionsDopdown = ({ noteId }: { noteId: string }) => {
+export const ActionsDropdown = ({ noteId }: { noteId: string }) => {
   const fetcher = useFetcher();
   return (
     <DropdownMenu modal={false}>

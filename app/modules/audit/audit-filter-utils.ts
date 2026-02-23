@@ -1,3 +1,5 @@
+import type { AuditAssetStatus } from "@prisma/client";
+
 export type AuditFilterType =
   | "ALL"
   | "EXPECTED"
@@ -64,8 +66,6 @@ export function getAuditFilterMetadata(
   const normalizedFilter = (filterType || "ALL") as AuditFilterType;
   return FILTER_METADATA[normalizedFilter] || FILTER_METADATA.ALL;
 }
-
-import type { AuditAssetStatus } from "@prisma/client";
 
 export type AuditStatusLabel = "Expected" | "Found" | "Missing" | "Unexpected";
 

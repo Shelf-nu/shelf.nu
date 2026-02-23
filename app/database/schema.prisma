@@ -1619,8 +1619,8 @@ model AuditImage {
   auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   auditAssetId String?
 
-  uploadedBy   User   @relation("AuditImageUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  uploadedById String
+  uploadedBy   User?   @relation("AuditImageUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  uploadedById String?
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String

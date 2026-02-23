@@ -4,7 +4,7 @@ import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/audits.$auditId.activity";
 import { isFormProcessing } from "~/utils/form";
-import { ActionsDopdown } from "./actions-dropdown";
+import { ActionsDropdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 
 export const AuditNotes = () => {
@@ -68,7 +68,7 @@ export const AuditNotes = () => {
             <Note
               key={optimisticNote.id}
               note={optimisticNote}
-              actionsDropdown={<ActionsDopdown noteId={optimisticNote.id} />}
+              actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
               assetLinkBase={assetLinkBase}
             />
           )}
@@ -77,7 +77,7 @@ export const AuditNotes = () => {
             <Note
               key={note.id}
               note={note}
-              actionsDropdown={<ActionsDopdown noteId={note.id} />}
+              actionsDropdown={<ActionsDropdown noteId={note.id} />}
               assetLinkBase={assetLinkBase}
             />
           ))}

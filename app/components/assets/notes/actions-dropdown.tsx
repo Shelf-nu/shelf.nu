@@ -10,7 +10,7 @@ interface Props {
   noteId: string;
 }
 
-export const ActionsDopdown = ({ noteId }: Props) => (
+export const ActionsDropdown = ({ noteId }: Props) => (
   <DropdownMenu modal={false}>
     <DropdownMenuTrigger>
       <HorizontalDotsIcon />

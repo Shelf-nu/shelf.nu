@@ -406,6 +406,14 @@ export default function AuditSessionRoute() {
     isRestoringRef,
   });
 
+  // Count resolved items that haven't been persisted yet
+  const pendingScanCount = Object.values(scannedItems).filter(
+    (item) =>
+      item?.data?.id &&
+      !item.error &&
+      !persistedItemsRef.current.has(item.data.id)
+  ).length;
+
   const scopeMeta =
     typeof session.scopeMeta === "object" && session.scopeMeta
       ? (session.scopeMeta as Record<string, unknown>)
@@ -449,6 +457,7 @@ export default function AuditSessionRoute() {
         contextLabel={contextLabel}
         contextName={contextName}
         expectedAssets={expectedItems}
+        pendingScanCount={pendingScanCount}
         portalContainer={
           typeof document !== "undefined" ? document.body : undefined
         }
