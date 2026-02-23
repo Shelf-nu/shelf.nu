@@ -1,10 +1,11 @@
 import {
-  Html,
-  Text,
-  Link,
-  Head,
-  render,
+  Button,
   Container,
+  Head,
+  Html,
+  Link,
+  render,
+  Text,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
@@ -14,15 +15,19 @@ import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
 import { styles } from "../styles";
 
-export const sendTeamTrialWelcomeEmail = async ({
-  email,
-}: {
+interface TeamTrialWelcomeProps {
+  firstName?: string | null;
   email: string;
-}) => {
+}
+
+export const sendTeamTrialWelcomeEmail = async ({
+  firstName,
+  email,
+}: TeamTrialWelcomeProps) => {
   try {
-    const subject = `Your Shelf Team Trial is Ready - Next Steps`;
-    const html = await welcomeToTrialEmailHtml();
-    const text = welcomeToTrialEmailText();
+    const subject = "Your Shelf Team Trial is Ready - Next Steps";
+    const html = await welcomeToTrialEmailHtml({ firstName });
+    const text = welcomeToTrialEmailText({ firstName });
 
     void sendEmail({
       to: email,
@@ -42,43 +47,43 @@ export const sendTeamTrialWelcomeEmail = async ({
   }
 };
 
-/**
- * THis is the text version of the onboarding email
- */
-export const welcomeToTrialEmailText = () => `Dear Shelf user,
+export const welcomeToTrialEmailText = ({
+  firstName,
+}: {
+  firstName?: string | null;
+}) => `Hey${firstName ? ` ${firstName}` : ""},
+
 Carlos Virreira here, Co-founder of Shelf Asset Management, Inc. I'm thrilled to inform you that your Shelf Team Trial has been activated! This is an excellent step towards more efficient asset management for your team.
 
 To get started with your trial:
 
-Create Your Team Workspace:
+1. Create Your Team Workspace
+Visit ${SERVER_URL}/account-details/workspace to see all your workspaces. Click "NEW WORKSPACE" to create your team workspace.
 
-Visit https://app.shelf.nu/account-details/workspace to see all your workspaces. You'll find a "NEW WORKSPACE" button enabled - click this to create your team workspace if you haven't already.
+2. Add Your First Assets
+Start populating your inventory to see Shelf in action. Try our QR code feature for easy asset tracking.
 
-
-Add Your First Assets:
-Start populating your inventory to see Shelf in action. Don't forget to try our QR code feature for easy asset tracking.
-
-
-Invite Team Members:
+3. Invite Team Members
 Collaboration is key. Add your colleagues to truly experience the power of Shelf.
 
-
 Explore Key Features:
-Custom Fields: Tailor Shelf to your specific needs - https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf
-Bookings: Efficiently manage equipment reservations - https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature
-Kits: Group related assets for easier management - https://www.shelf.nu/features/kits
+- Custom Fields: Tailor Shelf to your specific needs - https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf
+- Bookings: Efficiently manage equipment reservations - https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature
+- Kits: Group related assets for easier management - https://www.shelf.nu/features/kits
 
-Need help? Our support team is ready to assist you. Check out our Knowledge Base for quick answers, or reach out directly at ${SUPPORT_EMAIL}.
+Need help? Check out our Knowledge Base for quick answers, or reach out to us at ${SUPPORT_EMAIL}.
 
-Remember, your trial gives you full access to all our premium features. Make the most of it!
+Remember, your trial gives you full access to all premium features. Make the most of it!
 
 Happy asset tracking,
-Carlos Virreira
-Co-founder, Shelf Asset Management, Inc.
-P.S. Have questions or feedback? I'd love to hear from you. Reply directly to this email, and let's chat!
+The Shelf Team
 `;
 
-function WelcomeToTrialEmailTemplate() {
+function WelcomeToTrialEmailTemplate({
+  firstName,
+}: {
+  firstName?: string | null;
+}) {
   const { emailPrimaryColor } = config;
 
   return (
@@ -91,71 +96,96 @@ function WelcomeToTrialEmailTemplate() {
         <LogoForEmail />
 
         <div style={{ paddingTop: "8px" }}>
-          Dear Shelf user,
-          <Text style={{ marginBottom: "24px", ...styles.p }}>
-            Carlos Virreira here, Co-founder of Shelf Asset Management, Inc. I'm
-            thrilled to inform you that your Shelf Team Trial has been
-            activated! This is an excellent step towards more efficient asset
-            management for your team.
-            <br />
-            To get started with your trial:
-            <br />
-            <h2>Create Your Team Workspace:</h2>
+          <Text style={{ ...styles.p }}>
+            Hey{firstName ? ` ${firstName}` : ""},
           </Text>
-          <ol style={{ ...styles.li }}>
-            <li>
-              Visit{" "}
+
+          <Text style={{ ...styles.p }}>
+            Carlos Virreira here, Co-founder of Shelf Asset Management, Inc. I'm
+            thrilled to inform you that your <strong>Shelf Team Trial</strong>{" "}
+            has been activated! This is an excellent step towards more efficient
+            asset management for your team.
+          </Text>
+
+          <Text style={{ ...styles.h2 }}>To get started with your trial:</Text>
+
+          <ol style={{ ...styles.li, paddingLeft: "20px" }}>
+            <li style={{ marginBottom: "12px" }}>
+              <strong>Create Your Team Workspace:</strong> Visit your{" "}
               <Link
                 href={`${SERVER_URL}/account-details/workspace`}
                 style={{ color: emailPrimaryColor }}
               >
-                {SERVER_URL}/account-details/workspace
+                workspace settings
               </Link>{" "}
-              to see all your workspaces. You'll find a "NEW WORKSPACE" button
-              enabled - click this to create your team workspace if you haven't
-              already.
+              and click "NEW WORKSPACE" to create your team workspace.
             </li>
-            <li>
-              Add Your First Assets: Start populating your inventory to see
-              Shelf in action. Don't forget to try our QR code feature for easy
+            <li style={{ marginBottom: "12px" }}>
+              <strong>Add Your First Assets:</strong> Start populating your
+              inventory to see Shelf in action. Try our QR code feature for easy
               asset tracking.
             </li>
-            <li>
-              Invite Team Members: Collaboration is key. Add your colleagues to
-              truly experience the power of Shelf.
+            <li style={{ marginBottom: "12px" }}>
+              <strong>Invite Team Members:</strong> Collaboration is key. Add
+              your colleagues to truly experience the power of Shelf.
             </li>
           </ol>
-          <h2>Explore Key Features:</h2>
-          <Link
-            href="https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf"
-            style={{ color: emailPrimaryColor }}
+
+          <Button
+            href={`${SERVER_URL}/account-details/workspace`}
+            style={{
+              ...styles.button,
+              textAlign: "center" as const,
+              maxWidth: "250px",
+              marginBottom: "24px",
+            }}
           >
-            Custom Fields: Tailor Shelf to your specific needs
-          </Link>
-          <br />
-          <Link
-            href="https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature"
-            style={{ color: emailPrimaryColor }}
-          >
-            Bookings: Efficiently manage equipment reservations
-          </Link>
-          <br />
-          <Link
-            href="https://www.shelf.nu/features/kits"
-            style={{ color: emailPrimaryColor }}
-          >
-            Kits: Group related assets for easier management
-          </Link>
-          <br />
-          <Text style={{ marginBottom: "24px", ...styles.p }}>
-            Need help? Our support team is ready to assist you. Check out our
-            Knowledge Base for quick answers, or reach out directly at{" "}
-            {SUPPORT_EMAIL}.
-            <br />
-            Remember, your trial gives you full access to all our premium
-            features. Make the most of it!
-            <br />
-            <br />
+            Create your workspace
+          </Button>
+
+          <Text style={{ ...styles.h2 }}>Explore Key Features:</Text>
+
+          <Text style={{ ...styles.p }}>
+            <Link
+              href="https://www.shelf.nu/knowledge-base/custom-field-types-in-shelf"
+              style={{ color: emailPrimaryColor }}
+            >
+              Custom Fields
+            </Link>
+            : Tailor Shelf to your specific needs
+          </Text>
+
+          <Text style={{ ...styles.p }}>
+            <Link
+              href="https://www.shelf.nu/knowledge-base/use-case-scenarios-explaing-our-bookings-feature"
+              style={{ color: emailPrimaryColor }}
+            >
+              Bookings
+            </Link>
+            : Efficiently manage equipment reservations
+          </Text>
+
+          <Text style={{ ...styles.p }}>
+            <Link
+              href="https://www.shelf.nu/features/kits"
+              style={{ color: emailPrimaryColor }}
+            >
+              Kits
+            </Link>
+            : Group related assets for easier management
+          </Text>
+
+          <Text style={{ marginTop: "24px", ...styles.p }}>
+            Need help? Check out our Knowledge Base for quick answers, or reach
+            out to us at {SUPPORT_EMAIL}.
+          </Text>
+
+          <Text style={{ ...styles.p }}>
+            Remember, your trial gives you full access to all premium features.
+            Make the most of it!
+          </Text>
+
+          <Text style={{ marginTop: "24px", ...styles.p }}>
             Happy asset tracking, <br />
             Carlos Virreira <br />
             Co-founder, Shelf Asset Management, Inc.
@@ -169,9 +199,8 @@ function WelcomeToTrialEmailTemplate() {
   );
 }
 
-/*
- *The HTML content of an email will be accessed by a server file to send email,
-  we cannot import a TSX component in a server file so we are exporting TSX converted to HTML string using render function by react-email.
- */
-export const welcomeToTrialEmailHtml = () =>
-  render(<WelcomeToTrialEmailTemplate />);
+export const welcomeToTrialEmailHtml = ({
+  firstName,
+}: {
+  firstName?: string | null;
+}) => render(<WelcomeToTrialEmailTemplate firstName={firstName} />);

@@ -16,7 +16,7 @@ export const UserFooter = ({ booking }: { booking: BookingForEmail }) => (
     </Text>
     <Text style={{ marginBottom: "32px", fontSize: "14px", color: "#344054" }}>
       {" "}
-      © 2026 Shelf.nu
+      © {new Date().getFullYear()} Shelf.nu
     </Text>
   </>
 );
@@ -35,7 +35,7 @@ export const AdminFooter = ({ booking }: { booking: BookingForEmail }) => (
     </Text>
     <Text style={{ marginBottom: "32px", fontSize: "14px", color: "#344054" }}>
       {" "}
-      © 2026 Shelf.nu
+      © {new Date().getFullYear()} Shelf.nu
     </Text>
   </>
 );

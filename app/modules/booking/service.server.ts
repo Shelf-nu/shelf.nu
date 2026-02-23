@@ -64,6 +64,7 @@ import type { MergeInclude } from "~/utils/utils";
 import {
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
+  BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
@@ -813,9 +814,11 @@ export async function reserveBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          ...BOOKING_INCLUDE_FOR_EMAIL,
+          ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
           assets: {
-            include: {
+            select: {
+              ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.assets.select,
+              status: true,
               bookings: createBookingConflictConditions({
                 currentBookingId: id,
                 fromDate: from,
@@ -996,6 +999,7 @@ export async function reserveBooking({
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
         hints,
+        assets: bookingFound.assets,
       });
       /** END Prepare email content */
 
@@ -1016,6 +1020,7 @@ export async function reserveBooking({
           assetCount: bookingFound._count.assets,
           hints,
           isAdminEmail: true,
+          assets: bookingFound.assets,
         });
 
         sendEmail({
@@ -1050,7 +1055,7 @@ export async function reserveBooking({
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
-      cause: null,
+      cause,
       label,
       message: isLikeShelfError(cause)
         ? cause.message
@@ -3150,20 +3155,31 @@ export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
-  try {
-    const { id, organizationId } = booking;
-    const currentBooking = await db.booking.findUnique({
-      where: { id, organizationId },
-      include: {
-        assets: {
-          select: {
-            id: true,
-            kitId: true,
-          },
+  const { id, organizationId } = booking;
+  const currentBooking = await db.booking.findUnique({
+    where: { id, organizationId },
+    include: {
+      assets: {
+        select: {
+          id: true,
+          kitId: true,
         },
       },
-    });
+    },
+  });
 
+  if (!currentBooking) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "The booking you are trying to delete does not exist or has already been deleted.",
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  try {
     const activeBooking =
       currentBooking &&
       (currentBooking.status === BookingStatus.OVERDUE ||

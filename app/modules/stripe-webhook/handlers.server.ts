@@ -2,10 +2,12 @@ import { TierId } from "@prisma/client";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
-import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
+import { trialEndsSoonEmailText } from "~/emails/stripe/trial-ends-soon";
 import { unpaidInvoiceUserText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
 import {
@@ -64,6 +66,14 @@ export async function handleCheckoutCompleted(
       additionalData: { subscription },
     })
   ) {
+    const organizationId = subscription?.metadata?.organizationId;
+    if (product?.metadata?.addon_type === "audits" && organizationId) {
+      await handleAuditAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -103,6 +113,14 @@ export async function handleSubscriptionCreated(
       additionalData: { subscription },
     })
   ) {
+    const organizationId = subscription?.metadata?.organizationId;
+    if (product?.metadata?.addon_type === "audits" && organizationId) {
+      await handleAuditAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -171,7 +189,7 @@ export async function handleSubscriptionPaused(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType } =
+  const { subscription, customerId, tierId, productType, product } =
     await getDataFromStripeEvent(event);
 
   if (
@@ -182,6 +200,14 @@ export async function handleSubscriptionPaused(
       additionalData: { subscription },
     })
   ) {
+    const organizationId = subscription?.metadata?.organizationId;
+    if (product?.metadata?.addon_type === "audits" && organizationId) {
+      await handleAuditAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -225,7 +251,7 @@ export async function handleSubscriptionUpdated(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType } =
+  const { subscription, customerId, tierId, productType, product } =
     await getDataFromStripeEvent(event);
 
   if (
@@ -236,6 +262,14 @@ export async function handleSubscriptionUpdated(
       additionalData: { subscription },
     })
   ) {
+    const organizationId = subscription?.metadata?.organizationId;
+    if (product?.metadata?.addon_type === "audits" && organizationId) {
+      await handleAuditAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -271,10 +305,17 @@ export async function handleSubscriptionDeleted(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { customerId, tierId, productType } =
+  const { subscription, customerId, tierId, productType, product } =
     await getDataFromStripeEvent(event);
 
   if (isAddonSubscription({ tierId, productType, event })) {
+    const organizationId = subscription?.metadata?.organizationId;
+    if (product?.metadata?.addon_type === "audits" && organizationId) {
+      await handleAuditAddonWebhook({
+        eventType: event.type,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -416,6 +457,9 @@ export async function handleInvoicePaid(
    * - Subscription created in "incomplete" state that only activates after payment
    * - If `customer.subscription.created` event was missed or failed
    * - Any other scenario where the tier wasn't properly set on creation
+   *
+   * Iterates ALL subscription items to handle bundled subscriptions
+   * (tier + audit addon in a single subscription).
    */
   const subscriptionId = paidInvoice.parent?.subscription_details?.subscription;
   if (subscriptionId) {
@@ -424,28 +468,46 @@ export async function handleInvoicePaid(
     );
 
     if (subscription.status === "active") {
-      const product = subscription.items.data[0].plan.product as Stripe.Product;
-      const tierId = product?.metadata?.shelf_tier;
-      const productType = product?.metadata?.product_type;
+      // Iterate all items to find tier and addon products
+      for (const item of subscription.items.data) {
+        const product = item.plan.product as Stripe.Product;
+        const tierId = product?.metadata?.shelf_tier;
+        const productType = product?.metadata?.product_type;
 
-      // Only update tier for non-addon products
-      if (tierId && productType !== "addon") {
-        if (isHigherOrEqualTier(tierId as TierId, user.tierId)) {
-          await db.user
-            .update({
-              where: { customerId },
-              data: { tierId: tierId as TierId },
+        // Handle audit add-on invoice paid as safety net
+        if (
+          productType === "addon" &&
+          product?.metadata?.addon_type === "audits"
+        ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (organizationId) {
+            await db.organization.update({
+              where: { id: organizationId },
+              data: { auditsEnabled: true },
               select: { id: true },
-            })
-            .catch((cause) => {
-              throw new ShelfError({
-                cause,
-                message: "Failed to update user tier from paid invoice",
-                additionalData: { customerId, tierId, event },
-                label: "Stripe webhook",
-                status: 500,
-              });
             });
+          }
+        }
+
+        // Update tier for non-addon products
+        if (tierId && productType !== "addon") {
+          if (isHigherOrEqualTier(tierId as TierId, user.tierId)) {
+            await db.user
+              .update({
+                where: { customerId },
+                data: { tierId: tierId as TierId },
+                select: { id: true },
+              })
+              .catch((cause) => {
+                throw new ShelfError({
+                  cause,
+                  message: "Failed to update user tier from paid invoice",
+                  additionalData: { customerId, tierId, event },
+                  label: "Stripe webhook",
+                  status: 500,
+                });
+              });
+          }
         }
       }
     }
@@ -601,7 +663,7 @@ export async function handleTrialWillEnd(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { tierId, subscription, productType } =
+  const { tierId, subscription, productType, product, customerId } =
     await getDataFromStripeEvent(event);
 
   if (
@@ -612,6 +674,16 @@ export async function handleTrialWillEnd(
       additionalData: { subscription },
     })
   ) {
+    // Send trial ending email for audit add-on
+    if (subscription.trial_end && product?.metadata?.addon_type === "audits") {
+      const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+      void sendAuditTrialEndsSoonEmail({
+        firstName: user.firstName,
+        email: user.email,
+        hasPaymentMethod,
+        trialEndDate: new Date(subscription.trial_end * 1000),
+      });
+    }
     return OK();
   }
 
@@ -622,13 +694,9 @@ export async function handleTrialWillEnd(
     sendEmail({
       to: user.email,
       subject: "Your shelf.nu free trial is ending soon",
-      text: trialEndsSoonText({
-        user: {
-          firstName: user?.firstName ?? null,
-          lastName: user?.lastName ?? null,
-          email: user.email,
-        },
-        subscription,
+      text: trialEndsSoonEmailText({
+        firstName: user?.firstName ?? null,
+        trialEndDate: new Date((subscription.trial_end as number) * 1000),
       }),
     });
   }
