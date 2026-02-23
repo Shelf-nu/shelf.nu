@@ -1,40 +1,34 @@
 import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "react-router";
-import type { loader } from "~/routes/_layout+/dashboard";
+import type { loader } from "~/routes/_layout+/home";
 import { DashboardEmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image/component";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import { Button } from "../shared/button";
-import { InfoTooltip } from "../shared/info-tooltip";
+
+import { ClickableTr } from "./clickable-tr";
 import { Td, Table, Tr } from "../table";
 
 export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
   return (
-    <>
-      <div className="border border-b-0 border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-            Newest assets
-          </div>
-          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
-            <InfoTooltip
-              content={
-                <>
-                  <h6>Newest assets</h6>
-                  <p>Below listed assets were created recently</p>
-                </>
-              }
-            />
-          </div>
+    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+      <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
+        <span className="text-[14px] font-semibold text-gray-900">
+          Newest assets
+        </span>
+        <div className="flex items-center gap-2">
+          <Button to="/assets" variant="block-link-gray" className="!mt-0 text-xs">
+            View all
+          </Button>
         </div>
       </div>
       {newAssets.length > 0 ? (
-        <Table className="border  border-gray-200">
+        <Table className="flex-1">
           <tbody>
             {newAssets.map((asset) => (
-              <Tr key={asset.id}>
+              <ClickableTr key={asset.id} to={`/assets/${asset.id}`}>
                 <Row
                   item={{
                     ...asset,
@@ -52,7 +46,7 @@ export default function NewestAssets() {
                     updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
                   }}
                 />
-              </Tr>
+              </ClickableTr>
             ))}
             {newAssets.length < 5 &&
               Array(5 - newAssets.length)
@@ -65,7 +59,7 @@ export default function NewestAssets() {
           </tbody>
         </Table>
       ) : (
-        <div className="h-full flex-1 rounded-b border border-gray-200">
+        <div className="flex flex-1 items-center justify-center p-4">
           <DashboardEmptyState
             text="No assets yet"
             subText="Create your first asset to start building your inventory."
@@ -74,7 +68,7 @@ export default function NewestAssets() {
           />
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -105,7 +99,7 @@ const Row = ({
                 withPreview
               />
             </div>
-            <div className="min-w-[130px]">
+            <div className="min-w-0">
               <span className="word-break mb-1 block">
                 <Button
                   to={`/assets/${item.id}`}
@@ -129,8 +123,8 @@ const Row = ({
         </div>
       </Td>
 
-      {/* Category */}
-      <Td>
+      {/* Category — hidden on small screens to prevent overflow */}
+      <Td className="hidden md:table-cell">
         <CategoryBadge category={category} />
       </Td>
     </>

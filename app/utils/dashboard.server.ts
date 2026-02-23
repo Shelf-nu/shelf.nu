@@ -8,6 +8,8 @@ import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
 
+/** Base asset type for dashboard utilities.
+ *  `qrCodes` is optional — only needed for scan-related helpers. */
 type Asset = Prisma.AssetGetPayload<{
   include: {
     category: true;
@@ -16,13 +18,12 @@ type Asset = Prisma.AssetGetPayload<{
         custodian: true;
       };
     };
-    qrCodes: {
-      include: {
-        scans: true;
-      };
-    };
   };
-}>;
+}> & {
+  qrCodes?: Prisma.QrGetPayload<{
+    include: { scans: true };
+  }>[];
+};
 
 /**
  * Asset created in each month in the last year.
@@ -94,7 +95,6 @@ export function totalAssetsAtEndOfEachMonth({ assets }: { assets: Asset[] }) {
   });
 
   // Get the total of assets created in each month
-  let totalAssets = 0;
   for (const asset of assets) {
     const assetCreatedDate = new Date(asset.createdAt);
     const assetCreatedMonth = assetCreatedDate.getMonth();
@@ -113,8 +113,6 @@ export function totalAssetsAtEndOfEachMonth({ assets }: { assets: Asset[] }) {
       if (month) {
         month.assetsCreated += 1;
       }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      totalAssets += 1;
     }
   }
 
@@ -245,11 +243,13 @@ export function getCustodiansOrderedByTotalCustodies({
  * Most scanned assets
  */
 export function getMostScannedAssets({ assets }: { assets: Asset[] }) {
-  const assetsWithScans = assets.filter((asset) => asset.qrCodes.length > 0);
+  const assetsWithScans = assets.filter(
+    (asset) => (asset.qrCodes?.length ?? 0) > 0
+  );
 
   const assetsWithScanCount = assetsWithScans.map((asset) => ({
     ...asset,
-    scanCount: asset.qrCodes.reduce(
+    scanCount: (asset.qrCodes ?? []).reduce(
       (count, qrCode) => count + qrCode.scans.length,
       0
     ),
@@ -271,11 +271,13 @@ export function getMostScannedAssetsCategories({
 }: {
   assets: Asset[];
 }) {
-  const assetsWithScans = assets.filter((asset) => asset.qrCodes.length > 0);
+  const assetsWithScans = assets.filter(
+    (asset) => (asset.qrCodes?.length ?? 0) > 0
+  );
 
   const assetsWithScanCount = assetsWithScans.map((asset) => ({
     ...asset,
-    scanCount: asset.qrCodes.reduce(
+    scanCount: (asset.qrCodes ?? []).reduce(
       (count, qrCode) => count + qrCode.scans.length,
       0
     ),
