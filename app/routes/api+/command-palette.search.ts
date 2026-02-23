@@ -33,6 +33,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         payload({
           query,
           assets: [],
+          audits: [],
           kits: [],
           bookings: [],
           locations: [],
@@ -46,6 +47,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       role,
       canSeeAllBookings,
       canSeeAllCustody,
+      isSelfServiceOrBase,
       currentOrganization,
     } = await requirePermission({
       userId,
@@ -134,6 +136,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         ],
       }));
 
+    // Audit search conditions
+    const auditSearchConditions: Prisma.AuditSessionWhereInput[] =
+      searchTerms.map((term) => ({
+        OR: [
+          ...createTextSearchConditions(term, ["name", "description"]),
+          { id: { contains: term, mode: Prisma.QueryMode.insensitive } },
+        ],
+      }));
+
     // Check if this is a personal workspace - they don't have bookings or team members
     const isPersonalWorkspace = isPersonalOrg(currentOrganization);
 
@@ -145,6 +156,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const hasLocationPermission = ["OWNER", "ADMIN"].includes(role);
     const hasTeamMemberPermission =
       !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
+    const hasAuditPermission = true;
 
     // Prepare where clauses for other entities
 
@@ -202,8 +214,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           }),
     };
 
+    const auditWhere: Prisma.AuditSessionWhereInput = {
+      organizationId,
+      ...(auditSearchConditions.length ? { OR: auditSearchConditions } : {}),
+      ...(isSelfServiceOrBase && userId
+        ? {
+            assignments: {
+              some: {
+                userId,
+              },
+            },
+          }
+        : {}),
+    };
+
     // Execute parallel searches
-    const [assetResults, kits, bookings, locations, teamMembers] =
+    const [assetResults, audits, kits, bookings, locations, teamMembers] =
       await Promise.all([
         // Assets (always allowed) - using enhanced search from asset service
         getAssets({
@@ -219,6 +245,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
         }),
+
+        // Audits (permission-gated)
+        hasAuditPermission
+          ? db.auditSession.findMany({
+              where: auditWhere,
+              take: 6,
+              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                status: true,
+                dueDate: true,
+              },
+            })
+          : Promise.resolve([]),
 
         // Kits (permission-gated)
         hasKitPermission
@@ -307,6 +349,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 return String(extractedValue);
               })
               .filter(Boolean) ?? [],
+        })),
+        audits: audits.map((audit) => ({
+          id: audit.id,
+          name: audit.name,
+          description: audit.description || null,
+          status: audit.status,
+          dueDate: audit.dueDate?.toISOString() || null,
         })),
         kits: kits.map((kit) => ({
           id: kit.id,

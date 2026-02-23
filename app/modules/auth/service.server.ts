@@ -1,4 +1,8 @@
-import { AuthError, isAuthApiError } from "@supabase/supabase-js";
+import {
+  AuthError,
+  isAuthApiError,
+  isAuthRetryableFetchError,
+} from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
@@ -118,6 +122,7 @@ export async function signUpWithEmailPass(email: string, password: string) {
       isAuthApiError(cause) &&
       (cause.status === 429 ||
         cause.message.includes("request this after 5 seconds"));
+    const isTransientFetchError = isAuthRetryableFetchError(cause);
     const message = isRateLimitError
       ? "You're trying too fast. Please wait a few seconds and try again."
       : "Something went wrong, refresh page and try to signup again.";
@@ -126,7 +131,7 @@ export async function signUpWithEmailPass(email: string, password: string) {
       message,
       additionalData: { email },
       label,
-      shouldBeCaptured: !isRateLimitError,
+      shouldBeCaptured: !(isRateLimitError || isTransientFetchError),
     });
   }
 }

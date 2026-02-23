@@ -29,10 +29,12 @@ type ConfigurableDrawerProps<T> = {
   title: string | ReactNode;
   // Custom empty state content
   emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
+  // Whether to render content even when the list is empty
+  renderWhenEmpty?: boolean;
   // Loading state
   isLoading?: boolean;
   // Item rendering function
-  renderItem: (qrId: string, item: T) => ReactNode;
+  renderItem?: (qrId: string, item: T) => ReactNode;
   // Blockers component (from createBlockers)
   Blockers?: ComponentType;
   // Whether form submission should be disabled
@@ -55,10 +57,15 @@ type ConfigurableDrawerProps<T> = {
   formName?: string;
 
   // Optional form component to completely replace the default form
-  form?: ReactNode;
+  // Can be a ReactNode or a function that receives the expanded state
+  form?: ReactNode | ((expanded: boolean) => ReactNode);
 
   // Optional header content to render above the item list
   headerContent?: ReactNode;
+  // Optional custom render function for all items (if you need full control over rendering)
+  customRenderAllItems?: () => ReactNode;
+  // Custom height for the collapsed state when items are present (default: 170)
+  collapsedHeight?: number;
 };
 
 /**
@@ -73,6 +80,7 @@ export default function ConfigurableDrawer<T>({
   onClearItems,
   title,
   emptyStateContent,
+  renderWhenEmpty = false,
   isLoading,
   renderItem,
   Blockers,
@@ -86,6 +94,8 @@ export default function ConfigurableDrawer<T>({
   formName = "ConfigurableDrawerForm",
   form,
   headerContent,
+  customRenderAllItems,
+  collapsedHeight,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
   const itemsLength = Object.keys(items).length;
@@ -123,81 +133,92 @@ export default function ConfigurableDrawer<T>({
       title={drawerTitle}
       onClear={onClearItems}
       hasItems={hasItems}
+      renderWhenEmpty={renderWhenEmpty}
       emptyStateContent={emptyStateContent || defaultEmptyState}
       headerContent={headerContent}
+      collapsedHeight={collapsedHeight}
     >
-      {/* No need to pass expanded state to this content since we don't use it */}
-      <>
-        {/* Item List */}
-        <Table className="overflow-y-auto">
-          <ListHeader hideFirstColumn className="border-none">
-            <Th className="p-0"> </Th>
-            <Th className="p-0"> </Th>
-          </ListHeader>
+      {(expanded) => (
+        <>
+          {/* Item List */}
+          <Table className="overflow-y-auto">
+            <ListHeader hideFirstColumn className="border-none">
+              <Th className="p-0"> </Th>
+              <Th className="p-0"> </Th>
+            </ListHeader>
 
-          <tbody>
-            <AnimatePresence>
-              {Object.entries(items).map(([qrId, item]) =>
-                renderItem(qrId, item)
-              )}
-            </AnimatePresence>
-          </tbody>
-        </Table>
+            <tbody>
+              <AnimatePresence>
+                {customRenderAllItems
+                  ? customRenderAllItems()
+                  : renderItem
+                  ? Object.entries(items).map(([qrId, item]) =>
+                      renderItem(qrId, item)
+                    )
+                  : null}
+              </AnimatePresence>
+            </tbody>
+          </Table>
 
-        {/* Blockers */}
-        {Blockers && <Blockers />}
+          {/* Blockers */}
+          {Blockers && <Blockers />}
 
-        {/* Action form */}
-        {form ? (
-          form
-        ) : formData ? (
-          <When truthy={hasItems}>
-            <Form
-              ref={zo.ref}
-              className="mb-4 flex max-h-full w-full"
-              method={method}
-              action={actionUrl}
-              onSubmit={onSubmit}
-            >
-              <div className="flex w-full gap-2 p-3">
-                {/* Render form fields from formData */}
-                {Object.entries(formData).map(([key, value]) => {
-                  if (Array.isArray(value)) {
-                    return value.map((val, index) => (
-                      <input
-                        key={`${key}-${index}`}
-                        type="hidden"
-                        name={`${key}[${index}]`}
-                        value={val}
-                      />
-                    ));
-                  }
-                  return (
-                    <input key={key} type="hidden" name={key} value={value} />
-                  );
-                })}
-                {/* Cancel button */}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  to={".."}
-                  className={"ml-auto"}
-                >
-                  Cancel
-                </Button>
-                {/* Submit button */}
-                <Button
-                  type="submit"
-                  disabled={isLoading || disableSubmit}
-                  className={tw(submitButtonClassName, "w-auto")}
-                >
-                  {submitButtonText}
-                </Button>
-              </div>
-            </Form>
-          </When>
-        ) : null}
-      </>
+          {/* Action form */}
+          {form ? (
+            typeof form === "function" ? (
+              form(expanded)
+            ) : (
+              form
+            )
+          ) : formData ? (
+            <When truthy={hasItems}>
+              <Form
+                ref={zo.ref}
+                className="mb-4 flex max-h-full w-full"
+                method={method}
+                action={actionUrl}
+                onSubmit={onSubmit}
+              >
+                <div className="flex w-full gap-2 p-3">
+                  {/* Render form fields from formData */}
+                  {Object.entries(formData).map(([key, value]) => {
+                    if (Array.isArray(value)) {
+                      return value.map((val, index) => (
+                        <input
+                          key={`${key}-${index}`}
+                          type="hidden"
+                          name={`${key}[${index}]`}
+                          value={val}
+                        />
+                      ));
+                    }
+                    return (
+                      <input key={key} type="hidden" name={key} value={value} />
+                    );
+                  })}
+                  {/* Cancel button */}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    to={".."}
+                    className={"ml-auto"}
+                  >
+                    Cancel
+                  </Button>
+                  {/* Submit button */}
+                  <Button
+                    type="submit"
+                    disabled={isLoading || disableSubmit}
+                    className={tw(submitButtonClassName, "w-auto")}
+                  >
+                    {submitButtonText}
+                  </Button>
+                </div>
+              </Form>
+            </When>
+          ) : null}
+        </>
+      )}
     </BaseDrawer>
   );
 }

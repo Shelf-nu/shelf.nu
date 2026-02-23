@@ -63,3 +63,10 @@ export const assetImageValidateFileAtom = createValidateFileAtom({
   sizeErrorMessage: "Max file size is 8MB",
   allowedTypesErrorMessage: "Allowed file types are: PNG, JPG, JPEG, or WebP",
 });
+
+// For audit image uploads we use the default 4MB limit
+export const auditImageValidateFileAtom = createValidateFileAtom({
+  maxSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE, // 4MB
+  sizeErrorMessage: "Max file size is 4MB",
+  allowedTypesErrorMessage: "Allowed file types are: PNG, JPG or JPEG",
+});

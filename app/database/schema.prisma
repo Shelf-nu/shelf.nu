@@ -61,31 +61,37 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-  assets            Asset[]
-  categories        Category[]
-  notes             Note[]
+  assets             Asset[]
+  categories         Category[]
+  notes              Note[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
+  auditNotes        AuditNote[]        @relation("AuditNoteUser")
   locationNotes     LocationNote[]     @relation("LocationNoteUser")
-  qrCodes           Qr[]
-  scans             Scan[]
-  tags              Tag[]
-  roles             Role[]
-  locations         Location[]
-  images            Image[]
-  organizations     Organization[]
-  customFields      CustomField[]
-  sentInvites       Invite[]           @relation("inviter")
-  receivedInvites   Invite[]           @relation("invitee")
-  teamMembers       TeamMember[]
-  userOrganizations UserOrganization[]
-  bookings          Booking[]          @relation("creator")
-  custodies         Booking[]          @relation("custodian")
-  createdKits       Kit[]
-  tierId            TierId             @default(free)
-  tier              Tier               @relation(fields: [tierId], references: [id])
-  assetReminders    AssetReminder[]
-  contact           UserContact?
-  businessIntel     UserBusinessIntel?
+  qrCodes            Qr[]
+  scans              Scan[]
+  tags               Tag[]
+  roles              Role[]
+  locations          Location[]
+  images             Image[]
+  organizations      Organization[]
+  customFields       CustomField[]
+  sentInvites        Invite[]           @relation("inviter")
+  receivedInvites    Invite[]           @relation("invitee")
+  teamMembers        TeamMember[]
+  userOrganizations  UserOrganization[]
+  bookings           Booking[]          @relation("creator")
+  custodies          Booking[]          @relation("custodian")
+  createdKits        Kit[]
+  tierId             TierId             @default(free)
+  tier               Tier               @relation(fields: [tierId], references: [id])
+  assetReminders     AssetReminder[]
+  contact            UserContact?
+  businessIntel      UserBusinessIntel?
+  auditsCreated      AuditSession[]
+  auditAssignments   AuditAssignment[]
+  auditAssetsScanned AuditAsset[]
+  auditScans         AuditScan[]
+  auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
   referralSource String? // "How did you hear about us?" field.
@@ -207,6 +213,8 @@ model Asset {
   customFields AssetCustomFieldValue[]
   bookings     Booking[]
   reminders    AssetReminder[]
+  auditEntries AuditAsset[]
+  auditScans   AuditScan[]
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -703,6 +711,11 @@ model Organization {
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
   barcodesEnabledAt DateTime? // Track when barcode feature was enabled
 
+  // Audit add-on (per-organization, managed via Stripe subscription)
+  auditsEnabled    Boolean   @default(false) // If true, this organization can use audit functionality
+  auditsEnabledAt  DateTime? // Track when audit feature was enabled
+  usedAuditTrial   Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
+
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
@@ -722,7 +735,11 @@ model Organization {
   kits               Kit[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
-  assetFilterPresets  AssetFilterPreset[]
+  assetFilterPresets AssetFilterPreset[]
+
+  auditSessions      AuditSession[]
+  auditImages        AuditImage[]
+
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   roleChangeLogs     RoleChangeLog[]
 
@@ -1426,6 +1443,197 @@ model UserUpdateRead {
   @@index([userId])
   @@index([updateId])
   @@index([readAt])
+}
+
+enum AuditStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditAssetStatus {
+  PENDING
+  FOUND
+  MISSING
+  UNEXPECTED
+}
+
+enum AuditAssignmentRole {
+  LEAD
+  PARTICIPANT
+}
+
+model AuditNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user           User?        @relation("AuditNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId         String?
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  // Optional link to specific asset within the audit
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  // Indexes for foreign keys
+  @@index([auditSessionId])
+  @@index([userId])
+  @@index([auditAssetId])
+}
+
+model AuditSession {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+
+  targetId  String?
+  status    AuditStatus @default(PENDING)
+  scopeMeta Json?
+
+  expectedAssetCount   Int @default(0)
+  foundAssetCount      Int @default(0)
+  missingAssetCount    Int @default(0)
+  unexpectedAssetCount Int @default(0)
+
+  startedAt   DateTime?
+  dueDate     DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  activeSchedulerReference String?
+
+  createdBy      User         @relation(fields: [createdById], references: [id])
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  assignments AuditAssignment[]
+  assets      AuditAsset[]
+  scans       AuditScan[]
+  notes       AuditNote[]
+  images      AuditImage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([createdById])
+  @@index([status, createdAt])
+}
+
+model AuditAssignment {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  role AuditAssignmentRole?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditSessionId, userId])
+  @@index([userId])
+}
+
+model AuditAsset {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  expected Boolean          @default(true)
+  status   AuditAssetStatus @default(PENDING)
+
+  scannedBy   User?   @relation(fields: [scannedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  scannedById String?
+
+  scannedAt DateTime?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scans AuditScan[]
+  images AuditImage[]
+  notes AuditNote[]
+
+  @@unique([auditSessionId, assetId])
+  @@index([status])
+  @@index([scannedById])
+}
+
+model AuditScan {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  assetId String?
+
+  scannedBy   User?   @relation(fields: [scannedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  scannedById String?
+
+  code String?
+
+  metadata Json?
+
+  scannedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([auditSessionId, scannedAt])
+  @@index([auditAssetId])
+  @@index([assetId])
+}
+
+model AuditImage {
+  id String @id @default(cuid())
+
+  imageUrl     String
+  thumbnailUrl String?
+  description  String?
+
+  // Relationships
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  // Optional link to specific asset within the audit
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  uploadedBy   User?   @relation("AuditImageUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  uploadedById String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for performance
+  @@index([auditSessionId])
+  @@index([auditAssetId])
+  @@index([organizationId])
+  @@index([uploadedById])
 }
 
 model RoleChangeLog {

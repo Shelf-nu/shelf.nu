@@ -269,7 +269,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Update the asset with new signed URLs and expiration date
     const updatedAsset = await db.asset.update({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       data: {
         mainImage: newMainImageUrl,
         thumbnailImage: thumbnailUrl,

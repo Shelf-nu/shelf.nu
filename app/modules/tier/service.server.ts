@@ -11,7 +11,9 @@ import { ShelfError } from "~/utils/error";
 
 const label: ErrorLabel = "Tier";
 
-export async function getUserTierLimit(id: User["id"]) {
+export async function getUserTierLimit(
+  id: User["id"]
+): Promise<TierLimit | CustomTierLimit> {
   try {
     const { tier } = await db.user
       .findUniqueOrThrow({
@@ -36,7 +38,7 @@ export async function getUserTierLimit(id: User["id"]) {
      * If the tier is custom, we fetch the custom tier limit and return it
      */
     if (tier.id === "custom") {
-      return (await db.customTierLimit
+      const customLimit = (await db.customTierLimit
         .findUniqueOrThrow({
           where: { userId: id },
         })
@@ -49,6 +51,8 @@ export async function getUserTierLimit(id: User["id"]) {
             label,
           });
         })) as CustomTierLimit;
+
+      return customLimit;
     }
 
     return tier.tierLimit as TierLimit;

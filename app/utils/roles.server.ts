@@ -115,6 +115,9 @@ export async function requirePermission({
   // Determine if user can use barcodes based on organization settings
   const canUseBarcodes = currentOrganization.barcodesEnabled ?? false;
 
+  // Determine if user can use audits based on organization settings
+  const canUseAudits = currentOrganization.auditsEnabled ?? false;
+
   return {
     organizations,
     organizationId,
@@ -125,6 +128,7 @@ export async function requirePermission({
     canSeeAllBookings,
     canSeeAllCustody,
     canUseBarcodes,
+    canUseAudits,
   };
 }
 

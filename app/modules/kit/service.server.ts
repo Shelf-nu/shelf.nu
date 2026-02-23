@@ -1256,12 +1256,7 @@ export async function bulkReleaseKitCustody({
       /** Deleting all custodies of kits */
       await tx.kitCustody.deleteMany({
         where: {
-          id: {
-            in: kits.map((kit) => {
-              invariant(kit.custody, "Custody not found over kit.");
-              return kit.custody.id;
-            }),
-          },
+          kitId: { in: kits.map((kit) => kit.id) },
         },
       });
 
@@ -1274,13 +1269,7 @@ export async function bulkReleaseKitCustody({
       /** Deleting all custodies of all assets of kits */
       await tx.custody.deleteMany({
         where: {
-          id: {
-            in: allAssetsOfAllKits.map((asset) => {
-              /** This cause should not happen */
-              invariant(asset.custody, "Custody not found over the asset");
-              return asset.custody.id;
-            }),
-          },
+          assetId: { in: allAssetsOfAllKits.map((asset) => asset.id) },
         },
       });
 

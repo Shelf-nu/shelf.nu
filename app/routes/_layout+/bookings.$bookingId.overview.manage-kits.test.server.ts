@@ -118,6 +118,7 @@ describe("manage-kits route validation", () => {
       canSeeAllBookings: false,
       canSeeAllCustody: false,
       canUseBarcodes: false,
+      canUseAudits: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
