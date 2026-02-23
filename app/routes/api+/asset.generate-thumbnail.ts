@@ -20,6 +20,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const authSession = context.getSession();
   const { userId } = authSession;
+  let organizationId: string | undefined;
   try {
     const { assetId } = parseData(
       url.searchParams,
@@ -29,12 +30,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     );
 
     // Validate user has permission to access assets in their organization
-    const { organizationId } = await requirePermission({
+    ({ organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.read,
-    });
+    }));
 
     // Use findUnique with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUnique({
@@ -82,7 +83,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
           // Update with the fresh URL
           const updatedAsset = await db.asset.update({
-            where: { id: assetId },
+            where: { id: assetId, organizationId },
             data: {
               thumbnailImage: refreshedThumbnailUrl,
               mainImageExpiration: oneDayFromNow(),
@@ -207,7 +208,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Double-check the asset still exists before updating (in case it was deleted during processing)
     const existsCheck = await db.asset.findUnique({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       select: { id: true },
     });
 
@@ -231,7 +232,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Update the asset record with both the thumbnail and a fresh expiration
     const updatedAsset = await db.asset.update({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       data: {
         thumbnailImage: thumbnailSignedUrl,
         mainImageExpiration: oneDayFromNow(),
@@ -244,12 +245,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     return data(payload({ asset: updatedAsset }));
   } catch (cause) {
-    // In case of any error, try to return existing values instead of failing
+    // Try to return existing asset values as a fallback instead of failing
     try {
       const assetId = url.searchParams.get("assetId");
-      if (assetId) {
+      if (assetId && organizationId) {
         const asset = await db.asset.findUnique({
-          where: { id: assetId },
+          where: { id: assetId, organizationId },
           select: {
             id: true,
             thumbnailImage: true,

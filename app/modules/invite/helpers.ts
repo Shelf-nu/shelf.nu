@@ -68,3 +68,23 @@ ${customEmailFooter ? `\n---\n${customEmailFooter}` : ""}
 Thanks,
 The Shelf Team
 `;
+
+export const roleChangeEmailText = ({
+  orgName,
+  previousRole,
+  newRole,
+  customEmailFooter,
+}: {
+  orgName: string;
+  previousRole: string;
+  newRole: string;
+  customEmailFooter?: string | null;
+}) => `Howdy,
+
+Your role in ${orgName} has been changed from ${previousRole} to ${newRole}.
+
+If you think this is a mistake, please contact the workspace administrator.
+${customEmailFooter ? `\n---\n${customEmailFooter}` : ""}
+Thanks,
+The Shelf Team
+`;

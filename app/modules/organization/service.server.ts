@@ -371,6 +371,8 @@ const ORGANIZATION_SELECT_FIELDS = {
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
   barcodesEnabled: true,
+  auditsEnabled: true,
+  usedAuditTrial: true,
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
@@ -500,7 +502,7 @@ export async function toggleBarcodeEnabled({
 }) {
   try {
     return await db.organization.update({
-      where: { id: organizationId, type: OrganizationType.TEAM },
+      where: { id: organizationId },
       data: {
         barcodesEnabled,
         barcodesEnabledAt: barcodesEnabled ? new Date() : null,

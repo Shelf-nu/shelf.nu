@@ -1,10 +1,14 @@
-import { OrganizationType } from "@prisma/client";
+import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
 import { data, useLoaderData } from "react-router";
+import {
+  ExplicitCheckinSettings,
+  ExplicitCheckinSettingsSchema,
+} from "~/components/booking/explicit-checkin-settings";
 import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
@@ -106,7 +110,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.workingHours,
@@ -122,6 +126,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
+        "updateExplicitCheckin",
         "toggle",
         "updateSchedule",
         "createOverride",
@@ -308,6 +313,46 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return data(payload({ success: true }), { status: 200 });
       }
 
+      case "updateExplicitCheckin": {
+        // Only workspace owners can change explicit check-in settings
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed",
+            message:
+              "Only the workspace owner can change explicit check-in settings",
+            status: 403,
+            label: "Booking Settings",
+          });
+        }
+
+        const {
+          requireExplicitCheckinForAdmin,
+          requireExplicitCheckinForSelfService,
+        } = parseData(formData, ExplicitCheckinSettingsSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
+
+        await updateBookingSettings({
+          organizationId,
+          requireExplicitCheckinForAdmin,
+          requireExplicitCheckinForSelfService,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Explicit check-in settings have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
       default: {
         throw new ShelfError({
           cause: null,
@@ -327,6 +372,21 @@ export default function GeneralPage() {
 
   return (
     <>
+      {/* Explicit check-in settings form */}
+      <ExplicitCheckinSettings
+        header={{
+          title: "Explicit check-in requirement",
+          subHeading:
+            "Control whether specific roles must use the scanner-based explicit check-in flow instead of the one-click quick check-in. Only workspace owners can change this setting.",
+        }}
+        defaultValues={{
+          requireExplicitCheckinForAdmin:
+            bookingSettings.requireExplicitCheckinForAdmin,
+          requireExplicitCheckinForSelfService:
+            bookingSettings.requireExplicitCheckinForSelfService,
+        }}
+      />
+
       {/* Tags required settings form */}
       <TagsRequiredSettings
         header={{

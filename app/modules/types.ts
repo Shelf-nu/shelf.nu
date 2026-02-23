@@ -17,6 +17,9 @@ export interface SearchableIndexResponse {
     title: string;
     text: string; // Supports markdown
   };
+
+  /** Whether the current request has active column/advanced filters */
+  hasActiveFilters?: boolean;
 }
 
 export type RouteHandleWithName = {

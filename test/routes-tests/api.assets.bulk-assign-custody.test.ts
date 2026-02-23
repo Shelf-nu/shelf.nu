@@ -224,7 +224,7 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const response = (await action(createActionArgs({ request }))) as any;
 
-    expect(response.status).toBe(500); // ShelfError defaults to 500
+    expect(response.status).toBe(403);
   });
 
   it("allows self-service users to assign custody to themselves", async () => {

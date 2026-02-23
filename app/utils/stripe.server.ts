@@ -57,7 +57,9 @@ export function getDomainUrl(request: Request) {
     });
   }
 
-  const protocol = host.includes("localhost") ? "http" : "https";
+  const protocol =
+    request.headers.get("X-Forwarded-Proto") ??
+    new URL(request.url).protocol.replace(":", "");
 
   return `${protocol}://${host}`;
 }
@@ -70,6 +72,7 @@ export async function createStripeCheckoutSession({
   customerId,
   intent,
   shelfTier,
+  auditPriceId,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
@@ -77,6 +80,7 @@ export async function createStripeCheckoutSession({
   customerId: string;
   intent: "trial" | "subscribe";
   shelfTier: "tier_1" | "tier_2";
+  auditPriceId?: string;
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -99,18 +103,23 @@ export async function createStripeCheckoutSession({
       });
     }
 
-    const lineItems = [
+    const lineItems: { price: string; quantity: number }[] = [
       {
         price: priceId,
         quantity: 1,
       },
     ];
 
+    if (auditPriceId) {
+      lineItems.push({ price: auditPriceId, quantity: 1 });
+    }
+
     const successUrl = await generateReturnUrl({
       userId,
       shelfTier,
       intent,
       domainUrl,
+      hasAuditAddon: !!auditPriceId,
     });
 
     const { url } = await stripe.checkout.sessions.create({
@@ -129,6 +138,9 @@ export async function createStripeCheckoutSession({
             },
           },
           trial_period_days: config.freeTrialDays,
+          ...(auditPriceId && {
+            metadata: { includesAuditAddon: "true" },
+          }),
         },
         payment_method_collection: "if_required",
       }),
@@ -464,20 +476,39 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
   try {
     // Here we need to update the user's tier in the database based on the subscription they created
     const subscription = event.data.object as Stripe.Subscription;
-
-    /** Get the product */
-    const productId = subscription.items.data[0].plan.product as string;
-    const product = await stripe.products.retrieve(productId);
     const customerId = subscription.customer as string;
-    const tierId = product?.metadata?.shelf_tier;
-    const productType = product?.metadata?.product_type;
+
+    // Iterate all subscription items to find tier and addon products
+    const items = await Promise.all(
+      subscription.items.data.map(async (item) => {
+        const productId = item.plan.product as string;
+        const product = await stripe.products.retrieve(productId);
+        return {
+          product,
+          tierId: product?.metadata?.shelf_tier,
+          productType: product?.metadata?.product_type,
+          addonType: product?.metadata?.addon_type,
+        };
+      })
+    );
+
+    // The tier item is the one with a shelf_tier metadata
+    const tierItem = items.find((i) => i.tierId);
+    // The audit addon item is the one marked as addon with audits type
+    const auditItem = items.find(
+      (i) => i.productType === "addon" && i.addonType === "audits"
+    );
+
+    // For backward compat: return tier product info, or fall back to first item
+    const primaryItem = tierItem || items[0];
 
     return {
       subscription,
       customerId,
-      tierId,
-      productType,
-      product,
+      tierId: primaryItem.tierId,
+      productType: primaryItem.productType,
+      product: primaryItem.product,
+      hasAuditAddon: !!auditItem,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -524,17 +555,85 @@ export const disabledTeamOrg = async ({
   );
 };
 
+/** Creates a team trial subscription directly via the Stripe API (no checkout) */
+export async function createTeamTrialSubscription({
+  customerId,
+  priceId,
+  userId,
+  auditPriceId,
+}: {
+  customerId: string;
+  priceId: string;
+  userId: User["id"];
+  auditPriceId?: string;
+}) {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { customerId, priceId, userId },
+        label,
+      });
+    }
+
+    const lineItems: { price: string }[] = [{ price: priceId }];
+    if (auditPriceId) {
+      lineItems.push({ price: auditPriceId });
+    }
+
+    // If the customer already has a payment method, attach it so Stripe
+    // can auto-charge when the trial ends.
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      limit: 1,
+    });
+    const defaultPaymentMethod = paymentMethods.data[0]?.id;
+
+    const subscription = await stripe.subscriptions.create({
+      customer: customerId,
+      items: lineItems,
+      trial_period_days: config.freeTrialDays,
+      trial_settings: {
+        end_behavior: {
+          missing_payment_method: "pause",
+        },
+      },
+      ...(defaultPaymentMethod && {
+        default_payment_method: defaultPaymentMethod,
+      }),
+      metadata: {
+        userId,
+        createdByAction: "true",
+        ...(auditPriceId && { includesAuditAddon: "true" }),
+      },
+    });
+
+    return { subscription, hasPaymentMethod: !!defaultPaymentMethod };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating team trial subscription. Please try again later or contact support.",
+      additionalData: { customerId, priceId, userId },
+      label,
+    });
+  }
+}
+
 /** Generates the redirect URL based on relevant data */
-async function generateReturnUrl({
+export async function generateReturnUrl({
   userId,
   shelfTier,
   intent,
   domainUrl,
+  hasAuditAddon,
 }: {
   userId: User["id"];
   shelfTier: "tier_1" | "tier_2" | "free" | "custom";
   intent: "trial" | "subscribe";
   domainUrl: string;
+  hasAuditAddon?: boolean;
 }) {
   /**
    * Here we have a few cases:
@@ -558,6 +657,7 @@ async function generateReturnUrl({
     team: shelfTier === "tier_2" ? "true" : "",
     ...(intent === "trial" && { trial: "true" }),
     ...(userTeamOrg && { hasExistingWorkspace: "true" }),
+    ...(hasAuditAddon && { includesAudits: "true" }),
   });
 
   return shelfTier === "tier_2" && !userTeamOrg // If the user is on tier_2, and they dont already OWN a team org we redirect them to create a team workspace

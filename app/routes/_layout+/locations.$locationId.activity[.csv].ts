@@ -3,24 +3,12 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { exportLocationNotesToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams } from "~/utils/http.server";
+import { buildContentDisposition, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-function buildFilename(name: string | null | undefined) {
-  const fallback = "location";
-  const source = name && name.trim().length > 0 ? name : fallback;
-  const sanitizedName = source
-    .replace(/[\\/:*?"<>|]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
-  const base = sanitizedName.length > 0 ? sanitizedName : fallback;
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  return `${base}-activity-${timestamp}.csv`;
-}
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -64,9 +52,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       status: 200,
       headers: {
         "content-type": "text/csv",
-        "content-disposition": `attachment; filename="${buildFilename(
-          location.name
-        )}"`,
+        "content-disposition": buildContentDisposition(location.name, {
+          fallback: "location",
+          suffix: "-activity",
+        }),
       },
     });
   } catch (cause) {

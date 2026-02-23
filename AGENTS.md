@@ -24,6 +24,7 @@ This repository hosts **Shelf.nu**, an asset management platform built with Remi
 - Tests co-located with source files
 - Happy DOM environment for React component testing
 - Run with `npm run test` or `npm run test:cov` for coverage
+- **IMPORTANT:** Tests run as a daemon. When running tests manually or in scripts, ensure they terminate properly. Use `npm run test -- --run` to run tests once and exit, or stop long-running test processes with Ctrl+C.
 
 #### Validation Pipeline
 
@@ -172,6 +173,7 @@ When implementing bulk operations that work across multiple pages of filtered da
 ## Git Practices
 
 - Commit after completing a coherent task using descriptive messages.
+- **CRITICAL: NEVER commit changes without explicit user instruction.** Always wait for the user to review staged changes and explicitly ask you to commit before running `git commit`. Stage changes with `git add` and inform the user they are ready for review, but DO NOT commit.
 - Always use Conventional Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - Do **not** add "🤖 Generated with Claude Code" or similar co-authored trailers to commits.
 - Ensure the working tree is clean and applicable checks (including `npm run validate` for code changes) pass before requesting review.

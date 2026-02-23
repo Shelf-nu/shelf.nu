@@ -27,7 +27,8 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { computeHasActiveFilters } from "~/utils/filter-params";
+import { error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -67,6 +68,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return redirect("/settings/general");
     }
 
+    const searchParams = getCurrentSearchParams(request);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
+
     const { page, perPage, search, items, totalItems, totalPages } =
       await getPaginatedAndFilterableSettingUsers({
         organizationId,
@@ -91,6 +95,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       search,
       totalPages,
       modelName,
+      hasActiveFilters,
       organization,
       searchFieldLabel: "Search by name or email",
       searchFieldTooltip: {
@@ -113,14 +118,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId);
+    return await resolveUserAction(request, organizationId, userId, role);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -185,6 +190,10 @@ export default function UserTeamSetting() {
 
         <List
           className="overflow-x-visible md:overflow-x-auto"
+          customEmptyStateContent={{
+            title: "No team members yet",
+            text: "Invite team members to collaborate on asset management within your workspace.",
+          }}
           ItemComponent={UserRow}
           headerChildren={
             <>
@@ -233,6 +242,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
             isSSO={item.sso || false}
             role={item.role}
+            roleEnum={item.roleEnum}
           />
         ) : null}
       </Td>

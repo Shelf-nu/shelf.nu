@@ -19,6 +19,8 @@ export async function getBookingSettingsForOrganization(
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
         tagsRequired: false,
+        requireExplicitCheckinForAdmin: false,
+        requireExplicitCheckinForSelfService: false,
         organizationId,
       },
       select: {
@@ -27,6 +29,8 @@ export async function getBookingSettingsForOrganization(
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
         tagsRequired: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
 
@@ -47,12 +51,16 @@ export async function updateBookingSettings({
   tagsRequired,
   maxBookingLength,
   maxBookingLengthSkipClosedDays,
+  requireExplicitCheckinForAdmin,
+  requireExplicitCheckinForSelfService,
 }: {
   organizationId: string;
   bufferStartTime?: number;
   tagsRequired?: boolean;
   maxBookingLength?: number | null;
   maxBookingLengthSkipClosedDays?: boolean;
+  requireExplicitCheckinForAdmin?: boolean;
+  requireExplicitCheckinForSelfService?: boolean;
 }) {
   try {
     const updateData: Prisma.BookingSettingsUpdateInput = {};
@@ -64,6 +72,12 @@ export async function updateBookingSettings({
     if (maxBookingLengthSkipClosedDays !== undefined)
       updateData.maxBookingLengthSkipClosedDays =
         maxBookingLengthSkipClosedDays;
+    if (requireExplicitCheckinForAdmin !== undefined)
+      updateData.requireExplicitCheckinForAdmin =
+        requireExplicitCheckinForAdmin;
+    if (requireExplicitCheckinForSelfService !== undefined)
+      updateData.requireExplicitCheckinForSelfService =
+        requireExplicitCheckinForSelfService;
 
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
@@ -74,6 +88,8 @@ export async function updateBookingSettings({
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        requireExplicitCheckinForAdmin: true,
+        requireExplicitCheckinForSelfService: true,
       },
     });
 

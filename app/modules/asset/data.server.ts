@@ -14,6 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
@@ -118,6 +119,7 @@ export async function simpleModeLoader({
   }
 
   const searchParams = getCurrentSearchParams(request);
+  const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
   /** Query tierLimit, assets & Asset index settings */
@@ -199,6 +201,10 @@ export async function simpleModeLoader({
       : Promise.resolve(null),
   ]);
 
+  const currentUserTeamMember = isSelfService
+    ? teamMembers.find((tm) => tm.userId === userId) ?? null
+    : null;
+
   assets = await updateAssetsWithBookingCustodians(assets);
 
   const header: HeaderData = {
@@ -240,6 +246,7 @@ export async function simpleModeLoader({
       perPage,
       totalPages,
       modelName,
+      hasActiveFilters,
       canImportAssets:
         canImportAssets(tierLimit) &&
         (await hasPermission({
@@ -260,6 +267,7 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
+      currentUserTeamMember,
       teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
       filters,
       organizationId,
@@ -299,8 +307,8 @@ export async function advancedModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const isSelfServiceOrBase = isSelfService || role === OrganizationRoles.BASE;
 
   /** Parse filters */
   const {
@@ -313,6 +321,7 @@ export async function advancedModeLoader({
   const searchParams = filters
     ? currentFilterParams
     : getCurrentSearchParams(request);
+  const hasActiveFilters = computeHasActiveFilters(searchParams);
   const allSelectedEntries = searchParams.getAll(
     "getAll"
   ) as AllowedModelNames[];
@@ -438,6 +447,10 @@ export async function advancedModeLoader({
     }),
   ]);
 
+  const currentUserTeamMember = isSelfService
+    ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
+    : null;
+
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -475,6 +488,7 @@ export async function advancedModeLoader({
       perPage,
       totalPages,
       modelName,
+      hasActiveFilters,
       canImportAssets:
         canImportAssets(tierLimit) &&
         (await hasPermission({
@@ -498,6 +512,7 @@ export async function advancedModeLoader({
 
       customFields,
       ...teamMembersData,
+      currentUserTeamMember,
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       categories,

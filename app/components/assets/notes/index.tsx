@@ -3,7 +3,7 @@ import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/assets.$assetId.activity";
 import { isFormProcessing } from "~/utils/form";
-import { ActionsDopdown } from "./actions-dropdown";
+import { ActionsDropdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 import type { NoteWithUser } from "./note";
 import { Note } from "./note";
@@ -66,7 +66,7 @@ export const Notes = () => {
             <Note
               key={optimisticNote.id}
               note={optimisticNote}
-              actionsDropdown={<ActionsDopdown noteId={optimisticNote.id} />}
+              actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
             />
           )}
           {/* Render all existing notes */}
@@ -74,7 +74,7 @@ export const Notes = () => {
             <Note
               key={note.id}
               note={note}
-              actionsDropdown={<ActionsDopdown noteId={note.id} />}
+              actionsDropdown={<ActionsDropdown noteId={note.id} />}
             />
           ))}
         </ul>

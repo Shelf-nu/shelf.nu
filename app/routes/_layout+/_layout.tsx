@@ -48,6 +48,7 @@ import {
 } from "~/modules/organization/context.server";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -68,7 +69,7 @@ import {
   stripe,
   validateSubscriptionIsActive,
 } from "~/utils/stripe.server";
-import { canUseBookings } from "~/utils/subscription.server";
+import { canUseAudits, canUseBookings } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -178,14 +179,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    const [bookingSettings, workingHoursRaw] = await Promise.all([
+      getBookingSettingsForOrganization(currentOrganization.id),
+      getWorkingHoursForOrganization(currentOrganization.id),
+    ]);
+
+    const workingHours = workingHoursRaw;
+
     return data(
       payload({
         user,
         organizations,
         currentOrganizationId: organizationId,
-        bookingSettings: await getBookingSettingsForOrganization(
-          currentOrganization.id
-        ),
+        bookingSettings,
+        workingHours,
         currentOrganization,
         currentOrganizationUserRoles,
         subscription,
@@ -196,6 +203,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
+        canUseAudits: canUseAudits(currentOrganization),
         unreadUpdatesCount,
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,

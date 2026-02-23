@@ -92,7 +92,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const hints = useHints();
 
   // Fetch working hours for validation
-  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const workingHoursData = useWorkingHours();
   const { workingHours, isLoading: isLoadingWorkingHours } = workingHoursData;
 
   const disabled = isProcessing || bookingStatus?.isArchived;
@@ -108,8 +108,15 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
-  const { roles, isBaseOrSelfService, isBase, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const {
+    roles,
+    isBaseOrSelfService,
+    isBase,
+    isAdministratorOrOwner,
+    isAdministrator,
+    isOwner,
+    isSelfService,
+  } = useUserRoleHelper();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -301,6 +308,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   from: new Date(startDate),
                 }}
                 disabled={disabled || isLoadingWorkingHours}
+                requireExplicitCheckin={
+                  !isOwner &&
+                  ((isAdministrator &&
+                    bookingSettings.requireExplicitCheckinForAdmin) ||
+                    (isSelfService &&
+                      bookingSettings.requireExplicitCheckinForSelfService))
+                }
               />
             </When>
           </div>
