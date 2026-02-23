@@ -411,7 +411,7 @@ describe(buildContentDisposition.name, () => {
 
     expect(result).toBe(
       'attachment; filename="My Booking-activity-2024-06-15T1230.csv"; ' +
-        "filename*=UTF-8''My Booking-activity-2024-06-15T1230.csv"
+        "filename*=UTF-8''My%20Booking-activity-2024-06-15T1230.csv"
     );
   });
 
@@ -445,7 +445,7 @@ describe(buildContentDisposition.name, () => {
     });
 
     expect(result).toContain('filename="caf_ r_sum_-');
-    expect(result).toContain("filename*=UTF-8''caf%C3%A9 r%C3%A9sum%C3%A9-");
+    expect(result).toContain("filename*=UTF-8''caf%C3%A9%20r%C3%A9sum%C3%A9-");
   });
 
   it("should use fallback when name is null", () => {

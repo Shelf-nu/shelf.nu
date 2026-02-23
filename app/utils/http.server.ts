@@ -300,7 +300,7 @@ export function buildContentDisposition(
       .trim() || `${fallback}${suffix}-${timestamp}.csv`;
 
   // RFC 5987 encoded version for modern browsers
-  const encodedName = encodeURIComponent(fullName).replace(/%20/g, " ");
+  const encodedName = encodeURIComponent(fullName);
 
   return `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
 }

@@ -184,13 +184,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getWorkingHoursForOrganization(currentOrganization.id),
     ]);
 
-    const workingHours = {
-      ...workingHoursRaw,
-      overrides: workingHoursRaw.overrides.map((o) => ({
-        ...o,
-        date: o.date.toISOString(),
-      })),
-    };
+    const workingHours = workingHoursRaw;
 
     return data(
       payload({
