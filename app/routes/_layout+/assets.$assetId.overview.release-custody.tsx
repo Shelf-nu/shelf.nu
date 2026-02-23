@@ -5,8 +5,8 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAsset } from "~/modules/asset/service.server";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -37,67 +37,48 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.custody,
     });
 
-    const custody = await db.custody
-      .findUnique({
-        where: { assetId },
-        select: {
-          custodian: {
-            select: {
-              id: true,
-              name: true,
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
-                  email: true,
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+      request,
+      include: {
+        custody: {
+          select: {
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                user: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    profilePicture: true,
+                    email: true,
+                  },
                 },
               },
             },
           },
         },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching custody. Please try again or contact support.",
-          additionalData: { userId, assetId },
-          label: "Assets",
-        });
-      });
+      },
+    });
 
-    if (!custody) {
+    if (!asset.custody) {
       return redirect(`/assets/${assetId}`);
     }
 
-    const asset = await db.asset
-      .findUniqueOrThrow({
-        where: { id: params.assetId as string },
-        select: {
-          title: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "We couldn't find the asset you were looking for.",
-          additionalData: { userId, assetId },
-          label: "Assets",
-        });
-      });
-
     return payload({
       showModal: true,
-      custody,
-      asset,
+      custody: asset.custody,
+      asset: { title: asset.title },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
@@ -117,12 +98,14 @@ export const action = async ({
   });
 
   try {
-    const { role, organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { role, organizationId, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      }
+    );
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const user = await getUserByID(userId, {
@@ -133,25 +116,33 @@ export const action = async ({
       } satisfies Prisma.UserSelect,
     });
 
-    const custodyRecord = await db.custody.findUnique({
-      where: { assetId },
-      select: {
-        custodian: {
+    const assetWithCustody = await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
+      request,
+      include: {
+        custody: {
           select: {
-            id: true,
-            name: true,
-            userId: true,
-            user: {
+            custodian: {
               select: {
                 id: true,
-                firstName: true,
-                lastName: true,
+                name: true,
+                userId: true,
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                  },
+                },
               },
             },
           },
         },
       },
     });
+    const custodyRecord = assetWithCustody.custody;
 
     if (isSelfService) {
       if (custodyRecord?.custodian?.userId !== user.id) {
