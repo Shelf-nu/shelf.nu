@@ -289,12 +289,16 @@ export async function uploadFile(
     // Return just the path string for backward compatibility
     return data.path;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while uploading the file. Please try again or contact support.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
       additionalData: { filename, contentType, bucketName },
       label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
     });
   }
 }
@@ -402,14 +406,39 @@ export async function parseFileFormData({
       });
     }
 
+    const nestedShelfError = findShelfErrorInCause(cause);
+
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
+      message: nestedShelfError
+        ? nestedShelfError.message
         : "Something went wrong while uploading the file. Please try again or contact support.",
+      title: nestedShelfError?.title,
       label,
+      shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
     });
   }
+}
+
+/**
+ * Recursively walks the `.cause` chain to find a `ShelfError`.
+ *
+ * Libraries like `@remix-run/form-data-parser` wrap errors in their own
+ * `FormDataParseError`, hiding the nested ShelfError. This helper lets
+ * callers recover the original message, `title`, and `shouldBeCaptured` flag.
+ */
+export function findShelfErrorInCause(error: unknown): ShelfError | null {
+  if (isLikeShelfError(error)) {
+    return error;
+  }
+
+  const cause = (error as { cause?: unknown })?.cause;
+
+  if (!cause) {
+    return null;
+  }
+
+  return findShelfErrorInCause(cause);
 }
 
 /**
