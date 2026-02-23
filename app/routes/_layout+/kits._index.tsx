@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
-import { KitStatus } from "@prisma/client";
+import { KitStatus, OrganizationRoles } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -71,12 +71,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, canSeeAllCustody, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const searchParams = getCurrentSearchParams(request);
     const hasActiveFilters = computeHasActiveFilters(searchParams);
@@ -162,6 +163,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
+    const currentUserTeamMember = isSelfService
+      ? teamMembers.find((tm) => tm.userId === userId) ?? null
+      : null;
+
     if (totalPages !== 0 && page > totalPages) {
       return redirect("/kits");
     }
@@ -191,6 +196,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         searchFieldLabel: "Search kits",
         teamMembers,
         totalTeamMembers,
+        currentUserTeamMember,
         searchFieldTooltip: {
           title: "Search your kits database",
           text: "Search kits based on name or description.",

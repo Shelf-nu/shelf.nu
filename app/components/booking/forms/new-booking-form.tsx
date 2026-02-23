@@ -55,7 +55,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const hints = useHints();
 
   // Fetch working hours for validation
-  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 

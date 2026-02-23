@@ -1405,6 +1405,7 @@ export async function changeUserRole({
         message:
           "Cannot assign Owner role directly. Use ownership transfer instead.",
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1421,6 +1422,7 @@ export async function changeUserRole({
         message: "User is not a member of this organization",
         additionalData: { userId, organizationId },
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1432,6 +1434,7 @@ export async function changeUserRole({
         message:
           "Cannot change the Owner's role. Use ownership transfer instead.",
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1446,6 +1449,7 @@ export async function changeUserRole({
         message: "Only the workspace owner can promote users to Administrator.",
         label,
         status: 403,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1460,6 +1464,7 @@ export async function changeUserRole({
         message: "Only the workspace owner can change an Administrator's role.",
         label,
         status: 403,
+        shouldBeCaptured: false,
       });
     }
 

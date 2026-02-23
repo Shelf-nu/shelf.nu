@@ -30,7 +30,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
     value: tag.id,
   }));
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
   const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
