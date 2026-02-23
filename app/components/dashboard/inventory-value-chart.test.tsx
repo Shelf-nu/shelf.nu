@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { useLoaderData } from "react-router";
+import { MemoryRouter, useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InventoryValueChart from "./inventory-value-chart";
@@ -23,12 +23,8 @@ describe("InventoryValueChart", () => {
 
   it("stacks the progress circle and metrics responsively to avoid overflow", () => {
     const loaderData = {
-      assets: [
-        { id: "asset-1", valuation: 1000 },
-        { id: "asset-2", valuation: 5000 },
-        { id: "asset-3", valuation: null },
-      ],
       totalAssets: 3,
+      valueKnownAssets: 2,
       totalValuation: 123456789012.34,
       currency: "USD",
       locale: "en-US",
@@ -36,7 +32,11 @@ describe("InventoryValueChart", () => {
 
     useLoaderDataMock.mockReturnValue(loaderData as any);
 
-    render(<InventoryValueChart />);
+    render(
+      <MemoryRouter>
+        <InventoryValueChart />
+      </MemoryRouter>
+    );
 
     const layout = screen.getByTestId("inventory-value-layout");
 
@@ -54,6 +54,6 @@ describe("InventoryValueChart", () => {
     const valueElement = screen.getByText(expectedValue);
 
     expect(valueElement).toBeInTheDocument();
-    expect(valueElement).toHaveClass("break-words");
+    expect(valueElement).toHaveClass("break-all");
   });
 });
