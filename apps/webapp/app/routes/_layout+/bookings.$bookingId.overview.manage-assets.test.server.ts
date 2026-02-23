@@ -124,6 +124,7 @@ describe("manage-assets route validation", () => {
       canSeeAllBookings: false,
       canSeeAllCustody: false,
       canUseBarcodes: false,
+      canUseAudits: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({

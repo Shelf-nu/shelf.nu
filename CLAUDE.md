@@ -115,6 +115,38 @@ shelf/
 - **UI Primitives**: Radix UI components with Tailwind styling
 - **Date Display**: Always use the `DateS` component (`apps/webapp/app/components/shared/date.tsx`) for displaying dates in the UI. Do not use raw `toLocaleDateString()` or other custom date formatting.
 
+### Email Templates
+
+All HTML emails must follow the design established in
+`app/emails/stripe/audit-trial-welcome.tsx`:
+
+- **React Email components**: `Html`, `Head`, `Container`, `Text`, `Button`, `Link`
+- **LogoForEmail** at the top of every email
+- **Shared styles** from `app/emails/styles.ts` (`styles.p`, `styles.h2`, `styles.button`, `styles.li`)
+- **Personalized greeting** with user's first name: `Hey {firstName},`
+- **CTA buttons** using `styles.button` (not bare links)
+- **Info/warning boxes**: yellow background `#FFF8E1` + border `#FFE082` for important notices
+- **Both HTML and plain text exports**: HTML via `render()`, plain text as template literal
+- **Send wrapper function** with `try/catch` + `Logger.error` + `ShelfError`
+- **Closing**: `The Shelf Team`
+
+### Disabled State for Form Submissions
+
+Always use the `useDisabled` hook from `~/hooks/use-disabled` to disable buttons during form submission. Do **not** use `useNavigation` directly to check `navigation.state`.
+
+```typescript
+import { useDisabled } from "~/hooks/use-disabled";
+
+// Inside component:
+const disabled = useDisabled();
+// For fetcher forms, pass the fetcher:
+const disabled = useDisabled(fetcher);
+
+<Button type="submit" disabled={disabled}>
+  {disabled ? "Saving..." : "Save"}
+</Button>
+```
+
 ### Deprecated Components
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.

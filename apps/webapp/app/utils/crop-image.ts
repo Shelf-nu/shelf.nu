@@ -18,7 +18,9 @@ export const cropImage = async (
     if (!detectedFormat) {
       throw new ShelfError({
         cause: null,
-        message: "Unsupported image format",
+        title: "Unsupported image format",
+        message:
+          "The uploaded image format is not supported. Please upload a JPEG, PNG, GIF, WebP, or BMP image.",
         additionalData: { size: buffer.length },
         label: "Crop image",
         shouldBeCaptured: false,

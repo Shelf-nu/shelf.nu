@@ -36,6 +36,7 @@
       "@docsearch/react>react-dom": "19.2.1",
       "@tremor/react>react": "19.2.1",
       "@tremor/react>react-dom": "19.2.1",
+      "@tremor/react>react-day-picker": "^9.12.0",
       "cross-spawn": "~7.0.6",
       "p-map": "4.0.0"
     }

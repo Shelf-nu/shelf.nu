@@ -67,12 +67,18 @@ const InputOTPSeparator = React.forwardRef<
 ));
 InputOTPSeparator.displayName = "InputOTPSeparator";
 
-function ShelfOTP({ error }: { error?: string }) {
+function ShelfOTP({
+  error,
+  onComplete,
+}: {
+  error?: string;
+  onComplete?: (otp: string) => void;
+}) {
   return (
     <div>
       <label className={tw("relative flex flex-col")} htmlFor={"otp"}>
         <InnerLabel required>Code</InnerLabel>
-        <InputOTP maxLength={6} name="otp" required>
+        <InputOTP maxLength={6} name="otp" required onComplete={onComplete}>
           <InputOTPGroup className="w-full">
             <InputOTPSlot index={0} />
             <InputOTPSlot index={1} />

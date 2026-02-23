@@ -6,6 +6,10 @@ import {
   Container,
   Heading,
 } from "@react-email/components";
+import {
+  BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT,
+  type ReservationEmailAsset,
+} from "~/modules/booking/constants";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
@@ -24,6 +28,8 @@ interface Props {
   isAdminEmail?: boolean;
   cancellationReason?: string;
   changes?: string[];
+  /** Only provided for reservation emails */
+  assets?: ReservationEmailAsset[];
 }
 
 export function BookingUpdatesEmailTemplate({
@@ -35,6 +41,7 @@ export function BookingUpdatesEmailTemplate({
   isAdminEmail = false,
   cancellationReason,
   changes,
+  assets,
 }: Props) {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -92,6 +99,82 @@ export function BookingUpdatesEmailTemplate({
             {toDate}
           </p>
         </div>
+
+        {assets && assets.length > 0 && (
+          <div
+            style={{
+              textAlign: "left",
+              margin: "24px 32px",
+              backgroundColor: "#F9FAFB",
+              borderRadius: "8px",
+              border: "1px solid #EAECF0",
+              padding: "16px 20px",
+            }}
+          >
+            <p
+              style={{
+                ...styles.p,
+                fontWeight: "600",
+                color: "#101828",
+                marginBottom: "12px",
+              }}
+            >
+              Booked items:
+            </p>
+            {assets
+              .slice(0, BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT)
+              .map((asset) => (
+                <div
+                  key={asset.id}
+                  style={{
+                    padding: "6px 0",
+                    borderBottom: "1px solid #EAECF0",
+                  }}
+                >
+                  <span
+                    style={{
+                      ...styles.p,
+                      margin: "0",
+                      color: "#101828",
+                      fontWeight: "500",
+                    }}
+                  >
+                    {asset.title}
+                  </span>
+                  {asset.category?.name && (
+                    <span
+                      style={{
+                        ...styles.p,
+                        margin: "0 0 0 8px",
+                        color: "#667085",
+                        fontSize: "13px",
+                      }}
+                    >
+                      · {asset.category.name}
+                    </span>
+                  )}
+                </div>
+              ))}
+            {assets.length > BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT && (
+              <p
+                style={{
+                  ...styles.p,
+                  color: "#667085",
+                  fontSize: "13px",
+                  marginTop: "8px",
+                }}
+              >
+                and {assets.length - BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT} more —{" "}
+                <a
+                  href={`${SERVER_URL}/bookings/${booking.id}?orgId=${booking.organizationId}`}
+                  style={{ color: "#EF6820" }}
+                >
+                  View full booking
+                </a>
+              </p>
+            )}
+          </div>
+        )}
 
         {cancellationReason && (
           <div
@@ -188,6 +271,7 @@ export const bookingUpdatesTemplateString = ({
   isAdminEmail = false,
   cancellationReason,
   changes,
+  assets,
 }: Props) =>
   render(
     <BookingUpdatesEmailTemplate
@@ -199,5 +283,6 @@ export const bookingUpdatesTemplateString = ({
       isAdminEmail={isAdminEmail}
       cancellationReason={cancellationReason}
       changes={changes}
+      assets={assets}
     />
   );

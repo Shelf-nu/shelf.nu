@@ -16,18 +16,22 @@ const {
   mockCustomInstallCustomers: { value: "" as string | undefined },
 }));
 
-vi.mock("~/utils/env", () => ({
-  get STRIPE_WEBHOOK_ENDPOINT_SECRET() {
-    return mockStripeWebhookEndpointSecret.value;
-  },
-  get ADMIN_EMAIL() {
-    return mockAdminEmail.value;
-  },
-  get CUSTOM_INSTALL_CUSTOMERS() {
-    return mockCustomInstallCustomers.value;
-  },
-  SERVER_URL: "https://app.shelf.nu",
-}));
+vi.mock(import("~/utils/env"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    get STRIPE_WEBHOOK_ENDPOINT_SECRET() {
+      return mockStripeWebhookEndpointSecret.value;
+    },
+    get ADMIN_EMAIL() {
+      return mockAdminEmail.value;
+    },
+    get CUSTOM_INSTALL_CUSTOMERS() {
+      return mockCustomInstallCustomers.value;
+    },
+    SERVER_URL: "https://app.shelf.nu",
+  };
+});
 
 // why: Stripe SDK makes external API calls; we need a controllable
 // constructEventAsync and the real StripeSignatureVerificationError class

@@ -595,6 +595,75 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
+
+    /**
+     * Handle delete before fetching booking info.
+     * The booking may already be deleted (double-click, concurrent request),
+     * so we must not call findUniqueOrThrow before this.
+     */
+    if (intent === "delete") {
+      if (isSelfServiceOrBase) {
+        /**
+         * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
+         * They have delete permissions but shouldnt be able to delete other people's bookings
+         * Practically they should not be able to even view/access another booking but this is just an extra security measure
+         */
+        const b = await getBooking({ id, organizationId, request });
+        validateBookingOwnership({
+          booking: b,
+          userId,
+          role,
+          action: "delete",
+        });
+
+        // BASE users can only delete DRAFT bookings
+        if (
+          role === OrganizationRoles.BASE &&
+          b.status !== BookingStatus.DRAFT
+        ) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+      }
+
+      const deletedBooking = await deleteBooking(
+        { id, organizationId },
+        getClientHint(request)
+      );
+
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const deletedBookingLink = wrapLinkForNote(
+        `/bookings/${deletedBooking.id}`,
+        deletedBooking.name.trim()
+      );
+      await createNotes({
+        content: `${actor} deleted booking ${deletedBookingLink}.`,
+        type: "UPDATE",
+        userId: userId,
+        assetIds: deletedBooking.assets.map((a) => a.id),
+      });
+
+      sendNotification({
+        title: "Booking deleted",
+        message: "Your booking has been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+
+      return redirect("/bookings", {
+        headers,
+      });
+    }
+
     // Form data is already extracted above and will be reused
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
@@ -840,68 +909,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           userId,
           authSession,
-        });
-      }
-      case "delete": {
-        if (isSelfServiceOrBase) {
-          /**
-           * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
-           * They have delete permissions but shouldnt be able to delete other people's bookings
-           * Practically they should not be able to even view/access another booking but this is just an extra security measure
-           */
-          const b = await getBooking({ id, organizationId, request });
-          validateBookingOwnership({
-            booking: b,
-            userId,
-            role,
-            action: "delete",
-          });
-
-          // BASE users can only delete DRAFT bookings
-          if (
-            role === OrganizationRoles.BASE &&
-            b.status !== BookingStatus.DRAFT
-          ) {
-            throw new ShelfError({
-              cause: null,
-              message:
-                "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
-              status: 403,
-              label: "Booking",
-            });
-          }
-        }
-
-        const deletedBooking = await deleteBooking(
-          { id, organizationId },
-          getClientHint(request)
-        );
-
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
-        const deletedBookingLink = wrapLinkForNote(
-          `/bookings/${deletedBooking.id}`,
-          deletedBooking.name.trim()
-        );
-        await createNotes({
-          content: `${actor} deleted booking ${deletedBookingLink}.`,
-          type: "UPDATE",
-          userId: userId,
-          assetIds: deletedBooking.assets.map((a) => a.id),
-        });
-
-        sendNotification({
-          title: "Booking deleted",
-          message: "Your booking has been deleted successfully",
-          icon: { name: "trash", variant: "error" },
-          senderId: userId,
-        });
-
-        return redirect("/bookings", {
-          headers,
         });
       }
       case "removeAsset": {
