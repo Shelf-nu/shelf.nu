@@ -201,6 +201,10 @@ export async function simpleModeLoader({
       : Promise.resolve(null),
   ]);
 
+  const currentUserTeamMember = isSelfService
+    ? teamMembers.find((tm) => tm.userId === userId) ?? null
+    : null;
+
   assets = await updateAssetsWithBookingCustodians(assets);
 
   const header: HeaderData = {
@@ -263,6 +267,7 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
+      currentUserTeamMember,
       teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
       filters,
       organizationId,
@@ -302,8 +307,8 @@ export async function advancedModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const isSelfServiceOrBase = isSelfService || role === OrganizationRoles.BASE;
 
   /** Parse filters */
   const {
@@ -442,6 +447,10 @@ export async function advancedModeLoader({
     }),
   ]);
 
+  const currentUserTeamMember = isSelfService
+    ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
+    : null;
+
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -503,6 +512,7 @@ export async function advancedModeLoader({
 
       customFields,
       ...teamMembersData,
+      currentUserTeamMember,
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       categories,

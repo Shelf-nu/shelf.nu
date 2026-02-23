@@ -45,7 +45,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     if (role === OrganizationRoles.SELF_SERVICE) {
       const custodies = await db.custody.findMany({
-        where: { assetId: { in: assetIds } },
+        where: {
+          assetId: { in: assetIds },
+          asset: { organizationId },
+        },
         select: { custodian: { select: { id: true, userId: true } } },
       });
 

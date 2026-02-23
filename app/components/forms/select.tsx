@@ -49,7 +49,7 @@ const SelectContent = React.forwardRef<
           ref?.addEventListener("touchend", (e) => e.preventDefault())
         }
         className={tw(
-          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
+          " relative z-[200] overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className
         )}
         {...props}

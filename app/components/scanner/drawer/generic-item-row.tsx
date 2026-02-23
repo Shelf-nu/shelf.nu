@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Prisma } from "@prisma/client";
 import { motion } from "framer-motion";
 import { useSetAtom } from "jotai";
@@ -68,6 +68,12 @@ type GenericItemRowProps<T> = {
    * The strings inside the array should be a json representation of prisma's include/select syntax,
    */
   kitExtraInclude?: Prisma.KitInclude;
+  /**
+   * Optional additional search params to be sent to the get-scanned-item endpoint
+   */
+  searchParams?: Record<string, string>;
+  /** Optional className to apply to the row wrapper (Tr) */
+  className?: string;
 };
 
 /**
@@ -82,8 +88,14 @@ export function GenericItemRow<T>({
   renderLoading,
   assetExtraInclude,
   kitExtraInclude,
+  searchParams: additionalSearchParams,
+  className: rowClassName,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
+
+  // Track if item had data on initial mount (restored from DB)
+  // to skip entrance animation and prevent list jumping on route changes
+  const hadDataOnMountRef = useRef(!!item?.data);
 
   // Determine if we should fetch - only if we don't already have data or error
   const shouldFetch = !(item && (item.data || item.error));
@@ -95,6 +107,12 @@ export function GenericItemRow<T>({
   // Add kit extra include if provided
   if (kitExtraInclude) {
     searchParams.append("kitExtraInclude", JSON.stringify(kitExtraInclude));
+  }
+  // Add any additional search params
+  if (additionalSearchParams) {
+    Object.entries(additionalSearchParams).forEach(([key, value]) => {
+      searchParams.append(key, value);
+    });
   }
 
   // Determine which API to call based on codeType
@@ -176,7 +194,7 @@ export function GenericItemRow<T>({
     item?.error || (fetchError ? "Failed to fetch item" : undefined);
 
   return (
-    <Tr>
+    <Tr skipEntrance={hadDataOnMountRef.current} className={rowClassName}>
       <Td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           {shouldShowItem
@@ -190,6 +208,13 @@ export function GenericItemRow<T>({
           variant="ghost"
           icon="trash"
           onClick={() => onRemove(qrId)}
+          aria-label={
+            item?.data && "title" in item.data
+              ? `Remove scanned item: ${item.data.title}`
+              : item?.data && "name" in item.data
+              ? `Remove scanned item: ${item.data.name}`
+              : "Remove scanned item"
+          }
         />
       </Td>
     </Tr>
@@ -197,14 +222,26 @@ export function GenericItemRow<T>({
 }
 
 // Animation wrapper for rows
-export function Tr({ children }: { children: ReactNode }) {
+export function Tr({
+  children,
+  skipEntrance = false,
+  className,
+}: {
+  children: ReactNode;
+  /** Skip entrance animation for items restored from DB to prevent jumping on route changes */
+  skipEntrance?: boolean;
+  className?: string;
+}) {
   return (
     <motion.tr
-      initial={{ opacity: 0, y: -80 }}
+      initial={skipEntrance ? false : { opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       exit={{ opacity: 0 }}
-      className="h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0"
+      className={tw(
+        "h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0",
+        className
+      )}
       style={{
         transform: "translateZ(0)",
         willChange: "transform",

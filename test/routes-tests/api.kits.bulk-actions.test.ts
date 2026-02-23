@@ -223,7 +223,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
       createActionArgs({ request })
     )) as unknown as Response;
 
-    expect(response.status).toBe(500); // ShelfError defaults to 500
+    expect(response.status).toBe(403);
   });
 
   it("allows self-service users to assign custody to themselves", async () => {
