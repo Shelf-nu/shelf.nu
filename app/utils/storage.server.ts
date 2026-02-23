@@ -84,7 +84,7 @@ export async function createSignedUrl({
       }
 
       // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
-      // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
+      // as StorageUnknownError with a JSON parse failure. Retry before surfacing it to keep
       // transient CDN hiccups from bubbling up as user-facing ShelfErrors.
       const isHtmlError = isSupabaseHtmlError(error);
       const isFetchFailed = isSupabaseFetchFailedError(error);
@@ -855,7 +855,7 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
 /**
  * Supabase can sporadically return HTML error pages (e.g., CDN/edge 50x) that the storage
  * client surfaces as StorageUnknownError due to JSON parsing. Detect that shape so callers
- * can retry once instead of immediately failing user-visible flows.
+ * can retry instead of immediately failing user-visible flows.
  */
 function isSupabaseHtmlError(error: unknown) {
   if (!error || typeof error !== "object") {

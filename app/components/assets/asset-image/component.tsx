@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 import { useFetcher } from "react-router";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
@@ -27,7 +27,10 @@ export const AssetImage = ({
   const [isImageError, setIsImageError] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // Track if we've already tried refreshing to prevent loops
+  // Track if we've already tried refreshing to prevent loops.
+  // The ref is the authoritative guard (readable from stale closures);
+  // state drives the cache-buster in the render output.
+  const hasAttemptedRefreshRef = useRef(false);
   const [hasAttemptedRefresh, setHasAttemptedRefresh] = useState(false);
 
   const { id: assetId, thumbnailImage } = asset;
@@ -73,7 +76,8 @@ export const AssetImage = ({
 
   // Safe refresh function that prevents loops
   const refreshImage = useCallback(() => {
-    if (assetId && mainImage && !hasAttemptedRefresh) {
+    if (assetId && mainImage && !hasAttemptedRefreshRef.current) {
+      hasAttemptedRefreshRef.current = true;
       setHasAttemptedRefresh(true);
       void imageFetcher.submit(
         { assetId, mainImage },
@@ -83,11 +87,12 @@ export const AssetImage = ({
         }
       );
     }
-  }, [assetId, mainImage, imageFetcher, hasAttemptedRefresh]);
+  }, [assetId, mainImage, imageFetcher]);
 
   // Safe thumbnail generator that prevents loops
   const generateThumbnail = useCallback(() => {
-    if (assetId && !hasAttemptedRefresh) {
+    if (assetId && !hasAttemptedRefreshRef.current) {
+      hasAttemptedRefreshRef.current = true;
       setHasAttemptedRefresh(true);
       void thumbnailFetcher.submit(
         { assetId },
@@ -97,7 +102,7 @@ export const AssetImage = ({
         }
       );
     }
-  }, [assetId, thumbnailFetcher, hasAttemptedRefresh]);
+  }, [assetId, thumbnailFetcher]);
 
   const handleImageLoad = () => {
     // Successfully loaded, clear both loading and error states
@@ -111,7 +116,7 @@ export const AssetImage = ({
     setIsLoading(false);
 
     // Only set error state and refresh once
-    if (!isImageError && !hasAttemptedRefresh) {
+    if (!isImageError && !hasAttemptedRefreshRef.current) {
       setIsImageError(true);
       refreshImage();
     }
@@ -127,12 +132,9 @@ export const AssetImage = ({
 
   // Check for image expiration and generate thumbnail on component mount only
   useEffect(() => {
-    // Reset refresh attempt state when component mounts
-    setHasAttemptedRefresh(false);
-
     // Stagger refresh requests with a random delay to avoid
     // overwhelming Supabase with concurrent requests (429 errors)
-    let timerId: ReturnType<typeof setTimeout> | undefined;
+    const timerIds: ReturnType<typeof setTimeout>[] = [];
     const jitter = Math.random() * 3000;
 
     // Check for expiration
@@ -141,10 +143,12 @@ export const AssetImage = ({
         const now = new Date();
         const expiration = new Date(mainImageExpiration);
         // Only refresh if it's actually expired and we haven't tried yet
-        if (now > expiration && !hasAttemptedRefresh) {
-          timerId = setTimeout(() => {
-            refreshImage();
-          }, jitter);
+        if (now > expiration && !hasAttemptedRefreshRef.current) {
+          timerIds.push(
+            setTimeout(() => {
+              refreshImage();
+            }, jitter)
+          );
         }
       } catch (e) {
         // If date parsing fails, don't refresh
@@ -159,17 +163,17 @@ export const AssetImage = ({
       mainImage &&
       !thumbnailImage &&
       !dynamicThumbnailImage &&
-      !hasAttemptedRefresh
+      !hasAttemptedRefreshRef.current
     ) {
-      timerId = setTimeout(() => {
-        generateThumbnail();
-      }, jitter);
+      timerIds.push(
+        setTimeout(() => {
+          generateThumbnail();
+        }, jitter)
+      );
     }
 
     return () => {
-      if (timerId !== undefined) {
-        clearTimeout(timerId);
-      }
+      timerIds.forEach((id) => clearTimeout(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array to run only on mount
