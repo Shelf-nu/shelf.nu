@@ -39,19 +39,32 @@ export default function KitImage({
     image ?? updatedKitImage ?? "/static/images/asset-placeholder.jpg";
 
   useEffect(function refreshImageIfExpired() {
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+
     if (image && imageExpiration) {
       const now = new Date();
       const expiration = new Date(imageExpiration);
       if (now > expiration) {
-        void fetcher.submit(
-          { kitId, image },
-          {
-            method: "post",
-            action: "/api/kit/refresh-image",
-          }
-        );
+        // Stagger refresh requests with a random delay to avoid
+        // overwhelming Supabase with concurrent requests (429 errors)
+        const jitter = Math.random() * 3000;
+        timerId = setTimeout(() => {
+          void fetcher.submit(
+            { kitId, image },
+            {
+              method: "post",
+              action: "/api/kit/refresh-image",
+            }
+          );
+        }, jitter);
       }
     }
+
+    return () => {
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

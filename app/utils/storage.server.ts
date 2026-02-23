@@ -62,7 +62,7 @@ export async function createSignedUrl({
   const normalizedFilename = filename.startsWith("/")
     ? filename.substring(1)
     : filename;
-  const maxAttempts = 2;
+  const maxAttempts = 3;
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -123,6 +123,47 @@ export async function createSignedUrl({
             errorType: isHtmlError
               ? "persistent_html_error"
               : "persistent_fetch_failed",
+          },
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Supabase returns 429 when the storage API is overwhelmed.
+      // Use exponential backoff to give the API time to recover.
+      if (isSupabaseRateLimitError(error)) {
+        if (attempt < maxAttempts) {
+          const backoffMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message:
+                "Supabase rate limit hit while creating a signed URL. Retrying with backoff.",
+              additionalData: {
+                filename: normalizedFilename,
+                bucketName,
+                attempt,
+                backoffMs,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+          await delay(backoffMs);
+          continue;
+        }
+
+        // All retries exhausted - this is a transient rate-limit issue
+        // that shouldn't spam Sentry
+        throw new ShelfError({
+          cause: error,
+          message:
+            "Supabase rate limit exceeded. Please try again in a moment.",
+          additionalData: {
+            filename: normalizedFilename,
+            bucketName,
+            attempts: maxAttempts,
+            errorType: "rate_limit_exceeded",
           },
           label,
           shouldBeCaptured: false,
@@ -872,4 +913,34 @@ function isSupabaseFetchFailedError(error: unknown) {
       error.__isStorageError === true);
 
   return isFetchFailed && isStorageUnknown;
+}
+
+/**
+ * Supabase returns HTTP 429 when too many requests hit the storage API.
+ * The client surfaces this as a StorageApiError. Detect it so callers
+ * can back off and retry instead of immediately failing.
+ */
+export function isSupabaseRateLimitError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const status =
+    "status" in error && typeof error.status === "number" ? error.status : 0;
+  const statusCode =
+    "statusCode" in error && typeof error.statusCode === "string"
+      ? error.statusCode
+      : "";
+
+  const isRateLimitStatus = status === 429 || statusCode === "429";
+  const isRateLimitMessage = message.toLowerCase().includes("too many");
+  const isStorageApiError = name === "StorageApiError";
+
+  return isStorageApiError && (isRateLimitStatus || isRateLimitMessage);
 }

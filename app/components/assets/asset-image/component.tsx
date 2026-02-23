@@ -130,6 +130,11 @@ export const AssetImage = ({
     // Reset refresh attempt state when component mounts
     setHasAttemptedRefresh(false);
 
+    // Stagger refresh requests with a random delay to avoid
+    // overwhelming Supabase with concurrent requests (429 errors)
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    const jitter = Math.random() * 3000;
+
     // Check for expiration
     if (withPreview && mainImage && mainImageExpiration) {
       try {
@@ -137,7 +142,9 @@ export const AssetImage = ({
         const expiration = new Date(mainImageExpiration);
         // Only refresh if it's actually expired and we haven't tried yet
         if (now > expiration && !hasAttemptedRefresh) {
-          refreshImage();
+          timerId = setTimeout(() => {
+            refreshImage();
+          }, jitter);
         }
       } catch (e) {
         // If date parsing fails, don't refresh
@@ -154,8 +161,16 @@ export const AssetImage = ({
       !dynamicThumbnailImage &&
       !hasAttemptedRefresh
     ) {
-      generateThumbnail();
+      timerId = setTimeout(() => {
+        generateThumbnail();
+      }, jitter);
     }
+
+    return () => {
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array to run only on mount
 
