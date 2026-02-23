@@ -32,7 +32,14 @@ export const error404AdditionalDataSchema = z.discriminatedUnion("model", [
   /* For common and general use case */
   baseAdditionalDataSchema.extend({
     /** Type of resource that wasn't found */
-    model: z.enum(["asset", "kit", "location", "booking", "customField"]),
+    model: z.enum([
+      "asset",
+      "kit",
+      "location",
+      "booking",
+      "customField",
+      "audit",
+    ]),
     /** Organization context where the resource wasn't found */
     organization: organizationSchema,
   }),

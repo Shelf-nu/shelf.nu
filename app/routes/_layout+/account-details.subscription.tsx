@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { CustomTierLimit, Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -7,6 +8,7 @@ import type {
 import { data, redirect, Link, useLoaderData } from "react-router";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
+import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { CrispButton } from "~/components/marketing/crisp";
 import { Button } from "~/components/shared/button";
 
@@ -18,20 +20,23 @@ import { InvoiceHistory } from "~/components/subscription/invoice-history";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
+import { db } from "~/database/db.server";
+import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { useUserData } from "~/hooks/use-user-data";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
-
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
   getStripePricesAndProducts,
   createStripeCheckoutSession,
+  createTeamTrialSubscription,
+  generateReturnUrl,
   getCustomerOpenInvoices,
   getCustomerPaidInvoices,
   getCustomerUpcomingInvoices,
@@ -169,12 +174,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    const { priceId, intent, shelfTier } = parseData(
+    const { priceId, intent, shelfTier, auditPriceId } = parseData(
       await request.formData(),
       z.object({
         priceId: z.string(),
         intent: z.enum(["trial", "subscribe"]),
         shelfTier: z.enum(["tier_1", "tier_2"]),
+        auditPriceId: z.string().optional(),
       })
     );
 
@@ -183,6 +189,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
+        usedFreeTrial: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -193,13 +200,60 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
     const domainUrl = getDomainUrl(request);
 
+    if (intent === "trial") {
+      // Prevent duplicate trials — UI hides the button but this
+      // guards against double-submits and direct POST requests
+      if (user.usedFreeTrial) {
+        throw new ShelfError({
+          cause: null,
+          message: "You have already used your free trial.",
+          label: "Subscription",
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
+      // Create subscription directly via Stripe API — no checkout needed
+      await createTeamTrialSubscription({
+        customerId,
+        priceId,
+        userId,
+        auditPriceId,
+      });
+
+      // Update user tier and mark trial as used
+      await db.user.update({
+        where: { id: userId },
+        data: { tierId: shelfTier, usedFreeTrial: true },
+        select: { id: true },
+      });
+
+      // Send welcome email (fire-and-forget)
+      void sendTeamTrialWelcomeEmail({
+        firstName: user.firstName,
+        email,
+      });
+
+      const returnUrl = await generateReturnUrl({
+        userId,
+        shelfTier,
+        intent,
+        domainUrl,
+        hasAuditAddon: !!auditPriceId,
+      });
+
+      return redirect(returnUrl);
+    }
+
+    // intent === "subscribe" — go through Stripe Checkout as before
     const stripeRedirectUrl = await createStripeCheckoutSession({
       userId,
       priceId,
       domainUrl,
-      customerId: customerId,
+      customerId,
       intent,
       shelfTier,
+      auditPriceId,
     });
 
     return redirect(stripeRedirectUrl);
@@ -240,6 +294,19 @@ export default function SubscriptionPage() {
     isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
 
   const hasNoSubscription = customer?.subscriptions.data.length === 0;
+  const [pricingOpen, setPricingOpen] = useState(false);
+
+  /** Check if user has a workspace plan (not just addon subscriptions) */
+  const hasWorkspacePlan = subscriptionsWithProducts.some((sub) =>
+    sub.items.data.some((item) => {
+      const product = item.price?.product;
+      if (product && typeof product === "object" && "metadata" in product) {
+        const tier = product.metadata?.shelf_tier;
+        return tier === "tier_1" || tier === "tier_2";
+      }
+      return false;
+    })
+  );
 
   /**
    * This handles the case when there is no subscription and custom tier is set.
@@ -282,17 +349,67 @@ export default function SubscriptionPage() {
           <UnpaidInvoiceWarning invoices={openInvoices} />
         ) : null}
 
-        {hasNoSubscription ? (
-          <div className="mb-8 mt-3">
-            <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                <InfoIcon />
-              </div>
-              <p className="text-[14px] font-medium text-gray-700">
-                You’re currently using the{" "}
-                <span className="font-semibold">FREE</span> version of Shelf
-              </p>
-            </div>
+        {!hasWorkspacePlan ? (
+          <div className="mb-8">
+            {hasNoSubscription ? (
+              <>
+                <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
+                  <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                    <InfoIcon />
+                  </div>
+                  <p className="text-[14px] font-medium text-gray-700">
+                    You're currently using the{" "}
+                    <span className="font-semibold">FREE</span> version of Shelf
+                  </p>
+                </div>
+                <h3 className="text-text-lg font-semibold">
+                  Choose your workspace plan
+                </h3>
+                <PricingTable prices={prices} />
+              </>
+            ) : (
+              <>
+                <div className="mb-2 mt-3 flex items-center justify-between gap-3 rounded border border-gray-300 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                      <InfoIcon />
+                    </div>
+                    <div>
+                      <p className="text-[14px] font-medium text-gray-700">
+                        You have no workspace plan
+                      </p>
+                      <p className="text-[13px] text-gray-500">
+                        Upgrade to a workspace plan to unlock the full potential
+                        of Shelf alongside your add-ons.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    className="whitespace-nowrap"
+                    onClick={() => setPricingOpen(true)}
+                  >
+                    View workspace plans
+                  </Button>
+                </div>
+                <DialogPortal>
+                  <Dialog
+                    open={pricingOpen}
+                    onClose={() => setPricingOpen(false)}
+                    className="h-[90vh] w-[90vw]"
+                    title={
+                      <h3 className="text-text-lg font-semibold">
+                        Choose your workspace plan
+                      </h3>
+                    }
+                  >
+                    <div className="p-6">
+                      <PricingTable prices={prices} />
+                    </div>
+                  </Dialog>
+                </DialogPortal>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -305,10 +422,8 @@ export default function SubscriptionPage() {
             <CustomerPortalForm buttonText="Manage subscriptions" />
           )}
         </div>
-        {/* */}
-        {hasNoSubscription ? (
-          <PricingTable prices={prices} />
-        ) : (
+
+        {!hasNoSubscription && (
           <>
             <SubscriptionsOverview
               customer={customer}
