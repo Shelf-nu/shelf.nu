@@ -19,7 +19,7 @@ export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
   const { isSelfService } = useUserRoleHelper();
-  const { teamMembers } = useLoaderData<typeof loader>();
+  const { currentUserTeamMember } = useLoaderData<typeof loader>();
 
   return (
     <BulkUpdateDialogContent
@@ -35,42 +35,44 @@ export default function BulkAssignCustodyDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
-            <DynamicSelect
-              hidden={isSelfService}
-              defaultValue={
-                isSelfService && teamMembers?.length > 0
-                  ? JSON.stringify({
-                      id: teamMembers[0].id,
-                      name: resolveTeamMemberName(teamMembers[0]),
-                    })
-                  : undefined
-              }
-              disabled={disabled || isSelfService}
-              model={{
-                name: "teamMember",
-                queryKey: "name",
-                deletedAt: null,
-              }}
-              fieldName="custodian"
-              contentLabel="Team members"
-              initialDataKey="teamMembers"
-              countKey="totalTeamMembers"
-              placeholder="Select a team member"
-              allowClear
-              closeOnSelect
-              transformItem={(item) => ({
-                ...item,
-                id: JSON.stringify({
-                  id: item.id,
-                  /**
-                   * This is parsed on the server, because we need the name to create the note.
-                   * @TODO This should be refactored to send the name as some metadata, instaed of like this
-                   */
-                  name: resolveTeamMemberName(item),
-                }),
-              })}
-              renderItem={(item) => resolveTeamMemberName(item, true)}
-            />
+            {isSelfService && currentUserTeamMember ? (
+              <input
+                type="hidden"
+                name="custodian"
+                value={JSON.stringify({
+                  id: currentUserTeamMember.id,
+                  name: resolveTeamMemberName(currentUserTeamMember),
+                })}
+              />
+            ) : (
+              <DynamicSelect
+                disabled={disabled}
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                fieldName="custodian"
+                contentLabel="Team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
+                placeholder="Select a team member"
+                allowClear
+                closeOnSelect
+                transformItem={(item) => ({
+                  ...item,
+                  id: JSON.stringify({
+                    id: item.id,
+                    /**
+                     * This is parsed on the server, because we need the name to create the note.
+                     * @TODO This should be refactored to send the name as some metadata, instaed of like this
+                     */
+                    name: resolveTeamMemberName(item),
+                  }),
+                })}
+                renderItem={(item) => resolveTeamMemberName(item, true)}
+              />
+            )}
             {zo.errors.custodian()?.message ? (
               <p className="text-sm text-error-500">
                 {zo.errors.custodian()?.message}

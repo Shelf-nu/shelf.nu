@@ -69,6 +69,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         message: "Self user can only assign custody to themselves only.",
         additionalData: { userId, assetIds, custodian },
         label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
       });
     }
 

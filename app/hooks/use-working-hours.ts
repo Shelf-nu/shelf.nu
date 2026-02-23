@@ -1,9 +1,6 @@
-import useApiQuery from "~/hooks/use-api-query";
+import { useRouteLoaderData } from "react-router";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
-
-interface WorkingHoursApiResponse {
-  workingHours: WorkingHoursData;
-}
+import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 
 export interface UseWorkingHoursResult {
   workingHours: WorkingHoursData | null;
@@ -11,15 +8,14 @@ export interface UseWorkingHoursResult {
   error: string | undefined;
 }
 
-export function useWorkingHours(organizationId: string): UseWorkingHoursResult {
-  const { data, isLoading, error } = useApiQuery<WorkingHoursApiResponse>({
-    api: `/api/${organizationId}/working-hours`,
-    enabled: Boolean(organizationId),
-  });
+export function useWorkingHours(): UseWorkingHoursResult {
+  const workingHours = useRouteLoaderData<LayoutLoaderResponse>(
+    "routes/_layout+/_layout"
+  )?.workingHours as WorkingHoursData | undefined;
 
   return {
-    workingHours: data?.workingHours || null,
-    isLoading,
-    error,
+    workingHours: workingHours ?? null,
+    isLoading: false,
+    error: undefined,
   };
 }
