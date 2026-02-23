@@ -425,7 +425,7 @@ export async function parseFileFormData({
  *
  * Libraries like `@remix-run/form-data-parser` wrap errors in their own
  * `FormDataParseError`, hiding the nested ShelfError. This helper lets
- * callers recover the original message and `shouldBeCaptured` flag.
+ * callers recover the original message, `title`, and `shouldBeCaptured` flag.
  */
 function findShelfErrorInCause(error: unknown): ShelfError | null {
   if (isLikeShelfError(error)) {
