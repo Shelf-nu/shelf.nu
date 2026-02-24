@@ -10,7 +10,7 @@
     "staging:dev": "dotenv -e ../../.env.staging -- vite --host",
     "format": "prettier --write .",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint --ext .js,.jsx,.ts,.tsx .",
-    "setup": "prisma generate",
+    "setup": "prisma generate && prisma migrate deploy",
     "start": "NODE_ENV=production node ./build/server/index.js",
     "start:ci": "dotenv -- npm run start",
     "test": "vitest",

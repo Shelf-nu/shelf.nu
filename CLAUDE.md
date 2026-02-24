@@ -34,18 +34,47 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 
 ### Database
 
-Database commands run via `@shelf/database` (not the webapp):
+All database commands run via the `@shelf/database` package (`packages/database/`). This package owns the Prisma schema, migrations, and client generation. The webapp does **not** manage database concerns directly — it consumes `@shelf/database` as a workspace dependency.
 
-- `pnpm webapp:setup` - Generate Prisma client (webapp-side)
 - `pnpm db:generate` - Generate Prisma client after schema changes
 - `pnpm db:prepare-migration` - Create new database migration
 - `pnpm db:deploy-migration` - Apply migrations and regenerate client
 - `pnpm db:reset` - Reset database (destructive!)
+- `pnpm webapp:setup` - Generate Prisma client + deploy migrations (for initial setup/onboarding)
 
 ### Build & Production
 
 - `pnpm turbo build` - Build all packages and apps for **production**
 - `pnpm webapp:start` - Start production server
+
+## Monorepo Structure
+
+This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in `pnpm-workspace.yaml` and orchestrated by `turbo.json`.
+
+### Apps
+
+| Package         | Path           | Description                                                                                                           |
+| --------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `@shelf/webapp` | `apps/webapp/` | Remix web application — the main product. Contains routes, components, modules (business logic), and integrations.    |
+| `@shelf/docs`   | `apps/docs/`   | Developer documentation site (VitePress). Contains guides on local development, database triggers, architecture, etc. |
+
+### Packages
+
+| Package           | Path                 | Description                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@shelf/database` | `packages/database/` | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package — it does **not** run Prisma commands directly in production. |
+
+### Tooling
+
+| Package                    | Path                  | Description                                                           |
+| -------------------------- | --------------------- | --------------------------------------------------------------------- |
+| `@shelf/typescript-config` | `tooling/typescript/` | Shared `tsconfig` base configurations extended by all other packages. |
+
+### How packages connect
+
+- **Webapp → Database**: The webapp depends on `@shelf/database` (workspace dependency). Its `app/database/db.server.ts` is a thin wrapper that calls `createDatabaseClient()` from `@shelf/database`. All 135+ `~/database/db.server` imports in the webapp work unchanged.
+- **Webapp → Prisma types**: The webapp's `build`, `typecheck`, and `precommit` scripts run `prisma generate` to ensure types are available. In CI, this is done via `pnpm --filter @shelf/database run db:generate`.
+- **Vite config**: The webapp's `vite.config.ts` includes `ssr.noExternal: ["@shelf/database"]` so Vite bundles it correctly, and aliases `.prisma/client/index-browser` for browser builds.
 
 ## Architecture Overview
 
@@ -103,7 +132,9 @@ shelf/
 
 ### Data Layer
 
-- **Prisma Schema**: Located in `packages/database/prisma/schema.prisma`
+- **Prisma Schema**: Located in `packages/database/prisma/schema.prisma` (owned by `@shelf/database`)
+- **Client Generation**: Always run via `@shelf/database` (`pnpm db:generate`), never from the webapp directly
+- **DB Client**: `@shelf/database` exports `createDatabaseClient()` factory; the webapp's `app/database/db.server.ts` is a thin wrapper
 - **Row Level Security (RLS)**: Implemented via Supabase policies
 - **Full-text Search**: PostgreSQL search across assets and bookings
 

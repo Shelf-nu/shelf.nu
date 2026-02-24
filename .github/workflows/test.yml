@@ -105,6 +105,9 @@ jobs:
       - name: 📥 Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: 🔧 Generate Prisma client
+        run: pnpm --filter @shelf/database run db:generate
+
       - name: ⚡ Run vitest
         run: pnpm --filter @shelf/webapp test -- --run
 

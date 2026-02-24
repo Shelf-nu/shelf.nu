@@ -61,7 +61,7 @@ When adding new triggers to the project:
 1. **Create an empty Prisma migration**:
 
    ```bash
-   pnpm --filter @shelf/webapp db:prepare-migration
+   pnpm db:prepare-migration
    ```
 
 2. **Add the trigger SQL** to the migration file:

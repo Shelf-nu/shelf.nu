@@ -99,13 +99,13 @@ After completing the Supabase setup, update your `.env` file with the values fro
 ### 5. Initialize Database 🏗️
 
 ```bash
-npm run setup
+pnpm webapp:setup
 ```
 
 ### 6. Start Development Server 🎉
 
 ```bash
-npm run dev
+pnpm webapp:dev
 ```
 
 Your app will be available at `http://localhost:3000` 🎊
