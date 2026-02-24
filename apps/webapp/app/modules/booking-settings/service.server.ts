@@ -19,6 +19,8 @@ export async function getBookingSettingsForOrganization(
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
         tagsRequired: false,
+        autoArchiveBookings: false,
+        autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
         organizationId,
@@ -29,6 +31,8 @@ export async function getBookingSettingsForOrganization(
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
         tagsRequired: true,
+        autoArchiveBookings: true,
+        autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
       },
@@ -51,6 +55,8 @@ export async function updateBookingSettings({
   tagsRequired,
   maxBookingLength,
   maxBookingLengthSkipClosedDays,
+  autoArchiveBookings,
+  autoArchiveDays,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
 }: {
@@ -59,6 +65,8 @@ export async function updateBookingSettings({
   tagsRequired?: boolean;
   maxBookingLength?: number | null;
   maxBookingLengthSkipClosedDays?: boolean;
+  autoArchiveBookings?: boolean;
+  autoArchiveDays?: number;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
 }) {
@@ -72,6 +80,10 @@ export async function updateBookingSettings({
     if (maxBookingLengthSkipClosedDays !== undefined)
       updateData.maxBookingLengthSkipClosedDays =
         maxBookingLengthSkipClosedDays;
+    if (autoArchiveBookings !== undefined)
+      updateData.autoArchiveBookings = autoArchiveBookings;
+    if (autoArchiveDays !== undefined)
+      updateData.autoArchiveDays = autoArchiveDays;
     if (requireExplicitCheckinForAdmin !== undefined)
       updateData.requireExplicitCheckinForAdmin =
         requireExplicitCheckinForAdmin;
@@ -88,6 +100,8 @@ export async function updateBookingSettings({
         tagsRequired: true,
         maxBookingLength: true,
         maxBookingLengthSkipClosedDays: true,
+        autoArchiveBookings: true,
+        autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
       },
@@ -104,6 +118,8 @@ export async function updateBookingSettings({
         tagsRequired,
         maxBookingLength,
         maxBookingLengthSkipClosedDays,
+        autoArchiveBookings,
+        autoArchiveDays,
       },
       label,
     });

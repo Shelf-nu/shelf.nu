@@ -111,6 +111,7 @@ export enum BOOKING_SCHEDULER_EVENTS_ENUM {
   checkoutReminder = `booking-checkout-reminder`,
   checkinReminder = `booking-checkin-reminder`,
   overdueHandler = `booking-overdue-handler`,
+  autoArchiveHandler = `booking-auto-archive-handler`,
 }
 
 /**
