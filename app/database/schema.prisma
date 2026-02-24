@@ -110,6 +110,9 @@ model User {
 
   assetFilterPresets AssetFilterPreset[]
 
+  // External ID from SCIM identity provider (e.g. Entra ID)
+  scimExternalId String?
+  
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
   roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
@@ -119,6 +122,7 @@ model User {
   // Indexes for foreign keys
   @@index([tierId])
   @@index([lastSelectedOrganizationId])
+  @@index([scimExternalId])
 }
 
 model UserContact {
@@ -741,6 +745,7 @@ model Organization {
   auditImages        AuditImage[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
+  scimTokens             ScimToken[]
   roleChangeLogs     RoleChangeLog[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
@@ -809,6 +814,22 @@ model SsoDetails {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ScimToken {
+  id    String @id @default(cuid())
+  tokenHash String @unique // SHA-256 hash of the raw bearer token
+
+  label String // Human-friendly label, e.g. "Entra ID Production"
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  createdById String // User ID of the admin who created this token
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+
+  @@index([organizationId])
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.

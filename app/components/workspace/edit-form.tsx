@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from "react";
 import {
   type Organization,
   type Currency,
@@ -24,7 +25,23 @@ import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import { DateS } from "../shared/date";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../shared/modal";
 import { Spinner } from "../shared/spinner";
+
+export interface ScimTokenItem {
+  id: string;
+  label: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
@@ -32,6 +49,7 @@ interface Props {
   currency?: Organization["currency"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   className?: string;
+  scimTokens?: ScimTokenItem[];
 }
 
 export const EditGeneralWorkspaceSettingsFormSchema = (
@@ -59,6 +77,7 @@ export const WorkspaceEditForms = ({
   currency,
   qrIdDisplayPreference,
   className,
+  scimTokens,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
     <WorkspaceGeneralEditForms
@@ -68,6 +87,7 @@ export const WorkspaceEditForms = ({
     />
     <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
+    <WorkspaceScimTokensSection scimTokens={scimTokens} />
   </div>
 );
 
@@ -564,4 +584,209 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
       </Card>
     </fetcher.Form>
   ) : null;
+};
+
+const WorkspaceScimTokensSection = ({
+  scimTokens,
+  className,
+}: {
+  scimTokens?: ScimTokenItem[];
+  className?: string;
+}) => {
+  const { organization } = useLoaderData<typeof loader>();
+  const { isOwner } = useUserRoleHelper();
+  const generateFetcher = useFetcher({ key: "generateScimToken" });
+  const deleteFetcher = useFetcher({ key: "deleteScimToken" });
+  const generateDisabled = useDisabled(generateFetcher);
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [dismissedToken, setDismissedToken] = useState<string | null>(null);
+  const [tokenToDelete, setTokenToDelete] = useState<ScimTokenItem | null>(
+    null
+  );
+  const labelInputRef = useRef<HTMLInputElement>(null);
+
+  // Extract the raw token from the generate action response
+  const generateData = generateFetcher.data as
+    | { rawToken?: string }
+    | undefined;
+  const newToken = generateData?.rawToken;
+
+  // Show dialog when a new token is generated (but not if already dismissed)
+  if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
+    setRevealedToken(newToken);
+    setCopied(false);
+    if (labelInputRef.current) {
+      labelInputRef.current.value = "";
+    }
+  }
+
+  const handleCopy = useCallback(() => {
+    if (revealedToken) {
+      void navigator.clipboard.writeText(revealedToken);
+      setCopied(true);
+    }
+  }, [revealedToken]);
+
+  if (!isOwner || !organization.enabledSso || !organization.ssoDetails) {
+    return null;
+  }
+
+  return (
+    <>
+      <Card className={tw("my-0", className)}>
+        <div className="border-b pb-5">
+          <h2 className="text-[18px] font-semibold">SCIM provisioning</h2>
+          <p className="text-sm text-gray-600">
+            Manage bearer tokens for SCIM user provisioning (e.g. Microsoft
+            Entra ID).
+          </p>
+        </div>
+
+        {/* Token list */}
+        {scimTokens && scimTokens.length > 0 ? (
+          <div className="mt-4">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b text-xs text-gray-500">
+                  <th className="pb-2 font-medium">Label</th>
+                  <th className="pb-2 font-medium">Created</th>
+                  <th className="pb-2 font-medium">Last used</th>
+                  <th className="pb-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scimTokens.map((token) => (
+                  <tr key={token.id} className="border-b last:border-b-0">
+                    <td className="py-3 font-medium">{token.label}</td>
+                    <td className="py-3 text-gray-600">
+                      <DateS date={token.createdAt} />
+                    </td>
+                    <td className="py-3 text-gray-600">
+                      {token.lastUsedAt ? (
+                        <DateS date={token.lastUsedAt} />
+                      ) : (
+                        <span className="text-gray-400">Never</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-right">
+                      <Button
+                        variant="secondary"
+                        className="text-error-500 hover:text-error-600"
+                        onClick={() => setTokenToDelete(token)}
+                      >
+                        Delete
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-gray-500">
+            No active SCIM tokens. Generate one to enable SCIM provisioning.
+          </p>
+        )}
+
+        {/* Generate form */}
+        <generateFetcher.Form method="post" className="mt-4 flex gap-2">
+          <Input
+            ref={labelInputRef}
+            label="Token label"
+            hideLabel
+            name="label"
+            placeholder="Token label (e.g. Entra ID Production)"
+            className="flex-1"
+            required
+          />
+          <Button
+            type="submit"
+            name="intent"
+            value="generateScimToken"
+            disabled={generateDisabled}
+          >
+            {generateDisabled ? <Spinner /> : "Generate token"}
+          </Button>
+        </generateFetcher.Form>
+      </Card>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={!!tokenToDelete}
+        onOpenChange={(open) => {
+          if (!open) setTokenToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete SCIM token</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the token &ldquo;
+              {tokenToDelete?.label}&rdquo;? Any SCIM integration using this
+              token will stop working immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="secondary" onClick={() => setTokenToDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="bg-error-500 hover:bg-error-600"
+              onClick={async () => {
+                if (tokenToDelete) {
+                  await deleteFetcher.submit(
+                    { intent: "deleteScimToken", tokenId: tokenToDelete.id },
+                    { method: "post" }
+                  );
+                  setTokenToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Token reveal dialog */}
+      <AlertDialog
+        open={!!revealedToken}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDismissedToken(revealedToken);
+            setRevealedToken(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>SCIM token generated</AlertDialogTitle>
+            <AlertDialogDescription>
+              Copy this token now. It will not be shown again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="my-2">
+            <code className="block break-all rounded border bg-gray-50 p-3 text-sm">
+              {revealedToken}
+            </code>
+          </div>
+          <AlertDialogFooter>
+            <Button variant="secondary" onClick={handleCopy}>
+              {copied ? "Copied!" : "Copy to clipboard"}
+            </Button>
+            <Button
+              onClick={() => {
+                setDismissedToken(revealedToken);
+                setRevealedToken(null);
+              }}
+            >
+              Done
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 };

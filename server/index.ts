@@ -154,6 +154,7 @@ export default createHonoServer<ServerEnv>({
           "/api/public-stats",
           "/api/oss-friends",
           "/api/stripe-webhook",
+          "/api/scim/:path*",
           "/qr",
           "/qr/:qrId",
           "/qr/:qrId/not-logged-in",
