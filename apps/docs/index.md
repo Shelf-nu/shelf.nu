@@ -27,7 +27,7 @@ features:
 
   - icon: 🔧
     title: Developer Friendly
-    details: Modern stack with Remix, React, TypeScript, and comprehensive documentation.
+    details: Modern stack with Remix, React, TypeScript, Prisma, and comprehensive documentation.
 
   - icon: 🐳
     title: Deploy Anywhere
