@@ -40,18 +40,36 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
+      - name: 🔍 Detect package manager
+        id: pm
+        run: |
+          if [ -f pnpm-workspace.yaml ]; then
+            echo "agent=pnpm" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 📦 Setup pnpm
+        if: steps.pm.outputs.agent == 'pnpm'
+        uses: pnpm/action-setup@v4
+
       - name: ⎔ Setup node
         uses: actions/setup-node@v3
         with:
           node-version: 22
 
-      - name: 📥 Download deps
+      - name: 📥 Install deps (pnpm)
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm install --frozen-lockfile
+
+      - name: 📥 Install deps (npm)
+        if: steps.pm.outputs.agent == 'npm'
         uses: bahmutov/npm-install@v1
         with:
           useLockFile: false
 
       - name: 🔬 Lint
-        run: npm run lint
+        run: ${{ steps.pm.outputs.agent }} run lint
 
   typecheck:
     needs: authorize
@@ -66,17 +84,40 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
+      - name: 🔍 Detect package manager
+        id: pm
+        run: |
+          if [ -f pnpm-workspace.yaml ]; then
+            echo "agent=pnpm" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 📦 Setup pnpm
+        if: steps.pm.outputs.agent == 'pnpm'
+        uses: pnpm/action-setup@v4
+
       - name: ⎔ Setup node
         uses: actions/setup-node@v3
         with:
           node-version: 22
 
-      - name: 📥 Download deps
+      - name: 📥 Install deps (pnpm)
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm install --frozen-lockfile
+
+      - name: 📥 Install deps (npm)
+        if: steps.pm.outputs.agent == 'npm'
         uses: bahmutov/npm-install@v1
         with:
           useLockFile: false
 
-      - name: 🔎 Type check
+      - name: 🔎 Type check (pnpm)
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm run --if-present typecheck
+
+      - name: 🔎 Type check (npm)
+        if: steps.pm.outputs.agent == 'npm'
         run: npm run typecheck --if-present
 
   vitest:
@@ -92,17 +133,40 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
+      - name: 🔍 Detect package manager
+        id: pm
+        run: |
+          if [ -f pnpm-workspace.yaml ]; then
+            echo "agent=pnpm" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 📦 Setup pnpm
+        if: steps.pm.outputs.agent == 'pnpm'
+        uses: pnpm/action-setup@v4
+
       - name: ⎔ Setup node
         uses: actions/setup-node@v3
         with:
           node-version: 22
 
-      - name: 📥 Download deps
+      - name: 📥 Install deps (pnpm)
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm install --frozen-lockfile
+
+      - name: 📥 Install deps (npm)
+        if: steps.pm.outputs.agent == 'npm'
         uses: bahmutov/npm-install@v1
         with:
           useLockFile: false
 
-      - name: ⚡ Run vitest
+      - name: ⚡ Run vitest (pnpm)
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm --filter @shelf/webapp test -- --run
+
+      - name: ⚡ Run vitest (npm)
+        if: steps.pm.outputs.agent == 'npm'
         run: npm run test
 
   # playwright:
