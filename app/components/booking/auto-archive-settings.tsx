@@ -1,14 +1,34 @@
 import { useState } from "react";
-import { useFetcher } from "react-router";
+import { useFetcher, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
+import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { tw } from "~/utils/tw";
+import type { BookingSettingsActionData } from "~/routes/_layout+/settings.bookings";
+import { getValidationErrors } from "~/utils/http";
 
+export const AutoArchiveToggleSchema = z.object({
+  autoArchiveBookings: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
+});
+
+export const AutoArchiveDaysSchema = z.object({
+  autoArchiveDays: z.coerce
+    .number()
+    .int("Must be a whole number")
+    .min(1, "Must be at least 1 day")
+    .max(365, "Cannot exceed 365 days"),
+});
+
+/** @deprecated Kept for backwards compatibility during migration */
 export const AutoArchiveSettingsSchema = z.object({
   autoArchiveBookings: z
     .string()
@@ -16,6 +36,7 @@ export const AutoArchiveSettingsSchema = z.object({
     .default("false"),
   autoArchiveDays: z.coerce
     .number()
+    .int("Must be a whole number")
     .min(1, "Must be at least 1 day")
     .max(365, "Cannot exceed 365 days")
     .default(2),
@@ -31,34 +52,38 @@ export function AutoArchiveSettings({
   defaultAutoArchiveDays: number;
 }) {
   const fetcher = useFetcher();
-  const disabled = useDisabled();
-  const zo = useZorm("AutoArchiveForm", AutoArchiveSettingsSchema);
+  const toggleDisabled = useDisabled(fetcher);
+  const daysDisabled = useDisabled();
   const [isEnabled, setIsEnabled] = useState(defaultAutoArchiveBookings);
 
-  const handleSubmit = (form: HTMLFormElement) => {
-    fetcher.submit(form);
-  };
+  const toggleZo = useZorm("AutoArchiveToggleForm", AutoArchiveToggleSchema);
+  const daysZo = useZorm("AutoArchiveDaysForm", AutoArchiveDaysSchema);
+
+  const actionData = useActionData<BookingSettingsActionData>();
+  const validationErrors = getValidationErrors<typeof AutoArchiveDaysSchema>(
+    actionData?.error
+  );
 
   return (
-    <Card className={tw("my-0")}>
+    <Card className="my-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
       </div>
       <div>
+        {/* Toggle form - auto-submits on change */}
         <fetcher.Form
-          ref={zo.ref}
+          ref={toggleZo.ref}
           method="post"
           onChange={(e) => {
             const form = e.currentTarget;
-            // Update local state for controlled visibility
             const checkbox = form.elements.namedItem(
-              zo.fields.autoArchiveBookings()
+              toggleZo.fields.autoArchiveBookings()
             ) as HTMLInputElement;
             if (checkbox) {
               setIsEnabled(checkbox.checked);
             }
-            handleSubmit(form);
+            void fetcher.submit(form);
           }}
         >
           <FormRow
@@ -73,21 +98,20 @@ export function AutoArchiveSettings({
           >
             <div className="flex flex-col items-center gap-2">
               <Switch
-                name={zo.fields.autoArchiveBookings()}
-                disabled={disabled}
+                name={toggleZo.fields.autoArchiveBookings()}
+                disabled={toggleDisabled}
                 defaultChecked={defaultAutoArchiveBookings}
+                aria-label="Auto-archive completed bookings"
                 title="Auto-archive completed bookings"
               />
-              <label
-                htmlFor={`autoArchiveBookings-${zo.fields.autoArchiveBookings()}`}
-                className="hidden text-gray-500"
-              >
-                Auto-archive completed bookings
-              </label>
             </div>
           </FormRow>
+          <input type="hidden" value="updateAutoArchiveToggle" name="intent" />
+        </fetcher.Form>
 
-          {isEnabled && (
+        {/* Days form - standard form with Save button, only shown when enabled */}
+        {isEnabled && (
+          <Form ref={daysZo.ref} method="post">
             <FormRow
               rowLabel="Days after completion"
               subHeading={
@@ -103,8 +127,8 @@ export function AutoArchiveSettings({
                 label="Days after completion"
                 hideLabel
                 type="number"
-                name={zo.fields.autoArchiveDays()}
-                disabled={disabled}
+                name={daysZo.fields.autoArchiveDays()}
+                disabled={daysDisabled}
                 defaultValue={defaultAutoArchiveDays}
                 required
                 title="Days after completion"
@@ -112,13 +136,25 @@ export function AutoArchiveSettings({
                 max={365}
                 step={1}
                 inputClassName="w-24"
-                error={zo.errors.autoArchiveDays()?.message}
+                error={
+                  validationErrors?.autoArchiveDays?.message ||
+                  daysZo.errors.autoArchiveDays()?.message
+                }
               />
             </FormRow>
-          )}
 
-          <input type="hidden" value="updateAutoArchive" name="intent" />
-        </fetcher.Form>
+            <div className="text-right">
+              <Button
+                type="submit"
+                disabled={daysDisabled}
+                value="updateAutoArchiveDays"
+                name="intent"
+              >
+                {daysDisabled ? <Spinner /> : "Save settings"}
+              </Button>
+            </div>
+          </Form>
+        )}
       </div>
     </Card>
   );

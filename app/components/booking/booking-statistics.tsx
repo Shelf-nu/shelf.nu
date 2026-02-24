@@ -2,6 +2,7 @@ import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
 import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
+import { DateS } from "../shared/date";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Progress } from "../shared/progress";
 import { Separator } from "../shared/separator";
@@ -137,9 +138,12 @@ export function BookingStatistics({
         {autoArchivedAt && status === "ARCHIVED" && (
           <>
             <Separator />
-            <div className="flex items-start justify-between">
-              <span className="text-xs text-gray-400">
-                Automatically archived after completion
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">
+                Automatically archived
+              </span>
+              <span className="text-right font-medium">
+                <DateS date={autoArchivedAt} />
               </span>
             </div>
           </>

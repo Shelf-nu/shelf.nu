@@ -7,7 +7,8 @@ import type {
 import { data, useLoaderData } from "react-router";
 import {
   AutoArchiveSettings,
-  AutoArchiveSettingsSchema,
+  AutoArchiveDaysSchema,
+  AutoArchiveToggleSchema,
 } from "~/components/booking/auto-archive-settings";
 import {
   ExplicitCheckinSettings,
@@ -130,7 +131,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
-        "updateAutoArchive",
+        "updateAutoArchiveToggle",
+        "updateAutoArchiveDays",
         "updateExplicitCheckin",
         "toggle",
         "updateSchedule",
@@ -203,10 +205,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return data(payload({ success: true }), { status: 200 });
       }
-      case "updateAutoArchive": {
-        const { autoArchiveBookings, autoArchiveDays } = parseData(
+      case "updateAutoArchiveToggle": {
+        const { autoArchiveBookings } = parseData(
           formData,
-          AutoArchiveSettingsSchema,
+          AutoArchiveToggleSchema,
           {
             additionalData: {
               intent,
@@ -219,12 +221,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await updateBookingSettings({
           organizationId,
           autoArchiveBookings,
-          autoArchiveDays,
         });
 
         sendNotification({
           title: "Settings updated",
           message: "Auto-archive setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateAutoArchiveDays": {
+        const { autoArchiveDays } = parseData(formData, AutoArchiveDaysSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
+
+        await updateBookingSettings({
+          organizationId,
+          autoArchiveDays,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Auto-archive days setting has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });

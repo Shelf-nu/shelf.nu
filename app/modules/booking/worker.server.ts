@@ -226,15 +226,25 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       return;
     }
 
-    // Archive the booking
+    // Archive the booking atomically — include status in where clause
+    // to prevent race with concurrent manual archive (TOCTOU)
     const now = new Date();
-    await db.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.ARCHIVED,
-        autoArchivedAt: now,
-      },
-    });
+    const updatedBooking = await db.booking
+      .update({
+        where: { id: booking.id, status: BookingStatus.COMPLETE },
+        data: {
+          status: BookingStatus.ARCHIVED,
+          autoArchivedAt: now,
+        },
+      })
+      .catch(() => null);
+
+    if (!updatedBooking) {
+      Logger.info(
+        `Auto-archive: Booking ${data.id} was modified concurrently, skipping archive`
+      );
+      return;
+    }
 
     // Create system note for the status transition
     const fromStatusBadge = wrapBookingStatusForNote(

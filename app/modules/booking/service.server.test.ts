@@ -109,6 +109,9 @@ vitest.mock("~/database/db.server", () => ({
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    bookingSettings: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
