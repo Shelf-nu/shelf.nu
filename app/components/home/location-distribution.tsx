@@ -6,12 +6,16 @@ import { Button } from "../shared/button";
 
 import { Table, Td } from "../table";
 
+type LocationItem = ReturnType<
+  typeof useLoaderData<typeof loader>
+>["locationDistribution"][number];
+
 export default function LocationDistribution() {
   const { locationDistribution } = useLoaderData<typeof loader>();
 
   const maxCount =
     locationDistribution.length > 0
-      ? Math.max(...locationDistribution.map((l: any) => l.assetCount))
+      ? Math.max(...locationDistribution.map((l: LocationItem) => l.assetCount))
       : 0;
 
   return (
@@ -33,7 +37,7 @@ export default function LocationDistribution() {
       {locationDistribution.length > 0 ? (
         <Table className="flex-1">
           <tbody>
-            {locationDistribution.map((loc: any) => (
+            {locationDistribution.map((loc: LocationItem) => (
               <ClickableTr
                 key={loc.locationId}
                 to={`/locations/${loc.locationId}`}

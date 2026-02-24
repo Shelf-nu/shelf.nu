@@ -1,404 +1,244 @@
-import type { Custody, Prisma } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import {
   assetStatusColorMap,
   userFriendlyAssetStatus,
 } from "~/components/assets/asset-status-badge";
 import { db } from "~/database/db.server";
-import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
 
-/** Base asset type for dashboard utilities.
- *  `qrCodes` is optional — only needed for scan-related helpers. */
-type Asset = Prisma.AssetGetPayload<{
-  include: {
-    category: true;
-    custody: {
-      include: {
-        custodian: true;
-      };
-    };
-  };
-}> & {
-  qrCodes?: Prisma.QrGetPayload<{
-    include: { scans: true };
-  }>[];
-};
+// ---------------------------------------------------------------------------
+// buildAssetsByStatusChart — converts Prisma groupBy result to chart shape
+// ---------------------------------------------------------------------------
 
-/**
- * Asset created in each month in the last year.
- * */
-export function totalAssetsAtEndOfEachMonth({ assets }: { assets: Asset[] }) {
-  const currentDate = new Date();
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+export function buildAssetsByStatusChart(
+  statusGroups: { status: string; _count: { _all: number } }[]
+) {
+  const chartData = statusGroups.map((g) => ({
+    status: userFriendlyAssetStatus(g.status as AssetStatus),
+    assets: g._count._all,
+    color: assetStatusColorMap(g.status as AssetStatus).text,
+  }));
+  return { chartData };
+}
 
-  const months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
+// ---------------------------------------------------------------------------
+// buildMonthlyGrowthData — builds cumulative chart data from raw SQL rows
+// ---------------------------------------------------------------------------
 
-  const monthsArray = [];
+interface MonthlyGrowthRow {
+  month_start: Date;
+  assets_created: number;
+}
 
-  // Add the current month to the array
-  const currentMonthName = months[currentDate.getMonth()];
-  const currentYear = currentDate.getFullYear();
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
-  // Add the previous 12 months to the array
+export function buildMonthlyGrowthData(
+  monthlyRows: MonthlyGrowthRow[],
+  baselineCount: number
+) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+  // Build a lookup: "YYYY-MM" → assetsCreated
+  const rowMap = new Map<string, number>();
+  for (const row of monthlyRows) {
+    const d = new Date(row.month_start);
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    rowMap.set(key, Number(row.assets_created));
+  }
+
+  // Build the 12-month array with cumulative totals
+  let cumulative = baselineCount;
+  const months: {
+    month: string;
+    year: number;
+    assetsCreated: number;
+    "Total assets": number;
+  }[] = [];
+
   for (let i = 0; i < 12; i++) {
-    const monthDate = new Date();
-    monthDate.setFullYear(
-      twelveMonthsAgo.getFullYear(),
-      twelveMonthsAgo.getMonth() + i,
-      1
-    );
-    const monthName = months[monthDate.getMonth()];
-    const year = monthDate.getFullYear();
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    const assetsCreated = rowMap.get(key) ?? 0;
+    cumulative += assetsCreated;
 
-    // Prevent adding the current month in this loop
-    if (monthName === currentMonthName && year === currentYear) {
-      continue;
-    }
-
-    monthsArray.push({
-      month: monthName,
-      year,
-      assetsCreated: 0,
-      "Total assets": 0,
+    months.push({
+      month: MONTH_NAMES[d.getMonth()],
+      year: d.getFullYear(),
+      assetsCreated,
+      "Total assets": cumulative,
     });
   }
 
-  // Add the current month to the array
-  monthsArray.push({
-    month: currentMonthName,
-    year: currentYear,
-    assetsCreated: 0,
-    "Total assets": 0,
-  });
-  // Sort the array by year and month
-  monthsArray.sort((a, b) => {
-    const yearA = a.year;
-    const yearB = b.year;
-    const monthA = months.indexOf(a.month);
-    const monthB = months.indexOf(b.month);
-    return yearA - yearB || monthA - monthB;
-  });
+  return months;
+}
 
-  // Get the total of assets created in each month
-  for (const asset of assets) {
-    const assetCreatedDate = new Date(asset.createdAt);
-    const assetCreatedMonth = assetCreatedDate.getMonth();
-    const assetCreatedYear = assetCreatedDate.getFullYear();
+// ---------------------------------------------------------------------------
+// getCustodiansOrderedByTotalCustodies — pre-aggregated version
+// ---------------------------------------------------------------------------
 
-    // If the asset was created in the last year
-    if (
-      assetCreatedDate >= twelveMonthsAgo &&
-      assetCreatedDate <= currentDate
-    ) {
-      // Find the month object in the months array that matches the asset creation date
-      const month = monthsArray.find(
-        (m) =>
-          m.month === months[assetCreatedMonth] && m.year === assetCreatedYear
-      );
-      if (month) {
-        month.assetsCreated += 1;
+interface DirectCustodian {
+  id: string;
+  name: string;
+  userId: string | null;
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+    profilePicture: string | null;
+    email: string;
+  } | null;
+  _count: { custodies: number };
+}
+
+interface BookingForCustodians {
+  custodianUserId: string | null;
+  custodianTeamMemberId: string | null;
+  custodianTeamMember: {
+    id: string;
+    name: string;
+    userId: string | null;
+  } | null;
+  custodianUser: {
+    firstName: string | null;
+    lastName: string | null;
+    profilePicture: string | null;
+    email: string;
+  } | null;
+  _count: { assets: number };
+}
+
+export function getCustodiansOrderedByTotalCustodies({
+  directCustodians,
+  bookings,
+}: {
+  directCustodians: DirectCustodian[];
+  bookings: BookingForCustodians[];
+}) {
+  // Map keyed by (userId || teamMemberId)
+  const countMap = new Map<
+    string,
+    {
+      count: number;
+      custodian: {
+        id: string;
+        name: string;
+        userId: string | null;
+        user: {
+          firstName: string | null;
+          lastName: string | null;
+          profilePicture: string | null;
+        } | null;
+      };
+    }
+  >();
+
+  // Add direct custodies
+  for (const tm of directCustodians) {
+    const key = tm.userId ?? tm.id;
+    const existing = countMap.get(key);
+    if (existing) {
+      existing.count += tm._count.custodies;
+    } else {
+      countMap.set(key, {
+        count: tm._count.custodies,
+        custodian: {
+          id: tm.id,
+          name: tm.name,
+          userId: tm.userId,
+          user: tm.user
+            ? {
+                firstName: tm.user.firstName,
+                lastName: tm.user.lastName,
+                profilePicture: tm.user.profilePicture,
+              }
+            : null,
+        },
+      });
+    }
+  }
+
+  // Add booking custodies
+  for (const booking of bookings) {
+    const assetCount = booking._count.assets;
+    if (assetCount === 0) continue;
+
+    if (booking.custodianTeamMemberId && booking.custodianTeamMember) {
+      const key =
+        booking.custodianTeamMember.userId ?? booking.custodianTeamMemberId;
+      const existing = countMap.get(key);
+      if (existing) {
+        existing.count += assetCount;
+      } else {
+        countMap.set(key, {
+          count: assetCount,
+          custodian: {
+            id: booking.custodianTeamMemberId,
+            name: booking.custodianTeamMember.name,
+            userId: booking.custodianTeamMember.userId,
+            user: null,
+          },
+        });
+      }
+    } else if (booking.custodianUserId && booking.custodianUser) {
+      const key = booking.custodianUserId;
+      const existing = countMap.get(key);
+      if (existing) {
+        existing.count += assetCount;
+      } else {
+        countMap.set(key, {
+          count: assetCount,
+          custodian: {
+            id: booking.custodianUserId,
+            name: "",
+            userId: booking.custodianUserId,
+            user: {
+              firstName: booking.custodianUser.firstName,
+              lastName: booking.custodianUser.lastName,
+              profilePicture: booking.custodianUser.profilePicture,
+            },
+          },
+        });
       }
     }
   }
 
-  // Calculate the total number of assets that existed at the end of each month
-  let assetsExisting = 0;
-  for (let i = 0; i < monthsArray.length; i++) {
-    const currentMonth = monthsArray[i];
-    const previousMonth = monthsArray[i - 1];
-
-    // If the current month is not the first month and it's the same as the previous month, skip it
-    if (
-      previousMonth &&
-      currentMonth.month === previousMonth.month &&
-      currentMonth.year === previousMonth.year + 1
-    ) {
-      continue;
-    }
-
-    assetsExisting += currentMonth.assetsCreated;
-    currentMonth["Total assets"] = assetsExisting;
-  }
-
-  //Return the array of months with the total number of assets that existed at the end of each month
-  return monthsArray;
-}
-
-/**
- * Custodians ordered by total custodies
- */
-function hasCustody(asset: Asset): asset is Asset & { custody: Custody } {
-  return asset.custody !== null;
-}
-
-export function getCustodiansOrderedByTotalCustodies({
-  assets,
-  bookings,
-}: {
-  assets: Asset[];
-  bookings: Prisma.BookingGetPayload<{
-    include: {
-      custodianTeamMember: true;
-      custodianUser: true;
-      assets: true;
-    };
-  }>[];
-}) {
-  const assetsWithCustody = assets.filter(
-    (asset) => asset.custody && asset.custody.custodian
-  );
-
-  /** All custodians with directly assigned custody via assets */
-  const allDirectCustodians = Array.from(
-    new Set(
-      assetsWithCustody
-        .filter(hasCustody)
-        .map((asset) => asset.custody.custodian)
+  // Sort by count desc, then by id for stable order
+  const sorted = [...countMap.entries()]
+    .sort(
+      ([aKey, a], [bKey, b]) => b.count - a.count || aKey.localeCompare(bKey)
     )
-  ).filter(Boolean);
+    .slice(0, 5);
 
-  /** All custodians with custody via bookings */
-  const allBookerCustodians = Array.from(
-    new Set(
-      bookings.map((booking) =>
-        booking.custodianUser
-          ? {
-              id: booking.custodianUserId,
-              userId: booking.custodianUserId,
-              user: booking.custodianUser,
-            }
-          : {
-              id: booking.custodianTeamMemberId,
-              ...booking.custodianTeamMember,
-            }
-      )
-    )
-  ).filter(Boolean);
-
-  const allCustodians = [...allDirectCustodians, ...allBookerCustodians];
-  const custodianCounts: { [key: string]: number } = {};
-
-  /** Count normal custodies */
-  for (const asset of assetsWithCustody) {
-    if (asset.custody) {
-      // will use userId to map and show consolidated hold of assets (through bookings or direct custodies) of a team member, in case of NRM will use custodian id
-      const userId = asset.custody.custodian.userId
-        ? asset.custody.custodian.userId
-        : asset.custody.custodian.id;
-      custodianCounts[userId] = (custodianCounts[userId] || 0) + 1;
-    }
-  }
-
-  /** Count custodies via bookings */
-  for (const booking of bookings) {
-    if (booking.custodianUserId) {
-      custodianCounts[booking.custodianUserId] =
-        (custodianCounts[booking.custodianUserId] || 0) + booking.assets.length;
-    } else if (booking.custodianTeamMemberId) {
-      custodianCounts[booking.custodianTeamMemberId] =
-        (custodianCounts[booking.custodianTeamMemberId] || 0) +
-        booking.assets.length;
-    }
-  }
-
-  /**
-   * Make array for easier sorting
-   */
-  const custodianCountsArray = Object.entries(custodianCounts).map(
-    ([id, count]) => ({
-      id,
-      count,
-      custodian: allCustodians.find((custodian) =>
-        custodian.userId ? custodian.userId === id : custodian.id === id
-      ) as TeamMemberWithUser,
-    })
-  );
-
-  /** Sort the array based on the amount of assets per custodian */
-  custodianCountsArray.sort(
-    (a, b) => b.count - a.count || a.id.localeCompare(b.id)
-  );
-  /** Get the top 5 custodians */
-  const top5Custodians = custodianCountsArray.slice(0, 5);
-
-  return top5Custodians;
-}
-
-/**
- * Most scanned assets
- */
-export function getMostScannedAssets({ assets }: { assets: Asset[] }) {
-  const assetsWithScans = assets.filter(
-    (asset) => (asset.qrCodes?.length ?? 0) > 0
-  );
-
-  const assetsWithScanCount = assetsWithScans.map((asset) => ({
-    ...asset,
-    scanCount: (asset.qrCodes ?? []).reduce(
-      (count, qrCode) => count + qrCode.scans.length,
-      0
-    ),
-  }));
-
-  assetsWithScanCount.sort((a, b) => b.scanCount - a.scanCount);
-
-  const top5Assets = assetsWithScanCount.slice(0, 5);
-
-  return top5Assets;
-}
-
-/**
- * Most scanned assets' categories
- * Gives a list of the categories from all assets
- */
-export function getMostScannedAssetsCategories({
-  assets,
-}: {
-  assets: Asset[];
-}) {
-  const assetsWithScans = assets.filter(
-    (asset) => (asset.qrCodes?.length ?? 0) > 0
-  );
-
-  const assetsWithScanCount = assetsWithScans.map((asset) => ({
-    ...asset,
-    scanCount: (asset.qrCodes ?? []).reduce(
-      (count, qrCode) => count + qrCode.scans.length,
-      0
-    ),
-  }));
-
-  // group the assets by their category. assets without category should be grouped as "Ucatagorized"
-  const assetsByCategory: {
-    [key: string]: {
-      category: string;
-      assets: Asset[];
-      scanCount: number;
-    };
-  } = {};
-
-  for (const asset of assetsWithScanCount) {
-    const category = asset.category?.name || "Uncategorized";
-    if (!assetsByCategory[category]) {
-      assetsByCategory[category] = {
-        category,
-        assets: [],
-        scanCount: 0,
-      };
-    }
-    assetsByCategory[category].assets.push(asset);
-    assetsByCategory[category].scanCount += asset.scanCount;
-  }
-
-  const assetsByCategoryArray = Object.values(assetsByCategory);
-
-  // Calculate the total count of scans for each category
-  assetsByCategoryArray.sort((a, b) => b.scanCount - a.scanCount);
-
-  // Get the top 5 categories
-  const top5Categories = assetsByCategoryArray.slice(0, 5);
-
-  return top5Categories.map((cd) => ({
-    name: cd.category,
-    scanCount: cd.scanCount,
-    assetCount: cd.assets.length,
+  return sorted.map(([id, { count, custodian }]) => ({
+    id,
+    count,
+    custodian,
   }));
 }
 
-/**
- * Assets grouped per status
- */
-export function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
-  const assetsByStatus: Record<
-    string,
-    { status: string; assets: Asset[]; color: string }
-  > = {};
-
-  for (const asset of assets) {
-    const status = asset.status;
-    if (!assetsByStatus[status]) {
-      const colors = assetStatusColorMap(status);
-      assetsByStatus[status] = {
-        status: userFriendlyAssetStatus(status),
-        assets: [],
-        color: colors.text, // Use text color for charts (more saturated/visible)
-      };
-    }
-    assetsByStatus[status].assets.push(asset);
-  }
-
-  const assetsByStatusArray = Object.values(assetsByStatus);
-
-  const chartData = assetsByStatusArray.map((cd) => ({
-    status: cd.status,
-    assets: cd.assets.length,
-    color: cd.color,
-  }));
-
-  return {
-    chartData,
-  };
-}
-
-/**
- * Assets grouped per category
- */
-export function groupAssetsByCategory({ assets }: { assets: Asset[] }) {
-  const assetsByCategory: Record<
-    string,
-    { category: string; assets: Asset[]; id: string }
-  > = {};
-
-  for (const asset of assets) {
-    const category = asset.category?.name || "Uncategorized";
-    const id = asset?.category?.id || "Uncategorized";
-    if (!assetsByCategory[category]) {
-      assetsByCategory[category] = {
-        category,
-        id,
-        assets: [],
-      };
-    }
-    assetsByCategory[category].assets.push(asset);
-  }
-
-  const assetsByCategoryArray = Object.values(assetsByCategory);
-
-  const chartData = assetsByCategoryArray.map((cd) => ({
-    category: cd.category,
-    id: cd.id,
-    assets: cd.assets.length,
-  }));
-
-  // Order chart data based on item count
-  chartData.sort((a, b) => b.assets - a.assets);
-
-  // Get the top 6 categories
-  const top6Categories = chartData.slice(0, 6);
-
-  return top6Categories;
-}
+// ---------------------------------------------------------------------------
+// checklistOptions
+// ---------------------------------------------------------------------------
 
 export async function checklistOptions({
-  assets,
+  hasAssets,
   organizationId,
 }: {
-  assets: Asset[];
+  hasAssets: boolean;
   organizationId: string;
 }) {
   try {
@@ -409,7 +249,6 @@ export async function checklistOptions({
       custodiesCount,
       customFieldsCount,
     ] = await Promise.all([
-      /** Get the categories */
       db.category.count({
         where: {
           organizationId,
@@ -420,25 +259,20 @@ export async function checklistOptions({
       }),
 
       db.tag.count({
-        where: {
-          organizationId,
-        },
+        where: { organizationId },
+      }),
+
+      db.teamMember.count({
+        where: { organizationId },
       }),
 
       db.teamMember.count({
         where: {
           organizationId,
+          custodies: { some: {} },
         },
       }),
 
-      db.teamMember.count({
-        where: {
-          organizationId,
-          custodies: {
-            some: {},
-          },
-        },
-      }),
       db.customField.count({
         where: {
           organizationId,
@@ -448,7 +282,7 @@ export async function checklistOptions({
     ]);
 
     return {
-      hasAssets: assets.length > 0,
+      hasAssets,
       hasCategories: categoriesCount > 0,
       hasTags: tagsCount > 0,
       hasTeamMembers: teamMembersCount > 0,

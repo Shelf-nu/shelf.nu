@@ -29,10 +29,10 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getLocale } from "~/utils/client-hints";
 import { userPrefs } from "~/utils/cookies.server";
 import {
+  buildAssetsByStatusChart,
+  buildMonthlyGrowthData,
   checklistOptions,
   getCustodiansOrderedByTotalCustodies,
-  groupAssetsByStatus,
-  totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -55,56 +55,107 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    // Fetch all data in parallel for performance
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+    twelveMonthsAgo.setDate(1);
+    twelveMonthsAgo.setHours(0, 0, 0, 0);
+
+    // Fetch all data in parallel — targeted queries instead of loading all assets
     const [
-      assets,
+      // 1a. Aggregated asset stats
+      assetAggregation,
+      valueKnownAssets,
+      // 1b. Assets by status
+      statusGroups,
+      // 1c. Monthly growth data
+      monthlyRows,
+      baselineCount,
+      // 1d. Top custodians (direct custody)
+      directCustodians,
+      // 1d. Bookings for custodian merge (ongoing + overdue)
       { bookings: ongoingAndOverdueBookings },
+      // Upcoming bookings
       { bookings: upcomingBookings },
+      // Overdue bookings
       { bookings: overdueBookings },
+      // Active/ongoing bookings
       { bookings: activeBookings },
+      // 1e. Newest 5 assets
+      newAssets,
+      // Upcoming reminders
       upcomingReminders,
+      // Announcement
       announcement,
+      // KPI counts
       teamMembersCount,
       locationDistribution,
       locationsCount,
       categoriesCount,
+      // Cookie
       cookieResult,
     ] = await Promise.all([
-      // All assets for server-side analytics (no qrCodes — unused since Most Scanned removal)
+      // 1a. Asset count + total valuation
       db.asset
-        .findMany({
+        .aggregate({
           where: { organizationId },
-          orderBy: { createdAt: "desc" },
-          include: {
-            category: true,
-            custody: {
-              include: {
-                custodian: {
-                  include: {
-                    user: {
-                      select: {
-                        firstName: true,
-                        lastName: true,
-                        profilePicture: true,
-                        email: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          _count: { _all: true },
+          _sum: { valuation: true },
         })
         .catch((cause) => {
           throw new ShelfError({
             cause,
-            message: "Failed to load assets",
+            message: "Failed to load asset aggregation",
             additionalData: { userId, organizationId },
             label: "Dashboard",
           });
         }),
 
-      // Existing: ongoing + overdue for custodians list
+      // 1a. Count of assets with known valuation
+      db.asset.count({
+        where: { organizationId, valuation: { not: null } },
+      }),
+
+      // 1b. Assets grouped by status
+      db.asset.groupBy({
+        by: ["status"],
+        where: { organizationId },
+        _count: { _all: true },
+      }),
+
+      // 1c. Monthly asset creation counts (last 12 months)
+      db.$queryRaw<{ month_start: Date; assets_created: number }[]>`
+        SELECT date_trunc('month', "createdAt") AS month_start,
+               COUNT(*)::int AS assets_created
+        FROM "Asset"
+        WHERE "organizationId" = ${organizationId}
+          AND "createdAt" >= ${twelveMonthsAgo}
+        GROUP BY 1
+        ORDER BY 1`,
+
+      // 1c. Baseline count (assets before the 12-month window)
+      db.asset.count({
+        where: { organizationId, createdAt: { lt: twelveMonthsAgo } },
+      }),
+
+      // 1d. Team members with direct custody counts
+      db.teamMember.findMany({
+        where: { organizationId, custodies: { some: {} } },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              profilePicture: true,
+              email: true,
+            },
+          },
+          _count: { select: { custodies: true } },
+        },
+        orderBy: { custodies: { _count: "desc" } },
+        take: 20,
+      }),
+
+      // 1d. Ongoing + overdue bookings for custodian merge
       getBookings({
         organizationId,
         userId,
@@ -114,10 +165,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
+          _count: { select: { assets: true } },
         },
       }),
 
-      // NEW: upcoming bookings (RESERVED, future)
+      // Upcoming bookings (RESERVED, future)
       getBookings({
         organizationId,
         userId,
@@ -132,7 +184,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // NEW: overdue bookings
+      // Overdue bookings
       getBookings({
         organizationId,
         userId,
@@ -146,7 +198,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // NEW: active/ongoing bookings
+      // Active/ongoing bookings
       getBookings({
         organizationId,
         userId,
@@ -160,10 +212,27 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // NEW: upcoming reminders
+      // 1e. Newest 5 assets
+      db.asset
+        .findMany({
+          where: { organizationId },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          include: { category: true },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to load newest assets",
+            additionalData: { userId, organizationId },
+            label: "Dashboard",
+          });
+        }),
+
+      // Upcoming reminders
       getUpcomingRemindersForHomePage({ organizationId }),
 
-      // Existing: announcement
+      // Announcement
       db.announcement
         .findFirst({
           where: { published: true },
@@ -178,12 +247,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           });
         }),
 
-      // NEW: KPI - team members
+      // KPI: team members
       db.teamMember.count({
         where: { organizationId, deletedAt: null },
       }),
 
-      // NEW: location distribution (top 5) — single query with location names
+      // Location distribution (top 5)
       db.location
         .findMany({
           where: { organizationId },
@@ -219,15 +288,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
     ]);
 
-    /** Calculate the total value and count of assets that have value added */
-    let totalValuation = 0;
-    let valueKnownAssets = 0;
-    for (const asset of assets) {
-      if (asset.valuation) {
-        totalValuation += asset.valuation;
-        valueKnownAssets++;
-      }
-    }
+    const totalAssets = assetAggregation._count._all;
+    const totalValuation = assetAggregation._sum.valuation ?? 0;
 
     const header: HeaderData = {
       title: "Home",
@@ -236,7 +298,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return payload({
       header,
       // KPI data
-      totalAssets: assets.length,
+      totalAssets,
       teamMembersCount,
       locationsCount,
       categoriesCount,
@@ -251,21 +313,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       currency: currentOrganization?.currency,
       totalValuation,
       valueKnownAssets,
-      newAssets: assets.slice(0, 5),
+      newAssets,
       skipOnboardingChecklist: cookieResult.skipOnboardingChecklist,
       custodiansData: getCustodiansOrderedByTotalCustodies({
-        assets,
-        bookings: ongoingAndOverdueBookings,
+        directCustodians,
+        bookings: ongoingAndOverdueBookings as any,
       }),
-      assetsByStatus: groupAssetsByStatus({ assets }),
-      assetGrowthData: totalAssetsAtEndOfEachMonth({ assets }),
+      assetsByStatus: buildAssetsByStatusChart(statusGroups),
+      assetGrowthData: buildMonthlyGrowthData(monthlyRows, baselineCount),
       announcement: announcement
         ? {
             ...announcement,
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: await checklistOptions({ assets, organizationId }),
+      checklistOptions: await checklistOptions({
+        hasAssets: totalAssets > 0,
+        organizationId,
+      }),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

@@ -3,27 +3,13 @@ import type { loader } from "~/routes/_layout+/home";
 import { ClickableTr } from "../dashboard/clickable-tr";
 import { DashboardEmptyState } from "../dashboard/empty-state";
 import { Button } from "../shared/button";
+import { DateS } from "../shared/date";
 
 import { Table, Td } from "../table";
 
-/** Format alert date: "Jan 15" or "Today, 3:00 PM" */
-function formatAlertDate(date: string | Date): string {
-  const d = new Date(date);
-  const now = new Date();
-
-  if (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  ) {
-    return `Today, ${d.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    })}`;
-  }
-
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
+type ReminderItem = ReturnType<
+  typeof useLoaderData<typeof loader>
+>["upcomingReminders"][number];
 
 export default function UpcomingReminders() {
   const { upcomingReminders } = useLoaderData<typeof loader>();
@@ -47,7 +33,7 @@ export default function UpcomingReminders() {
       {upcomingReminders.length > 0 ? (
         <Table className="flex-1">
           <tbody>
-            {upcomingReminders.map((reminder: any) => (
+            {upcomingReminders.map((reminder: ReminderItem) => (
               <ClickableTr
                 key={reminder.id}
                 to={`/assets/${reminder.asset.id}/reminders`}
@@ -66,7 +52,11 @@ export default function UpcomingReminders() {
                         {reminder.asset.title}
                       </span>
                       {" · "}
-                      {formatAlertDate(reminder.alertDateTime)}
+                      <DateS
+                        date={reminder.alertDateTime}
+                        options={{ month: "short", day: "numeric" }}
+                        includeTime
+                      />
                     </span>
                   </div>
                 </Td>

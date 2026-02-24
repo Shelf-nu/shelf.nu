@@ -1,43 +1,18 @@
 import { useLoaderData } from "react-router";
 import { useCanUseBookings } from "~/hooks/use-can-use-bookings";
 import type { loader } from "~/routes/_layout+/home";
+import { getBookingCustodianName } from "~/utils/bookings";
 import { PremiumFeatureTeaser } from "./premium-feature-teaser";
 import { ClickableTr } from "../dashboard/clickable-tr";
 import { DashboardEmptyState } from "../dashboard/empty-state";
 import { Button } from "../shared/button";
+import { DateS } from "../shared/date";
 
 import { Table, Td } from "../table";
 
-/** Resolve custodian display name from booking data */
-function getCustodianName(booking: any): string | null {
-  if (booking.custodianTeamMember?.name) {
-    return booking.custodianTeamMember.name;
-  }
-  if (booking.custodianUser) {
-    const { firstName, lastName } = booking.custodianUser;
-    if (firstName || lastName) {
-      return [firstName, lastName].filter(Boolean).join(" ");
-    }
-  }
-  return null;
-}
-
-/** Format a date as short readable: "Jan 15", "Feb 3", or "Today" */
-function formatShortDate(date: string | Date): string {
-  const d = new Date(date);
-  const now = new Date();
-
-  // Check if same calendar day
-  if (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  ) {
-    return "Today";
-  }
-
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
+type BookingItem = ReturnType<
+  typeof useLoaderData<typeof loader>
+>["upcomingBookings"][number];
 
 export default function UpcomingBookings() {
   const { upcomingBookings } = useLoaderData<typeof loader>();
@@ -71,9 +46,11 @@ export default function UpcomingBookings() {
       ) : upcomingBookings.length > 0 ? (
         <Table className="flex-1">
           <tbody>
-            {upcomingBookings.map((booking: any) => {
-              const custodian = getCustodianName(booking);
-              const assetCount = booking._count?.assets ?? 0;
+            {upcomingBookings.map((booking: BookingItem) => {
+              const custodian = getBookingCustodianName(booking);
+              const assetCount =
+                (booking as BookingItem & { _count?: { assets?: number } })
+                  ._count?.assets ?? 0;
 
               return (
                 <ClickableTr key={booking.id} to={`/bookings/${booking.id}`}>
@@ -102,8 +79,15 @@ export default function UpcomingBookings() {
                               {" · "}
                             </>
                           )}
-                          {formatShortDate(booking.from)} →{" "}
-                          {formatShortDate(booking.to)}
+                          <DateS
+                            date={booking.from}
+                            options={{ month: "short", day: "numeric" }}
+                          />{" "}
+                          →{" "}
+                          <DateS
+                            date={booking.to}
+                            options={{ month: "short", day: "numeric" }}
+                          />
                         </span>
                       </div>
                     </div>
