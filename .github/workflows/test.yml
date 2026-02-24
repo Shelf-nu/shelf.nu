@@ -40,19 +40,19 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: ⎔ Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: 📦 Install pnpm
-        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
-
       - name: 📥 Install deps
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: 🔬 Lint
-        run: pnpm turbo lint
+        run: pnpm run lint
 
   typecheck:
     needs: authorize
@@ -67,19 +67,19 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: ⎔ Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: 📦 Install pnpm
-        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
-
       - name: 📥 Install deps
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: 🔎 Type check
-        run: pnpm turbo typecheck
+        run: pnpm run typecheck
 
   vitest:
     needs: authorize
@@ -94,16 +94,65 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: ⎔ Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: 📦 Install pnpm
-        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
-
       - name: 📥 Install deps
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: ⚡ Run vitest
         run: pnpm --filter @shelf/webapp test -- --run
+
+  # playwright:
+  #   needs: authorize
+  #   name: 🎭 Playwright
+  #   timeout-minutes: 60
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: 🛑 Cancel Previous Runs
+  #       uses: styfle/cancel-workflow-action@0.11.0
+
+  #     - name: ⬇️ Checkout repo
+  #       uses: actions/checkout@v3
+  #       with:
+  #         ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+  #     - name: 🔑 Make envfile
+  #       uses: SpicyPizza/create-envfile@v2.0
+  #       with:
+  #         envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+  #         envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
+  #         envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+  #         envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  #         envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
+  #         envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  #         file_name: .env
+
+  #     - name: ⎔ Setup node
+  #       uses: actions/setup-node@v3
+  #       with:
+  #         node-version: 18
+
+  #     - name: 📥 Download deps
+  #       uses: bahmutov/npm-install@v1
+
+  #     - name: 📥 Install Playwright Browsers
+  #       run: npm run test:e2e:install
+
+  #     - name: ⚙️ Build
+  #       run: npm run build
+
+  #     - name: Run Playwright tests
+  #       run: npx playwright test
+
+  #     - uses: actions/upload-artifact@v3
+  #       if: always()
+  #       with:
+  #         name: playwright-report
+  #         path: playwright-report/
+  #         retention-days: 30
