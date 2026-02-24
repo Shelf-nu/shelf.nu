@@ -6,7 +6,7 @@
 # Learn more: https://community.fly.io/t/sqlite-not-getting-setup-properly/4386
 
 # Deploy database schema
-pnpm run db:deploy
+npx prisma migrate deploy
 
 # Start the app
 pnpm run start

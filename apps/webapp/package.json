@@ -12,7 +12,7 @@
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint --ext .js,.jsx,.ts,.tsx .",
     "setup": "prisma generate && prisma migrate deploy",
     "start": "NODE_ENV=production node ./build/server/index.js",
-    "start:ci": "dotenv -- npm run start",
+    "start:ci": "dotenv -- pnpm run start",
     "test": "vitest",
     "test:cov": "vitest --coverage",
     "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx playwright test --ui'",
