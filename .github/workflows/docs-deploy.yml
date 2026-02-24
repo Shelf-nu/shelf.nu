@@ -35,10 +35,11 @@ jobs:
       - name: 🔨 Build docs
         run: pnpm docs:build
 
+      - name: 📥 Install Wrangler
+        run: npm install -g wrangler
+
       - name: 🚀 Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          packageManager: npm
-          command: pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch=${{ github.event_name == 'push' && 'main' || github.head_ref }}
+        run: wrangler pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch=${{ github.event_name == 'push' && 'main' || github.head_ref }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
