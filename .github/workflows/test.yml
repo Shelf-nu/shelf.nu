@@ -161,6 +161,10 @@ jobs:
         with:
           useLockFile: false
 
+      - name: 🔧 Generate Prisma client
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm --filter @shelf/database run db:generate
+
       - name: ⚡ Run vitest (pnpm)
         if: steps.pm.outputs.agent == 'pnpm'
         run: pnpm --filter @shelf/webapp test -- --run
