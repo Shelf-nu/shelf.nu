@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
-import { KitStatus } from "@prisma/client";
+import { KitStatus, OrganizationRoles } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -46,6 +46,7 @@ import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -70,14 +71,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, canSeeAllCustody, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const searchParams = getCurrentSearchParams(request);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
     const view = searchParams.get("view") ?? "table";
     const {
       filters,
@@ -160,6 +163,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
+    const currentUserTeamMember = isSelfService
+      ? teamMembers.find((tm) => tm.userId === userId) ?? null
+      : null;
+
     if (totalPages !== 0 && page > totalPages) {
       return redirect("/kits");
     }
@@ -185,9 +192,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         search,
+        hasActiveFilters,
         searchFieldLabel: "Search kits",
         teamMembers,
         totalTeamMembers,
+        currentUserTeamMember,
         searchFieldTooltip: {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
@@ -329,6 +338,12 @@ export default function KitsIndexPage() {
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
             bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            customEmptyStateContent={{
+              title: "No kits yet",
+              text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",
+              newButtonRoute: "/kits/new",
+              newButtonContent: "Create your first kit",
+            }}
             headerChildren={
               <>
                 <Th>Category</Th>

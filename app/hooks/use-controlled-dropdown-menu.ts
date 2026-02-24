@@ -31,12 +31,24 @@ export function useControlledDropdownMenu(
   const ref = useRef<HTMLDivElement>(null);
   const [searchParams] = useSearchParams();
   const refIsQrScan = searchParams.get("ref") === "qr";
-  const defaultOpen = options?.skipDefault
-    ? false
-    : window.innerWidth <= 640 && refIsQrScan;
 
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
   const [defaultApplied, setDefaultApplied] = useState(false);
+
+  // Reactively calculate if menu should auto-open based on current state
+  const shouldAutoOpen =
+    !options?.skipDefault &&
+    typeof window !== "undefined" &&
+    window.innerWidth <= 640 &&
+    refIsQrScan;
+
+  // Apply auto-open when conditions are met
+  useEffect(() => {
+    if (shouldAutoOpen && !defaultApplied) {
+      setOpen(true);
+      setDefaultApplied(true);
+    }
+  }, [shouldAutoOpen, defaultApplied]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -59,16 +71,9 @@ export function useControlledDropdownMenu(
     };
   }, []);
 
-  useEffect(() => {
-    if (defaultOpen && !defaultApplied) {
-      setOpen(true);
-      setDefaultApplied(true);
-    }
-  }, [defaultOpen, defaultApplied, setOpen]);
-
   return {
     ref,
-    defaultOpen,
+    defaultOpen: shouldAutoOpen,
     defaultApplied,
     open,
     setOpen,

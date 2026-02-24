@@ -2,7 +2,8 @@ import { Text, ProgressCircle } from "@tremor/react";
 import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { EmptyState } from "./empty-state";
+import { formatCurrency } from "~/utils/currency";
+import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 import { InfoTooltip } from "../shared/info-tooltip";
 
@@ -64,16 +65,20 @@ export default function InventoryValueChart() {
                   Inventory value
                 </Text>
                 <Text className="mb-3 break-words !text-[30px] font-semibold text-gray-900">
-                  {(totalValuation || 0).toLocaleString(locale, {
-                    style: "currency",
-                    currency: currency,
+                  {formatCurrency({
+                    value: totalValuation || 0,
+                    locale,
+                    currency,
                   })}
                 </Text>
               </div>
             </div>
           </div>
         ) : (
-          <EmptyState text="No assets with values exists in database" />
+          <DashboardEmptyState
+            text="No asset values yet"
+            subText="Add valuations to your assets to see your total inventory value here."
+          />
         )}
       </div>
     </div>

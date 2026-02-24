@@ -6,6 +6,20 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+
+/**
+ * Type assertion helper for booking assets.
+ * The loader enriches partial booking assets with full asset details via assetDetailsMap,
+ * but TypeScript can't infer this enrichment. This helper documents the intentional
+ * assertion and provides a single point of type conversion.
+ */
+function asEnrichedAssets<T>(assets: T[]): AssetWithBooking[] {
+  return assets as unknown as AssetWithBooking[];
+}
+
+function asEnrichedAsset<T>(asset: T): AssetWithBooking {
+  return asset as unknown as AssetWithBooking;
+}
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import KitRow from "./kit-row";
 import ListAssetContent from "./list-asset-content";
@@ -181,6 +195,7 @@ export function BookingAssetsColumn() {
                     <Th>Name</Th>
                     <Th> </Th>
                     <Th>Category</Th>
+                    <Th>Tags</Th>
                     {shouldShowCheckinColumns && (
                       <>
                         <Th className="whitespace-nowrap">
@@ -229,7 +244,7 @@ export function BookingAssetsColumn() {
                             isExpanded={isExpanded}
                             onToggleExpansion={toggleKitExpansion}
                             bookingStatus={booking.status}
-                            assets={item.assets as AssetWithBooking[]}
+                            assets={asEnrichedAssets(item.assets)}
                             partialCheckinDetails={partialCheckinDetails}
                             shouldShowCheckinColumns={shouldShowCheckinColumns}
                           />
@@ -241,7 +256,7 @@ export function BookingAssetsColumn() {
                       return (
                         <ListItem key={`asset-${asset.id}`} item={asset}>
                           <ListAssetContent
-                            item={asset as AssetWithBooking}
+                            item={asEnrichedAsset(asset)}
                             partialCheckinDetails={partialCheckinDetails}
                             shouldShowCheckinColumns={shouldShowCheckinColumns}
                           />

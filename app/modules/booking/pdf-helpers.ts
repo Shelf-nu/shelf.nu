@@ -12,15 +12,22 @@ import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
+import { groupAndSortAssetsByKit } from "./helpers";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+
+export interface SortParams {
+  orderBy?: string;
+  orderDirection?: "asc" | "desc";
+}
 
 export interface PdfDbResult {
   booking: Prisma.BookingGetPayload<{
     include: {
       custodianTeamMember: true;
       custodianUser: true;
-      tags: { select: { id: true; name: true } };
+      tags: typeof TAG_WITH_COLOR_SELECT;
     };
   }>;
   assets: (Asset & {
@@ -45,14 +52,15 @@ export async function fetchAllPdfRelatedData(
   organizationId: string,
   userId: string,
   role: OrganizationRoles | undefined,
-  request: Request
+  request: Request,
+  sortParams?: SortParams
 ): Promise<PdfDbResult> {
   try {
     const booking = await getBooking({
       id: bookingId,
       organizationId,
       request,
-      extraInclude: { tags: { select: { id: true, name: true } } },
+      extraInclude: { tags: TAG_WITH_COLOR_SELECT },
     });
 
     if (role) {
@@ -64,6 +72,10 @@ export async function fetchAllPdfRelatedData(
         checkCustodianOnly: true,
       });
     }
+
+    // Get sort params
+    const orderBy = sortParams?.orderBy || "status";
+    const orderDirection = sortParams?.orderDirection || "desc";
 
     const [assets, organization] = await Promise.all([
       db.asset.findMany({
@@ -110,15 +122,22 @@ export async function fetchAllPdfRelatedData(
       });
     }
 
-    const assetIdToQrCodeMap = await getQrCodeMaps({
+    // Group by kit and sort - this ensures kit assets stay together
+    const sortedAssets = groupAndSortAssetsByKit(
       assets,
+      orderBy,
+      orderDirection
+    );
+
+    const assetIdToQrCodeMap = await getQrCodeMaps({
+      assets: sortedAssets,
       userId,
       organizationId,
       size: "small",
     });
     return {
       booking,
-      assets,
+      assets: sortedAssets,
       totalValue: calculateTotalValueOfAssets({
         assets: booking.assets,
         currency: organization.currency,

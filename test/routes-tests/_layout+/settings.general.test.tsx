@@ -11,6 +11,10 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { action, loader } from "~/routes/_layout+/settings.general";
 import { requirePermission } from "~/utils/roles.server";
 import {
+  getOwnerSubscriptionInfo,
+  userHasActiveSubscription,
+} from "~/utils/stripe.server";
+import {
   canExportAssets,
   canHideShelfBranding,
 } from "~/utils/subscription.server";
@@ -25,7 +29,17 @@ vi.mock("~/database/db.server", () => ({
     user: {
       findUniqueOrThrow: vi.fn(),
     },
+    organization: {
+      count: vi.fn().mockResolvedValue(0),
+    },
   },
+}));
+
+// why: mock Stripe functions to avoid real Stripe API calls in tests
+vi.mock("~/utils/stripe.server", () => ({
+  getOwnerSubscriptionInfo: vi.fn(),
+  userHasActiveSubscription: vi.fn(),
+  premiumIsEnabled: false,
 }));
 
 vi.mock("~/modules/organization/service.server", () => ({
@@ -56,6 +70,9 @@ const dbMock = db as unknown as {
   user: {
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
   };
+  organization: {
+    count: ReturnType<typeof vi.fn>;
+  };
 };
 const getOrganizationTierLimitMock = vi.mocked(getOrganizationTierLimit);
 const getOrganizationAdminsMock = vi.mocked(getOrganizationAdmins);
@@ -63,6 +80,8 @@ const updateOrganizationMock = vi.mocked(updateOrganization);
 const requirePermissionMock = vi.mocked(requirePermission);
 const canExportAssetsMock = vi.mocked(canExportAssets);
 const canHideShelfBrandingMock = vi.mocked(canHideShelfBranding);
+const getOwnerSubscriptionInfoMock = vi.mocked(getOwnerSubscriptionInfo);
+const userHasActiveSubscriptionMock = vi.mocked(userHasActiveSubscription);
 
 const mockContext = {
   getSession: () => ({ userId: "user-1" }),
@@ -134,6 +153,14 @@ describe("settings.general loader", () => {
     getOrganizationAdminsMock.mockResolvedValue([]);
     canExportAssetsMock.mockReturnValue(true);
     canHideShelfBrandingMock.mockReturnValue(true);
+    // why: mock Stripe subscription functions to return default values
+    getOwnerSubscriptionInfoMock.mockResolvedValue({
+      hasActiveSubscription: false,
+      subscriptionName: null,
+      tierId: null,
+      subscriptionId: null,
+    });
+    userHasActiveSubscriptionMock.mockResolvedValue(false);
   });
 
   it("includes canHideShelfBranding in the loader payload", async () => {

@@ -50,6 +50,14 @@ export const scannedItemIdsAtom = atom((get) => {
   return { assetIds, kitIds, idsTotalCount: assetIds.length + kitIds.length };
 });
 
+/** Stores info about the last duplicate scan so consumers can show a toast / highlight. */
+export type DuplicateScanInfo = {
+  qrId: string;
+  assetTitle: string;
+  timestamp: number;
+};
+export const lastDuplicateScanAtom = atom<DuplicateScanInfo | null>(null);
+
 // Add item to object with value `undefined` (just receives the key)
 export const addScannedItemAtom = atom(
   null,
@@ -76,6 +84,20 @@ export const addScannedItemAtom = atom(
             }, // Add the new entry at the start
         ...currentItems, // Spread the rest of the existing items
       });
+    } else {
+      // QR already in list – signal duplicate so consumers can show toast/highlight
+      const existingItem = currentItems[qrId];
+      if (existingItem?.data) {
+        const title =
+          "title" in existingItem.data
+            ? (existingItem.data as AssetFromQr).title
+            : (existingItem.data as KitFromQr).name;
+        set(lastDuplicateScanAtom, {
+          qrId,
+          assetTitle: title || "Unknown",
+          timestamp: Date.now(),
+        });
+      }
     }
   }
 );
@@ -173,3 +195,163 @@ export const clearScannedItemsAtom = atom(null, (_get, set) => {
 });
 
 /*******************************/
+
+/* AUDIT-SPECIFIC ATOMS */
+
+export type AuditSessionInfo = {
+  id: string;
+  name: string;
+  targetId?: string | null;
+  contextType?: string | null;
+  contextName?: string | null;
+  expectedAssetCount: number;
+  foundAssetCount: number;
+  missingAssetCount: number;
+  unexpectedAssetCount: number;
+} | null;
+
+export type AuditAssetStatus = "found" | "missing" | "unexpected";
+
+export type AuditScannedItem = {
+  id: string;
+  name: string;
+  type: "asset" | "kit";
+  auditStatus: AuditAssetStatus;
+  expectedLocation?: string;
+  currentLocation?: string;
+  auditAssetId?: string; // Link to AuditAsset record for notes/images
+  auditNotesCount?: number;
+  auditImagesCount?: number;
+  mainImage?: string | null;
+  thumbnailImage?: string | null;
+};
+
+export type AuditAssetMeta = {
+  notesCount?: number;
+  imagesCount?: number;
+};
+
+// Stores current audit session information
+export const auditSessionAtom = atom<AuditSessionInfo>(null);
+
+// Stores expected assets for the current audit target (location/kit)
+export const auditExpectedAssetsAtom = atom<AuditScannedItem[]>([]);
+// Local, client-side overrides for live note/image counts per audit asset.
+export const auditAssetMetaAtom = atom<Record<string, AuditAssetMeta>>({});
+
+// Derived atom that categorizes scanned items by audit status
+export const auditResultsAtom = atom((get) => {
+  const items = get(scannedItemsAtom);
+  const expectedAssets = get(auditExpectedAssetsAtom);
+  const sessionInfo = get(auditSessionAtom);
+
+  if (!sessionInfo) {
+    return {
+      found: [] as AuditScannedItem[],
+      missing: expectedAssets,
+      unexpected: [] as AuditScannedItem[],
+    };
+  }
+
+  // Create a map of expected asset IDs for quick lookup
+  const expectedAssetIds = new Set(expectedAssets.map((asset) => asset.id));
+
+  // Process scanned items
+  const scannedAssets: AuditScannedItem[] = Object.values(items)
+    .filter((item) => !!item && item.data && item.type === "asset")
+    .map((item) => {
+      const assetData = item!.data as AssetFromQr;
+      return {
+        id: assetData.id,
+        name: assetData.title,
+        type: "asset" as const,
+        auditStatus: expectedAssetIds.has(assetData.id)
+          ? ("found" as const)
+          : ("unexpected" as const),
+      } satisfies AuditScannedItem;
+    });
+
+  // Categorize assets
+  const found = scannedAssets.filter((asset) => asset.auditStatus === "found");
+  const unexpected = scannedAssets.filter(
+    (asset) => asset.auditStatus === "unexpected"
+  );
+  const foundIds = new Set(found.map((asset) => asset.id));
+  const missing = expectedAssets.filter((asset) => !foundIds.has(asset.id));
+
+  return {
+    found,
+    missing,
+    unexpected,
+  };
+});
+
+// Action atom to set expected assets for audit
+export const setAuditExpectedAssetsAtom = atom(
+  null,
+  (_get, set, assets: AuditScannedItem[]) => {
+    set(auditExpectedAssetsAtom, assets);
+    // Seed meta counts from loader data so UI starts with server values.
+    set(
+      auditAssetMetaAtom,
+      assets.reduce<Record<string, AuditAssetMeta>>((acc, asset) => {
+        if (!asset.auditAssetId) return acc;
+        acc[asset.auditAssetId] = {
+          notesCount: asset.auditNotesCount ?? 0,
+          imagesCount: asset.auditImagesCount ?? 0,
+        };
+        return acc;
+      }, {})
+    );
+  }
+);
+
+export const incrementAuditAssetMetaAtom = atom(
+  null,
+  (
+    get,
+    set,
+    {
+      auditAssetId,
+      notesDelta = 0,
+      imagesDelta = 0,
+    }: {
+      auditAssetId: string;
+      notesDelta?: number;
+      imagesDelta?: number;
+    }
+  ) => {
+    const current = get(auditAssetMetaAtom);
+    const existing = current[auditAssetId] ?? {};
+    // Keep counts in sync with local optimistic actions.
+    const nextNotes = (existing.notesCount ?? 0) + notesDelta;
+    const nextImages = (existing.imagesCount ?? 0) + imagesDelta;
+    set(auditAssetMetaAtom, {
+      ...current,
+      [auditAssetId]: {
+        ...existing,
+        notesCount: Math.max(0, nextNotes),
+        imagesCount: Math.max(0, nextImages),
+      },
+    });
+  }
+);
+
+// Action atom to start an audit session
+export const startAuditSessionAtom = atom(
+  null,
+  (_get, set, sessionInfo: Exclude<AuditSessionInfo, null>) => {
+    set(auditSessionAtom, sessionInfo);
+    // Clear any existing scanned items when starting a new audit
+    set(scannedItemsAtom, {});
+    set(auditAssetMetaAtom, {});
+  }
+);
+
+// Action atom to end an audit session
+export const endAuditSessionAtom = atom(null, (_get, set) => {
+  set(auditSessionAtom, null);
+  set(auditExpectedAssetsAtom, []);
+  set(scannedItemsAtom, {});
+  set(auditAssetMetaAtom, {});
+});

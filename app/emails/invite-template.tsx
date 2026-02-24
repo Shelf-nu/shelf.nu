@@ -6,11 +6,11 @@ import {
   render,
   Container,
   Section,
-  Img,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
+import { CustomEmailFooter } from "./components/custom-footer";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 
@@ -32,7 +32,9 @@ export function InvitationEmailTemplate({
         <title>Invitation to join Shelf</title>
       </Head>
 
-      <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
+      <Container
+        style={{ padding: "32px 16px", maxWidth: "600px", margin: "0 auto" }}
+      >
         <LogoForEmail />
 
         <div style={{ paddingTop: "8px" }}>
@@ -47,35 +49,32 @@ export function InvitationEmailTemplate({
           {extraMessage ? (
             <Section
               style={{
-                padding: "10px",
-                borderRadius: "12px",
-                border: "1px solid #FEC84B",
-                backgroundColor: "#FFFCF5",
+                padding: "16px",
+                borderRadius: "8px",
+                border: "1px solid #E5E7EB",
+                backgroundColor: "#F9FAFB",
                 marginBottom: "24px",
               }}
             >
-              <Img
-                src={`${SERVER_URL}/static/images/circle-alert.png`}
-                alt="alert-icon"
-                style={{ width: "16px", height: "16px", marginBottom: "10px" }}
-              />
-
               <Text
                 style={{
-                  fontSize: "16px",
-                  fontWeight: "bold",
-                  color: "#B54708",
-                  margin: "0px",
+                  fontSize: "14px",
+                  fontWeight: "600",
+                  color: "#6B7280",
+                  margin: "0 0 8px 0",
                 }}
               >
-                Message from sender, please read carefully.
+                Message from {invite.inviter.firstName}{" "}
+                {invite.inviter.lastName}:
               </Text>
 
               <Text
                 style={{
-                  fontSize: "16px",
-                  color: "#B54708",
+                  fontSize: "15px",
+                  color: "#111827",
                   margin: "0px",
+                  whiteSpace: "pre-wrap",
+                  lineHeight: "1.5",
                 }}
               >
                 {extraMessage}
@@ -101,6 +100,11 @@ export function InvitationEmailTemplate({
             Thanks, <br />
             The Shelf team
           </Text>
+
+          <CustomEmailFooter
+            footerText={invite.organization.customEmailFooter}
+          />
+
           <Text style={{ fontSize: "14px", color: "#344054" }}>
             This is an automatic email sent from shelf.nu to{" "}
             <span style={{ color: emailPrimaryColor }}>

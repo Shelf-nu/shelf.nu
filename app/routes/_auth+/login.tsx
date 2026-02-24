@@ -24,7 +24,7 @@ import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-e
 import { signInWithEmail } from "~/modules/auth/service.server";
 
 import {
-  getSelectedOrganisation,
+  getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -76,7 +76,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       case "POST": {
         const { email, password, redirectTo } = parseData(
           await request.formData(),
-          LoginFormSchema
+          LoginFormSchema,
+          { shouldBeCaptured: false }
         );
 
         const authSession = await signInWithEmail(email, password);
@@ -91,7 +92,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
          * Theoretically, the user should always have a selected organization cookie as soon as they login for the first time
          * However we do this check to make sure they are still part of that organization
          */
-        const { organizationId } = await getSelectedOrganisation({
+        const { organizationId } = await getSelectedOrganization({
           userId,
           request,
         });

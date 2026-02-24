@@ -24,6 +24,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
@@ -45,6 +46,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search } = getParamsValues(searchParams);
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
@@ -73,8 +75,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalItems: totalLocations,
         totalPages,
         perPage,
-
         modelName,
+        hasActiveFilters,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -111,6 +113,12 @@ export default function LocationsIndexPage() {
           bulkActions={
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
           }
+          customEmptyStateContent={{
+            title: "No locations yet",
+            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+            newButtonRoute: "/locations/new",
+            newButtonContent: "Create your first location",
+          }}
           ItemComponent={ListItemContent}
           headerChildren={
             <>

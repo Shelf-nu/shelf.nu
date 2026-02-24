@@ -1,4 +1,5 @@
 import { createCookie } from "react-router";
+import { getRequestCache } from "@server/request-cache.server";
 import {
   destroyCookie,
   parseCookie,
@@ -24,6 +25,17 @@ const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
 
 type SelectedOrganizationId = string;
 
+// Shape returned by getSelectedOrganization for cache typing.
+type SelectedOrganization = {
+  organizationId: string;
+  organizations: OrganizationFromUser[];
+  userOrganizations: Awaited<ReturnType<typeof getUserOrganizations>>;
+  currentOrganization: OrganizationFromUser;
+  cookieRefreshNeeded: boolean;
+};
+
+type SelectedOrganizationCache = Map<string, Promise<SelectedOrganization>>;
+
 async function getSelectedOrganizationIdCookie(request: Request) {
   return parseCookie<SelectedOrganizationId>(
     selectedOrganizationIdCookie,
@@ -47,7 +59,8 @@ export function destroySelectedOrganizationIdCookie() {
  * It always defaults to the personal organization if the user is not part of the current selected organization.
  * @throws If the user is not part of any organization
  */
-export async function getSelectedOrganisation({
+// Uncached implementation used as the single source of truth.
+async function getSelectedOrganizationUncached({
   userId,
   request,
 }: {
@@ -63,11 +76,30 @@ export async function getSelectedOrganisation({
   const organizations = userOrganizations.map((uo) => uo.organization);
   const userOrganizationIds = organizations.map((org) => org.id);
 
-  // If the organizationId is not set or the user is not part of the organization, we set it to the personal organization
-  // This case should be extremely rare (be revoked from an organization while browsing it), so, I keep it simple
-  // 💡 This can be improved by implementing a system that sends an sse notification when a user is revoked and forcing the app to reload
+  // Track whether we need to refresh the cookie (fallback was used)
+  let cookieRefreshNeeded = false;
+
+  // If the organizationId is not set or the user is not part of the organization,
+  // fall back to the last selected organization from the database (cross-device persistence),
+  // then to the personal organization, then to the first available organization
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-    organizationId = userOrganizationIds[0];
+    cookieRefreshNeeded = true;
+
+    // Piggyback on the already-fetched userOrganizations query
+    const user = userOrganizations[0]?.user;
+    const lastSelectedOrganizationId = user?.lastSelectedOrganizationId ?? null;
+
+    if (
+      lastSelectedOrganizationId &&
+      userOrganizationIds.includes(lastSelectedOrganizationId)
+    ) {
+      // DB field is valid — cross-device persistence working
+      organizationId = lastSelectedOrganizationId;
+    } else {
+      // DB field is null or points to an org the user lost access to
+      const personalOrg = organizations.find((org) => org.type === "PERSONAL");
+      organizationId = personalOrg?.id ?? userOrganizationIds[0];
+    }
   }
 
   const currentOrganization = organizations.find(
@@ -95,5 +127,43 @@ export async function getSelectedOrganisation({
     organizations,
     userOrganizations,
     currentOrganization: nonNullCurrentOrganization,
+    cookieRefreshNeeded,
   };
+}
+
+/**
+ * Returns the selected organization for the user and caches the result per
+ * incoming request to avoid duplicate DB queries when loaders run in parallel.
+ */
+export async function getSelectedOrganization({
+  userId,
+  request,
+}: {
+  userId: string;
+  request: Request;
+}) {
+  // Create a per-request cache bucket keyed by userId.
+  const requestCache = getRequestCache(
+    "selected-organization"
+  ) as SelectedOrganizationCache | null;
+  if (!requestCache) {
+    return getSelectedOrganizationUncached({ userId, request });
+  }
+
+  // Reuse the same promise during this request to avoid duplicate queries.
+  const cached = requestCache.get(userId);
+  if (cached) {
+    return cached;
+  }
+
+  // Store the in-flight promise so concurrent callers share it.
+  const pending = getSelectedOrganizationUncached({ userId, request }).catch(
+    (error) => {
+      // Evict failed promises so later calls in this request can retry.
+      requestCache.delete(userId);
+      throw error;
+    }
+  );
+  requestCache.set(userId, pending);
+  return pending;
 }

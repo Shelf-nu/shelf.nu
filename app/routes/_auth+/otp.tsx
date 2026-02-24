@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -14,7 +14,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import {
-  getSelectedOrganisation,
+  getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
@@ -48,7 +48,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 const OtpSchema = z.object({
-  otp: z.string().min(2),
+  otp: z.string().min(2, "Please enter the code sent to your email"),
   email: z
     .string()
     .transform((email) => email.toLowerCase())
@@ -63,26 +63,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { email, otp } = parseData(await request.formData(), OtpSchema, {
-          message:
-            "Invalid request. Please try again. If the issue persists, contact support.",
-        });
+        const { email, otp } = parseData(await request.formData(), OtpSchema);
 
         const authSession = await verifyOtpAndSignin(email, otp);
         const userExists = Boolean(await findUserByEmail(email));
 
         if (!userExists) {
-          const username = await generateUniqueUsername(authSession.email);
-          await createUser({
-            ...authSession,
-            username,
-          });
+          try {
+            const username = await generateUniqueUsername(authSession.email);
+            await createUser({
+              ...authSession,
+              username,
+            });
+          } catch (createError) {
+            // Handle race condition: if a concurrent request already
+            // created this user, verify they exist and proceed.
+            // This can happen when two OTP verification requests
+            // run simultaneously for the same user.
+            const userNowExists = Boolean(await findUserByEmail(email));
+            if (!userNowExists) {
+              throw createError;
+            }
+          }
         }
 
         // Setting the auth session and redirecting user to assets page
         context.setSession(authSession);
 
-        const { organizationId } = await getSelectedOrganisation({
+        const { organizationId } = await getSelectedOrganization({
           userId: authSession.userId,
           request,
         });
@@ -117,7 +125,15 @@ export default function OtpPage() {
   const [searchParams] = useSearchParams();
   const fetcher = useFetcher<resendAction>();
 
+  const formRef = useRef<HTMLFormElement>(null);
   const zo = useZorm("otpForm", OtpSchema);
+  const zormRef = useCallback(
+    (el: HTMLFormElement | null) => {
+      zo.ref(el);
+      formRef.current = el;
+    },
+    [zo]
+  );
   const fetcherDisabled = isFormProcessing(fetcher.state);
   const disabled = useDisabled();
 
@@ -166,8 +182,11 @@ export default function OtpPage() {
 
       <div className="mt-2 flex min-h-full flex-col justify-center">
         <div className="mx-auto w-full max-w-md px-8">
-          <Form ref={zo.ref} method="post" className="space-y-6">
-            <ShelfOTP error={data?.error.message} />
+          <Form ref={zormRef} method="post" className="space-y-6">
+            <ShelfOTP
+              error={data?.error.message}
+              onComplete={() => formRef.current?.requestSubmit()}
+            />
 
             <input
               type="hidden"

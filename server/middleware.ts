@@ -6,12 +6,54 @@ import {
   refreshAccessToken,
   validateSession,
 } from "~/modules/auth/service.server";
+import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
 import { isQrId } from "~/utils/id";
 import { Logger } from "~/utils/logger";
 import type { FlashData, SessionData } from "./session";
 import { authSessionKey } from "./session";
+
+/**
+ * Ensure host headers for React Router CSRF protection
+ * React Router v7.12+ requires host or x-forwarded-host headers
+ * In dev mode, Vite dev server doesn't always preserve these headers
+ * Only applied in development - production environments have headers intact
+ */
+export function ensureHostHeaders() {
+  return createMiddleware(async (c, next) => {
+    // Only apply this fix in development mode
+    if (process.env.NODE_ENV === "production") {
+      return next();
+    }
+
+    const originalRequest = c.req.raw;
+    const host = originalRequest.headers.get("host");
+    const forwardedHost = originalRequest.headers.get("x-forwarded-host");
+
+    // If both headers are missing, create a new Request with host header
+    if (!host && !forwardedHost) {
+      const headers = new Headers(originalRequest.headers);
+      // Use the URL host from the request
+      const url = new URL(originalRequest.url);
+      headers.set("host", url.host);
+
+      // Create new Request with the updated headers
+      const newRequest = new Request(originalRequest.url, {
+        method: originalRequest.method,
+        headers,
+        body: originalRequest.body,
+        // @ts-expect-error - duplex is required for streaming bodies
+        duplex: "half",
+      });
+
+      // Replace the request in the context
+      c.req.raw = newRequest;
+    }
+
+    return next();
+  });
+}
 
 /**
  * Protected routes middleware
@@ -173,20 +215,19 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     }
 
     const path = pathParts.join("/");
-    const serverUrl = process.env.SERVER_URL;
 
     // Check if the path is a single segment and a valid CUID
     if (pathParts.length === 1 && isQrId(path)) {
-      const redirectUrl = `${serverUrl}/qr/${path}`;
+      const redirectUrl = `${SERVER_URL}/qr/${path}`;
       // console.log(`urlShortener middleware: Redirecting QR to ${redirectUrl}`);
       return c.redirect(safeRedirect(redirectUrl), 301);
     }
 
-    // console.log(`urlShortener middleware: Redirecting to ${serverUrl}`);
+    // console.log(`urlShortener middleware: Redirecting to ${SERVER_URL}`);
     /**
      * In all other cases, we just redirect to the app root.
      * The URL shortener should only be used for QR codes
      * */
-    return c.redirect(safeRedirect(serverUrl), 301);
+    return c.redirect(safeRedirect(SERVER_URL), 301);
   });
 }

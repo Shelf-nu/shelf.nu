@@ -46,6 +46,12 @@ model User {
   sso                   Boolean @default(false)
   createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
   skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
+  hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
+  warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
+
+  // Last selected organization for cross-device workspace persistence
+  lastSelectedOrganization   Organization? @relation("lastSelectedOrg", fields: [lastSelectedOrganizationId], references: [id], onDelete: SetNull)
+  lastSelectedOrganizationId String?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -55,30 +61,37 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-  assets            Asset[]
-  categories        Category[]
-  notes             Note[]
+  assets             Asset[]
+  categories         Category[]
+  notes              Note[]
   bookingNotes      BookingNote[]      @relation("BookingNoteUser")
-  qrCodes           Qr[]
-  scans             Scan[]
-  tags              Tag[]
-  roles             Role[]
-  locations         Location[]
-  images            Image[]
-  organizations     Organization[]
-  customFields      CustomField[]
-  sentInvites       Invite[]           @relation("inviter")
-  receivedInvites   Invite[]           @relation("invitee")
-  teamMembers       TeamMember[]
-  userOrganizations UserOrganization[]
-  bookings          Booking[]          @relation("creator")
-  custodies         Booking[]          @relation("custodian")
-  createdKits       Kit[]
-  tierId            TierId             @default(free)
-  tier              Tier               @relation(fields: [tierId], references: [id])
-  assetReminders    AssetReminder[]
-  contact           UserContact?
-  businessIntel     UserBusinessIntel?
+  auditNotes        AuditNote[]        @relation("AuditNoteUser")
+  locationNotes     LocationNote[]     @relation("LocationNoteUser")
+  qrCodes            Qr[]
+  scans              Scan[]
+  tags               Tag[]
+  roles              Role[]
+  locations          Location[]
+  images             Image[]
+  organizations      Organization[]
+  customFields       CustomField[]
+  sentInvites        Invite[]           @relation("inviter")
+  receivedInvites    Invite[]           @relation("invitee")
+  teamMembers        TeamMember[]
+  userOrganizations  UserOrganization[]
+  bookings           Booking[]          @relation("creator")
+  custodies          Booking[]          @relation("custodian")
+  createdKits        Kit[]
+  tierId             TierId             @default(free)
+  tier               Tier               @relation(fields: [tierId], references: [id])
+  assetReminders     AssetReminder[]
+  contact            UserContact?
+  businessIntel      UserBusinessIntel?
+  auditsCreated      AuditSession[]
+  auditAssignments   AuditAssignment[]
+  auditAssetsScanned AuditAsset[]
+  auditScans         AuditScan[]
+  auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
   referralSource String? // "How did you hear about us?" field.
@@ -97,10 +110,15 @@ model User {
 
   assetFilterPresets AssetFilterPreset[]
 
+  // Role change audit log
+  roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
+  roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
+
   @@unique([email, username])
   @@index([firstName, lastName])
-  // Index for foreign key
+  // Indexes for foreign keys
   @@index([tierId])
+  @@index([lastSelectedOrganizationId])
 }
 
 model UserContact {
@@ -195,6 +213,8 @@ model Asset {
   customFields AssetCustomFieldValue[]
   bookings     Booking[]
   reminders    AssetReminder[]
+  auditEntries AuditAsset[]
+  auditScans   AuditScan[]
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -219,16 +239,15 @@ enum AssetStatus {
   CHECKED_OUT
 }
 
-
 model AssetFilterPreset {
-  id             String                @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   ownerId        String
   name           String
   query          String
-  starred        Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  starred        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -311,6 +330,7 @@ model Tag {
   id          String  @id @default(cuid())
   name        String
   description String?
+  color       String?
 
   useFor TagUseFor[] @default([ASSET])
 
@@ -371,6 +391,26 @@ model BookingNote {
 
   // Indexes for foreign keys
   @@index([bookingId])
+  @@index([userId])
+}
+
+model LocationNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user       User?    @relation("LocationNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId     String?
+  location   Location @relation("LocationNotes", fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  locationId String
+
+  // Indexes for foreign keys
+  @@index([locationId])
   @@index([userId])
 }
 
@@ -564,6 +604,7 @@ model Location {
 
   assets Asset[]
   kits   Kit[]
+  notes  LocationNote[] @relation("LocationNotes")
 
   // Self-relation for nested locations
   parentId String?
@@ -670,6 +711,11 @@ model Organization {
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
   barcodesEnabledAt DateTime? // Track when barcode feature was enabled
 
+  // Audit add-on (per-organization, managed via Stripe subscription)
+  auditsEnabled    Boolean   @default(false) // If true, this organization can use audit functionality
+  auditsEnabledAt  DateTime? // Track when audit feature was enabled
+  usedAuditTrial   Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
+
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
@@ -691,6 +737,12 @@ model Organization {
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
 
+  auditSessions      AuditSession[]
+  auditImages        AuditImage[]
+
+  usersWithLastSelected User[] @relation("lastSelectedOrg")
+  roleChangeLogs     RoleChangeLog[]
+
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
 
@@ -699,6 +751,9 @@ model Organization {
 
   // Branding preference for downloadable labels
   showShelfBranding Boolean @default(true)
+
+  // Custom footer text appended to workspace emails
+  customEmailFooter String? @db.VarChar(500)
 
   // Indexes for foreign keys
   @@index([userId])
@@ -779,32 +834,32 @@ model Tier {
 
 // TierLimit is used for the basic tiers
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  canImportNRM     Boolean  @default(false)
-  canHideShelfBranding Boolean @default(false)
-  maxCustomFields  Int      @default(0)
-  maxOrganizations Int      @default(1)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   TierId   @id
+  tier                 Tier?
+  canImportAssets      Boolean  @default(false)
+  canExportAssets      Boolean  @default(false)
+  canImportNRM         Boolean  @default(false)
+  canHideShelfBranding Boolean  @default(false)
+  maxCustomFields      Int      @default(0)
+  maxOrganizations     Int      @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // CustomTierLimit is used for users which has Tier with ID: custom
 model CustomTierLimit {
-  id               String   @id @default(cuid())
-  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userId           String?  @unique // This is the foreign key
-  canImportAssets  Boolean  @default(true)
-  canExportAssets  Boolean  @default(true)
-  canImportNRM     Boolean  @default(true)
-  canHideShelfBranding Boolean @default(true)
-  maxCustomFields  Int      @default(1000)
-  maxOrganizations Int      @default(1)
-  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId               String?  @unique // This is the foreign key
+  canImportAssets      Boolean  @default(true)
+  canExportAssets      Boolean  @default(true)
+  canImportNRM         Boolean  @default(true)
+  canHideShelfBranding Boolean  @default(true)
+  maxCustomFields      Int      @default(1000)
+  maxOrganizations     Int      @default(1)
+  isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 model CustomField {
@@ -871,41 +926,165 @@ model AssetCustomFieldValue {
   @@index([customFieldId])
 }
 
+// ISO 4217 Currency Codes
+// See app/utils/currency.ts for the canonical list with full metadata
+// Sorted alphabetically by currency code
 enum Currency {
-  USD // United States Dollar
-  EUR // Euro
-  GBP // British Pound Sterling
-
-  AED // United Arab Emirates Dirham
+  AED // UAE Dirham
+  AFN // Afghani
+  ALL // Lek
+  AMD // Armenian Dram
+  ANG // Netherlands Antillean Guilder
+  AOA // Kwanza
+  ARS // Argentine Peso
   AUD // Australian Dollar
+  AWG // Aruban Florin
+  AZN // Azerbaijan Manat
+  BAM // Convertible Mark
+  BBD // Barbados Dollar
+  BDT // Taka
   BGN // Bulgarian Lev
+  BHD // Bahraini Dinar
+  BIF // Burundi Franc
+  BMD // Bermudian Dollar
+  BND // Brunei Dollar
+  BOB // Boliviano
   BRL // Brazilian Real
+  BSD // Bahamian Dollar
+  BTN // Ngultrum
+  BWP // Pula
+  BYN // Belarusian Ruble
+  BZD // Belize Dollar
   CAD // Canadian Dollar
+  CDF // Congolese Franc
   CHF // Swiss Franc
-  CNY // Chinese Yuan
+  CLP // Chilean Peso
+  CNY // Yuan Renminbi
+  COP // Colombian Peso
+  CRC // Costa Rican Colon
+  CUP // Cuban Peso
+  CVE // Cabo Verde Escudo
   CZK // Czech Koruna
+  DJF // Djibouti Franc
   DKK // Danish Krone
+  DOP // Dominican Peso
+  DZD // Algerian Dinar
+  EGP // Egyptian Pound
+  ERN // Nakfa
+  ETB // Ethiopian Birr
+  EUR // Euro
+  FJD // Fiji Dollar
+  FKP // Falkland Islands Pound
+  GBP // Pound Sterling
+  GEL // Lari
+  GHS // Ghana Cedi
+  GIP // Gibraltar Pound
+  GMD // Dalasi
+  GNF // Guinean Franc
+  GTQ // Quetzal
+  GYD // Guyana Dollar
   HKD // Hong Kong Dollar
-  IDR // Indonesian Rupiah
+  HNL // Lempira
+  HTG // Gourde
+  HUF // Forint
+  IDR // Rupiah
+  ILS // New Israeli Sheqel
   INR // Indian Rupee
-  JPY // Japanese Yen
-  KRW // South Korean Won
-  LKR // Sri Lankan Rupee
+  IQD // Iraqi Dinar
+  IRR // Iranian Rial
+  ISK // Iceland Krona
+  JMD // Jamaican Dollar
+  JOD // Jordanian Dinar
+  JPY // Yen
+  KES // Kenyan Shilling
+  KGS // Som
+  KHR // Riel
+  KMF // Comorian Franc
+  KPW // North Korean Won
+  KRW // Won
+  KWD // Kuwaiti Dinar
+  KYD // Cayman Islands Dollar
+  KZT // Tenge
+  LAK // Lao Kip
+  LBP // Lebanese Pound
+  LKR // Sri Lanka Rupee
+  LRD // Liberian Dollar
+  LSL // Loti
+  LYD // Libyan Dinar
+  MAD // Moroccan Dirham
+  MDL // Moldovan Leu
+  MGA // Malagasy Ariary
+  MKD // Denar
+  MMK // Kyat
+  MNT // Tugrik
+  MOP // Pataca
+  MRU // Ouguiya
+  MUR // Mauritius Rupee
+  MVR // Rufiyaa
+  MWK // Malawi Kwacha
   MXN // Mexican Peso
   MYR // Malaysian Ringgit
+  MZN // Mozambique Metical
+  NAD // Namibia Dollar
+  NGN // Naira
+  NIO // Cordoba Oro
   NOK // Norwegian Krone
+  NPR // Nepalese Rupee
   NZD // New Zealand Dollar
+  OMR // Rial Omani
+  PAB // Balboa
+  PEN // Sol
+  PGK // Kina
   PHP // Philippine Peso
-  PLN // Polish Zloty
+  PKR // Pakistan Rupee
+  PLN // Zloty
+  PYG // Guarani
+  QAR // Qatari Rial
+  RON // Romanian Leu
+  RSD // Serbian Dinar
   RUB // Russian Ruble
+  RWF // Rwanda Franc
   SAR // Saudi Riyal
+  SBD // Solomon Islands Dollar
+  SCR // Seychelles Rupee
+  SDG // Sudanese Pound
   SEK // Swedish Krona
   SGD // Singapore Dollar
-  TWD // Taiwanese Dollar
-  UGX // Ugandan Shilling
-  ZAR // South African Rand
-  PKR // Pakistani Rupee
-  RON // Romanian Leu
+  SHP // Saint Helena Pound
+  SLE // Leone
+  SOS // Somali Shilling
+  SRD // Surinam Dollar
+  SSP // South Sudanese Pound
+  STN // Dobra
+  SVC // El Salvador Colon
+  SYP // Syrian Pound
+  SZL // Lilangeni
+  THB // Baht
+  TJS // Somoni
+  TMT // Turkmenistan Manat
+  TND // Tunisian Dinar
+  TOP // Pa'anga
+  TRY // Turkish Lira
+  TTD // Trinidad and Tobago Dollar
+  TWD // New Taiwan Dollar
+  TZS // Tanzanian Shilling
+  UAH // Hryvnia
+  UGX // Uganda Shilling
+  USD // US Dollar
+  UYU // Peso Uruguayo
+  UZS // Uzbekistan Sum
+  VES // Bolívar Soberano
+  VND // Dong
+  VUV // Vatu
+  WST // Tala
+  XAF // CFA Franc BEAC
+  XCD // East Caribbean Dollar
+  XOF // CFA Franc BCEAO
+  XPF // CFP Franc
+  YER // Yemeni Rial
+  ZAR // Rand
+  ZMW // Zambian Kwacha
+  ZWL // Zimbabwe Dollar
 }
 
 enum InviteStatuses {
@@ -928,10 +1107,11 @@ model Invite {
   inviteeTeamMember TeamMember   @relation(fields: [teamMemberId], references: [id])
   teamMemberId      String
 
-  inviteeEmail String
-  status       InviteStatuses      @default(PENDING)
-  inviteCode   String
-  roles        OrganizationRoles[]
+  inviteeEmail  String
+  status        InviteStatuses      @default(PENDING)
+  inviteCode    String
+  roles         OrganizationRoles[]
+  inviteMessage String?             @db.VarChar(1000)
 
   // Datetime
   expiresAt DateTime
@@ -1012,6 +1192,8 @@ model Booking {
   // When a booking is auto-archived, we store the timestamp here
   autoArchivedAt DateTime? @db.Timestamptz(3)
 
+  cancellationReason String?
+
   // Indexes for foreign keys
   @@index([creatorId])
   @@index([custodianTeamMemberId])
@@ -1030,6 +1212,9 @@ model BookingSettings {
 
   autoArchiveBookings Boolean @default(false) // Whether to automatically archive completed bookings
   autoArchiveDays     Int     @default(2) // Number of days after completion before auto-archiving
+
+  requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
+  requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -1220,6 +1405,7 @@ model Update {
   title       String
   content     String // Markdown content
   url         String? // Optional URL to redirect to when clicked
+  imageUrl    String? // Optional featured image URL (external hosting)
   publishDate DateTime // When the update should be visible to users
   status      UpdateStatus @default(DRAFT)
 
@@ -1263,4 +1449,217 @@ model UserUpdateRead {
   @@index([userId])
   @@index([updateId])
   @@index([readAt])
+}
+
+enum AuditStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditAssetStatus {
+  PENDING
+  FOUND
+  MISSING
+  UNEXPECTED
+}
+
+enum AuditAssignmentRole {
+  LEAD
+  PARTICIPANT
+}
+
+model AuditNote {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user           User?        @relation("AuditNoteUser", fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId         String?
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  // Optional link to specific asset within the audit
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  // Indexes for foreign keys
+  @@index([auditSessionId])
+  @@index([userId])
+  @@index([auditAssetId])
+}
+
+model AuditSession {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+
+  targetId  String?
+  status    AuditStatus @default(PENDING)
+  scopeMeta Json?
+
+  expectedAssetCount   Int @default(0)
+  foundAssetCount      Int @default(0)
+  missingAssetCount    Int @default(0)
+  unexpectedAssetCount Int @default(0)
+
+  startedAt   DateTime?
+  dueDate     DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  activeSchedulerReference String?
+
+  createdBy      User         @relation(fields: [createdById], references: [id])
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  assignments AuditAssignment[]
+  assets      AuditAsset[]
+  scans       AuditScan[]
+  notes       AuditNote[]
+  images      AuditImage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([createdById])
+  @@index([status, createdAt])
+}
+
+model AuditAssignment {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  role AuditAssignmentRole?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditSessionId, userId])
+  @@index([userId])
+}
+
+model AuditAsset {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  expected Boolean          @default(true)
+  status   AuditAssetStatus @default(PENDING)
+
+  scannedBy   User?   @relation(fields: [scannedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  scannedById String?
+
+  scannedAt DateTime?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scans AuditScan[]
+  images AuditImage[]
+  notes AuditNote[]
+
+  @@unique([auditSessionId, assetId])
+  @@index([status])
+  @@index([scannedById])
+}
+
+model AuditScan {
+  id String @id @default(cuid())
+
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  assetId String?
+
+  scannedBy   User?   @relation(fields: [scannedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  scannedById String?
+
+  code String?
+
+  metadata Json?
+
+  scannedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([auditSessionId, scannedAt])
+  @@index([auditAssetId])
+  @@index([assetId])
+}
+
+model AuditImage {
+  id String @id @default(cuid())
+
+  imageUrl     String
+  thumbnailUrl String?
+  description  String?
+
+  // Relationships
+  auditSession   AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  auditSessionId String
+
+  // Optional link to specific asset within the audit
+  auditAsset   AuditAsset? @relation(fields: [auditAssetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  auditAssetId String?
+
+  uploadedBy   User?   @relation("AuditImageUploader", fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  uploadedById String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for performance
+  @@index([auditSessionId])
+  @@index([auditAssetId])
+  @@index([organizationId])
+  @@index([uploadedById])
+}
+
+model RoleChangeLog {
+  id           String            @id @default(cuid())
+  previousRole OrganizationRoles
+  newRole      OrganizationRoles
+  createdAt    DateTime          @default(now())
+
+  // Who was changed
+  user   User   @relation("roleChangeTarget", fields: [userId], references: [id])
+  userId String
+
+  // Who performed the change
+  changedBy   User   @relation("roleChangeActor", fields: [changedById], references: [id])
+  changedById String
+
+  // Which organization
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  @@index([userId, organizationId])
+  @@index([organizationId, createdAt])
 }

@@ -128,33 +128,29 @@ export async function markUpdateAsRead({
   updateId: string;
   userId: string;
 }): Promise<void> {
-  await db.$transaction(async (prisma) => {
-    // Create read record if it doesn't exist
-    await prisma.userUpdateRead.upsert({
-      where: {
-        userId_updateId: {
-          userId,
-          updateId,
-        },
-      },
-      create: {
+  await db.userUpdateRead.upsert({
+    where: {
+      userId_updateId: {
         userId,
         updateId,
       },
-      update: {
-        readAt: new Date(),
-      },
-    });
+    },
+    create: {
+      userId,
+      updateId,
+    },
+    update: {
+      readAt: new Date(),
+    },
+  });
 
-    // Increment view count
-    await prisma.update.update({
-      where: { id: updateId },
-      data: {
-        viewCount: {
-          increment: 1,
-        },
+  await db.update.update({
+    where: { id: updateId },
+    data: {
+      viewCount: {
+        increment: 1,
       },
-    });
+    },
   });
 }
 
@@ -323,6 +319,7 @@ export async function createUpdate({
   title,
   content,
   url,
+  imageUrl,
   publishDate,
   status = UpdateStatus.DRAFT,
   targetRoles = [],
@@ -331,6 +328,7 @@ export async function createUpdate({
   title: string;
   content: string;
   url?: string | null;
+  imageUrl?: string | null;
   publishDate: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -342,6 +340,7 @@ export async function createUpdate({
         title,
         content,
         url: url === undefined ? null : url, // Convert undefined to null for database
+        imageUrl: imageUrl === undefined ? null : imageUrl, // Convert undefined to null for database
         publishDate,
         status,
         targetRoles,
@@ -366,6 +365,7 @@ export async function updateUpdate({
   title,
   content,
   url,
+  imageUrl,
   publishDate,
   status,
   targetRoles,
@@ -374,6 +374,7 @@ export async function updateUpdate({
   title?: string;
   content?: string;
   url?: string | null;
+  imageUrl?: string | null;
   publishDate?: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -385,6 +386,7 @@ export async function updateUpdate({
         ...(title !== undefined && { title }),
         ...(content !== undefined && { content }),
         ...(url !== undefined && { url }),
+        ...(imageUrl !== undefined && { imageUrl }),
         ...(publishDate !== undefined && { publishDate }),
         ...(status !== undefined && { status }),
         ...(targetRoles !== undefined && { targetRoles }),

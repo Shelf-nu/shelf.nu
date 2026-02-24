@@ -10,6 +10,7 @@ interface UpdateFormProps {
   title?: string;
   content?: string;
   url?: string | null;
+  imageUrl?: string | null;
   publishDate?: Date;
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
@@ -20,6 +21,7 @@ export function UpdateForm({
   title = "",
   content = "",
   url = null,
+  imageUrl = null,
   publishDate,
   status = UpdateStatus.DRAFT,
   targetRoles = [],
@@ -68,6 +70,19 @@ export function UpdateForm({
         defaultValue={url || ""}
         placeholder="https://example.com (leave empty for updates without links)"
       />
+
+      <div>
+        <Input
+          label="Featured Image URL (optional)"
+          name="imageUrl"
+          type="url"
+          defaultValue={imageUrl || ""}
+          placeholder="https://example.com/image.jpg (external image URL)"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Add a featured image to make your update more visual
+        </p>
+      </div>
 
       <div>
         <label

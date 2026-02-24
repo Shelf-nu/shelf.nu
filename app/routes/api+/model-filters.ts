@@ -2,7 +2,7 @@ import { TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 
@@ -42,6 +42,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
     userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
+    usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
@@ -57,7 +58,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await getSelectedOrganisation({
+    const { organizationId } = await getSelectedOrganization({
       userId,
       request,
     });
@@ -111,6 +112,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
           },
         ];
+      } else if (modelFilters.usersOnly) {
+        // Filter to show only team members with users (exclude NRMs)
+        where.user = { isNot: null };
       }
     } else {
       where.OR.push({
@@ -118,8 +122,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    if (modelFilters.name === "booking") {
+      where.status = { in: ["RESERVED", "ONGOING", "OVERDUE"] };
+    }
+
     if (modelFilters.name === "tag" && modelFilters.useFor) {
-      where.useFor = { has: modelFilters.useFor };
+      // Tags with "All" selected are stored with an empty useFor array, so filtering only by `has`
+      // would hide those tags in bulk/tag pickers even though they are intended to be available.
+      // This keeps tag searches consistent with create/edit flows that also include "All" tags.
+      where.AND = [
+        ...(where.AND ?? []),
+        {
+          OR: [
+            { useFor: { isEmpty: true } },
+            { useFor: { has: modelFilters.useFor } },
+          ],
+        },
+      ];
     }
 
     const queryData = (await db[name].dynamicFindMany({

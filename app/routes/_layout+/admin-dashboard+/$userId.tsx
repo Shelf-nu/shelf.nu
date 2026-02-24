@@ -46,6 +46,7 @@ import {
   getOrCreateCustomerId,
   getStripeCustomer,
   getStripePricesAndProducts,
+  getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
@@ -88,6 +89,10 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         customerId: true,
         usedFreeTrial: true,
         sso: true,
+        onboarded: true,
+        createdWithInvite: true,
+        hasUnpaidInvoice: true,
+        warnForNoPaymentMethod: true,
         customTierLimit: {
           select: {
             maxOrganizations: true,
@@ -192,19 +197,25 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     );
 
     /** Get the Stripe customer */
-    const customer = premiumIsEnabled
-      ? ((await getStripeCustomer(
-          await getOrCreateCustomerId(user)
-        )) as CustomerWithSubscriptions)
+    const customerId = premiumIsEnabled
+      ? await getOrCreateCustomerId(user)
+      : null;
+    const customer = customerId
+      ? ((await getStripeCustomer(customerId)) as CustomerWithSubscriptions)
       : null;
 
-    /* Get the prices and products from Stripe */
-    const prices = await getStripePricesAndProducts();
+    /* Get the prices, products, and subscriptions from Stripe */
+    const [prices, subscriptionsWithProducts] = await Promise.all([
+      getStripePricesAndProducts(),
+      customerId ? getCustomerSubscriptionsWithProducts(customerId) : [],
+    ]);
+
     return payload({
       user,
       organizations: userOrganizations.map((uo) => uo.organization),
       ssoUsersByDomain,
       customer,
+      subscriptionsWithProducts,
       prices,
       premiumIsEnabled,
     });
@@ -243,6 +254,7 @@ export const action = async ({
           "createCustomerId",
           "deleteUser",
           "toggleSubscriptionCheck",
+          "toggleBooleanField",
         ]),
       })
     );
@@ -358,6 +370,29 @@ export const action = async ({
         });
         break;
       }
+      case "toggleBooleanField": {
+        const { fieldName, fieldValue } = parseData(
+          await request.formData(),
+          z.object({
+            fieldName: z.enum(["hasUnpaidInvoice", "warnForNoPaymentMethod"]),
+            fieldValue: z.string().transform((val) => val === "true"),
+          })
+        );
+
+        await db.user.update({
+          where: { id: shelfUserId },
+          data: { [fieldName]: fieldValue },
+          select: { id: true },
+        });
+
+        sendNotification({
+          title: "Field updated",
+          message: `${fieldName} has been set to ${fieldValue}`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
     }
 
     return payload(null);
@@ -373,6 +408,7 @@ export default function Area51UserPage() {
     organizations,
     ssoUsersByDomain,
     customer,
+    subscriptionsWithProducts,
     prices,
     premiumIsEnabled,
   } = useLoaderData<typeof loader>();
@@ -421,6 +457,23 @@ export default function Area51UserPage() {
             skipSubscriptionCheck={user.skipSubscriptionCheck}
           />
         );
+      case "hasUnpaidInvoice":
+        return (
+          <BooleanToggleForm
+            fieldName="hasUnpaidInvoice"
+            fieldValue={user.hasUnpaidInvoice}
+          />
+        );
+      case "warnForNoPaymentMethod":
+        return (
+          <BooleanToggleForm
+            fieldName="warnForNoPaymentMethod"
+            fieldValue={user.warnForNoPaymentMethod}
+          />
+        );
+      case "createdAt":
+      case "updatedAt":
+        return <DateS date={value as string | Date} />;
       default:
         return typeof value === "string"
           ? value
@@ -443,7 +496,7 @@ export default function Area51UserPage() {
     return value;
   };
 
-  const hasSubscription = (customer?.subscriptions?.total_count ?? 0) > 0;
+  const hasSubscription = (customer?.subscriptions?.data?.length ?? 0) > 0;
 
   return user ? (
     <div>
@@ -503,7 +556,11 @@ export default function Area51UserPage() {
             {!hasSubscription ? (
               <div>No subscription found</div>
             ) : (
-              <SubscriptionsOverview customer={customer} prices={prices} />
+              <SubscriptionsOverview
+                customer={customer}
+                subscriptions={subscriptionsWithProducts}
+                prices={prices}
+              />
             )}
           </div>
         </div>
@@ -614,6 +671,41 @@ function SubscriptionCheckUpdateForm({
         defaultChecked={skipSubscriptionCheck}
         disabled={disabled}
       />
+    </fetcher.Form>
+  );
+}
+
+function BooleanToggleForm({
+  fieldName,
+  fieldValue,
+}: {
+  fieldName: string;
+  fieldValue: boolean;
+}) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        void fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="toggleBooleanField" />
+      <input type="hidden" name="fieldName" value={fieldName} />
+
+      <select
+        style={{ all: "revert" }}
+        disabled={disabled}
+        defaultValue={String(fieldValue)}
+        name="fieldValue"
+      >
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+      {disabled && <Spinner />}
     </fetcher.Form>
   );
 }

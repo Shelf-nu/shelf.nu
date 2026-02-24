@@ -20,6 +20,7 @@ import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
 import { id } from "./id/id.server";
+import { detectImageFormat } from "./image-format.server";
 import {
   cacheOptimizedImage,
   type CachedImage,
@@ -61,7 +62,7 @@ export async function createSignedUrl({
   const normalizedFilename = filename.startsWith("/")
     ? filename.substring(1)
     : filename;
-  const maxAttempts = 2;
+  const maxAttempts = 3;
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -83,15 +84,19 @@ export async function createSignedUrl({
       }
 
       // Supabase occasionally responds with HTML on 50x/edge errors, which the client surfaces
-      // as StorageUnknownError with a JSON parse failure. Retry once before surfacing it to keep
+      // as StorageUnknownError with a JSON parse failure. Retry before surfacing it to keep
       // transient CDN hiccups from bubbling up as user-facing ShelfErrors.
-      if (isSupabaseHtmlError(error)) {
+      const isHtmlError = isSupabaseHtmlError(error);
+      const isFetchFailed = isSupabaseFetchFailedError(error);
+
+      if (isHtmlError || isFetchFailed) {
         if (attempt < maxAttempts) {
           Logger.warn(
             new ShelfError({
               cause: error,
-              message:
-                "Supabase returned a non-JSON response while creating a signed URL. Retrying.",
+              message: isHtmlError
+                ? "Supabase returned a non-JSON response while creating a signed URL. Retrying."
+                : "Supabase request failed while creating a signed URL. Retrying.",
               additionalData: {
                 filename: normalizedFilename,
                 bucketName,
@@ -115,7 +120,50 @@ export async function createSignedUrl({
             filename: normalizedFilename,
             bucketName,
             attempts: maxAttempts,
-            errorType: "persistent_html_error",
+            errorType: isHtmlError
+              ? "persistent_html_error"
+              : "persistent_fetch_failed",
+          },
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Supabase returns 429 when the storage API is overwhelmed.
+      // Use exponential backoff to give the API time to recover.
+      if (isSupabaseRateLimitError(error)) {
+        if (attempt < maxAttempts) {
+          const backoffMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message:
+                "Supabase rate limit hit while creating a signed URL. Retrying with backoff.",
+              additionalData: {
+                filename: normalizedFilename,
+                bucketName,
+                attempt,
+                backoffMs,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+          await delay(backoffMs);
+          continue;
+        }
+
+        // All retries exhausted - this is a transient rate-limit issue
+        // that shouldn't spam Sentry
+        throw new ShelfError({
+          cause: error,
+          message:
+            "Supabase rate limit exceeded. Please try again in a moment.",
+          additionalData: {
+            filename: normalizedFilename,
+            bucketName,
+            attempts: maxAttempts,
+            errorType: "rate_limit_exceeded",
           },
           label,
           shouldBeCaptured: false,
@@ -241,12 +289,16 @@ export async function uploadFile(
     // Return just the path string for backward compatibility
     return data.path;
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while uploading the file. Please try again or contact support.",
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
       additionalData: { filename, contentType, bucketName },
       label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
     });
   }
 }
@@ -354,14 +406,39 @@ export async function parseFileFormData({
       });
     }
 
+    const nestedShelfError = findShelfErrorInCause(cause);
+
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
+      message: nestedShelfError
+        ? nestedShelfError.message
         : "Something went wrong while uploading the file. Please try again or contact support.",
+      title: nestedShelfError?.title,
       label,
+      shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
     });
   }
+}
+
+/**
+ * Recursively walks the `.cause` chain to find a `ShelfError`.
+ *
+ * Libraries like `@remix-run/form-data-parser` wrap errors in their own
+ * `FormDataParseError`, hiding the nested ShelfError. This helper lets
+ * callers recover the original message, `title`, and `shouldBeCaptured` flag.
+ */
+export function findShelfErrorInCause(error: unknown): ShelfError | null {
+  if (isLikeShelfError(error)) {
+    return error;
+  }
+
+  const cause = (error as { cause?: unknown })?.cause;
+
+  if (!cause) {
+    return null;
+  }
+
+  return findShelfErrorInCause(cause);
 }
 
 /**
@@ -453,62 +530,6 @@ async function normalizeToAsyncIterable(
       await Promise.resolve();
       yield buffer;
     })();
-  }
-
-  return null;
-}
-
-/**
- * Detects image format from file content using magic bytes (file signatures)
- * Returns the detected MIME type or null if not a supported image format
- */
-function detectImageFormat(buffer: Buffer): string | null {
-  // Check for common image format signatures
-  if (buffer.length < 4) return null;
-
-  // PNG: 89 50 4E 47
-  if (
-    buffer[0] === 0x89 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x4e &&
-    buffer[3] === 0x47
-  ) {
-    return "image/png";
-  }
-
-  // JPEG: FF D8 FF
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-    return "image/jpeg";
-  }
-
-  // GIF: 47 49 46 38 (GIF8)
-  if (
-    buffer[0] === 0x47 &&
-    buffer[1] === 0x49 &&
-    buffer[2] === 0x46 &&
-    buffer[3] === 0x38
-  ) {
-    return "image/gif";
-  }
-
-  // WebP: 52 49 46 46 ... 57 45 42 50 (RIFF...WEBP)
-  if (
-    buffer.length >= 12 &&
-    buffer[0] === 0x52 &&
-    buffer[1] === 0x49 &&
-    buffer[2] === 0x46 &&
-    buffer[3] === 0x46 &&
-    buffer[8] === 0x57 &&
-    buffer[9] === 0x45 &&
-    buffer[10] === 0x42 &&
-    buffer[11] === 0x50
-  ) {
-    return "image/webp";
-  }
-
-  // BMP: 42 4D
-  if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
-    return "image/bmp";
   }
 
   return null;
@@ -818,7 +839,7 @@ export function getFileUploadPath({
   typeId,
 }: {
   organizationId: string;
-  type: "locations";
+  type: "locations" | "audits";
   typeId: string;
 }) {
   return `${organizationId}/${type}/${typeId}/${id()}`;
@@ -863,7 +884,7 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
 /**
  * Supabase can sporadically return HTML error pages (e.g., CDN/edge 50x) that the storage
  * client surfaces as StorageUnknownError due to JSON parsing. Detect that shape so callers
- * can retry once instead of immediately failing user-visible flows.
+ * can retry instead of immediately failing user-visible flows.
  */
 function isSupabaseHtmlError(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -879,8 +900,14 @@ function isSupabaseHtmlError(error: unknown) {
 
   // Detect JSON parse failures that typically show up when HTML is returned instead of JSON
   const lowerMessage = message.toLowerCase();
+  const isJsonParseFailure =
+    lowerMessage.includes("unexpected token") && lowerMessage.includes("json");
+  const mentionsHtml =
+    lowerMessage.includes("<html") ||
+    lowerMessage.includes("html>") ||
+    lowerMessage.includes("text/html");
   const isUnexpectedHtml =
-    message.includes("Unexpected token <") && lowerMessage.includes("json");
+    isJsonParseFailure && (mentionsHtml || lowerMessage.includes("<"));
   const isStorageUnknown =
     name === "StorageUnknownError" ||
     ("__isStorageError" in error &&
@@ -888,4 +915,61 @@ function isSupabaseHtmlError(error: unknown) {
       error.__isStorageError === true);
 
   return isUnexpectedHtml && isStorageUnknown;
+}
+
+/**
+ * Supabase can also surface network failures as StorageUnknownError with a
+ * generic "fetch failed" message. Treat those as transient for retries.
+ */
+function isSupabaseFetchFailedError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+
+  const lowerMessage = message.toLowerCase();
+  const isFetchFailed = lowerMessage.includes("fetch failed");
+  const isStorageUnknown =
+    name === "StorageUnknownError" ||
+    ("__isStorageError" in error &&
+      typeof error.__isStorageError === "boolean" &&
+      error.__isStorageError === true);
+
+  return isFetchFailed && isStorageUnknown;
+}
+
+/**
+ * Supabase returns HTTP 429 when too many requests hit the storage API.
+ * The client surfaces this as a StorageApiError. Detect it so callers
+ * can back off and retry instead of immediately failing.
+ */
+export function isSupabaseRateLimitError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const status =
+    "status" in error && typeof error.status === "number" ? error.status : 0;
+  const statusCode =
+    "statusCode" in error && typeof error.statusCode === "string"
+      ? error.statusCode
+      : "";
+
+  const isRateLimitStatus = status === 429 || statusCode === "429";
+  const isRateLimitMessage = message.toLowerCase().includes("too many");
+  const isStorageApiError = name === "StorageApiError";
+
+  return isStorageApiError && (isRateLimitStatus || isRateLimitMessage);
 }

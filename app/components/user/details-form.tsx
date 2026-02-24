@@ -159,7 +159,7 @@ export function UserDetailsForm({
           <div className="flex gap-3">
             <ProfilePicture />
             <div>
-              <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
+              <p>Accepts PNG, JPG, JPEG, or WebP (max.4 MB)</p>
               <Input
                 disabled={disabled}
                 accept={ACCEPT_SUPPORTED_IMAGES}

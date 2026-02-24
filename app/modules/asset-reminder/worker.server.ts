@@ -29,7 +29,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
       mainImageExpiration: true,
     },
   },
-  organization: { select: { name: true } },
+  organization: { select: { name: true, customEmailFooter: true } },
 } satisfies Prisma.AssetReminderInclude;
 
 type UserToEmail = Pick<User, "email" | "firstName" | "lastName"> & {
@@ -41,19 +41,23 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
   (job: PgBoss.Job<AssetsSchedulerData>) => Promise<void>
 > = {
   REMINDER: async (job) => {
-    const reminder = await db.assetReminder
-      .findFirstOrThrow({
-        where: { id: job.data.reminderId },
-        include: ASSET_REMINDER_INCLUDES_FOR_EMAIL,
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Asset reminder not found",
+    const reminder = await db.assetReminder.findFirst({
+      where: { id: job.data.reminderId },
+      include: ASSET_REMINDER_INCLUDES_FOR_EMAIL,
+    });
+
+    if (!reminder) {
+      Logger.warn(
+        new ShelfError({
+          cause: null,
+          message: "Asset reminder not found for scheduled job. Skipping.",
           additionalData: { ...job.data },
           label: "Asset Scheduler",
-        });
-      });
+          shouldBeCaptured: false,
+        })
+      );
+      return;
+    }
 
     const usersToSendEmail = reminder.teamMembers
       .filter((tm) => !!tm.user)
@@ -104,6 +108,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           reminder,
           workspaceName: reminder.organization.name,
           isOwner: user.isOwner,
+          customEmailFooter: reminder.organization.customEmailFooter,
         });
 
         sendEmail({
@@ -115,6 +120,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             reminder,
             workspaceName: reminder.organization.name,
             isOwner: user.isOwner,
+            customEmailFooter: reminder.organization.customEmailFooter,
           }),
           html,
         });

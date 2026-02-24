@@ -35,6 +35,7 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
@@ -43,6 +44,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
@@ -114,6 +116,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId,
     });
 
+    const hasActiveFilters = computeHasActiveFilters(searchParams);
+
     /** We only do that when we are on the index page */
     if (filters && redirectNeeded) {
       const cookieParams = new URLSearchParams(filters);
@@ -141,9 +145,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy,
         orderDirection,
         tags: filterTags,
-        extraInclude: {
-          tags: { select: { id: true, name: true } },
-        },
+        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
       }),
 
       // team members for filter dropdown
@@ -202,6 +204,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        hasActiveFilters,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members
@@ -326,6 +329,12 @@ export default function BookingsIndexPage({
               <BulkActionsDropdown />
             )
           }
+          customEmptyStateContent={{
+            title: "No bookings yet",
+            text: "Bookings let your team reserve assets for specific dates. Create a booking to schedule equipment checkouts and returns.",
+            newButtonRoute: "/bookings/new",
+            newButtonContent: "Create your first booking",
+          }}
           ItemComponent={ListBookingsContent}
           headerChildren={
             <>
@@ -397,7 +406,7 @@ const ListBookingsContent = ({
       to: true;
       custodianUser: true;
       custodianTeamMember: true;
-      tags: { select: { id: true; name: true } };
+      tags: { select: { id: true; name: true; color: true } };
     };
   }>;
 }) => {

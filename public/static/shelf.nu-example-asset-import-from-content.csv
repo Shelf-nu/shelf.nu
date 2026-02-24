@@ -1,3 +1,3 @@
-qrId,title,description,kit,category,tags,location,valuation,custodian,bookable,"cf: Serial number,type:text","cf:brand, type:option","cf:purchase date, type:date","cf:warranty cost, type:amount","cf:temperature rating, type:number"
-abcde12345,AMD Ryzen,"CPU from my new home PC",Home PC,CPU,"High priority, small",Sofia office,100,John,yes,WQE239123d,amd,2024-02-22,299.99,-40
-12345abcde,"Macbook Pro.","New laptop",Working gear,Laptop,"High priority, mid-size",Dutch office,2500,Thea,no,43543we23d,apple,2022-03-12,499.00,85
+title,description,kit,category,tags,location,valuation,custodian,bookable,"cf: Serial number,type:text","cf:brand, type:option","cf:purchase date, type:date","cf:warranty cost, type:amount","cf:temperature rating, type:number"
+AMD Ryzen,"CPU from my new home PC",Home PC,CPU,"High priority, small",Sofia office,100,John,yes,WQE239123d,amd,2024-02-22,299.99,-40
+"Macbook Pro.","New laptop",Working gear,Laptop,"High priority, mid-size",Dutch office,2500,Thea,no,43543we23d,apple,2022-03-12,499.00,85

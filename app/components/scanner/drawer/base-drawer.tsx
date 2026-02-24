@@ -19,8 +19,11 @@ type BaseDrawerProps = {
   title?: string | ReactNode;
   onClear?: () => void;
   hasItems: boolean;
+  renderWhenEmpty?: boolean;
   emptyStateContent?: ReactNode | ((expanded: boolean) => ReactNode);
   headerContent?: ReactNode;
+  /** Custom height for the collapsed state when items are present (default: 170) */
+  collapsedHeight?: number;
 };
 
 /** Used for calculating expanded size */
@@ -40,8 +43,10 @@ export default function BaseDrawer({
   title,
   onClear,
   hasItems,
+  renderWhenEmpty = false,
   emptyStateContent,
   headerContent,
+  collapsedHeight = 170,
 }: BaseDrawerProps) {
   const [expanded, setExpanded] = useState(
     defaultExpanded !== undefined ? defaultExpanded : false
@@ -107,6 +112,9 @@ export default function BaseDrawer({
     };
   }, [headerContent, title, hasItems, onClear]);
 
+  // Allow callers to show a non-empty body even when there are no items.
+  const shouldRenderBody = hasItems || renderWhenEmpty;
+
   return (
     <Portal>
       <div
@@ -122,8 +130,8 @@ export default function BaseDrawer({
               : vh - TOP_GAP
             : headerContent
             ? headerHeight // Use dynamic height when custom header content exists
-            : hasItems
-            ? 170 // Original logic: show first item when there are items
+            : shouldRenderBody
+            ? collapsedHeight // Show first item when there are items
             : 148, // Original logic: minimal height when no items
         }}
       >
@@ -173,7 +181,7 @@ export default function BaseDrawer({
             </div>
 
             {/* Body */}
-            {!hasItems ? (
+            {!shouldRenderBody ? (
               <div className="flex flex-col items-center px-3 py-6 text-center">
                 {typeof emptyStateContent === "function"
                   ? emptyStateContent(expanded)

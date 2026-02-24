@@ -110,6 +110,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
             message: "Self user can only assign custody to themselves only.",
             additionalData: { userId, kitIds, custodian },
             label: "Kit",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -151,6 +153,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
               message: "Self user can release custody of themselves only.",
               additionalData: { userId, kitIds },
               label: "Kit",
+              status: 403,
+              shouldBeCaptured: false,
             });
           }
         }

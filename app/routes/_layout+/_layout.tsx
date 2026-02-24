@@ -37,12 +37,18 @@ import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { SequentialIdMigrationModal } from "~/components/sequential-id-migration-modal";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
+import { MissingPaymentMethodBanner } from "~/components/subscription/missing-payment-method-banner";
 import { NoSubscription } from "~/components/subscription/no-subscription";
+import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import {
+  getSelectedOrganization,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -63,7 +69,7 @@ import {
   stripe,
   validateSubscriptionIsActive,
 } from "~/utils/stripe.server";
-import { canUseBookings } from "~/utils/subscription.server";
+import { canUseAudits, canUseBookings } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -88,6 +94,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         skipSubscriptionCheck: true,
         sso: true,
         tierId: true,
+        hasUnpaidInvoice: true,
+        warnForNoPaymentMethod: true,
         roles: { select: { id: true, name: true } },
         userOrganizations: {
           where: {
@@ -128,8 +136,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /** There could be a case when you get removed from an organization while browsing it.
      * In this case what we do is we set the current organization to the first one in the list
      */
-    const { organizationId, organizations, currentOrganization } =
-      await getSelectedOrganisation({ userId: authSession.userId, request });
+    const {
+      organizationId,
+      organizations,
+      currentOrganization,
+      cookieRefreshNeeded,
+    } = await getSelectedOrganization({
+      userId: authSession.userId,
+      request,
+    });
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
     // Get current user's organization role for updates filtering
@@ -164,24 +179,34 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    const [bookingSettings, workingHoursRaw] = await Promise.all([
+      getBookingSettingsForOrganization(currentOrganization.id),
+      getWorkingHoursForOrganization(currentOrganization.id),
+    ]);
+
+    const workingHours = workingHoursRaw;
+
     return data(
       payload({
         user,
         organizations,
         currentOrganizationId: organizationId,
-        bookingSettings: await getBookingSettingsForOrganization(
-          currentOrganization.id
-        ),
+        bookingSettings,
+        workingHours,
         currentOrganization,
         currentOrganizationUserRoles,
         subscription,
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
+        scannerCameraId: userPrefsCookie.scannerCameraId as string | undefined,
         hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
+        canUseAudits: canUseAudits(currentOrganization),
         unreadUpdatesCount,
+        hasUnpaidInvoice: user.hasUnpaidInvoice,
+        warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
         disabledTeamOrg: isAdmin
@@ -194,7 +219,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             })),
       }),
       {
-        headers: [setCookie(await userPrefs.serialize(userPrefsCookie))],
+        headers: [
+          setCookie(await userPrefs.serialize(userPrefsCookie)),
+          ...(cookieRefreshNeeded
+            ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
+            : []),
+        ],
       }
     );
   } catch (cause) {
@@ -228,6 +258,8 @@ export default function App() {
   useCrisp();
   const {
     disabledTeamOrg,
+    hasUnpaidInvoice,
+    warnForNoPaymentMethod,
     minimizedSidebar,
     needsSequentialIdMigration,
     currentOrganizationId,
@@ -248,6 +280,8 @@ export default function App() {
         <AtomsResetHandler />
         <AppSidebar id="navigation" />
         <SidebarInset id="main-content" tabIndex={-1}>
+          {warnForNoPaymentMethod ? <MissingPaymentMethodBanner /> : null}
+          {hasUnpaidInvoice ? <UnpaidInvoiceBanner /> : null}
           {disabledTeamOrg ? (
             <NoSubscription />
           ) : workspaceSwitching ? (

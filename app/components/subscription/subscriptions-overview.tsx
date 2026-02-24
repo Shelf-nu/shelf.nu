@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { InfoIcon } from "lucide-react";
+import { useRouteLoaderData } from "react-router";
 import type Stripe from "stripe";
+import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import { CustomerPortalForm } from "./customer-portal-form";
@@ -18,14 +20,47 @@ import {
 
 export function SubscriptionsOverview({
   customer,
+  subscriptions,
   prices,
 }: {
   customer: CustomerWithSubscriptions | null;
+  subscriptions: Stripe.Subscription[];
   prices: {
     [key: string]: PriceWithProduct[];
   };
 }) {
-  const subscriptionsData = customer?.subscriptions?.data;
+  // Separate subscriptions into workspace plans and addons
+  const { workspaceSubscriptions, addonSubscriptions } = useMemo(() => {
+    const workspace: Stripe.Subscription[] = [];
+    const addons: Stripe.Subscription[] = [];
+
+    for (const subscription of subscriptions) {
+      // Check if any item in the subscription is a workspace tier (tier_1 or tier_2)
+      const isWorkspace = subscription.items.data.some((item) => {
+        const product = item.price?.product;
+        if (product && typeof product === "object" && "metadata" in product) {
+          const tier = product.metadata?.shelf_tier;
+          return tier === "tier_1" || tier === "tier_2";
+        }
+        // Also check in prices array
+        const priceFromArray = findPriceById(prices, item.price.id);
+        if (priceFromArray) {
+          const tier = priceFromArray.product.metadata.shelf_tier;
+          return tier === "tier_1" || tier === "tier_2";
+        }
+        return false;
+      });
+
+      if (isWorkspace) {
+        workspace.push(subscription);
+      } else {
+        addons.push(subscription);
+      }
+    }
+
+    return { workspaceSubscriptions: workspace, addonSubscriptions: addons };
+  }, [subscriptions, prices]);
+
   if (!customer) {
     return (
       <div>
@@ -35,16 +70,72 @@ export function SubscriptionsOverview({
     );
   }
 
+  // Calculate group totals (include all non-canceled subscriptions)
+  const calculateGroupTotal = (subs: Stripe.Subscription[]) =>
+    subs.reduce((total, sub) => {
+      // Exclude only paused and canceled subscriptions
+      const shouldExclude =
+        sub.status === "paused" || sub.status === "canceled";
+      if (shouldExclude) return total;
+      return (
+        total +
+        sub.items.data.reduce((acc, item) => {
+          const unitAmount = item.price?.unit_amount || 0;
+          return acc + unitAmount * (item.quantity || 1);
+        }, 0)
+      );
+    }, 0);
+
+  const workspaceTotal = calculateGroupTotal(workspaceSubscriptions);
+  const addonTotal = calculateGroupTotal(addonSubscriptions);
+
   return (
-    <div>
-      {subscriptionsData?.map((subscription) => (
-        <SubscriptionBox
-          subscription={subscription}
-          key={subscription.id}
-          prices={prices}
-          customer={customer}
-        />
-      ))}
+    <div className="space-y-6">
+      {workspaceSubscriptions.length > 0 && (
+        <div>
+          <h4 className="mb-3 text-sm font-medium uppercase text-gray-500">
+            Workspace Subscriptions
+          </h4>
+          {workspaceSubscriptions.map((subscription) => (
+            <SubscriptionBox
+              subscription={subscription}
+              key={subscription.id}
+              prices={prices}
+              customer={customer}
+            />
+          ))}
+          <div className="mt-2 text-right font-medium">
+            Subtotal:{" "}
+            {new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency: "USD",
+            }).format(workspaceTotal / 100)}
+          </div>
+        </div>
+      )}
+
+      {addonSubscriptions.length > 0 && (
+        <div>
+          <h4 className="mb-3 text-sm font-medium uppercase text-gray-500">
+            Add-ons
+          </h4>
+          {addonSubscriptions.map((subscription) => (
+            <SubscriptionBox
+              subscription={subscription}
+              key={subscription.id}
+              prices={prices}
+              customer={customer}
+            />
+          ))}
+          <div className="mt-2 text-right font-medium">
+            Subtotal:{" "}
+            {new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency: "USD",
+            }).format(addonTotal / 100)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -59,11 +150,6 @@ function SubscriptionBox({
   };
   customer: CustomerWithSubscriptions;
 }) {
-  const { isActive } = getSubscriptionStatus(subscription);
-  const total = subscription.items.data.reduce((acc, item) => {
-    const price = findPriceById(prices, item.price.id);
-    return acc + (price?.unit_amount || 0) * (item.quantity || 1);
-  }, 0);
   return (
     <div>
       {subscription.items.data.map((item) => (
@@ -74,15 +160,6 @@ function SubscriptionBox({
           key={item.id}
         />
       ))}
-      {isActive && (
-        <div className="text-right">
-          Total:{" "}
-          {new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-          }).format(total / 100)}
-        </div>
-      )}
     </div>
   );
 }
@@ -101,12 +178,34 @@ function Item({
   const interval = item.price?.recurring?.interval;
   const isLegacyPricing = item?.price?.metadata?.legacy === "true";
   const subscriptionPrice = findPriceById(prices, item.price.id);
-  let planTier: string | undefined = undefined;
 
-  if (subscriptionPrice) {
-    // You can safely access product metadata and other fields
-    planTier = subscriptionPrice.product.metadata.shelf_tier;
-  }
+  // Get plan tier from the prices array if available
+  const planTier = subscriptionPrice?.product.metadata.shelf_tier;
+
+  // Get product name - prefer from prices array, fallback to item's product if expanded
+  const productName = useMemo(() => {
+    // First try the prices array
+    if (subscriptionPrice?.product.name) {
+      return subscriptionPrice.product.name;
+    }
+    // Fallback: check if product is expanded on the item's price
+    const product = item.price?.product;
+    if (product && typeof product === "object" && "name" in product) {
+      return product.name;
+    }
+    // Last resort: use nickname from price or generic label
+    return item.price?.nickname || "Subscription";
+  }, [subscriptionPrice, item.price]);
+
+  // Look up workspace name from layout data for addon subscriptions
+  const layoutData = useRouteLoaderData<typeof layoutLoader>(
+    "routes/_layout+/_layout"
+  );
+  const workspaceName = useMemo(() => {
+    const orgId = subscription.metadata?.organizationId;
+    if (!orgId || !layoutData?.organizations) return null;
+    return layoutData.organizations.find((o) => o.id === orgId)?.name ?? null;
+  }, [subscription.metadata, layoutData?.organizations]);
 
   const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
   const costPerPrice = item?.price?.unit_amount
@@ -119,15 +218,22 @@ function Item({
     subscription?.trial_end * 1000 > Date.now();
 
   const detailsArray = useMemo<(string | ReactNode)[]>(() => {
-    const arr: (string | ReactNode)[] = [
+    // Determine the display name based on tier or product name
+    const displayName =
       planTier === "tier_2"
         ? "Team plan"
         : planTier === "tier_1"
         ? "Plus plan"
-        : subscriptionPrice?.product.name,
-      subscription.status,
+        : productName;
+
+    const arr: (string | ReactNode)[] = [
+      displayName,
+      formatSubscriptionStatus(subscription.status),
       interval === "year" ? "Yearly billing" : "Monthly billing",
     ];
+    if (workspaceName) {
+      arr.push(`Workspace: ${workspaceName}`);
+    }
     if (isLegacyPricing) {
       arr.unshift(
         <div className="flex items-center gap-1">
@@ -138,10 +244,11 @@ function Item({
     return arr;
   }, [
     planTier,
+    productName,
     interval,
     subscription.status,
     isLegacyPricing,
-    subscriptionPrice,
+    workspaceName,
   ]);
 
   function renderSubscriptionCost() {
@@ -194,12 +301,10 @@ function Item({
         <div>
           <div className="flex gap-2">
             {detailsArray.map((content, index, array) => (
-              <>
-                <div className="font-semibold uppercase" key={index}>
-                  {content}
-                </div>{" "}
+              <span key={index} className="flex items-center gap-2">
+                <span className="font-semibold uppercase">{content}</span>
                 {index < array.length - 1 && " - "}
-              </>
+              </span>
             ))}
           </div>
           <div className="flex gap-2">
@@ -219,17 +324,13 @@ function Item({
               {isActive && (
                 <>
                   <span className="font-medium">RENEWS ON:</span>{" "}
-                  <DateS
-                    date={new Date(subscription.current_period_end * 1000)}
-                  />
+                  <DateS date={new Date(item.current_period_end * 1000)} />
                 </>
               )}
               {isPaused && (
                 <>
                   <span className="font-medium">PAUSED ON:</span>{" "}
-                  <DateS
-                    date={new Date(subscription.current_period_end * 1000)}
-                  />
+                  <DateS date={new Date(item.current_period_end * 1000)} />
                 </>
               )}
             </div>
@@ -346,4 +447,19 @@ function getSubscriptionStatus(subscription: Stripe.Subscription) {
     isActive: subscription.status === "active",
     isPaused: subscription.status === "paused",
   };
+}
+
+/** Maps Stripe subscription status to a human-friendly label */
+function formatSubscriptionStatus(status: Stripe.Subscription.Status): string {
+  const statusMap: Record<Stripe.Subscription.Status, string> = {
+    active: "Active",
+    past_due: "Past due",
+    unpaid: "Unpaid",
+    canceled: "Canceled",
+    incomplete: "Incomplete",
+    incomplete_expired: "Expired",
+    trialing: "Trialing",
+    paused: "Paused",
+  };
+  return statusMap[status] || status;
 }

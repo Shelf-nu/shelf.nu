@@ -60,12 +60,12 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
-import AssetQuickActions from "./asset-quick-actions";
-import { ListItemTagsColumn } from "./list-item-tags-column";
 import { CategoryBadge } from "../category-badge";
 
 export function AdvancedIndexColumn({
@@ -215,12 +215,13 @@ export function AdvancedIndexColumn({
       return <DescriptionColumn value={item.description ?? ""} />;
 
     case "valuation": {
-      const value = item?.valuation?.toLocaleString(locale, {
-        currency: currentOrganization.currency,
-        style: "currency",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+      const value = item?.valuation
+        ? formatCurrency({
+            value: item.valuation,
+            locale,
+            currency: currentOrganization.currency,
+          })
+        : null;
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
           {value ? value : <EmptyTableValue />}
@@ -371,8 +372,9 @@ function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
 /**
  * Displays a truncated plain-text preview of the asset description and shows
  * the full markdown-rendered content inside a tooltip on hover.
+ * Description column component - exported for reuse in other index pages
  */
-function DescriptionColumn({ value }: { value: string }) {
+export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();

@@ -8,8 +8,8 @@ import {
 import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
-
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
+import { sendBookingUpdatedEmail } from "./email-helpers";
 import {
   createBooking,
   partialCheckinBooking,
@@ -62,6 +62,7 @@ afterAll(() => {
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    $executeRaw: vitest.fn().mockResolvedValue(0),
     booking: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -105,6 +106,9 @@ vitest.mock("~/database/db.server", () => ({
         .fn()
         .mockResolvedValue([{ name: "Tag 1" }, { name: "Tag 2" }]),
     },
+    teamMember: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -143,6 +147,16 @@ vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
 }));
 
+// why: spying on booking update email calls without executing
+// actual DB lookups or email sends
+vitest.mock("./email-helpers", async () => {
+  const actual = await vitest.importActual("./email-helpers");
+  return {
+    ...actual,
+    sendBookingUpdatedEmail: vitest.fn().mockResolvedValue(undefined),
+  };
+});
+
 // why: avoiding organization admin lookups during booking notification tests
 vitest.mock("~/modules/organization/service.server", () => ({
   getOrganizationAdminsEmails: vitest
@@ -162,6 +176,14 @@ vitest.mock("~/utils/scheduler.server", () => ({
   },
 }));
 
+const HOURS_BETWEEN_FROM_AND_TO = 8;
+const futureFromDate = new Date();
+futureFromDate.setDate(futureFromDate.getDate() + 30);
+const futureToDate = new Date(
+  futureFromDate.getTime() + HOURS_BETWEEN_FROM_AND_TO * 60 * 60 * 1000
+);
+const futureCreatedAt = new Date(futureFromDate.getTime() - 60 * 60 * 1000);
+
 const mockBookingData = {
   id: "booking-1",
   name: "Test Booking",
@@ -171,16 +193,16 @@ const mockBookingData = {
   organizationId: "org-1",
   custodianUserId: "user-1",
   custodianTeamMemberId: null,
-  from: new Date("2025-01-01T09:00:00Z"),
-  to: new Date("2025-01-01T17:00:00Z"),
-  createdAt: new Date("2025-01-01T08:00:00Z"),
-  updatedAt: new Date("2025-01-01T08:00:00Z"),
+  from: futureFromDate,
+  to: futureToDate,
+  createdAt: futureCreatedAt,
+  updatedAt: futureCreatedAt,
   assets: [
     { id: "asset-1", kitId: null },
     { id: "asset-2", kitId: null },
     { id: "asset-3", kitId: "kit-1" },
   ],
-  tags: [{ id: "tag-1", name: "Tag 1" }],
+  tags: [{ id: "tag-1", name: "Tag 1", color: "#123456" }],
 };
 
 const mockClientHints = {
@@ -196,8 +218,8 @@ const mockCreateBookingParams = {
     custodianTeamMemberId: "team-member-1",
     organizationId: "org-1",
     creatorId: "user-1",
-    from: new Date("2024-01-01T09:00:00Z"),
-    to: new Date("2024-01-01T17:00:00Z"),
+    from: futureFromDate,
+    to: futureToDate,
     tags: [],
   },
   assetIds: ["asset-1", "asset-2"],
@@ -224,10 +246,10 @@ describe("createBooking", () => {
         custodianTeamMember: { connect: { id: "team-member-1" } },
         organization: { connect: { id: "org-1" } },
         creator: { connect: { id: "user-1" } },
-        from: new Date("2024-01-01T09:00:00Z"),
-        to: new Date("2024-01-01T17:00:00Z"),
-        originalFrom: new Date("2024-01-01T09:00:00Z"),
-        originalTo: new Date("2024-01-01T17:00:00Z"),
+        from: futureFromDate,
+        to: futureToDate,
+        originalFrom: futureFromDate,
+        originalTo: futureToDate,
         status: "DRAFT",
         assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
       },
@@ -239,6 +261,7 @@ describe("createBooking", () => {
           select: {
             id: true,
             name: true,
+            color: true,
           },
         },
       },
@@ -269,10 +292,10 @@ describe("createBooking", () => {
         organization: { connect: { id: "org-1" } },
         creator: { connect: { id: "user-1" } },
         custodianTeamMember: { connect: { id: "team-member-1" } },
-        from: new Date("2024-01-01T09:00:00Z"),
-        to: new Date("2024-01-01T17:00:00Z"),
-        originalFrom: new Date("2024-01-01T09:00:00Z"),
-        originalTo: new Date("2024-01-01T17:00:00Z"),
+        from: futureFromDate,
+        to: futureToDate,
+        originalFrom: futureFromDate,
+        originalTo: futureToDate,
         status: "DRAFT",
         assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
       },
@@ -284,6 +307,7 @@ describe("createBooking", () => {
           select: {
             id: true,
             name: true,
+            color: true,
           },
         },
       },
@@ -801,6 +825,186 @@ describe("updateBasicBooking", () => {
       ShelfError
     );
   });
+
+  it("should send email when changes are detected and hints are provided", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "custodian-1",
+      custodianTeamMemberId: "team-member-1",
+      name: "Old Name",
+      description: "Old Description",
+      from: futureFromDate,
+      to: futureToDate,
+      custodianUser: {
+        id: "custodian-1",
+        email: "custodian@example.com",
+        firstName: "Custodian",
+        lastName: "User",
+      },
+      custodianTeamMember: null,
+      tags: [],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-1",
+      name: "New Name",
+    });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      name: "New Name",
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    expect(sendBookingUpdatedEmail).toHaveBeenCalledTimes(1);
+    expect(sendBookingUpdatedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "editor-1",
+        changes: expect.arrayContaining([
+          expect.stringContaining("Booking name changed"),
+        ]),
+      })
+    );
+  });
+
+  it("should not send email when no hints are provided", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "custodian-1",
+      custodianTeamMemberId: "team-member-1",
+      name: "Old Name",
+      description: null,
+      from: futureFromDate,
+      to: futureToDate,
+      custodianUser: {
+        id: "custodian-1",
+        email: "custodian@example.com",
+        firstName: "Custodian",
+        lastName: "User",
+      },
+      custodianTeamMember: null,
+      tags: [],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      name: "New Name",
+      userId: "editor-1",
+      // no hints
+    });
+
+    expect(sendBookingUpdatedEmail).not.toHaveBeenCalled();
+  });
+
+  it("should not send email when no changes are detected", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-2",
+      custodianTeamMemberId: "team-member-2",
+      name: "Updated Booking Name",
+      description: "Updated Description",
+      from: new Date("2024-02-01T09:00:00Z"),
+      to: new Date("2024-02-01T17:00:00Z"),
+      custodianUser: {
+        id: "user-2",
+        email: "custodian@example.com",
+        firstName: "Custodian",
+        lastName: "User",
+      },
+      custodianTeamMember: { id: "team-member-2", name: "TM" },
+      tags: [
+        { id: "tag-1", name: "Tag 1" },
+        { id: "tag-2", name: "Tag 2" },
+      ],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    expect(sendBookingUpdatedEmail).not.toHaveBeenCalled();
+  });
+
+  it("should pass old custodian email when custodian changes", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "old-custodian-1",
+      custodianTeamMemberId: "old-team-member-1",
+      name: "Updated Booking Name",
+      description: "Updated Description",
+      from: new Date("2024-02-01T09:00:00Z"),
+      to: new Date("2024-02-01T17:00:00Z"),
+      custodianUser: {
+        id: "old-custodian-1",
+        email: "old-custodian@example.com",
+        firstName: "Old",
+        lastName: "Custodian",
+      },
+      custodianTeamMember: {
+        id: "old-team-member-1",
+        name: "Old TM",
+        user: {
+          id: "old-custodian-1",
+          firstName: "Old",
+          lastName: "Custodian",
+        },
+      },
+      tags: [
+        { id: "tag-1", name: "Tag 1" },
+        { id: "tag-2", name: "Tag 2" },
+      ],
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    //@ts-expect-error missing vitest type
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "team-member-2",
+      name: "New TM",
+      user: { id: "user-2", firstName: "New", lastName: "Custodian" },
+    });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    expect(sendBookingUpdatedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oldCustodianEmail: "old-custodian@example.com",
+      })
+    );
+  });
 });
 
 describe("updateBookingAssets", () => {
@@ -815,7 +1019,7 @@ describe("updateBookingAssets", () => {
   };
 
   it("should update booking assets successfully for DRAFT booking", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
     const mockBooking = {
       id: "booking-1",
@@ -823,7 +1027,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.DRAFT,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -833,19 +1037,11 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalledWith({
+    expect(db.booking.findUniqueOrThrow).toHaveBeenCalledWith({
       where: { id: "booking-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }, { id: "asset-2" }],
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-        status: true,
-      },
+      select: { id: true, name: true, status: true },
     });
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(result).toEqual(mockBooking);
   });
 
@@ -858,7 +1054,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -868,7 +1064,7 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
@@ -885,7 +1081,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.OVERDUE,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -895,7 +1091,7 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
@@ -912,7 +1108,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -921,7 +1117,7 @@ describe("updateBookingAssets", () => {
 
     const result = await updateBookingAssets(params);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
@@ -942,7 +1138,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -952,7 +1148,7 @@ describe("updateBookingAssets", () => {
 
     await updateBookingAssets(mockUpdateBookingAssetsParams);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalled();
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
@@ -966,7 +1162,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -981,7 +1177,7 @@ describe("updateBookingAssets", () => {
 
     await updateBookingAssets(params);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).toHaveBeenCalled();
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
@@ -995,7 +1191,7 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.RESERVED,
     };
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -1004,16 +1200,16 @@ describe("updateBookingAssets", () => {
 
     await updateBookingAssets(params);
 
-    expect(db.booking.update).toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalled();
     expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 
-  it("should throw ShelfError when booking update fails", async () => {
+  it("should throw ShelfError when booking lookup fails", async () => {
     expect.assertions(1);
 
     //@ts-expect-error missing vitest type
-    db.booking.update.mockRejectedValue(new Error("Database error"));
+    db.booking.findUniqueOrThrow.mockRejectedValue(new Error("Database error"));
 
     await expect(
       updateBookingAssets(mockUpdateBookingAssetsParams)
@@ -1032,8 +1228,8 @@ describe("reserveBooking", () => {
     organizationId: "org-1",
     custodianUserId: "user-1",
     custodianTeamMemberId: "team-1",
-    from: new Date("2026-12-01T09:00:00Z"), // Future date
-    to: new Date("2026-12-01T17:00:00Z"),
+    from: futureFromDate,
+    to: futureToDate,
     description: "Reserved booking description",
     hints: mockClientHints,
     isSelfServiceOrBase: false,
@@ -1080,8 +1276,8 @@ describe("reserveBooking", () => {
           name: "Reserved Booking",
           custodianUser: { connect: { id: "user-1" } },
           custodianTeamMember: { connect: { id: "team-1" } },
-          from: new Date("2026-12-01T09:00:00Z"),
-          to: new Date("2026-12-01T17:00:00Z"),
+          from: futureFromDate,
+          to: futureToDate,
           description: "Reserved booking description",
         }),
       })
@@ -1150,8 +1346,8 @@ describe("checkoutBooking", () => {
     id: "booking-1",
     organizationId: "org-1",
     hints: mockClientHints,
-    from: new Date("2025-12-01T09:00:00Z"),
-    to: new Date("2025-12-01T17:00:00Z"),
+    from: futureFromDate,
+    to: futureToDate,
   };
 
   it("should checkout booking successfully with no conflicts", async () => {
@@ -1191,11 +1387,25 @@ describe("checkoutBooking", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
-    expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
-      data: { status: "OVERDUE" }, // Based on test output
-      include: expect.any(Object),
-    });
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1" },
+        data: { status: BookingStatus.ONGOING },
+        include: expect.objectContaining({
+          _count: { select: { assets: true } },
+          assets: true,
+          custodianTeamMember: true,
+          custodianUser: true,
+          organization: expect.objectContaining({
+            include: expect.objectContaining({
+              owner: expect.objectContaining({
+                select: { email: true },
+              }),
+            }),
+          }),
+        }),
+      })
+    );
 
     expect(result).toEqual(checkedOutBooking);
   });

@@ -2,14 +2,14 @@ import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import type { Organization, Currency } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useActionData, useLoaderData, useNavigation } from "react-router";
+import { useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { defaultValidateFileAtom, fileErrorAtom } from "~/atoms/file";
 import { useSearchParams } from "~/hooks/search-params";
-import type { loader } from "~/routes/_layout+/account-details.workspace.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
+import { ISO_4217_CURRENCIES } from "~/utils/currency";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
@@ -23,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
-import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
@@ -42,7 +41,6 @@ interface Props {
 
 export const WorkspaceForm = ({ name, currency, children }: Props) => {
   const actionData = useActionData<{ error?: any }>();
-  const { curriences } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewWorkspaceFormSchema);
@@ -105,7 +103,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
         >
           <div>
             <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
             <Input
               // disabled={disabled}
@@ -120,7 +118,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
               inputClassName="border-0 shadow-none p-0 rounded-none"
             />
             <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
+              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
             </p>
           </div>
         </FormRow>
@@ -129,16 +127,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
           <FormRow
             rowLabel={"Currency"}
             className={children ? "border-b-0" : ""}
-            subHeading={
-              <p>
-                Choose the currency for your workspace. If you don't see your
-                currency, please{" "}
-                <CrispButton variant="link" className="inline text-xs">
-                  contact support
-                </CrispButton>
-                .
-              </p>
-            }
+            subHeading="Choose the currency for your workspace. All ISO 4217 currencies are supported."
           >
             <InnerLabel hideLg>Currency</InnerLabel>
 
@@ -148,7 +137,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
               name={zo.fields.currency()}
             >
               <SelectTrigger className="px-3.5 py-3">
-                <SelectValue placeholder="Choose a field type" />
+                <SelectValue placeholder="Choose a currency" />
               </SelectTrigger>
               <SelectContent
                 position="popper"
@@ -156,10 +145,11 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
                 align="start"
               >
                 <div className=" max-h-[320px] overflow-auto">
-                  {curriences.map((value) => (
-                    <SelectItem value={value} key={value}>
+                  {ISO_4217_CURRENCIES.map((c) => (
+                    <SelectItem value={c.code} key={c.code}>
                       <span className="mr-4 text-[14px] text-gray-700">
-                        {value}
+                        <span className="font-medium">{c.code}</span>
+                        <span className="ml-2 text-gray-500">{c.name}</span>
                       </span>
                     </SelectItem>
                   ))}

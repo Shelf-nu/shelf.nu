@@ -13,13 +13,18 @@ export function useNprogress() {
     "asset-index-settings-freeze-column",
     "updates-change",
     "add-note",
+    "add-audit-note",
+    "audit-scan-persist",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(
     (fetcher) =>
       !excludeFetchers.includes(fetcher.key) &&
       !fetcher.key.startsWith("toggle-star-") &&
-      !fetcher.key.startsWith("delete-preset-")
+      !fetcher.key.startsWith("delete-preset-") &&
+      !fetcher.key.startsWith("audit-asset-note-") &&
+      !fetcher.key.startsWith("quick-image-upload-") &&
+      !fetcher.key.startsWith("mark-update-read-")
   );
 
   const state = useMemo<"idle" | "loading">(

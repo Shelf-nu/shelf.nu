@@ -64,6 +64,7 @@ import type { MergeInclude } from "~/utils/utils";
 import {
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
+  BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
@@ -73,9 +74,11 @@ import {
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  sendBookingUpdatedEmail,
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  getBookingAssetsOrderBy,
   hasAssetBookingConflicts,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
@@ -94,6 +97,7 @@ import {
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
@@ -409,6 +413,7 @@ export async function updateBasicBooking({
   organizationId,
   tags,
   userId,
+  hints,
 }: Partial<
   Pick<
     Booking,
@@ -425,6 +430,7 @@ export async function updateBasicBooking({
   Pick<Booking, "id" | "organizationId"> & {
     tags: { id: string }[];
     userId?: User["id"];
+    hints?: ClientHint;
   }) {
   try {
     const booking = await db.booking
@@ -455,6 +461,7 @@ export async function updateBasicBooking({
           custodianUser: {
             select: {
               id: true,
+              email: true,
               firstName: true,
               lastName: true,
             },
@@ -476,6 +483,10 @@ export async function updateBasicBooking({
           label,
         });
       });
+
+    // Capture old custodian email before the update
+    // (for custodian change scenarios)
+    const oldCustodianEmail = booking.custodianUser?.email;
 
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
@@ -576,12 +587,27 @@ export async function updateBasicBooking({
       : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
 
+    // Collect plain-text change descriptions for the email
+    const changes: string[] = [];
+
+    // Helper to format dates for email change descriptions
+    const formatDateForEmail = (date: Date) => {
+      if (hints) {
+        return getDateTimeFormatFromHints(hints, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(date);
+      }
+      return date.toISOString();
+    };
+
     // Check and log name changes
     if (name && name !== booking.name) {
       await createSystemBookingNote({
         bookingId: booking.id,
         content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
       });
+      changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
     }
 
     // Check and log description changes
@@ -595,6 +621,7 @@ export async function updateBasicBooking({
         bookingId: booking.id,
         content: `${userLink} changed booking description from ${descriptionChange}.`,
       });
+      changes.push("Booking description was updated");
     }
 
     // Check and log start date changes
@@ -605,6 +632,11 @@ export async function updateBasicBooking({
           booking.from
         )} to ${wrapDateForNote(from)}.`,
       });
+      changes.push(
+        `Start date changed from ${formatDateForEmail(
+          booking.from
+        )} to ${formatDateForEmail(from)}`
+      );
     }
 
     // Check and log end date changes
@@ -615,6 +647,11 @@ export async function updateBasicBooking({
           booking.to
         )} to ${wrapDateForNote(to)}.`,
       });
+      changes.push(
+        `End date changed from ${formatDateForEmail(
+          booking.to
+        )} to ${formatDateForEmail(to)}`
+      );
     }
 
     // Check and log custodian changes
@@ -622,6 +659,11 @@ export async function updateBasicBooking({
       custodianTeamMemberId &&
       custodianTeamMemberId !== booking.custodianTeamMemberId
     ) {
+      // Build custodian name helpers for the email change description
+      const oldCustodianName = booking.custodianUser
+        ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+        : booking.custodianTeamMember?.name ?? "Unknown";
+
       try {
         // Fetch new custodian details
         const newCustodian = await db.teamMember.findUnique({
@@ -660,6 +702,13 @@ export async function updateBasicBooking({
             bookingId: booking.id,
             content: custodianChangeMessage,
           });
+
+          const newCustodianName = newCustodian.user
+            ? `${newCustodian.user.firstName} ${newCustodian.user.lastName}`
+            : newCustodian.name;
+          changes.push(
+            `Custodian changed from ${oldCustodianName} to ${newCustodianName}`
+          );
         }
       } catch (_error) {
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
@@ -667,6 +716,7 @@ export async function updateBasicBooking({
           bookingId: booking.id,
           content: `${userLink} changed booking custodian assignment.`,
         });
+        changes.push("Custodian assignment was changed");
       }
     }
 
@@ -689,6 +739,25 @@ export async function updateBasicBooking({
       await createSystemBookingNote({
         bookingId: booking.id,
         content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
+      });
+      changes.push(`Tags changed from "${oldTagNames}" to "${newTagNames}"`);
+    }
+
+    // Send email notification to custodian(s) about the changes
+    if (changes.length > 0 && hints && userId) {
+      const custodianChanged =
+        custodianTeamMemberId &&
+        custodianTeamMemberId !== booking.custodianTeamMemberId;
+
+      void sendBookingUpdatedEmail({
+        bookingId: booking.id,
+        organizationId,
+        userId,
+        changes,
+        hints,
+        oldCustodianEmail: custodianChanged
+          ? oldCustodianEmail ?? undefined
+          : undefined,
       });
     }
 
@@ -745,9 +814,11 @@ export async function reserveBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          ...BOOKING_INCLUDE_FOR_EMAIL,
+          ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
           assets: {
-            include: {
+            select: {
+              ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.assets.select,
+              status: true,
               bookings: createBookingConflictConditions({
                 currentBookingId: id,
                 fromDate: from,
@@ -785,7 +856,9 @@ export async function reserveBooking({
         throw new ShelfError({
           cause: null,
           label,
+          title: "Booking conflict",
           message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          shouldBeCaptured: false,
         });
       }
     }
@@ -918,6 +991,7 @@ export async function reserveBooking({
         to,
         hints,
         bookingId: bookingFound.id,
+        customEmailFooter: bookingFound.organization.customEmailFooter,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -925,6 +999,7 @@ export async function reserveBooking({
         heading: `Booking reservation for ${custodian}`,
         assetCount: bookingFound._count.assets,
         hints,
+        assets: bookingFound.assets,
       });
       /** END Prepare email content */
 
@@ -945,6 +1020,7 @@ export async function reserveBooking({
           assetCount: bookingFound._count.assets,
           hints,
           isAdminEmail: true,
+          assets: bookingFound.assets,
         });
 
         sendEmail({
@@ -979,7 +1055,7 @@ export async function reserveBooking({
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
-      cause: null,
+      cause,
       label,
       message: isLikeShelfError(cause)
         ? cause.message
@@ -1051,6 +1127,30 @@ export async function checkoutBooking({
           message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
         });
       }
+    }
+
+    /** Server-side validation: Block checkout if any assets are in custody */
+    const assetsInCustody = bookingFound.assets.filter(
+      (asset) => asset.status === AssetStatus.IN_CUSTODY
+    );
+
+    if (assetsInCustody.length > 0) {
+      const assetNames = assetsInCustody
+        .slice(0, 3)
+        .map((asset) => asset.title)
+        .join(", ");
+      const additionalCount =
+        assetsInCustody.length > 3 ? assetsInCustody.length - 3 : 0;
+      const additionalText =
+        additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Assets in custody",
+        message: `Cannot check out booking. Some assets are currently in custody: ${assetNames}${additionalText}. Please release custody first or remove these assets from the booking.`,
+        shouldBeCaptured: false,
+      });
     }
 
     /**
@@ -1564,6 +1664,7 @@ export async function checkinBooking({
         to: updatedBooking.to as Date,
         bookingId: updatedBooking.id,
         hints: hints,
+        customEmailFooter: updatedBooking.organization.customEmailFooter,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -1909,19 +2010,33 @@ export async function updateBookingAssets({
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
-      const b = await tx.booking.update({
+      // Verify booking exists before inserting into the join table,
+      // so a stale/deleted booking returns a proper 404 (P2025)
+      // instead of a FK violation (P2003)
+      const b = await tx.booking.findUniqueOrThrow({
         where: { id, organizationId },
-        data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
         select: {
           id: true,
           name: true,
           status: true,
         },
       });
+
+      await Promise.all([
+        // Bulk insert into the join table in a single SQL statement instead of
+        // N individual connect operations which cause transaction timeouts
+        // for large bookings
+        tx.$executeRaw`
+          INSERT INTO "_AssetToBooking" ("A", "B")
+          SELECT unnest(${assetIds}::text[]), ${id}
+          ON CONFLICT ("A", "B") DO NOTHING
+        `,
+        // Touch updatedAt since the raw INSERT doesn't update the booking row
+        tx.booking.update({
+          where: { id },
+          data: { updatedAt: new Date() },
+        }),
+      ]);
 
       /**
        *  When adding an asset to a booking, we need to update the status of the asset to CHECKED_OUT if the booking is ONGOING or OVERDUE
@@ -2098,9 +2213,11 @@ export async function cancelBooking({
   organizationId,
   hints,
   userId,
+  cancellationReason,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   userId?: string;
+  cancellationReason?: string;
 }) {
   try {
     const bookingFound = await db.booking
@@ -2157,7 +2274,7 @@ export async function cancelBooking({
 
       return tx.booking.update({
         where: { id: bookingFound.id },
-        data: { status: BookingStatus.CANCELLED },
+        data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
           assets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -2180,6 +2297,8 @@ export async function cancelBooking({
         to: booking.to as Date,
         bookingId: booking.id,
         hints,
+        cancellationReason,
+        customEmailFooter: booking.organization.customEmailFooter,
       });
 
       const html = await bookingUpdatesTemplateString({
@@ -2187,6 +2306,7 @@ export async function cancelBooking({
         heading: `Your booking has been cancelled: "${booking.name}".`,
         assetCount: booking._count.assets,
         hints,
+        cancellationReason,
       });
 
       sendEmail({
@@ -2453,6 +2573,7 @@ export async function extendBooking({
         hints,
         bookingId: updatedBooking.id,
         oldToDate: booking.to,
+        customEmailFooter: updatedBooking.organization.customEmailFooter,
       });
 
       const { format } = getDateTimeFormatFromHints(hints, {
@@ -3060,20 +3181,31 @@ export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint
 ) {
-  try {
-    const { id, organizationId } = booking;
-    const currentBooking = await db.booking.findUnique({
-      where: { id, organizationId },
-      include: {
-        assets: {
-          select: {
-            id: true,
-            kitId: true,
-          },
+  const { id, organizationId } = booking;
+  const currentBooking = await db.booking.findUnique({
+    where: { id, organizationId },
+    include: {
+      assets: {
+        select: {
+          id: true,
+          kitId: true,
         },
       },
-    });
+    },
+  });
 
+  if (!currentBooking) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "The booking you are trying to delete does not exist or has already been deleted.",
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  try {
     const activeBooking =
       currentBooking &&
       (currentBooking.status === BookingStatus.OVERDUE ||
@@ -3113,6 +3245,7 @@ export async function deleteBooking(
         to: b.to as Date,
         bookingId: b.id,
         hints: hints,
+        customEmailFooter: b.organization.customEmailFooter,
       });
       const html = await bookingUpdatesTemplateString({
         booking: b,
@@ -3175,11 +3308,14 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     // Extract search parameters from request
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
-    const { search } = paramsValues;
-    const status =
-      searchParams.get("status") === "ALL"
-        ? null
-        : (searchParams.get("status") as AssetStatus | null);
+    const { search, orderBy, orderDirection } = paramsValues;
+    // const status =
+    //   searchParams.get("status") === "ALL"
+    //     ? null
+    //     : (searchParams.get("status") as AssetStatus | null);
+
+    // Get dynamic orderBy based on URL params
+    const assetsOrderBy = getBookingAssetsOrderBy(orderBy, orderDirection);
 
     /**
      * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -3188,31 +3324,25 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
 
-    // Build assets include with optional search and status filtering
-    let assetsInclude: Prisma.BookingInclude["assets"] =
-      BOOKING_WITH_ASSETS_INCLUDE.assets;
+    // Build assets include with optional search, status filtering, and dynamic sorting
+    const assetsWhere: Prisma.AssetWhereInput = {};
 
-    // Add WHERE clause if search or status filters are provided
-    if (search || status) {
-      const assetsWhere: Prisma.AssetWhereInput = {};
-
-      if (search) {
-        assetsWhere.title = {
-          contains: search,
-          mode: "insensitive",
-        };
-      }
-
-      // if (status) {
-      //   assetsWhere.status = status;
-      // }
-
-      assetsInclude = {
-        select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
-        orderBy: BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy,
-        where: assetsWhere,
+    if (search) {
+      assetsWhere.title = {
+        contains: search,
+        mode: "insensitive",
       };
     }
+
+    // if (status) {
+    //   assetsWhere.status = status;
+    // }
+
+    const assetsInclude: Prisma.BookingInclude["assets"] = {
+      select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
+      orderBy: assetsOrderBy,
+      ...(Object.keys(assetsWhere).length > 0 && { where: assetsWhere }),
+    };
 
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
@@ -3352,7 +3482,7 @@ export async function getBookingsForCalendar(params: {
             profilePicture: true,
           },
         },
-        tags: { select: { id: true, name: true } },
+        tags: TAG_WITH_COLOR_SELECT,
       },
       takeAll: true,
     });
@@ -3932,6 +4062,7 @@ export async function bulkCancelBookings({
           to: b.to as Date,
           bookingId: b.id,
           hints: hints,
+          customEmailFooter: b.organization.customEmailFooter,
         });
 
         const html = await bookingUpdatesTemplateString({

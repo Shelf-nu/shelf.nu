@@ -10,7 +10,13 @@ import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
 import { logger } from "./logger";
-import { protect, refreshSession, urlShortener } from "./middleware";
+import {
+  ensureHostHeaders,
+  protect,
+  refreshSession,
+  urlShortener,
+} from "./middleware";
+import { runWithRequestCache } from "./request-cache.server";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -65,6 +71,15 @@ export default createHonoServer<ServerEnv>({
   defaultLogger: false,
   getLoadContext,
   configure: (server) => {
+    /**
+     * Ensure host headers are present for React Router CSRF protection
+     * Must be first to ensure headers are available for all downstream middleware
+     */
+    server.use("*", ensureHostHeaders());
+
+    // Attach a per-request AsyncLocalStorage cache for downstream loaders/actions.
+    server.use("*", async (_c, next) => runWithRequestCache(() => next()));
+
     // Apply URL shortener middleware only when host matches
     // In v2, we check the host inside middleware instead of using getPath
     server.use("*", async (c, next) => {
@@ -140,9 +155,9 @@ export default createHonoServer<ServerEnv>({
           "/api/oss-friends",
           "/api/stripe-webhook",
           "/qr",
-          "/qr/:path*",
-          "/qr/:path*/contact-owner",
-          "/qr/:path*/not-logged-in",
+          "/qr/:qrId",
+          "/qr/:qrId/not-logged-in",
+          "/qr/:qrId/contact-owner",
         ],
       })
     );

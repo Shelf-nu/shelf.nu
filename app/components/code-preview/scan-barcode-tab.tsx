@@ -3,6 +3,7 @@ import type { BarcodeType } from "@prisma/client";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
 import { AddBarcodeForm } from "./add-barcode-form";
 
@@ -23,6 +24,8 @@ export function ScanBarcodeTab({
   const [scannedValue, setScannedValue] = useState<string | null>(null);
   const [detectedType, setDetectedType] = useState<BarcodeType | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+  const savedCameraId = useScannerCameraId();
 
   // Handle scan results from CodeScanner
   const handleScanSuccess = ({
@@ -114,6 +117,7 @@ export function ScanBarcodeTab({
           forceMode="camera"
           overlayPosition="centered"
           errorMessage={errorMessage}
+          savedCameraId={savedCameraId}
         />
       </div>
     </div>

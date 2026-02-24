@@ -17,6 +17,7 @@ import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -135,6 +136,8 @@ const QRScanner = () => {
   const height = isMd ? vh - 67 : vh - 102;
   const isNavigating = useRef(false);
   const addItem = useSetAtom(addScannedItemAtom);
+
+  const savedCameraId = useScannerCameraId();
 
   // Get action directly from the atom
   const [action] = useAtom(scannerActionAtom);
@@ -258,7 +261,7 @@ const QRScanner = () => {
 
   return (
     <>
-      <Header title="QR code scanner" hidePageDescription={true} />
+      <Header title="QR code scanner" hidePageDescription hideBreadcrumbs />
       <div
         className="-mx-4 flex flex-col overflow-hidden"
         style={{ height: `${height}px` }}
@@ -274,6 +277,7 @@ const QRScanner = () => {
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
           }
+          savedCameraId={savedCameraId}
         />
       </div>
     </>

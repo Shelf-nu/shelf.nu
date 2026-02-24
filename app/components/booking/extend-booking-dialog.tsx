@@ -35,9 +35,8 @@ export default function ExtendBookingDialog({
   const fetcher = useFetcherWithReset<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
   const hints = useHints();
-  const { currentOrganization, booking } =
-    useLoaderData<BookingPageLoaderData>();
-  const workingHoursData = useWorkingHours(currentOrganization.id);
+  const { booking } = useLoaderData<BookingPageLoaderData>();
+  const workingHoursData = useWorkingHours();
   const bookingSettings = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;

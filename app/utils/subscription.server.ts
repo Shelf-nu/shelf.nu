@@ -75,6 +75,7 @@ export async function assertUserCanExportAssets({
         "Your user cannot export assets. Please update your subscription to unlock this feature.",
       additionalData: { organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -120,6 +121,7 @@ export async function assertUserCanImportAssets({
       message: "You are not allowed to import assets",
       additionalData: { organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -407,3 +409,10 @@ export async function assertUserCanInviteUsersToWorkspace({
   }
 }
 /** End Team Features */
+
+/** Audit Add-on */
+export const canUseAudits = (org: { auditsEnabled: boolean }) => {
+  if (!premiumIsEnabled) return true;
+  return org.auditsEnabled;
+};
+/** End Audit Add-on */

@@ -14,6 +14,7 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
@@ -36,6 +37,7 @@ import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
+import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -117,6 +119,7 @@ export async function simpleModeLoader({
   }
 
   const searchParams = getCurrentSearchParams(request);
+  const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
   /** Query tierLimit, assets & Asset index settings */
@@ -166,7 +169,7 @@ export async function simpleModeLoader({
                   description: true,
                   custodianTeamMember: true,
                   custodianUser: true,
-                  tags: { select: { id: true, name: true } },
+                  tags: TAG_WITH_COLOR_SELECT,
                   creator: {
                     select: {
                       id: true,
@@ -197,6 +200,10 @@ export async function simpleModeLoader({
         })
       : Promise.resolve(null),
   ]);
+
+  const currentUserTeamMember = isSelfService
+    ? teamMembers.find((tm) => tm.userId === userId) ?? null
+    : null;
 
   assets = await updateAssetsWithBookingCustodians(assets);
 
@@ -239,6 +246,7 @@ export async function simpleModeLoader({
       perPage,
       totalPages,
       modelName,
+      hasActiveFilters,
       canImportAssets:
         canImportAssets(tierLimit) &&
         (await hasPermission({
@@ -259,6 +267,7 @@ export async function simpleModeLoader({
       totalLocations,
       teamMembers,
       totalTeamMembers,
+      currentUserTeamMember,
       teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
       filters,
       organizationId,
@@ -272,6 +281,9 @@ export async function simpleModeLoader({
        * */
       customFields: [],
       kits: [] as Kit[],
+      totalKits: 0,
+      bookings: [] as { id: string; name: string }[],
+      totalBookings: 0,
       // Those tags are used for the tags autocomplete on the booking form
       tagsData,
       // Saved filter presets
@@ -295,8 +307,8 @@ export async function advancedModeLoader({
   settings,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const isSelfServiceOrBase = isSelfService || role === OrganizationRoles.BASE;
 
   /** Parse filters */
   const {
@@ -309,6 +321,7 @@ export async function advancedModeLoader({
   const searchParams = filters
     ? currentFilterParams
     : getCurrentSearchParams(request);
+  const hasActiveFilters = computeHasActiveFilters(searchParams);
   const allSelectedEntries = searchParams.getAll(
     "getAll"
   ) as AllowedModelNames[];
@@ -356,6 +369,8 @@ export async function advancedModeLoader({
     totalKits,
     tagsData,
     teamMembersForFormData,
+    bookings,
+    totalBookings,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -410,7 +425,31 @@ export async function advancedModeLoader({
             hasGetAllValue(searchParams, "teamMember"),
         })
       : Promise.resolve(null),
+
+    // Bookings for filter dropdown (upcoming bookings only)
+    db.booking.findMany({
+      where: {
+        organizationId,
+        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+      },
+      select: { id: true, name: true },
+      take:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "booking")
+          ? undefined
+          : 12,
+      orderBy: { from: "asc" },
+    }),
+    db.booking.count({
+      where: {
+        organizationId,
+        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+      },
+    }),
   ]);
+
+  const currentUserTeamMember = isSelfService
+    ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
+    : null;
 
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
@@ -449,6 +488,7 @@ export async function advancedModeLoader({
       perPage,
       totalPages,
       modelName,
+      hasActiveFilters,
       canImportAssets:
         canImportAssets(tierLimit) &&
         (await hasPermission({
@@ -472,6 +512,7 @@ export async function advancedModeLoader({
 
       customFields,
       ...teamMembersData,
+      currentUserTeamMember,
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       categories,
@@ -483,6 +524,8 @@ export async function advancedModeLoader({
       tags,
       totalTags,
       tagsData,
+      bookings,
+      totalBookings,
       // Saved filter presets
       savedFilterPresets,
       savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,

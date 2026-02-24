@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Form, useNavigation, useLocation } from "react-router";
+import { Form, useNavigation, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -8,13 +8,17 @@ import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
 export const setReminderSchema = z.object({
   name: z.string().min(1, "Please enter name."),
   message: z.string().min(1, "Please enter message."),
-  alertDateTime: z.coerce.date().min(new Date()),
+  alertDateTime: z.coerce
+    .date()
+    .min(new Date(), "Please select a date in the future"),
   teamMembers: z
     .array(z.string())
     .min(1, "Please select at least one team member"),
@@ -47,6 +51,12 @@ export default function SetOrEditReminderDialog({
   }`;
 
   const zo = useZorm("SetOrEditReminder", setReminderSchema);
+
+  const actionData = useActionData<DataOrErrorResponse>();
+  /** This handles server side errors in case client side validation fails */
+  const validationErrors = getValidationErrors<typeof setReminderSchema>(
+    actionData?.error
+  );
 
   const isEdit = !!reminder;
 
@@ -103,7 +113,9 @@ export default function SetOrEditReminderDialog({
             <Input
               defaultValue={reminder?.name ?? ""}
               name={zo.fields.name()}
-              error={zo.errors.name()?.message}
+              error={
+                validationErrors?.name?.message || zo.errors.name()?.message
+              }
               label="Name"
               disabled={disabled}
               autoFocus
@@ -116,7 +128,10 @@ export default function SetOrEditReminderDialog({
               <Input
                 defaultValue={reminder?.message ?? ""}
                 name={zo.fields.message()}
-                error={zo.errors.message()?.message}
+                error={
+                  validationErrors?.message?.message ||
+                  zo.errors.message()?.message
+                }
                 label="Message"
                 disabled={disabled}
                 autoFocus
@@ -150,7 +165,10 @@ export default function SetOrEditReminderDialog({
                 }
                 type="datetime-local"
                 name={zo.fields.alertDateTime()}
-                error={zo.errors.alertDateTime()?.message}
+                error={
+                  validationErrors?.alertDateTime?.message ||
+                  zo.errors.alertDateTime()?.message
+                }
                 label="Reminder Date"
                 disabled={disabled}
                 autoFocus
@@ -168,7 +186,10 @@ export default function SetOrEditReminderDialog({
             <p className="border-b p-3 font-medium">Select team member(s)</p>
             <TeamMembersSelector
               defaultValues={reminder?.teamMembers}
-              error={zo.errors.teamMembers()?.message}
+              error={
+                validationErrors?.teamMembers?.message ||
+                zo.errors.teamMembers()?.message
+              }
             />
           </div>
           <div className="flex items-center justify-end gap-2 border-t p-4 md:col-span-2">

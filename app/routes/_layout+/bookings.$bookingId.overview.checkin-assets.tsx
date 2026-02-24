@@ -15,6 +15,7 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
+import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   checkinAssets,
@@ -67,9 +68,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+    // For check-in, self-service users are allowed when the booking is
+    // ongoing or overdue (check-in eligible states) AND they are the
+    // custodian. The generic canUserManageBookingAssets blocks self-service
+    // on non-draft bookings, but that restriction is for adding/removing
+    // assets, not for checking in.
+    const isCheckinEligible =
+      booking.status === "ONGOING" || booking.status === "OVERDUE";
+    const isCustodian = booking.custodianUserId === userId;
+    const canCheckin =
+      isSelfService && isCheckinEligible && isCustodian
+        ? true
+        : canUserManageBookingAssets(booking, isSelfService);
 
-    if (!canManageAssets) {
+    if (!canCheckin) {
       throw new ShelfError({
         cause: null,
         message:
@@ -168,6 +180,8 @@ export default function CheckinAssetsFromBooking() {
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;
 
+  const savedCameraId = useScannerCameraId();
+
   function handleCodeDetectionSuccess({
     value: qrId,
     error,
@@ -195,6 +209,7 @@ export default function CheckinAssetsFromBooking() {
           scannerModeClassName={(mode) =>
             tw(mode === "scanner" && "justify-start pt-[100px]")
           }
+          savedCameraId={savedCameraId}
         />
       </div>
     </>

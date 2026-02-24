@@ -24,6 +24,7 @@ import {
 } from "@prisma/client";
 import { LRUCache } from "lru-cache";
 import { redirect, type LoaderFunctionArgs } from "react-router";
+import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type {
   SortingDirection,
   SortingOptions,
@@ -84,6 +85,7 @@ import {
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import { detectImageFormat } from "~/utils/image-format.server";
 import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
@@ -91,6 +93,8 @@ import { Logger } from "~/utils/logger";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
+  wrapAssetsWithDataForNote,
+  wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
@@ -131,6 +135,7 @@ import {
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
+import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createAssetCategoryChangeNote,
   createAssetDescriptionChangeNote,
@@ -202,10 +207,13 @@ async function setKitCustodyAfterAssetImport({
   kits: Record<string, Kit>;
   teamMembers: Record<string, TeamMember>;
 }) {
-  // Find assets that have both kit and custodian
-  const assetsWithKitAndCustodian = data.filter(
-    (asset) => asset.kit && asset.custodian
-  );
+  // Normalize kit/custodian names so padded CSV values still map to created records.
+  const assetsWithKitAndCustodian = data
+    .map((asset) => ({
+      kit: asset.kit?.trim(),
+      custodian: asset.custodian?.trim(),
+    }))
+    .filter((asset) => asset.kit && asset.custodian);
 
   if (assetsWithKitAndCustodian.length === 0) {
     return; // Nothing to do
@@ -214,8 +222,10 @@ async function setKitCustodyAfterAssetImport({
   // Group by kit name and get the custodian for each kit
   const kitToCustodianMap = new Map<string, string>();
   for (const asset of assetsWithKitAndCustodian) {
-    if (!kitToCustodianMap.has(asset.kit!)) {
-      kitToCustodianMap.set(asset.kit!, asset.custodian!);
+    const kitName = asset.kit!;
+    const custodianName = asset.custodian!;
+    if (!kitToCustodianMap.has(kitName)) {
+      kitToCustodianMap.set(kitName, custodianName);
     }
   }
 
@@ -255,9 +265,14 @@ async function validateKitCustodyConflicts({
   organizationId: Organization["id"];
 }) {
   // Extract assets that have both a kit and a custodian
-  const conflictCandidates = data.filter(
-    (asset) => asset.kit && asset.custodian
-  );
+  // Normalize kit/custodian names so padded CSV values don't bypass conflict checks.
+  const conflictCandidates = data
+    .map((asset) => ({
+      title: asset.title,
+      kit: asset.kit?.trim(),
+      custodian: asset.custodian?.trim(),
+    }))
+    .filter((asset) => asset.kit && asset.custodian);
 
   if (conflictCandidates.length === 0) {
     return; // No conflicts possible
@@ -1437,6 +1452,52 @@ export async function updateAsset({
         userId,
         isRemoving: newLocationId === null,
       });
+
+      // Create location activity notes
+      const userLink = wrapUserLinkForNote({
+        id: userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      });
+      const assetData = [{ id: asset.id, title: asset.title }];
+
+      if (newLocation) {
+        const newLocLink = wrapLinkForNote(
+          `/locations/${newLocation.id}`,
+          newLocation.name
+        );
+        const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+        const movedFrom = currentLocation
+          ? ` Moved from ${wrapLinkForNote(
+              `/locations/${currentLocation.id}`,
+              currentLocation.name
+            )}.`
+          : "";
+        await createSystemLocationNote({
+          locationId: newLocation.id,
+          content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
+          userId,
+        });
+      }
+
+      if (currentLocation && currentLocation.id !== newLocation?.id) {
+        const prevLocLink = wrapLinkForNote(
+          `/locations/${currentLocation.id}`,
+          currentLocation.name
+        );
+        const assetMarkup = wrapAssetsWithDataForNote(assetData, "removed");
+        const movedTo = newLocation
+          ? ` Moved to ${wrapLinkForNote(
+              `/locations/${newLocation.id}`,
+              newLocation.name
+            )}.`
+          : "";
+        await createSystemLocationNote({
+          locationId: currentLocation.id,
+          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
+          userId,
+        });
+      }
     }
 
     if (assetBeforeUpdate && trackedFieldUpdates) {
@@ -1759,26 +1820,57 @@ export async function deleteOtherImages({
   }
 }
 
-async function uploadDuplicateAssetMainImage(
+export async function uploadDuplicateAssetMainImage(
   mainImageUrl: string,
   assetId: string,
   userId: string
 ) {
   try {
-    /**
-     * Getting the blob from asset mainImage signed url so
-     * that we can upload it into duplicated assets as well
-     * */
-    const imageFile = await fetch(mainImageUrl);
-    const imageFileBlob = await imageFile.blob();
+    const originalPath = extractStoragePath(mainImageUrl, "assets");
+
+    if (!originalPath) {
+      throw new ShelfError({
+        cause: null,
+        message: "Failed to extract asset image path for duplication",
+        additionalData: { mainImageUrl, assetId, userId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { data: originalFile, error: downloadError } =
+      await getSupabaseAdmin().storage.from("assets").download(originalPath);
+
+    if (downloadError) {
+      throw new ShelfError({
+        cause: downloadError,
+        message: "Failed to download asset image for duplication",
+        additionalData: { originalPath, assetId, userId },
+        label,
+      });
+    }
+
+    const arrayBuffer = await originalFile.arrayBuffer();
+    const imageBuffer = Buffer.from(arrayBuffer);
+    const detectedFormat = detectImageFormat(imageBuffer);
+
+    if (!detectedFormat) {
+      throw new ShelfError({
+        cause: null,
+        message: "Unsupported image format for asset duplication",
+        additionalData: { originalPath, assetId, userId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
 
     /** Uploading the Blob to supabase */
     const { data, error } = await getSupabaseAdmin()
       .storage.from("assets")
       .upload(
         `${userId}/${assetId}/main-image-${dateTimeInUnix(Date.now())}`,
-        imageFileBlob,
-        { contentType: imageFileBlob.type, upsert: true }
+        imageBuffer,
+        { contentType: detectedFormat, upsert: true }
       );
 
     if (error) {
@@ -1874,20 +1966,37 @@ export async function duplicateAsset({
       });
 
       if (asset.mainImage) {
-        const imagePath = await uploadDuplicateAssetMainImage(
-          asset.mainImage,
-          duplicatedAsset.id,
-          userId
-        );
+        try {
+          const imagePath = await uploadDuplicateAssetMainImage(
+            asset.mainImage,
+            duplicatedAsset.id,
+            userId
+          );
 
-        if (typeof imagePath === "string") {
-          await db.asset.update({
-            where: { id: duplicatedAsset.id },
-            data: {
-              mainImage: imagePath,
-              mainImageExpiration: oneDayFromNow(),
-            },
-          });
+          if (typeof imagePath === "string") {
+            await db.asset.update({
+              where: { id: duplicatedAsset.id },
+              data: {
+                mainImage: imagePath,
+                mainImageExpiration: oneDayFromNow(),
+              },
+            });
+          }
+        } catch (cause) {
+          // Log the error so we are aware there is an issue anc can check if it is on our side
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Skipping duplicate asset image due to upload failure",
+              additionalData: {
+                assetId: duplicatedAsset.id,
+                originalAssetId: asset.id,
+                userId,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
         }
       }
 
@@ -2458,6 +2567,43 @@ export async function createAssetsFromContentImport({
       const assetBarcodes =
         barcodesPerAsset.find((item) => item.key === asset.key)?.barcodes || [];
 
+      // Resolve kit/custodian IDs from normalized CSV values to avoid undefined lookups.
+      const kitKey = asset.kit?.trim();
+      const kitId = kitKey ? kits?.[kitKey]?.id : undefined;
+      // Surface a clear import error instead of a TypeError when a kit value can't be resolved.
+      if (kitKey && !kitId) {
+        throw new ShelfError({
+          cause: null,
+          message: `Kit "${kitKey}" could not be resolved for asset "${asset.title}". Please verify the kit column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            kit: kitKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
+      const custodianKey = asset.custodian?.trim();
+      const custodianId = custodianKey
+        ? teamMembers?.[custodianKey]?.id
+        : undefined;
+      // Surface a clear import error instead of a TypeError when a custodian value can't be resolved.
+      if (custodianKey && !custodianId) {
+        throw new ShelfError({
+          cause: null,
+          message: `Custodian "${custodianKey}" could not be resolved for asset "${asset.title}". Please verify the custodian column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            custodian: custodianKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -2465,12 +2611,10 @@ export async function createAssetsFromContentImport({
         title: asset.title,
         description: asset.description || "",
         userId,
-        kitId: asset.kit ? kits?.[asset.kit].id : undefined,
+        kitId,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: asset.custodian
-          ? teamMembers?.[asset.custodian].id
-          : undefined,
+        custodian: custodianId,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
@@ -3385,36 +3529,116 @@ export async function bulkUpdateAssetLocation({
         })
       : null;
 
+    // Filter out assets already at the target location
+    const assetsToUpdate = assets.filter(
+      (a) => a.location?.id !== newLocation?.id
+    );
+
     await db.$transaction(async (tx) => {
-      /** Updating location of assets to newLocation */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { locationId: newLocation?.id ? newLocation.id : null },
-      });
+      if (assetsToUpdate.length > 0) {
+        /** Updating location of assets to newLocation */
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
+          data: { locationId: newLocation?.id ? newLocation.id : null },
+        });
 
-      /** Creating notes for the assets */
-      await tx.note.createMany({
-        data: assets.map((asset) => {
-          const isRemoving = !newLocationId;
+        /** Creating notes for the assets */
+        await tx.note.createMany({
+          data: assetsToUpdate.map((asset) => {
+            const isRemoving = !newLocationId;
 
-          const content = getLocationUpdateNoteContent({
-            currentLocation: asset.location,
-            newLocation,
-            userId,
-            firstName: user?.firstName ?? "",
-            lastName: user?.lastName ?? "",
-            isRemoving,
-          });
+            const content = getLocationUpdateNoteContent({
+              currentLocation: asset.location,
+              newLocation,
+              userId,
+              firstName: user?.firstName ?? "",
+              lastName: user?.lastName ?? "",
+              isRemoving,
+            });
 
-          return {
-            content,
-            type: "UPDATE",
-            userId,
-            assetId: asset.id,
-          };
-        }),
-      });
+            return {
+              content,
+              type: "UPDATE",
+              userId,
+              assetId: asset.id,
+            };
+          }),
+        });
+      }
     });
+
+    // Create location activity notes
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    // Filter out assets already at the target location
+    const actuallyChanged = assets.filter(
+      (a) => a.location?.id !== newLocation?.id
+    );
+    const assetData = actuallyChanged.map((a) => ({
+      id: a.id,
+      title: a.title,
+    }));
+
+    // Group assets by their previous location
+    const byPrevLocation = new Map<
+      string,
+      { name: string; assets: typeof assetData }
+    >();
+    for (const asset of actuallyChanged) {
+      if (!asset.location) continue;
+      const existing = byPrevLocation.get(asset.location.id);
+      if (existing) {
+        existing.assets.push({ id: asset.id, title: asset.title });
+      } else {
+        byPrevLocation.set(asset.location.id, {
+          name: asset.location.name,
+          assets: [{ id: asset.id, title: asset.title }],
+        });
+      }
+    }
+
+    // Note on the new location
+    if (newLocation && assetData.length > 0) {
+      const newLocLink = wrapLinkForNote(
+        `/locations/${newLocation.id}`,
+        newLocation.name
+      );
+      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+
+      const prevLocLinks = [...byPrevLocation.entries()].map(([id, { name }]) =>
+        wrapLinkForNote(`/locations/${id}`, name)
+      );
+      const movedFromSuffix =
+        prevLocLinks.length > 0
+          ? ` Moved from ${prevLocLinks.join(", ")}.`
+          : "";
+
+      await createSystemLocationNote({
+        locationId: newLocation.id,
+        content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
+        userId,
+      });
+    }
+
+    // Removal notes on previous locations
+    for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
+      const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
+      const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
+      const movedToSuffix = newLocation
+        ? ` Moved to ${wrapLinkForNote(
+            `/locations/${newLocation.id}`,
+            newLocation.name
+          )}.`
+        : "";
+      await createSystemLocationNote({
+        locationId: locId,
+        content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
+        userId,
+      });
+    }
 
     return true;
   } catch (cause) {

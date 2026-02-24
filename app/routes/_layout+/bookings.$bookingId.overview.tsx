@@ -18,6 +18,7 @@ import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import {
   BookingFormSchema,
+  CancelBookingSchema,
   ExtendBookingSchema,
 } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
@@ -28,6 +29,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
   archiveBooking,
   cancelBooking,
@@ -48,6 +51,7 @@ import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server"
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -102,7 +106,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const { page, perPageParam } = paramsValues;
+  const { page, perPageParam, orderDirection } = paramsValues;
+  // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
+  const orderBy =
+    paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -200,47 +207,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
     const enhancedBooking = booking;
 
-    // Sort assets by booking context priority
-    enhancedBooking.assets = sortBookingAssets(
+    // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
+    // For other sort options, the database orderBy is sufficient
+    const isStatusSort = !orderBy || orderBy === "status";
+    if (isStatusSort) {
+      enhancedBooking.assets = sortBookingAssets(
+        enhancedBooking.assets,
+        partialCheckinDetails
+      );
+    }
+
+    // Use helper to group assets by kit and sort them
+    const sortedAssets = groupAndSortAssetsByKit(
       enhancedBooking.assets,
-      partialCheckinDetails
+      orderBy,
+      orderDirection
     );
 
-    // Group assets by kitId for pagination purposes
-    const assetsByKit: Record<
-      string,
-      Array<(typeof enhancedBooking.assets)[0]>
-    > = {};
-    const individualAssets: Array<(typeof enhancedBooking.assets)[0]> = [];
-
-    enhancedBooking.assets.forEach((asset) => {
-      if (asset.kitId) {
-        if (!assetsByKit[asset.kitId]) {
-          assetsByKit[asset.kitId] = [];
-        }
-        assetsByKit[asset.kitId].push(asset);
-      } else {
-        individualAssets.push(asset);
-      }
-    });
-
-    // Create pagination items where each kit or individual asset is one item
+    // Convert sorted assets to pagination items (kits grouped, individual assets separate)
     const paginationItems: Array<{
       type: "kit" | "asset";
       id: string;
       assets: Array<(typeof enhancedBooking.assets)[0]>;
-    }> = [
-      ...Object.entries(assetsByKit).map(([kitId, assets]) => ({
-        type: "kit" as const,
-        id: kitId,
-        assets,
-      })),
-      ...individualAssets.map((asset) => ({
-        type: "asset" as const,
-        id: asset.id,
-        assets: [asset],
-      })),
-    ];
+    }> = [];
+
+    const processedKitIds = new Set<string>();
+    for (const asset of sortedAssets) {
+      if (asset.kitId && asset.kit) {
+        // Kit asset - group with other assets from same kit
+        if (!processedKitIds.has(asset.kitId)) {
+          processedKitIds.add(asset.kitId);
+          const kitAssets = sortedAssets.filter((a) => a.kitId === asset.kitId);
+          paginationItems.push({
+            type: "kit",
+            id: asset.kitId,
+            assets: kitAssets,
+          });
+        }
+      } else {
+        // Individual asset
+        paginationItems.push({
+          type: "asset",
+          id: asset.id,
+          assets: [asset],
+        });
+      }
+    }
 
     // Calculate pagination
     const totalPaginationItems = paginationItems.length;
@@ -299,6 +311,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         include: {
           category: true,
           custody: true,
+          tags: TAG_WITH_COLOR_SELECT,
           kit: true,
           bookings: {
             where: {
@@ -454,14 +467,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ...teamMembersData,
         teamMembersForForm,
         bookingFlags,
-        totalKits: Object.keys(assetsByKit).length,
+        totalKits: paginationItems.filter((item) => item.type === "kit").length,
         totalValue: calculateTotalValueOfAssets({
           assets: enhancedBooking.assets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
         /** Assets inside the booking without kits */
-        assetsCount: individualAssets.length,
+        assetsCount: paginationItems.filter((item) => item.type === "asset")
+          .length,
         totalAssets: totalBookingAssets,
         allCategories,
         tags,
@@ -581,6 +595,75 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
+
+    /**
+     * Handle delete before fetching booking info.
+     * The booking may already be deleted (double-click, concurrent request),
+     * so we must not call findUniqueOrThrow before this.
+     */
+    if (intent === "delete") {
+      if (isSelfServiceOrBase) {
+        /**
+         * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
+         * They have delete permissions but shouldnt be able to delete other people's bookings
+         * Practically they should not be able to even view/access another booking but this is just an extra security measure
+         */
+        const b = await getBooking({ id, organizationId, request });
+        validateBookingOwnership({
+          booking: b,
+          userId,
+          role,
+          action: "delete",
+        });
+
+        // BASE users can only delete DRAFT bookings
+        if (
+          role === OrganizationRoles.BASE &&
+          b.status !== BookingStatus.DRAFT
+        ) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+      }
+
+      const deletedBooking = await deleteBooking(
+        { id, organizationId },
+        getClientHint(request)
+      );
+
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const deletedBookingLink = wrapLinkForNote(
+        `/bookings/${deletedBooking.id}`,
+        deletedBooking.name.trim()
+      );
+      await createNotes({
+        content: `${actor} deleted booking ${deletedBookingLink}.`,
+        type: "UPDATE",
+        userId: userId,
+        assetIds: deletedBooking.assets.map((a) => a.id),
+      });
+
+      sendNotification({
+        title: "Booking deleted",
+        message: "Your booking has been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+
+      return redirect("/bookings", {
+        headers,
+      });
+    }
+
     // Form data is already extracted above and will be reused
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id },
@@ -635,6 +718,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianTeamMemberId: parsedData.custodian?.id,
           tags,
           userId,
+          hints: getClientHint(request),
         });
 
         sendNotification({
@@ -747,6 +831,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn": {
+        // Enforce explicit check-in requirement based on role and settings
+        if (
+          role === OrganizationRoles.ADMIN &&
+          bookingSettings.requireExplicitCheckinForAdmin
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed to quick check-in",
+            message:
+              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+        if (
+          role === OrganizationRoles.SELF_SERVICE &&
+          bookingSettings.requireExplicitCheckinForSelfService
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed to quick check-in",
+            message:
+              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
+            status: 403,
+            label: "Booking",
+          });
+        }
+
         // Extract specific asset IDs if provided (for enhanced completion messaging)
         const specificAssetIds = formData.getAll(
           "specificAssetIds[]"
@@ -799,68 +911,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           authSession,
         });
       }
-      case "delete": {
-        if (isSelfServiceOrBase) {
-          /**
-           * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
-           * They have delete permissions but shouldnt be able to delete other people's bookings
-           * Practically they should not be able to even view/access another booking but this is just an extra security measure
-           */
-          const b = await getBooking({ id, organizationId, request });
-          validateBookingOwnership({
-            booking: b,
-            userId,
-            role,
-            action: "delete",
-          });
-
-          // BASE users can only delete DRAFT bookings
-          if (
-            role === OrganizationRoles.BASE &&
-            b.status !== BookingStatus.DRAFT
-          ) {
-            throw new ShelfError({
-              cause: null,
-              message:
-                "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
-              status: 403,
-              label: "Booking",
-            });
-          }
-        }
-
-        const deletedBooking = await deleteBooking(
-          { id, organizationId },
-          getClientHint(request)
-        );
-
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
-        const deletedBookingLink = wrapLinkForNote(
-          `/bookings/${deletedBooking.id}`,
-          deletedBooking.name.trim()
-        );
-        await createNotes({
-          content: `${actor} deleted booking ${deletedBookingLink}.`,
-          type: "UPDATE",
-          userId: userId,
-          assetIds: deletedBooking.assets.map((a) => a.id),
-        });
-
-        sendNotification({
-          title: "Booking deleted",
-          message: "Your booking has been deleted successfully",
-          icon: { name: "trash", variant: "error" },
-          senderId: userId,
-        });
-
-        return redirect("/bookings", {
-          headers,
-        });
-      }
       case "removeAsset": {
         const { assetId } = parseData(
           formData,
@@ -887,6 +937,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           assets: asset ? [asset] : [],
         });
 
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "An asset was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
+        });
+
         sendNotification({
           title: "Asset removed",
           message: "Your asset has been removed from the booking",
@@ -911,11 +971,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ success: true }), { headers });
       }
       case "cancel": {
+        const { cancellationReason } = parseData(
+          formData,
+          CancelBookingSchema,
+          {
+            additionalData: { userId, id, organizationId, role },
+          }
+        );
         const cancelledBooking = await cancelBooking({
           id,
           organizationId,
           hints: getClientHint(request),
           userId: user.id,
+          cancellationReason,
         });
 
         const actor = wrapUserLinkForNote({
@@ -928,7 +996,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           cancelledBooking.name.trim()
         );
         await createNotes({
-          content: `${actor} cancelled booking ${cancelledBookingLink}.`,
+          content: `${actor} cancelled booking ${cancelledBookingLink}.${
+            cancellationReason ? `\n\nReason: ${cancellationReason}` : ""
+          }`,
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
@@ -970,6 +1040,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // The assets parameter is used for note content, not for actual removal
           assets: [],
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "A kit was removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({
@@ -1083,6 +1163,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           lastName: user?.lastName || "",
           userId,
           organizationId,
+        });
+
+        void sendBookingUpdatedEmail({
+          bookingId: id,
+          organizationId,
+          userId,
+          changes: [
+            "Assets and/or kits were removed from the booking. View booking activity for full details",
+          ],
+          hints: getClientHint(request),
         });
 
         sendNotification({

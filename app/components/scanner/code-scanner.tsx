@@ -13,10 +13,16 @@ import {
 import { Link } from "react-router";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
-import { Tabs, TabsList, TabsTrigger } from "~/components/shared/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
+import { CameraSelector } from "./camera-selector";
 import SuccessAnimation from "./success-animation";
 import {
   getBestBackCamera,
@@ -137,6 +143,9 @@ type CodeScannerProps = {
 
   /** Control the overlay positioning for different contexts */
   overlayPosition?: "fullscreen" | "centered";
+
+  /** Saved camera device ID from user preferences (cookie) */
+  savedCameraId?: string;
 };
 
 type Mode = "camera" | "scanner";
@@ -161,11 +170,18 @@ export const CodeScanner = ({
   actionSwitcher,
   forceMode,
   overlayPosition = "fullscreen",
+  savedCameraId,
 }: CodeScannerProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const { isMd } = useViewportHeight();
   const containerRef = useRef<HTMLDivElement>(null);
   const [action] = useAtom(scannerActionAtom);
+
+  // Camera selector state - initialize with saved camera ID if available
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(
+    savedCameraId ?? null
+  );
 
   const [mode, setMode] = useState<Mode>(
     forceMode || (isMd ? "scanner" : "camera")
@@ -187,6 +203,34 @@ export const CodeScanner = ({
   const shouldAllowNonShelfCodes =
     allowNonShelfCodes || action !== "View asset";
 
+  // Handler for camera device enumeration from CameraMode
+  const handleDevicesEnumerated = useCallback(
+    (devices: MediaDeviceInfo[], activeDeviceId: string | null) => {
+      setCameraDevices(devices);
+      // Only update if we don't have a saved camera ID or the saved one isn't available
+      if (
+        !savedCameraId ||
+        !devices.some((d) => d.deviceId === savedCameraId)
+      ) {
+        setCurrentDeviceId(activeDeviceId);
+      }
+    },
+    [savedCameraId]
+  );
+
+  // Handler for camera change - updates state and saves preference to cookie
+  const handleCameraChange = useCallback((deviceId: string) => {
+    setCurrentDeviceId(deviceId);
+
+    // Save the preference to the user's cookie via API (fire-and-forget)
+    const formData = new FormData();
+    formData.append("scannerCameraId", deviceId);
+    void fetch("/api/user/prefs/scanner-camera", {
+      method: "POST",
+      body: formData,
+    });
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -201,10 +245,9 @@ export const CodeScanner = ({
           <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
             <div
               className={tw(
-                // Different UI for mobile when actionSwitcher is present
-                actionSwitcher &&
-                  !isMd &&
-                  "flex w-full items-center justify-between gap-4"
+                "flex items-center gap-2",
+                // Full width on mobile when actionSwitcher is present
+                actionSwitcher && !isMd && "w-full justify-between"
               )}
             >
               {!hideBackButtonText && (
@@ -221,15 +264,27 @@ export const CodeScanner = ({
                   <span>{backButtonText}</span>
                 </Link>
               )}
+              <div className="flex items-center gap-1">
+                {/* Camera selector - placed next to action switcher to avoid layout shift */}
+                {mode === "camera" && cameraDevices.length > 1 && (
+                  <CameraSelector
+                    devices={cameraDevices}
+                    currentDeviceId={currentDeviceId}
+                    onCameraChange={handleCameraChange}
+                    disabled={isLoading || paused}
+                    showLabel={isMd}
+                  />
+                )}
 
-              {actionSwitcher && <div>{actionSwitcher}</div>}
+                {actionSwitcher && <div>{actionSwitcher}</div>}
+              </div>
             </div>
 
             {/* We only show option to switch to scanner on big screens and when not forced to a specific mode */}
             {isMd && !forceMode && (
               <div>
                 <Tabs
-                  defaultValue={mode}
+                  value={mode}
                   onValueChange={(mode) => handleModeChange(mode as Mode)}
                 >
                   <TabsList>
@@ -240,6 +295,11 @@ export const CodeScanner = ({
                       <CameraIcon className="mr-2 size-5" /> Camera
                     </TabsTrigger>
                   </TabsList>
+                  {/* Empty TabsContent elements required for ARIA compliance.
+                      The aria-controls attribute on tab triggers must reference valid DOM IDs.
+                      Actual scanner/camera UI is rendered separately below based on mode state. */}
+                  <TabsContent value="scanner" className="hidden" />
+                  <TabsContent value="camera" className="hidden" />
                 </Tabs>
               </div>
             )}
@@ -267,12 +327,16 @@ export const CodeScanner = ({
           />
         ) : (
           <CameraMode
+            isLoading={isLoading}
             setIsLoading={setIsLoading}
             paused={paused}
             setPaused={setPaused}
             onCodeDetectionSuccess={onCodeDetectionSuccess}
             allowNonShelfCodes={shouldAllowNonShelfCodes}
             action={action}
+            onDevicesEnumerated={handleDevicesEnumerated}
+            currentDeviceId={currentDeviceId}
+            savedCameraId={savedCameraId}
           />
         )}
         {paused && (
@@ -447,6 +511,7 @@ function ScannerMode({
           disabled={paused || !inputValue.trim()}
           variant="secondary"
           className="absolute bottom-1 right-1"
+          aria-label={`Submit scanned code: ${inputValue}`}
         >
           <ArrowRight className="size-4" />
         </Button>
@@ -460,26 +525,111 @@ function ScannerMode({
 }
 
 function CameraMode({
+  isLoading,
   setIsLoading,
   paused,
   setPaused,
   onCodeDetectionSuccess,
   allowNonShelfCodes = false,
+  onDevicesEnumerated,
+  currentDeviceId,
+  savedCameraId,
 }: {
+  isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
   paused: boolean;
   setPaused: (paused: boolean) => void;
   onCodeDetectionSuccess: OnCodeDetectionSuccess;
   allowNonShelfCodes: boolean;
   action?: ActionType;
+  onDevicesEnumerated?: (
+    devices: MediaDeviceInfo[],
+    activeDeviceId: string | null
+  ) => void;
+  currentDeviceId?: string | null;
+  /** Saved camera ID from user preferences - used for initial constraint */
+  savedCameraId?: string;
 }) {
   const videoRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrame = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
+  // Use saved camera ID for initial constraint if available, otherwise default to back camera
   const [videoConstraints, setVideoConstraints] =
-    useState<MediaTrackConstraints>({ facingMode: "environment" });
+    useState<MediaTrackConstraints>(() =>
+      savedCameraId
+        ? { deviceId: { exact: savedCameraId } }
+        : { facingMode: "environment" }
+    );
   const [hasRetriedConstraints, setHasRetriedConstraints] = useState(false);
+  // Track internal device ID to detect external changes
+  const [internalDeviceId, setInternalDeviceId] = useState<string | null>(
+    savedCameraId ?? null
+  );
+
+  // Enumerate video devices and get current device ID from stream
+  const enumerateAndReportDevices = useCallback(async () => {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      !onDevicesEnumerated
+    ) {
+      return;
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(
+        (device) => device.kind === "videoinput"
+      );
+
+      // Get current device ID from the active stream
+      let activeDeviceId: string | null = null;
+      const video = videoRef.current?.video;
+      if (video?.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          const settings = videoTrack.getSettings();
+          activeDeviceId = settings.deviceId ?? null;
+        }
+      }
+
+      // Only update internalDeviceId when a non-empty deviceId is available
+      // Safari/iOS may return undefined or empty string from track settings
+      if (activeDeviceId) {
+        setInternalDeviceId(activeDeviceId);
+      }
+      onDevicesEnumerated(videoDevices, activeDeviceId);
+    } catch {
+      // Silently ignore enumeration errors
+    }
+  }, [onDevicesEnumerated]);
+
+  // Effect to switch camera when currentDeviceId changes from parent
+  useEffect(() => {
+    // Only switch if the device ID has changed and differs from internal state
+    if (
+      currentDeviceId &&
+      currentDeviceId !== internalDeviceId &&
+      !paused &&
+      !isLoading
+    ) {
+      // Stop current stream tracks
+      const video = videoRef.current?.video;
+      if (video?.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        stream.getTracks().forEach((track) => track.stop());
+        // Clear srcObject to fully release the previous stream reference
+        video.srcObject = null;
+      }
+
+      // Update constraints to use the new device
+      setVideoConstraints({ deviceId: { exact: currentDeviceId } });
+      setInternalDeviceId(currentDeviceId);
+      setIsLoading(true);
+    }
+  }, [currentDeviceId, internalDeviceId, paused, isLoading, setIsLoading]);
 
   const handleUserMediaError = useCallback(
     async (cameraError: unknown) => {
@@ -639,11 +789,17 @@ function CameraMode({
             return;
           }
 
-          /** ONce the video can play, update canvas and stop the loading */
-          video.addEventListener("canplay", () => {
-            updateCanvasSize({ video, canvas });
-            setIsLoading(false);
-          });
+          /** Once the video can play, update canvas, stop loading, and enumerate devices */
+          video.addEventListener(
+            "canplay",
+            () => {
+              updateCanvasSize({ video, canvas });
+              setIsLoading(false);
+              // Enumerate devices after camera is ready
+              void enumerateAndReportDevices();
+            },
+            { once: true }
+          );
 
           video.addEventListener("error", (e) => {
             setError(

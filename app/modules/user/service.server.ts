@@ -24,6 +24,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
+  confirmExistingAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
@@ -237,22 +238,31 @@ export async function createUserOrAttachOrg({
       select: USER_WITH_SSO_DETAILS_SELECT,
     });
 
-    /**
-     * If user does not exist, create a new user and attach the org to it
-     * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
-     * This will always fail because we need them to confirm their email before we create a user in shelf
-     */
+    // If no Prisma User exists, create one.
+    // First try creating a fresh auth account. If that fails (email already
+    // exists in Supabase from a previous unconfirmed signup), fall back to
+    // confirming the existing auth account. The invite JWT (sent to the
+    // user's email) serves as proof of email ownership.
     if (!shelfUser?.id) {
-      const authAccount = await createEmailAuthAccount(email, password).catch(
-        (cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
-            label,
-          });
-        }
+      let authAccount = await createEmailAuthAccount(email, password).catch(
+        () => null
       );
+
+      if (!authAccount) {
+        authAccount = await confirmExistingAuthAccount(email, password).catch(
+          () => null
+        );
+      }
+
+      if (!authAccount) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "We are facing some issue with your account. " +
+            "Please try again or contact support.",
+          label,
+        });
+      }
 
       const newUser = await createUser({
         email,
@@ -787,6 +797,9 @@ export async function createUser(
       { maxWait: 6000, timeout: 10000 }
     );
   } catch (cause) {
+    const isUniqueViolation =
+      cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
+
     throw new ShelfError({
       cause,
       message: "We had trouble while creating your account. Please try again.",
@@ -794,6 +807,7 @@ export async function createUser(
         payload,
       },
       label,
+      shouldBeCaptured: !isUniqueViolation,
     });
   }
 }
@@ -1027,6 +1041,18 @@ async function getUsers({
         orderBy: { createdAt: "desc" },
         include: {
           tier: true,
+          userOrganizations: {
+            select: {
+              roles: true,
+              organization: {
+                select: {
+                  id: true,
+                  type: true,
+                  userId: true,
+                },
+              },
+            },
+          },
         },
       }),
 
@@ -1296,7 +1322,7 @@ export async function revokeAccessToOrganization({
       where: { userId, organizationId },
     });
 
-    return await db.user.update({
+    const result = await db.user.update({
       where: { id: userId },
       data: {
         ...(teamMember?.id && {
@@ -1316,12 +1342,154 @@ export async function revokeAccessToOrganization({
         },
       },
     });
+
+    // Clear lastSelectedOrganizationId if it points to the revoked org.
+    // Uses raw SQL to avoid bumping updatedAt. No-op if already different.
+    // Best-effort: don't block revocation if cleanup fails.
+    try {
+      await db.$executeRaw`
+        UPDATE "User"
+        SET "lastSelectedOrganizationId" = NULL
+        WHERE "id" = ${userId}
+          AND "lastSelectedOrganizationId" = ${organizationId}
+      `;
+    } catch (cleanupError) {
+      Logger.warn(
+        "Failed to clear lastSelectedOrganizationId during access revocation",
+        userId,
+        organizationId,
+        cleanupError
+      );
+    }
+
+    return result;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Failed to revoke user access to organization",
       additionalData: { userId, organizationId },
       label,
+    });
+  }
+}
+
+/**
+ * Changes a user's role in an organization in-place.
+ * This is the same pattern used by ownership transfer and SCIM sync.
+ * Does NOT affect TeamMember, Custody, or Booking records.
+ *
+ * Caller role validation:
+ * - Only OWNER can promote/demote ADMINs
+ * - Cannot assign OWNER role
+ * - Cannot change the OWNER's role
+ *
+ * Returns the target user's previous role alongside the updated record.
+ */
+export async function changeUserRole({
+  userId,
+  organizationId,
+  newRole,
+  callerRole,
+  tx: client = db,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+  newRole: OrganizationRoles;
+  callerRole: OrganizationRoles;
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+}) {
+  try {
+    if (newRole === OrganizationRoles.OWNER) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot assign Owner role directly. Use ownership transfer instead.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const userOrg = await client.userOrganization.findFirst({
+      where: {
+        userId,
+        organizationId,
+      },
+    });
+
+    if (!userOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "User is not a member of this organization",
+        additionalData: { userId, organizationId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const currentRole = userOrg.roles[0];
+
+    if (currentRole === OrganizationRoles.OWNER) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Cannot change the Owner's role. Use ownership transfer instead.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Only OWNER can promote someone to ADMIN */
+    if (
+      newRole === OrganizationRoles.ADMIN &&
+      callerRole !== OrganizationRoles.OWNER
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Insufficient permissions",
+        message: "Only the workspace owner can promote users to Administrator.",
+        label,
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Only OWNER can change an ADMIN's role */
+    if (
+      currentRole === OrganizationRoles.ADMIN &&
+      callerRole !== OrganizationRoles.OWNER
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Insufficient permissions",
+        message: "Only the workspace owner can change an Administrator's role.",
+        label,
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const updated = await client.userOrganization.update({
+      where: {
+        userId_organizationId: {
+          userId,
+          organizationId,
+        },
+      },
+      data: {
+        roles: { set: [newRole] },
+      },
+    });
+
+    return { ...updated, previousRole: currentRole };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to change user role",
+      additionalData: { userId, organizationId, newRole },
+      label,
+      status: isLikeShelfError(cause) ? cause.status : undefined,
     });
   }
 }
@@ -1333,10 +1501,18 @@ export async function revokeAccessToOrganization({
  *   - [x] Tag
  *   - [x] Location
  *   - [x] CustomField
- *   - [x] Invite
+ *   - [x] Invite (skippable via `skipInvites`)
  *   - [x] Booking
  *   - [x] Image
  *   - [x] Kit
+ *   - [x] AssetReminder
+ *
+ * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
+ * transferred — their userId represents authorship, not ownership.
+ *
+ * Invites can be skipped via `skipInvites` (used during demotion) because
+ * inviterId represents "who sent this" (authorship), not ownership.
+ *
  * Required to be used inside a transaction
  */
 export async function transferEntitiesToNewOwner({
@@ -1344,11 +1520,13 @@ export async function transferEntitiesToNewOwner({
   id,
   newOwnerId,
   organizationId,
+  skipInvites = false,
 }: {
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   id: User["id"];
   newOwnerId: User["id"];
   organizationId: Organization["id"];
+  skipInvites?: boolean;
 }) {
   /** Update assets */
   await tx.asset.updateMany({
@@ -1405,16 +1583,18 @@ export async function transferEntitiesToNewOwner({
     },
   });
 
-  /** Update invites */
-  await tx.invite.updateMany({
-    where: {
-      inviterId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      inviterId: newOwnerId,
-    },
-  });
+  /** Update invites (skipped during demotion — inviterId is authorship) */
+  if (!skipInvites) {
+    await tx.invite.updateMany({
+      where: {
+        inviterId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        inviterId: newOwnerId,
+      },
+    });
+  }
 
   /** Update bookings */
   await tx.booking.updateMany({
@@ -1451,6 +1631,17 @@ export async function transferEntitiesToNewOwner({
 
   /** Update kits */
   await tx.kit.updateMany({
+    where: {
+      createdById: id,
+      organizationId: organizationId,
+    },
+    data: {
+      createdById: newOwnerId,
+    },
+  });
+
+  /** Update asset reminders */
+  await tx.assetReminder.updateMany({
     where: {
       createdById: id,
       organizationId: organizationId,
