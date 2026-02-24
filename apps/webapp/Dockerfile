@@ -20,19 +20,21 @@ RUN npm i -g turbo@^2.4.4
 COPY . .
 RUN turbo prune @shelf/webapp --docker
 
-# Install all node_modules from pruned output
+# Install all node_modules (including devDependencies for build)
 FROM base AS deps
 
 COPY --from=pruner /src/out/json/ .
-RUN pnpm install --frozen-lockfile
+RUN NODE_ENV=development pnpm install --frozen-lockfile
 
 # Build the app
 FROM base AS build
 
+RUN npm i -g turbo@^2.4.4
+
 COPY --from=deps /src/ /src/
 COPY --from=pruner /src/out/full/ .
 
-RUN pnpm turbo build --filter=@shelf/webapp
+RUN turbo build --filter=@shelf/webapp
 RUN pnpm prune --prod
 
 # Finally, build the production image with minimal footprint
