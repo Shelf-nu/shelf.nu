@@ -128,7 +128,7 @@ const Row = ({
       </Td>
 
       {/* Category — hidden on small screens to prevent overflow */}
-      <Td className="hidden md:table-cell">
+      <Td className="hidden lg:table-cell">
         <CategoryBadge category={category} />
       </Td>
     </>

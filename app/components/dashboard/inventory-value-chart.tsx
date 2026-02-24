@@ -50,7 +50,7 @@ export default function InventoryValueChart() {
                 <Text className="mb-2 !text-[14px] font-medium text-gray-600">
                   Inventory value
                 </Text>
-                <Text className="mb-3 break-all !text-[22px] font-semibold text-gray-900 md:!text-[30px]">
+                <Text className="mb-3 whitespace-nowrap !text-[22px] font-semibold text-gray-900 md:!text-[30px]">
                   {formatCurrency({
                     value: totalValuation || 0,
                     locale,
