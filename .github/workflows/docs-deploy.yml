@@ -40,5 +40,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          packageManager: npx
+          packageManager: npm
           command: pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch=${{ github.event_name == 'push' && 'main' || github.head_ref }}
