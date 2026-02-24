@@ -163,7 +163,7 @@ Understanding Shelf's tech stack will help you develop effectively:
 pnpm webapp:dev      # Start development server
 pnpm webapp:build    # Build webapp for production
 pnpm turbo build     # Build all packages for production
-pnpm webapp:start    # Start production server
+pnpm webapp:start    # Start production server locally (loads root .env)
 pnpm turbo typecheck # Run TypeScript checks (all packages)
 ```
 
@@ -293,7 +293,21 @@ shelf.nu/
 
 ## Environment Configuration 🔧
 
-Your `.env` file lives at the **monorepo root** (not inside `apps/webapp/`). Copy `.env.example` to `.env` and fill in your values. Here are the development-specific ones:
+Your `.env` file lives at the **monorepo root** (not inside `apps/webapp/`). Copy `.env.example` to `.env` and fill in your values.
+
+### How env vars are loaded
+
+Because the `.env` lives at the monorepo root but the webapp runs from `apps/webapp/`, different contexts load env vars differently:
+
+| Context              | Command                                  | How env vars are loaded                                                                                                     |
+| -------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Dev server**       | `pnpm webapp:dev`                        | Vite reads from `envDir: "../.."` (the monorepo root)                                                                       |
+| **Local production** | `pnpm webapp:start`                      | Root script calls `start:local` which uses `dotenv -e ../../.env` to inject the root `.env` before starting the Node server |
+| **Docker / Fly.io**  | `pnpm run start` (inside `apps/webapp/`) | Env vars are provided by the platform — no dotenv, no `.env` file needed                                                    |
+
+> **Why the distinction?** The bare `start` script (`NODE_ENV=production node ./build/server/index.js`) does not load any `.env` file. In production (Docker/Fly), the platform injects env vars directly. For local production testing you need the `start:local` wrapper (called automatically by `pnpm webapp:start`) to load the root `.env`, otherwise required vars like `SESSION_SECRET` will be missing.
+
+Here are the development-specific ones:
 
 ```bash
 # Development server (adjust based on SSL setup)

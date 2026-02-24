@@ -1,3 +1,5 @@
+import { resolve, dirname } from "path";
+import { createRequire } from "module";
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -5,11 +7,22 @@ import { reactRouterHonoServer } from "react-router-hono-server/dev";
 import { cjsInterop } from "vite-plugin-cjs-interop";
 import { init } from "@paralleldrive/cuid2";
 
+const require = createRequire(import.meta.url);
+
 const createHash = init({
   length: 8,
 });
 
 const buildHash = process.env.BUILD_HASH || createHash();
+
+// Resolve the generated Prisma browser entry that contains enum runtime values.
+// In pnpm, .prisma/client lives inside the @prisma/client store directory,
+// not at the project root, so we resolve the path dynamically.
+const prismaClientDir = dirname(require.resolve("@prisma/client/package.json"));
+const prismaClientIndexBrowser = resolve(
+  prismaClientDir,
+  "../../.prisma/client/index-browser.js"
+);
 
 export default defineConfig({
   envDir: "../..",
@@ -52,7 +65,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      ".prisma/client/index-browser": "@prisma/client/index-browser",
+      ".prisma/client/index-browser": prismaClientIndexBrowser,
       // Use lottie_light version to avoid eval warnings
       "lottie-web": "lottie-web/build/player/lottie_light.js",
     },

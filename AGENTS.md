@@ -137,7 +137,8 @@ Before committing tests:
 ### Build & Production
 
 - `pnpm turbo build` – Build all packages and apps for production.
-- `pnpm webapp:start` – Start the production server.
+- `pnpm webapp:start` – Start the production server locally (loads `.env` from monorepo root).
+- `pnpm run start` (inside `apps/webapp/`) – Used by Docker/Fly (env vars from platform).
 
 ## Architecture Notes
 

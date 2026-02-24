@@ -14,7 +14,7 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm webapp:build` - Build webapp for production
 - `pnpm webapp:test -- --run` - Run Vitest unit tests (always use `--run` flag)
 - `pnpm webapp:validate` - Run all tests, linting, and typecheck (use before commits)
-- `pnpm webapp:start` - Start webapp production server
+- `pnpm webapp:start` - Start webapp production server locally (loads `.env` from monorepo root)
 
 **IMPORTANT:** When running tests manually, ALWAYS use the `--run` flag to run tests once and exit. Without `--run`, Vitest runs in watch mode which consumes excessive memory. Never run multiple test processes in parallel as this can freeze the system.
 
@@ -45,7 +45,8 @@ All database commands run via the `@shelf/database` package (`packages/database/
 ### Build & Production
 
 - `pnpm turbo build` - Build all packages and apps for **production**
-- `pnpm webapp:start` - Start production server
+- `pnpm webapp:start` - Start production server locally (loads `.env` from monorepo root)
+- `pnpm run start` (inside `apps/webapp/`) - Used by Docker/Fly (env vars from platform)
 
 ## Monorepo Structure
 

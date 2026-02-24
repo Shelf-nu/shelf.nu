@@ -336,8 +336,8 @@ Your Supabase setup is complete! You should now have:
 Now you can return to the main setup and run:
 
 ```bash
-pnpm --filter @shelf/webapp setup
-pnpm turbo dev --filter=@shelf/webapp
+pnpm webapp:setup
+pnpm webapp:dev
 ```
 
 **With SSL:** Your Shelf.nu app will be available at `https://localhost:3000` 🔒  

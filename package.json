@@ -13,7 +13,7 @@
     "webapp:build": "turbo run build --filter=@shelf/webapp",
     "webapp:test": "pnpm --filter @shelf/webapp test",
     "webapp:validate": "pnpm --filter @shelf/webapp validate",
-    "webapp:start": "pnpm --filter @shelf/webapp start",
+    "webapp:start": "pnpm --filter @shelf/webapp start:local",
     "docs:dev": "turbo run dev --filter=@shelf/docs",
     "docs:build": "turbo run build --filter=@shelf/docs",
     "docs:preview": "pnpm --filter @shelf/docs preview",
@@ -21,7 +21,13 @@
     "db:generate": "pnpm --filter @shelf/database run db:generate",
     "db:prepare-migration": "pnpm --filter @shelf/database run db:prepare-migration",
     "db:deploy-migration": "pnpm --filter @shelf/database run db:deploy-migration",
-    "db:reset": "pnpm --filter @shelf/database run db:reset"
+    "db:prepare-migration:staging": "pnpm --filter @shelf/database run db:prepare-migration:staging",
+    "db:deploy-migration:staging": "pnpm --filter @shelf/database run db:deploy-migration:staging",
+    "db:deploy-migration:production": "pnpm --filter @shelf/database run db:deploy-migration:production",
+    "db:reset": "pnpm --filter @shelf/database run db:reset",
+    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging",
+    "webapp:deploy:staging": "fly deploy --remote-only --app shelf-webapp-staging --dockerfile apps/webapp/Dockerfile",
+    "webapp:deploy:production": "fly deploy --remote-only --app shelf-webapp --dockerfile apps/webapp/Dockerfile"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",
