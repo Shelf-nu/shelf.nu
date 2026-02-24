@@ -112,8 +112,13 @@ jobs:
         with:
           useLockFile: false
 
-      - name: 🔎 Type check
-        run: ${{ steps.pm.outputs.agent }} run typecheck --if-present
+      - name: 🔎 Type check (pnpm)
+        if: steps.pm.outputs.agent == 'pnpm'
+        run: pnpm run --if-present typecheck
+
+      - name: 🔎 Type check (npm)
+        if: steps.pm.outputs.agent == 'npm'
+        run: npm run typecheck --if-present
 
   vitest:
     needs: authorize
