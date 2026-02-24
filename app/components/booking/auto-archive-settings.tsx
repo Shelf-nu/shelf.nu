@@ -28,20 +28,6 @@ export const AutoArchiveDaysSchema = z.object({
     .max(365, "Cannot exceed 365 days"),
 });
 
-/** @deprecated Kept for backwards compatibility during migration */
-export const AutoArchiveSettingsSchema = z.object({
-  autoArchiveBookings: z
-    .string()
-    .transform((val) => val === "on")
-    .default("false"),
-  autoArchiveDays: z.coerce
-    .number()
-    .int("Must be a whole number")
-    .min(1, "Must be at least 1 day")
-    .max(365, "Cannot exceed 365 days")
-    .default(2),
-});
-
 export function AutoArchiveSettings({
   header,
   defaultAutoArchiveBookings = false,

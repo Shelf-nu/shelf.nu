@@ -18,7 +18,10 @@ import {
   overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import { scheduleNextBookingJob } from "./service.server";
+import {
+  createStatusTransitionNote,
+  scheduleNextBookingJob,
+} from "./service.server";
 import type { SchedulerData } from "./types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 
@@ -247,18 +250,11 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     }
 
     // Create system note for the status transition
-    const fromStatusBadge = wrapBookingStatusForNote(
-      "COMPLETE",
-      booking.custodianUserId || undefined
-    );
-    const toStatusBadge = wrapBookingStatusForNote(
-      "ARCHIVED",
-      booking.custodianUserId || undefined
-    );
-
-    await createSystemBookingNote({
+    await createStatusTransitionNote({
       bookingId: booking.id,
-      content: `Booking was automatically archived. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+      fromStatus: BookingStatus.COMPLETE,
+      toStatus: BookingStatus.ARCHIVED,
+      custodianUserId: booking.custodianUserId || undefined,
     });
 
     Logger.info(`Auto-archived booking ${booking.id}`);

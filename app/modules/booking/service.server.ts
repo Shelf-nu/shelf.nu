@@ -228,6 +228,8 @@ export function getSystemActionText(
   switch (transition) {
     case "ONGOING->OVERDUE":
       return "Booking became overdue";
+    case "COMPLETE->ARCHIVED":
+      return "Booking was automatically archived";
     default:
       return "Booking status changed";
   }
