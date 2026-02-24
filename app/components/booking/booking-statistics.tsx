@@ -1,7 +1,8 @@
-import type { Tag as PrismaTag, User } from "@prisma/client";
+import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
 import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
+import { DateS } from "../shared/date";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Progress } from "../shared/progress";
 import { Separator } from "../shared/separator";
@@ -18,6 +19,8 @@ export function BookingStatistics({
   tags,
   creator,
   partialCheckinProgress,
+  autoArchivedAt,
+  status,
 }: {
   duration: string;
   totalAssets: number;
@@ -28,6 +31,8 @@ export function BookingStatistics({
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
   creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
   partialCheckinProgress?: ReturnType<typeof calculatePartialCheckinProgress>;
+  autoArchivedAt?: Date | null;
+  status: BookingStatus;
 }) {
   return (
     <div className="m-0">
@@ -129,6 +134,20 @@ export function BookingStatistics({
             img={creator.profilePicture}
           />
         </div>
+
+        {autoArchivedAt && status === "ARCHIVED" && (
+          <>
+            <Separator />
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">
+                Automatically archived
+              </span>
+              <span className="text-right font-medium">
+                <DateS date={autoArchivedAt} />
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

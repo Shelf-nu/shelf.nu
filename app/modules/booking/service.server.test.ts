@@ -9,6 +9,7 @@ import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
+import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
 import {
   createBooking,
@@ -109,6 +110,9 @@ vitest.mock("~/database/db.server", () => ({
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    bookingSettings: {
+      findUnique: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -173,6 +177,7 @@ vitest.mock("~/utils/scheduler.server", () => ({
   },
   QueueNames: {
     BOOKING_UPDATES: "booking-updates",
+    bookingQueue: "booking-queue",
   },
 }));
 
@@ -1742,6 +1747,124 @@ describe("checkinBooking", () => {
     const result = await checkinBooking(mockCheckinParams);
     expect(result).toBeDefined();
   });
+
+  it("should schedule auto-archive when enabled", async () => {
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      autoArchiveBookings: true,
+      autoArchiveDays: 3,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        id: "booking-1",
+        eventType: "booking-auto-archive-handler",
+      }),
+      expect.any(Object),
+      expect.any(Date)
+    );
+  });
+
+  it("should not schedule auto-archive when disabled", async () => {
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      autoArchiveBookings: false,
+      autoArchiveDays: 3,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    expect(scheduler.sendAfter).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        eventType: "booking-auto-archive-handler",
+      }),
+      expect.any(Object),
+      expect.any(Date)
+    );
+  });
+
+  it("should not schedule auto-archive when settings not found", async () => {
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+
+    await checkinBooking(mockCheckinParams);
+
+    expect(scheduler.sendAfter).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        eventType: "booking-auto-archive-handler",
+      }),
+      expect.any(Object),
+      expect.any(Date)
+    );
+  });
 });
 
 describe("archiveBooking", () => {
@@ -1782,6 +1905,42 @@ describe("archiveBooking", () => {
     await expect(
       archiveBooking({ id: "booking-1", organizationId: "org-1" })
     ).rejects.toThrow(ShelfError);
+  });
+
+  it("should cancel pending auto-archive job on manual archive", async () => {
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.COMPLETE,
+      activeSchedulerReference: "job-123",
+    };
+    const archivedBooking = { ...mockBooking, status: BookingStatus.ARCHIVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(archivedBooking);
+
+    await archiveBooking({ id: "booking-1", organizationId: "org-1" });
+
+    expect(scheduler.cancel).toHaveBeenCalledWith("job-123");
+  });
+
+  it("should handle archive when no scheduler reference exists", async () => {
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.COMPLETE,
+      activeSchedulerReference: null,
+    };
+    const archivedBooking = { ...mockBooking, status: BookingStatus.ARCHIVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(archivedBooking);
+
+    await archiveBooking({ id: "booking-1", organizationId: "org-1" });
+
+    expect(scheduler.cancel).not.toHaveBeenCalled();
   });
 });
 

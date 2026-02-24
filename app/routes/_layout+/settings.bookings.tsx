@@ -6,6 +6,11 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import {
+  AutoArchiveSettings,
+  AutoArchiveDaysSchema,
+  AutoArchiveToggleSchema,
+} from "~/components/booking/auto-archive-settings";
+import {
   ExplicitCheckinSettings,
   ExplicitCheckinSettingsSchema,
 } from "~/components/booking/explicit-checkin-settings";
@@ -126,6 +131,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
+        "updateAutoArchiveToggle",
+        "updateAutoArchiveDays",
         "updateExplicitCheckin",
         "toggle",
         "updateSchedule",
@@ -192,6 +199,56 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Tags requirement setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateAutoArchiveToggle": {
+        const { autoArchiveBookings } = parseData(
+          formData,
+          AutoArchiveToggleSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          autoArchiveBookings,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Auto-archive setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateAutoArchiveDays": {
+        const { autoArchiveDays } = parseData(formData, AutoArchiveDaysSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
+
+        await updateBookingSettings({
+          organizationId,
+          autoArchiveDays,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Auto-archive days setting has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -395,6 +452,17 @@ export default function GeneralPage() {
             "Control whether users must add tags to their bookings. This helps with categorization and organization of bookings.",
         }}
         defaultValue={bookingSettings.tagsRequired}
+      />
+
+      {/* Auto-archive settings form */}
+      <AutoArchiveSettings
+        header={{
+          title: "Automation",
+          subHeading:
+            "Configure automatic actions for completed bookings to keep your workspace clean.",
+        }}
+        defaultAutoArchiveBookings={bookingSettings.autoArchiveBookings}
+        defaultAutoArchiveDays={bookingSettings.autoArchiveDays}
       />
 
       {/* Time settings form */}

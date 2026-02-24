@@ -228,6 +228,8 @@ export function getSystemActionText(
   switch (transition) {
     case "ONGOING->OVERDUE":
       return "Booking became overdue";
+    case "COMPLETE->ARCHIVED":
+      return "Booking was automatically archived";
     default:
       return "Booking status changed";
   }
@@ -1624,6 +1626,32 @@ export async function checkinBooking({
      */
     await cancelScheduler(updatedBooking);
 
+    /**
+     * Check if auto-archive is enabled for this organization
+     * and schedule the auto-archive job if needed
+     */
+    const bookingSettings = await db.bookingSettings.findUnique({
+      where: { organizationId: updatedBooking.organizationId },
+      select: {
+        autoArchiveBookings: true,
+        autoArchiveDays: true,
+      },
+    });
+
+    if (bookingSettings?.autoArchiveBookings) {
+      const when = new Date();
+      when.setDate(when.getDate() + bookingSettings.autoArchiveDays);
+
+      await scheduleNextBookingJob({
+        data: {
+          id: updatedBooking.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveHandler,
+        },
+        when,
+      });
+    }
+
     if (updatedBooking.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
         ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
@@ -2135,7 +2163,7 @@ export async function archiveBooking({
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, activeSchedulerReference: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -2160,6 +2188,9 @@ export async function archiveBooking({
       where: { id: booking.id },
       data: { status: BookingStatus.ARCHIVED },
     });
+
+    // Cancel any pending auto-archive job
+    await cancelScheduler(booking);
 
     // Add activity log for booking archival
     await createStatusTransitionNote({
