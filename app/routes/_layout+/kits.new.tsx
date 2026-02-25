@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { data, redirect } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
@@ -14,7 +14,13 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import {
+  assertIsPost,
+  getRefererPath,
+  payload,
+  error,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -55,6 +61,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalCategories,
       locations,
       totalLocations,
+      referer: getRefererPath(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -133,12 +140,13 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function CreateNewKit() {
   const title = useAtomValue(dynamicTitleAtom);
+  const { referer } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
   return (
     <>
       <Header title={title ?? "Untitled kit"} />
-      <KitsForm qrId={qrId} />
+      <KitsForm qrId={qrId} referer={referer} />
     </>
   );
 }
