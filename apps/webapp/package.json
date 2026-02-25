@@ -121,7 +121,6 @@
     "remix-utils": "^9.0.0",
     "sharp": "^0.33.2",
     "stripe": "^20.3.0",
-    "swiper": "^11.0.6",
     "tailwind-merge": "^2.2.1",
     "tailwindcss-animate": "^1.0.7",
     "tiny-invariant": "^1.3.1",
