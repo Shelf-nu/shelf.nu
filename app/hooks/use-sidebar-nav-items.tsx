@@ -7,8 +7,8 @@ import {
   BoxesIcon,
   CalendarRangeIcon,
   ChartLineIcon,
-  ChartNoAxesCombinedIcon,
   ClipboardCheckIcon,
+  HomeIcon,
   MapPinIcon,
   MessageCircleIcon,
   Package,
@@ -107,9 +107,9 @@ export function useSidebarNavItems() {
     },
     {
       type: "child",
-      title: "Dashboard",
-      to: "/dashboard",
-      Icon: ChartNoAxesCombinedIcon,
+      title: "Home",
+      to: "/home",
+      Icon: HomeIcon,
       hidden: isBaseOrSelfService,
     },
     {

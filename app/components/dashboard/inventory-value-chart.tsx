@@ -1,37 +1,23 @@
 import { Text, ProgressCircle } from "@tremor/react";
 import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
-import type { loader } from "~/routes/_layout+/dashboard";
+import type { loader } from "~/routes/_layout+/home";
 import { formatCurrency } from "~/utils/currency";
 import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
-import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function InventoryValueChart() {
-  const { assets, currency, totalAssets, totalValuation, locale } =
+  const { currency, totalAssets, totalValuation, valueKnownAssets, locale } =
     useLoaderData<typeof loader>();
-  const valueKnownAssets = assets.filter(
-    (asset) => asset.valuation !== null
-  ).length;
 
   return (
-    <div className="w-full border border-gray-200 ">
-      <div className="flex items-center justify-between">
-        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+      <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
+        <span className="text-[14px] font-semibold text-gray-900">
           Inventory value
-        </div>
-        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
-          <InfoTooltip
-            content={
-              <>
-                <h6>Inventory value</h6>
-                <p>This chart shows how much value your assets hold</p>
-              </>
-            }
-          />
-        </div>
+        </span>
       </div>
-      <div className="h-full p-8">
+      <div className="flex flex-1 items-center justify-center p-6">
         {valueKnownAssets > 0 ? (
           <div className="space-y-3">
             <div
@@ -64,7 +50,7 @@ export default function InventoryValueChart() {
                 <Text className="mb-2 !text-[14px] font-medium text-gray-600">
                   Inventory value
                 </Text>
-                <Text className="mb-3 break-words !text-[30px] font-semibold text-gray-900">
+                <Text className="mb-3 break-all !text-[22px] font-semibold text-gray-900 md:!text-[30px]">
                   {formatCurrency({
                     value: totalValuation || 0,
                     locale,
@@ -78,6 +64,8 @@ export default function InventoryValueChart() {
           <DashboardEmptyState
             text="No asset values yet"
             subText="Add valuations to your assets to see your total inventory value here."
+            ctaTo="/assets"
+            ctaText="Go to assets"
           />
         )}
       </div>
