@@ -74,7 +74,7 @@ Get Shelf running locally in just a few steps:
 ```bash
 git clone https://github.com/Shelf-nu/shelf.nu.git
 cd shelf.nu
-npm install
+pnpm install
 ```
 
 ### 2. Setup Environment Variables 🔧

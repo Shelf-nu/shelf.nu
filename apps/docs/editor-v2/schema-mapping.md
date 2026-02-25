@@ -52,4 +52,4 @@ Slash commands (`/h1`, `/h2`, `/ul`, `/ol`, `/quote`, `/divider`) execute the sa
 
 `serializeMarkdoc` reuses ProseMirror’s Markdown serializer with custom handlers for bullet lists and raw blocks. After every edit we serialize the document back to Markdoc, guaranteeing that the stored value matches what downstream Markdoc consumers expect.
 
-For detailed implementation, see [`app/modules/editor-v2/markdoc-utils.ts`](../../app/modules/editor-v2/markdoc-utils.ts).
+For detailed implementation, see [`app/modules/editor-v2/markdoc-utils.ts`](../../../apps/webapp/app/modules/editor-v2/markdoc-utils.ts).

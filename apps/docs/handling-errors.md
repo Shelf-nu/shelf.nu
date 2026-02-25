@@ -151,7 +151,7 @@ No changes are required in service-level `catch` blocks. Both layers are central
 
 ### `ShelfError` class
 
-> [Source](/app/utils/error.ts)
+> [Source](/apps/webapp/app/utils/error.ts)
 
 This class is used to create a custom error object that can be used to throw errors in the application.
 
@@ -173,17 +173,17 @@ throw new ShelfError({
 
 ### `payload()` & `error()` functions
 
-> [Source](/app/utils/http.server.ts)
+> [Source](/apps/webapp/app/utils/http.server.ts)
 
 These functions are used to build the payload response returned by `payload()`. The `payload()` function is used to send a successful response, while the `error()` function is used to send an error response.
 
 ### `makeShelfError()` function
 
-> [Source](/app/utils/error.ts)
+> [Source](/apps/webapp/app/utils/error.ts)
 
 This function is used to create a `ShelfError` object from a caught error. It is used to standardize the error object and make sure that the error is properly formatted before being sent to the client.
 
-It pairs with the [`error()`](/app/utils/http.server.ts).
+It pairs with the [`error()`](/apps/webapp/app/utils/http.server.ts).
 
 It can take an optional `additionalData` parameter to add more context to the error.
 
@@ -200,7 +200,7 @@ It can take an optional `additionalData` parameter to add more context to the er
 
 #### `parseData()` function
 
-> [Source](/app/utils/http.server.ts)
+> [Source](/apps/webapp/app/utils/http.server.ts)
 >
 > ✅ Use it in a `try/catch` block
 
@@ -213,7 +213,7 @@ It throws a `ShelfError` (`badRequest()`) if the data is invalid.
 
 #### `getParams()` function
 
-> [Source](/app/utils/http.server.ts)
+> [Source](/apps/webapp/app/utils/http.server.ts)
 >
 > ❌ Don't use it in a `try/catch` block
 
@@ -223,7 +223,7 @@ It directly throw a `json` response if the `params` are invalid.
 
 #### `getValidationErrors()` function
 
-> [Source](/app/utils/http.ts)
+> [Source](/apps/webapp/app/utils/http.ts)
 
 This function is used to get the `validationErrors` from the `error.additionalData` object returned by the `error()` function.
 It pairs well with Forms validation, when you want to display a specific error message for a given field.

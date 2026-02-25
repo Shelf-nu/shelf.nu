@@ -8,7 +8,7 @@ swap_size_mb = 512
 auto_rollback = true
 
 [deploy]
-strategy = "rolling"
+strategy = "bluegreen"
 
 [env]
 NODE_ENV = "production"

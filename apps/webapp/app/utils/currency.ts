@@ -9,7 +9,7 @@
  * @see https://www.iban.com/currency-codes
  *
  * IMPORTANT: When adding new currencies, also update:
- * 1. The Prisma schema enum (app/database/schema.prisma)
+ * 1. The Prisma schema enum (packages/database/prisma/schema.prisma)
  * 2. Create a migration to add the currency to the database
  */
 
