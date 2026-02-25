@@ -169,7 +169,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // Upcoming bookings (RESERVED, future)
+      // Upcoming bookings (RESERVED, starting from now)
+      // Both bookingFrom and bookingTo are required for date filtering
       getBookings({
         organizationId,
         userId,
@@ -177,6 +178,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["RESERVED"],
         bookingFrom: new Date(),
+        bookingTo: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
