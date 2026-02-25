@@ -39,19 +39,31 @@
       "Bash(npm view:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr diff:*)",
+      "Bash(git status:*)",
+      "Bash(pnpm turbo typecheck:*)",
+      "Bash(pnpm --filter @shelf/webapp exec prisma generate:*)",
+      "Bash(pnpm --filter @shelf/webapp test -- --run)",
+      "Bash(pnpm --filter @shelf/webapp test:*)",
+      "Bash(grep:*)",
+      "Bash(pnpm run typecheck:*)",
+      "Bash(pnpm --filter @shelf/docs build:*)",
+      "Bash(node -e:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm --filter @shelf/database exec tsc:*)",
+      "Bash(pnpm turbo build:*)",
       "WebSearch",
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:docs.stripe.com)"
     ],
     "deny": [
-      "Read(./.env)",
+      "Read(**/.env)",
       "Read(**/.env.local)",
       "Read(**/.env.development)",
       "Read(**/.env.production)",
       "Read(**/.env.staging)",
       "Read(**/.env.test)",
-      "Write(./.env)",
+      "Write(**/.env)",
       "Write(**/.env.*)"
     ]
   }
