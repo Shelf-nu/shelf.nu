@@ -1,4 +1,4 @@
 #!/bin/sh -ex
 
 # Start the app
-pnpm run start
+NODE_ENV=production node ./build/server/index.js

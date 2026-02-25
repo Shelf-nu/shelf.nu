@@ -5,4 +5,4 @@
 # run, which is why this file exists in the first place.
 # Learn more: https://community.fly.io/t/sqlite-not-getting-setup-properly/4386
 
-pnpm run start
+NODE_ENV=production node ./build/server/index.js
