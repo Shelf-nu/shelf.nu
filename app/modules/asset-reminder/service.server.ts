@@ -313,6 +313,36 @@ export async function deleteAssetReminder({
   }
 }
 
+export async function getUpcomingRemindersForHomePage({
+  organizationId,
+  take = 5,
+}: {
+  organizationId: AssetReminder["organizationId"];
+  take?: number;
+}) {
+  try {
+    const reminders = await db.assetReminder.findMany({
+      where: {
+        organizationId,
+        alertDateTime: {
+          gte: new Date(),
+        },
+      },
+      take,
+      include: ASSET_REMINDER_INCLUDE_FIELDS,
+      orderBy: { alertDateTime: "asc" },
+    });
+
+    return reminders;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while getting upcoming reminders.",
+      label,
+    });
+  }
+}
+
 export async function getRemindersForOverviewPage({
   assetId,
   organizationId,

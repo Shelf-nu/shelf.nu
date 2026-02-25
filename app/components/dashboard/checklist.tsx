@@ -1,5 +1,5 @@
 import { Link, useFetcher, useLoaderData } from "react-router";
-import type { loader } from "~/routes/_layout+/dashboard";
+import type { loader } from "~/routes/_layout+/home";
 import { tw } from "~/utils/tw";
 import {
   AddUserIcon,
