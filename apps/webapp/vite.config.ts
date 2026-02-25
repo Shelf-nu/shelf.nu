@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { createRequire } from "module";
 import { reactRouter } from "@react-router/dev/vite";
@@ -23,6 +24,15 @@ const prismaClientIndexBrowser = resolve(
   prismaClientDir,
   "../../.prisma/client/index-browser.js"
 );
+
+// Fail fast if the Prisma browser bundle is missing. Without it, enums like
+// OrganizationRoles silently resolve to `undefined` in the browser at runtime.
+if (!existsSync(prismaClientIndexBrowser)) {
+  throw new Error(
+    `Prisma browser bundle not found at ${prismaClientIndexBrowser}. ` +
+      `Run "prisma generate" or check that the .prisma/client path is correct.`
+  );
+}
 
 export default defineConfig({
   envDir: "../..",

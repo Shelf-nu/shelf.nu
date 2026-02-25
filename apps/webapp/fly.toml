@@ -9,6 +9,7 @@ auto_rollback = true
 
 [deploy]
 strategy = "bluegreen"
+release_command = "npx prisma migrate deploy"
 
 [env]
 NODE_ENV = "production"
