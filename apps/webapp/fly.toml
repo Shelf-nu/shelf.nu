@@ -1,0 +1,47 @@
+app = "shelf-webapp"
+primary_region = "ams"
+kill_signal = "SIGINT"
+kill_timeout = "5s"
+swap_size_mb = 512
+
+[experimental]
+auto_rollback = true
+
+[deploy]
+strategy = "bluegreen"
+release_command = "npx prisma migrate deploy"
+
+[env]
+NODE_ENV = "production"
+PORT = "8080"
+
+[[services.ports]]
+handlers = ["http"]
+port = 80
+force_https = true
+
+[[services.ports]]
+handlers = ["tls", "http"]
+port = 443
+
+[http_service]
+internal_port = 8080
+force_https = true
+auto_stop_machines = "off"
+auto_start_machines = false
+min_machines_running = 1
+processes = ["app"]
+
+[http_service.concurrency]
+type = "requests"
+soft_limit = 100
+hard_limit = 125
+
+[[http_service.checks]]
+grace_period = "90s"
+interval = "10s"
+method = "GET"
+timeout = "2s"
+path = "/healthcheck"
+protocol = "http"
+
