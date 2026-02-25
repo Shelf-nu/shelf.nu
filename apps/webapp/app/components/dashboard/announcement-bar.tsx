@@ -1,5 +1,5 @@
 import { useLoaderData } from "react-router";
-import type { loader } from "~/routes/_layout+/dashboard";
+import type { loader } from "~/routes/_layout+/home";
 import { StarsIcon } from "../icons/library";
 import { MarkdownViewer } from "../markdown/markdown-viewer";
 import { Button } from "../shared/button";

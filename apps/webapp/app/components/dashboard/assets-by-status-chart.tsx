@@ -1,12 +1,12 @@
 import { DonutChart } from "@tremor/react";
 import { useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
-import type { loader } from "~/routes/_layout+/dashboard";
+import type { loader } from "~/routes/_layout+/home";
 import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 
 import { Badge } from "../shared/badge";
-import { InfoTooltip } from "../shared/info-tooltip";
+import { Button } from "../shared/button";
 
 export default function AssetsByStatusChart() {
   const { assetsByStatus } = useLoaderData<typeof loader>();
@@ -14,32 +14,28 @@ export default function AssetsByStatusChart() {
   const { chartData } = assetsByStatus;
 
   return (
-    <div className="w-full border border-gray-200 ">
-      <div className="flex items-center justify-between">
-        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+      <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
+        <span className="text-[14px] font-semibold text-gray-900">
           Assets by status
-        </div>
-        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
-          <InfoTooltip
-            content={
-              <>
-                <h6>Assets by status</h6>
-                <p>
-                  Below graph shows how many percent of assets are in which
-                  status{" "}
-                </p>
-              </>
-            }
-          />
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            to="/assets"
+            variant="block-link-gray"
+            className="!mt-0 text-xs"
+          >
+            View all
+          </Button>
         </div>
       </div>
-      <div className="h-full p-8">
+      <div className="flex flex-1 items-center justify-center p-6">
         {chartData?.length > 0 ? (
           <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-between">
-            <ClientOnly fallback={<FallbackLoading className="size-80" />}>
+            <ClientOnly fallback={<FallbackLoading className="size-40" />}>
               {() => (
                 <DonutChart
-                  className="mt-6 size-[240px] 2xl:size-[320px]"
+                  className="size-[160px]"
                   data={chartData}
                   category="assets"
                   index="status"
