@@ -1,44 +1,45 @@
 node_modules
 
-/build
-/public/build
-.react-router/
+# Build outputs
+**/build
+**/dist
+**/.react-router/
+**/.react-router/types
+
+# Environment files
 .env
 .env.local
 .env.staging
 .env.production
-.env.staging
+
 .cache
-/app/database/migrations/migration_lock.toml
+
+# Prisma
+**/migrations/migration_lock.toml
 
 tsconfig.tsbuildinfo
-
-/prisma/data.db
-/prisma/data.db-journal
 
 # Claude Code development notes (local only)
 .claude-notes/
 
-/coverage
+**/coverage
 
 # Supabase
 **/supabase/.branches
 **/supabase/.temp
 **/supabase/.env
-/sso/metadata-files
 
 # OS
 .DS_Store
 test-results/
 
-/playwright-report/
-/playwright/.cache/
-/playwright-report/*
+# Playwright
+**/playwright-report/
+**/playwright/.cache/
+
+# Desktop app build artifacts
 desktop-app/shelf-installer
 desktop-app/portable
-/test/lab_equipment_2000.csv
-
-.npmrc
 
 .vscode
 .worktrees
@@ -47,9 +48,11 @@ desktop-app/portable
 .sentryclirc
 
 .cert
+
 # VitePress
-docs/.vitepress/cache
-docs/.vitepress/dist
+apps/docs/.vitepress/cache
+apps/docs/.vitepress/dist
 .vercel
 
-.react-router/types
+# Turborepo
+.turbo
