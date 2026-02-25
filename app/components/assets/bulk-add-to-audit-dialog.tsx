@@ -130,7 +130,7 @@ export default function BulkAddToAuditDialog() {
                   <Button
                     variant="primary"
                     width="full"
-                    to="/audits/new"
+                    to="/audits"
                     onClick={handleCloseDialog}
                   >
                     Create new audit
