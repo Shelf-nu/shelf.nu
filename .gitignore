@@ -41,7 +41,8 @@ test-results/
 desktop-app/shelf-installer
 desktop-app/portable
 
-.vscode
+.vscode/*
+!.vscode/settings.json
 .worktrees
 
 # Sentry Config File
