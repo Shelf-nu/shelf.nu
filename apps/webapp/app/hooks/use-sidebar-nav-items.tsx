@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { Crisp } from "crisp-sdk-web";
 import {
   AlarmClockIcon,
   BellIcon,
@@ -258,7 +257,7 @@ export function useSidebarNavItems() {
       title: "Questions/Feedback",
       Icon: MessageCircleIcon,
       onClick: () => {
-        Crisp.chat.open();
+        // Handled by FeedbackNavItem in sidebar-nav.tsx
       },
     },
   ];
