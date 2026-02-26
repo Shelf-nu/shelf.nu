@@ -2,6 +2,7 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Crisp } from "crisp-sdk-web";
 import {
+  AlertCircleIcon,
   ImageIcon,
   LightbulbIcon,
   MessageCircleIcon,
@@ -11,6 +12,7 @@ import {
 import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -40,17 +42,24 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validationErrors = getValidationErrors<typeof feedbackSchema>(
     fetcher.data?.error
   );
 
+  const generalError =
+    fetcher.data?.error && !validationErrors
+      ? fetcher.data.error.message
+      : null;
+
   const handleClose = useCallback(() => {
     setFeedbackType("issue");
     setScreenshot(null);
     setPreviewUrl(null);
     setShowSuccess(false);
+    setFileError(null);
     onClose();
   }, [onClose]);
 
@@ -80,6 +89,17 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] || null;
+    setFileError(null);
+
+    if (file && file.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
+      const maxMB = DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024);
+      setFileError(`File size exceeds the ${maxMB}MB limit`);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
     setScreenshot(file);
 
     if (previewUrl) {
@@ -153,6 +173,14 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
             className="flex flex-col"
           >
             <div className="space-y-4 px-6 py-4">
+              {/* General server error */}
+              {generalError ? (
+                <div className="flex items-start gap-2 rounded-lg border border-error-300 bg-error-50 px-3 py-2 text-sm text-error-700">
+                  <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+                  <span>{generalError}</span>
+                </div>
+              ) : null}
+
               {/* Category toggle */}
               <div>
                 <fieldset>
@@ -259,6 +287,10 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                   className="hidden"
                   aria-label="Upload screenshot"
                 />
+
+                {fileError ? (
+                  <p className="mt-1 text-sm text-error-600">{fileError}</p>
+                ) : null}
               </div>
             </div>
 

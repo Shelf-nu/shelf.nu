@@ -6,6 +6,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
+import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
 
 export const feedbackSchema = z.object({
@@ -39,7 +40,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
       newFileName: `feedback/${userId}/${dateTimeInUnix(Date.now())}`,
       bucketName: "files",
-      maxFileSize: 4_000_000,
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
 
     const { type, message } = parseData(formData, feedbackSchema);

@@ -103,5 +103,7 @@ export const Dialog = ({
   ) : null;
 };
 
-export const DialogPortal = ({ children }: { children: ReactNode }) =>
-  ReactDOM.createPortal(children, document.body);
+export const DialogPortal = ({ children }: { children: ReactNode }) => {
+  if (typeof document === "undefined") return null;
+  return ReactDOM.createPortal(children, document.body);
+};
