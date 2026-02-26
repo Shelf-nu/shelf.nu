@@ -203,7 +203,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
               <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
                 <Button
                   variant="link"
-                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3 text-color-700 hover:text-color-700"
                   width="full"
                   onClick={() => {
                     setOpen(false);
@@ -229,7 +229,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   to="assets/update-location"
                   role="link"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-color-700 hover:text-color-700"
                   width="full"
                   onClick={() => setOpen(false)}
                 >
@@ -243,7 +243,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                 <Button
                   role="button"
                   variant="link"
-                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3 text-color-700 hover:text-color-700"
                   width="full"
                   onClick={() => {
                     setOpen(false);

@@ -28,7 +28,7 @@ export function BubbleMenu({
 
   return (
     <div
-      className="absolute z-50 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 shadow-lg"
+      className="absolute z-50 flex items-center gap-1 rounded-md border border-color-200 bg-surface px-2 py-1 shadow-lg"
       style={{
         left: `${state.left}px`,
         top: `${state.top}px`,

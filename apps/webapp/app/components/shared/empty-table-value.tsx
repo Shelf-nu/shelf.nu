@@ -15,7 +15,7 @@ export function EmptyTableValue({
     <span
       aria-label={label}
       className={tw(
-        "inline-flex items-center text-sm text-gray-400",
+        "inline-flex items-center text-sm text-color-400",
         className
       )}
       {...rest}

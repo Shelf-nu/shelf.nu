@@ -99,14 +99,14 @@ export function KitsListComponent({
       </PopoverTrigger>
 
       <PopoverContent
-        className="z-[999999] max-h-48 w-80 overflow-y-auto rounded border bg-white p-3"
+        className="z-[999999] max-h-48 w-80 overflow-y-auto rounded border bg-surface p-3"
         side="top"
         sideOffset={8}
       >
         {isLoading && (
           <div className="flex items-center justify-center py-4">
             <Spinner className="size-4" />
-            <span className="ml-2 text-sm text-gray-500">Loading kits...</span>
+            <span className="ml-2 text-sm text-color-500">Loading kits...</span>
           </div>
         )}
 
@@ -129,11 +129,11 @@ export function KitsListComponent({
                     variant="link"
                     to={`/kits/${kit.id}`}
                     target="_blank"
-                    className="h-auto p-0 font-medium text-gray-700 hover:text-gray-900"
+                    className="h-auto p-0 font-medium text-color-700 hover:text-color-900"
                   >
                     {kit.name}
                   </Button>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-color-500">
                     ({kit.assets.length} assets)
                   </span>
                   <span className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600">
@@ -147,7 +147,7 @@ export function KitsListComponent({
                     {kit.assets.map((asset) => (
                       <li
                         key={asset.id}
-                        className="flex items-center gap-2 text-sm text-gray-700"
+                        className="flex items-center gap-2 text-sm text-color-700"
                       >
                         <AssetImage
                           className="size-5"
@@ -165,12 +165,12 @@ export function KitsListComponent({
                           variant="link"
                           to={`/assets/${asset.id}`}
                           target="_blank"
-                          className="h-auto p-0 font-medium text-gray-700 hover:text-gray-900"
+                          className="h-auto p-0 font-medium text-color-700 hover:text-color-900"
                         >
                           {asset.title}
                         </Button>
                         {asset.category && (
-                          <span className="text-gray-500">
+                          <span className="text-color-500">
                             ({asset.category.name})
                           </span>
                         )}
@@ -184,13 +184,13 @@ export function KitsListComponent({
         )}
 
         {!isLoading && error && (
-          <div className="py-2 text-sm text-gray-500">
+          <div className="py-2 text-sm text-color-500">
             Failed to load kit details
           </div>
         )}
 
         {!isLoading && data?.kits.length === 0 && (
-          <div className="py-2 text-sm text-gray-500">No kits found</div>
+          <div className="py-2 text-sm text-color-500">No kits found</div>
         )}
       </PopoverContent>
     </Popover>

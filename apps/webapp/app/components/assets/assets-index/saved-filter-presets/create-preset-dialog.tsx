@@ -60,7 +60,7 @@ export function CreatePresetDialog({
         title={
           <div className="-mb-3 w-full pb-6">
             <h3>Save filter preset</h3>
-            <p className="text-gray-500">
+            <p className="text-color-500">
               Give your filter a name and save it for quick access later.
             </p>
           </div>
@@ -82,8 +82,8 @@ export function CreatePresetDialog({
             />
 
             {/* Filter preview */}
-            <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="mb-1 text-xs font-medium text-gray-600">Preview</p>
+            <div className="mt-4 rounded-md border border-color-200 bg-color-50 p-3">
+              <p className="mb-1 text-xs font-medium text-color-600">Preview</p>
               {preview}
             </div>
 

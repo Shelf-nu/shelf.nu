@@ -37,7 +37,7 @@ const WeeklyScheduleGrid = ({ weeklySchedule }: WeeklyScheduleGridProps) => (
             "relative overflow-hidden border transition-all duration-200",
             isOpen
               ? "border-green-200 bg-gradient-to-b from-green-50 to-green-100 shadow-sm"
-              : "border-color-200 bg-gradient-to-b from-color-50 to-color-100"
+              : "from-color-50 to-color-100 border-color-200 bg-gradient-to-b"
           )}
         >
           {/* Day header */}
@@ -77,7 +77,7 @@ const WeeklyScheduleGrid = ({ weeklySchedule }: WeeklyScheduleGridProps) => (
             ) : (
               <div className="text-center">
                 <div className="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-color-200">
-                  <div className="h-0.5 w-3 rounded bg-color-400"></div>
+                  <div className="bg-color-400 h-0.5 w-3 rounded"></div>
                 </div>
                 <div className="text-xs font-medium text-color-500">Closed</div>
               </div>

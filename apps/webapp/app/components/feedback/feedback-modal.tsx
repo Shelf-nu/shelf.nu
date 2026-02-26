@@ -136,10 +136,10 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
         headerClassName="border-b"
         title={
           <div className="-mb-3 w-full pb-4">
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 className="text-lg font-semibold text-color-900">
               Share feedback
             </h3>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-color-600">
               What would you like to share?
             </p>
           </div>
@@ -162,8 +162,8 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                 />
               </svg>
             </div>
-            <p className="text-lg font-semibold text-gray-900">Thank you!</p>
-            <p className="text-sm text-gray-600">
+            <p className="text-lg font-semibold text-color-900">Thank you!</p>
+            <p className="text-sm text-color-600">
               Your feedback has been submitted.
             </p>
           </div>
@@ -187,7 +187,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
               {/* Category toggle */}
               <div>
                 <fieldset>
-                  <legend className="mb-2 text-sm font-medium text-gray-700">
+                  <legend className="mb-2 text-sm font-medium text-color-700">
                     Type
                   </legend>
                   <div className="flex gap-2">
@@ -198,7 +198,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                         "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
                         feedbackType === "issue"
                           ? "border-primary-400 bg-primary-50 text-primary-700"
-                          : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                          : "border-color-200 bg-surface text-color-700 hover:bg-color-50"
                       )}
                       aria-pressed={feedbackType === "issue"}
                     >
@@ -212,7 +212,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                         "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
                         feedbackType === "idea"
                           ? "border-primary-400 bg-primary-50 text-primary-700"
-                          : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                          : "border-color-200 bg-surface text-color-700 hover:bg-color-50"
                       )}
                       aria-pressed={feedbackType === "idea"}
                     >
@@ -249,9 +249,9 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
 
               {/* Screenshot upload */}
               <div>
-                <p className="mb-2 text-sm font-medium text-gray-700">
+                <p className="mb-2 text-sm font-medium text-color-700">
                   Screenshot{" "}
-                  <span className="font-normal text-gray-500">(optional)</span>
+                  <span className="font-normal text-color-500">(optional)</span>
                 </p>
 
                 {previewUrl && screenshot ? (
@@ -259,22 +259,22 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                     <img
                       src={previewUrl}
                       alt="Screenshot preview"
-                      className="h-24 rounded-lg border border-gray-200 object-cover"
+                      className="h-24 rounded-lg border border-color-200 object-cover"
                     />
                     <button
                       type="button"
                       onClick={removeScreenshot}
-                      className="absolute -right-2 -top-2 rounded-full border border-gray-200 bg-white p-0.5 shadow-sm hover:bg-gray-50"
+                      className="absolute -right-2 -top-2 rounded-full border border-color-200 bg-surface p-0.5 shadow-sm hover:bg-color-50"
                       aria-label="Remove screenshot"
                     >
-                      <XIcon className="size-3.5 text-gray-500" />
+                      <XIcon className="size-3.5 text-color-500" />
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50"
+                    className="flex items-center gap-2 rounded-lg border border-dashed border-color-300 px-4 py-3 text-sm text-color-600 transition-colors hover:border-color-400 hover:bg-color-50"
                   >
                     <ImageIcon className="size-4" />
                     Attach a screenshot
@@ -305,7 +305,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                   Crisp.chat.open();
                   handleClose();
                 }}
-                className="flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-700"
+                className="flex items-center gap-1.5 text-sm text-color-500 transition-colors hover:text-color-700"
               >
                 <MessageCircleIcon className="size-4" />
                 Chat with us

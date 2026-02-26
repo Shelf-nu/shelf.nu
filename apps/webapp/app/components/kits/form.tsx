@@ -165,7 +165,7 @@ export default function KitsForm({
               <Button
                 to="/categories/new"
                 variant="link-gray"
-                className="text-gray-600 underline"
+                className="text-color-600 underline"
                 target="_blank"
               >
                 Create categories
@@ -217,7 +217,7 @@ export default function KitsForm({
               This is different than the last scanned location{" "}
               <Button
                 to="/locations/new"
-                className="text-gray-600 underline"
+                className="text-color-600 underline"
                 target="_blank"
                 variant="link-gray"
               >

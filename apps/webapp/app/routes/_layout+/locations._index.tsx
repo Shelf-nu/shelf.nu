@@ -156,11 +156,11 @@ const ListItemContent = ({
             <Button
               to={`${item.id}/assets`}
               variant="link"
-              className="text-left font-medium text-gray-900 hover:text-gray-700"
+              className="text-left font-medium text-color-900 hover:text-color-700"
             >
               {item.name}
             </Button>
-            <div className="hidden text-gray-600 md:block">{item.address}</div>
+            <div className="hidden text-color-600 md:block">{item.address}</div>
           </div>
         </div>
       </div>

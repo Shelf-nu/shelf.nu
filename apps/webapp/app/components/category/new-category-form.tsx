@@ -80,7 +80,7 @@ export default function NewCategoryForm({
     <fetcher.Form
       method="post"
       className={tw(
-        "w-full rounded border border-gray-200 bg-white px-6 py-5 md:flex md:items-center md:justify-between",
+        "w-full rounded border border-color-200 bg-surface px-6 py-5 md:flex md:items-center md:justify-between",
         formClassName
       )}
       ref={zo.ref}

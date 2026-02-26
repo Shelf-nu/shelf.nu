@@ -39,15 +39,15 @@ export function InvoiceHistory({
       <h3 className="mb-4 text-text-lg font-semibold">Billing History</h3>
 
       {hasUpcoming && (
-        <div className="mb-6 rounded border border-gray-300">
-          <div className="border-b border-gray-300 bg-gray-50 px-4 py-3">
-            <div className="text-sm font-medium uppercase text-gray-500">
+        <div className="mb-6 rounded border border-color-300">
+          <div className="border-b border-color-300 bg-color-50 px-4 py-3">
+            <div className="text-sm font-medium uppercase text-color-500">
               Upcoming {upcomingInvoices.length > 1 ? "Invoices" : "Invoice"}
             </div>
           </div>
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-200 text-left text-sm text-gray-500">
+              <tr className="border-b border-color-200 text-left text-sm text-color-500">
                 <th className="px-4 py-3 font-medium">Subscription</th>
                 <th className="px-4 py-3 font-medium">Billing Date</th>
                 <th className="px-4 py-3 font-medium">Amount</th>
@@ -57,12 +57,12 @@ export function InvoiceHistory({
               {upcomingInvoices.map((invoice) => (
                 <tr
                   key={invoice.subscriptionId}
-                  className="border-b border-gray-200 last:border-b-0"
+                  className="border-b border-color-200 last:border-b-0"
                 >
                   <td className="px-4 py-3 text-sm font-medium">
                     {invoice.subscriptionName}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
+                  <td className="px-4 py-3 text-sm text-color-600">
                     <DateS date={new Date(invoice.periodEnd * 1000)} />
                   </td>
                   <td className="px-4 py-3 text-sm">
@@ -76,15 +76,15 @@ export function InvoiceHistory({
       )}
 
       {hasPaid && (
-        <div className="rounded border border-gray-300">
-          <div className="border-b border-gray-300 bg-gray-50 px-4 py-3">
-            <div className="text-sm font-medium uppercase text-gray-500">
+        <div className="rounded border border-color-300">
+          <div className="border-b border-color-300 bg-color-50 px-4 py-3">
+            <div className="text-sm font-medium uppercase text-color-500">
               Past Invoices
             </div>
           </div>
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-200 text-left text-sm text-gray-500">
+              <tr className="border-b border-color-200 text-left text-sm text-color-500">
                 <th className="px-4 py-3 font-medium">Invoice</th>
                 <th className="px-4 py-3 font-medium">Date Paid</th>
                 <th className="px-4 py-3 font-medium">Amount</th>
@@ -96,12 +96,12 @@ export function InvoiceHistory({
               {paidInvoices.map((invoice) => (
                 <tr
                   key={invoice.id}
-                  className="border-b border-gray-200 last:border-b-0"
+                  className="border-b border-color-200 last:border-b-0"
                 >
                   <td className="px-4 py-3 text-sm font-medium">
                     {invoice.number || "-"}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
+                  <td className="px-4 py-3 text-sm text-color-600">
                     {invoice.paidAt ? (
                       <DateS date={new Date(invoice.paidAt * 1000)} />
                     ) : (

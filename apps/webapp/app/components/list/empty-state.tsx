@@ -129,24 +129,24 @@ export const EmptyState = ({
         />
         {isFiltered ? (
           <div>
-            <div className="text-text-lg font-semibold text-gray-900">
+            <div className="text-text-lg font-semibold text-color-900">
               {filteredTexts.title}
             </div>
-            <p className="text-gray-600">{filteredTexts.p}</p>
+            <p className="text-color-600">{filteredTexts.p}</p>
           </div>
         ) : customContent ? (
           <div>
-            <div className="text-text-lg font-semibold text-gray-900">
+            <div className="text-text-lg font-semibold text-color-900">
               {customContent.title}
             </div>
-            <div className="text-gray-600">{customContent.text}</div>
+            <div className="text-color-600">{customContent.text}</div>
           </div>
         ) : (
           <div>
-            <div className="text-text-lg font-semibold text-gray-900">
+            <div className="text-text-lg font-semibold text-color-900">
               {zeroDataTexts.title}
             </div>
-            <p className="text-gray-600">{zeroDataTexts.p}</p>
+            <p className="text-color-600">{zeroDataTexts.p}</p>
           </div>
         )}
       </div>

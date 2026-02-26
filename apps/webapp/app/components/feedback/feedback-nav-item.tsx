@@ -17,7 +17,7 @@ export default function FeedbackNavItem() {
           tooltip="Questions/Feedback"
           onClick={() => setIsOpen(true)}
         >
-          <MessageCircleIcon className="size-4 text-gray-600" />
+          <MessageCircleIcon className="size-4 text-color-600" />
           <span>Questions/Feedback</span>
         </SidebarMenuButton>
       </SidebarMenuItem>

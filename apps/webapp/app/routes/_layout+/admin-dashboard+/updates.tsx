@@ -128,7 +128,7 @@ export default function Updates() {
                       {update.url}
                     </a>
                   ) : (
-                    <span className="text-sm text-gray-400">No URL</span>
+                    <span className="text-sm text-color-400">No URL</span>
                   )}
                 </Td>
                 <Td>{getRoleBadges(update.targetRoles)}</Td>
@@ -184,7 +184,7 @@ export default function Updates() {
         </Table>
 
         {updates.length === 0 && (
-          <div className="py-8 text-center text-gray-500">
+          <div className="py-8 text-center text-color-500">
             <p>No updates created yet.</p>
             <Button variant="primary" to="new" className="mt-4">
               Create your first update

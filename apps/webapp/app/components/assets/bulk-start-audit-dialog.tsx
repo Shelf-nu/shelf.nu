@@ -119,7 +119,7 @@ function StartAuditDialogContent({
             className="mb-1"
             onChange={handleDescriptionChange}
           />
-          <div className="text-right text-xs text-gray-500">
+          <div className="text-right text-xs text-color-500">
             {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
           </div>
 

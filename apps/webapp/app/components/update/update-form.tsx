@@ -46,7 +46,7 @@ export function UpdateForm({
 
       <div>
         <label
-          className="mb-[6px] block text-sm font-medium text-gray-700"
+          className="mb-[6px] block text-sm font-medium text-color-700"
           htmlFor="update-content-editor"
         >
           Content
@@ -79,14 +79,14 @@ export function UpdateForm({
           defaultValue={imageUrl || ""}
           placeholder="https://example.com/image.jpg (external image URL)"
         />
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1 text-xs text-color-500">
           Add a featured image to make your update more visual
         </p>
       </div>
 
       <div>
         <label
-          className="mb-[6px] block text-sm font-medium text-gray-700"
+          className="mb-[6px] block text-sm font-medium text-color-700"
           htmlFor="publishDate"
         >
           Publish Date & Time
@@ -102,7 +102,7 @@ export function UpdateForm({
 
       <div>
         <label
-          className="mb-3 block text-sm font-medium text-gray-700"
+          className="mb-3 block text-sm font-medium text-color-700"
           htmlFor="targetAdmin"
         >
           Target Roles
@@ -146,7 +146,7 @@ export function UpdateForm({
             />
             <span className="text-sm">Base</span>
           </label>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-color-500">
             Leave all unchecked to make the update visible to all users
           </p>
         </div>
@@ -154,7 +154,7 @@ export function UpdateForm({
 
       <div>
         <label
-          className="mb-3 block text-sm font-medium text-gray-700"
+          className="mb-3 block text-sm font-medium text-color-700"
           htmlFor="status"
         >
           Status
@@ -181,7 +181,7 @@ export function UpdateForm({
             <span className="text-sm">Published</span>
           </label>
         </div>
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1 text-xs text-color-500">
           Draft updates are not visible to users until published
         </p>
       </div>

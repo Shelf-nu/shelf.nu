@@ -12,7 +12,7 @@ export default function OnboardingLayout() {
     <div className="relative flex min-h-screen flex-col md:h-full">
       <main className="flex size-full overflow-y-auto">
         <div className="flex size-full flex-col items-center p-6 lg:p-10">
-          <div className="max-h-[calc(100vh-3rem)] w-full overflow-y-auto rounded-xl bg-white shadow-xl md:w-[650px]">
+          <div className="max-h-[calc(100vh-3rem)] w-full overflow-y-auto rounded-xl bg-surface shadow-xl md:w-[650px]">
             <Outlet />
           </div>
         </div>

@@ -135,13 +135,13 @@ export function AuditAssetNoteItem({
   };
 
   return (
-    <div className={tw("rounded-md border border-gray-200 bg-gray-50 p-3")}>
+    <div className={tw("rounded-md border border-color-200 bg-color-50 p-3")}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
-          <div className="text-sm text-gray-900">
+          <div className="text-sm text-color-900">
             <MarkdownViewer content={note.content} disablePortal={true} />
           </div>
-          <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
+          <div className="mt-4 flex items-center gap-2 text-xs text-color-500">
             <>
               <span>
                 <UserBadge name={note.user.name} img={note.user.img} />

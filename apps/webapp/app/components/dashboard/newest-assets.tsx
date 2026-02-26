@@ -13,9 +13,9 @@ import { Td, Table, Tr } from "../table";
 export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
   return (
-    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+    <div className="flex h-full flex-col rounded border border-color-200 bg-surface">
       <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
-        <span className="text-[14px] font-semibold text-gray-900">
+        <span className="text-[14px] font-semibold text-color-900">
           Newest assets
         </span>
         <div className="flex items-center gap-2">
@@ -108,7 +108,7 @@ const Row = ({
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-color-900 hover:text-color-700"
                   target={"_blank"}
                   onlyNewTabIconOnHover={true}
                 >

@@ -16,8 +16,8 @@ import { LinkComponent } from "./link-component";
 import { TagComponent } from "./tag-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
-  <div className="raw-block rounded border border-dashed border-gray-300 bg-gray-50">
-    <pre className="overflow-x-auto whitespace-pre-wrap p-3 font-mono text-xs text-gray-700">
+  <div className="raw-block rounded border border-dashed border-color-300 bg-color-50">
+    <pre className="overflow-x-auto whitespace-pre-wrap p-3 font-mono text-xs text-color-700">
       {raw}
     </pre>
   </div>

@@ -18,10 +18,10 @@ export default function AssetGrowthChart() {
   );
 
   return (
-    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+    <div className="flex h-full flex-col rounded border border-color-200 bg-surface">
       <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
         <div className="flex items-center gap-3">
-          <span className="text-[14px] font-semibold text-gray-900">
+          <span className="text-[14px] font-semibold text-color-900">
             Asset growth
           </span>
           <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-600">

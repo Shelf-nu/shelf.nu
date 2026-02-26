@@ -241,7 +241,7 @@ export default function InviteUserDialog({
               <div className="pt-1.5">
                 <label
                   htmlFor="inviteMessage"
-                  className="mb-2 block text-sm font-medium text-gray-700"
+                  className="mb-2 block text-sm font-medium text-color-700"
                 >
                   Personal Message (Optional)
                 </label>
@@ -252,12 +252,12 @@ export default function InviteUserDialog({
                   maxLength={1000}
                   disabled={disabled}
                   aria-describedby="inviteMessage-helper"
-                  className="block w-full rounded-md border border-gray-300 px-3.5 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50"
+                  className="block w-full rounded-md border border-color-300 px-3.5 py-2 text-sm text-color-900 placeholder:text-color-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50"
                   placeholder="Add a personal note to help them understand why you're inviting them to this workspace..."
                   onChange={(e) => setMessageCharCount(e.target.value.length)}
                 />
                 <div id="inviteMessage-helper" className="mt-1">
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-color-500">
                     {messageCharCount} / 1000 characters
                   </span>
                   <When

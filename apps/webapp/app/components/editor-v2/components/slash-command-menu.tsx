@@ -23,7 +23,7 @@ export function SlashCommandMenu({
 
   const menu = (
     <div
-      className="fixed z-50 w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-xl"
+      className="fixed z-50 w-64 overflow-hidden rounded-md border border-color-200 bg-surface shadow-xl"
       style={{
         left: `${state.left}px`,
         top: `${state.top}px`,
@@ -41,15 +41,17 @@ export function SlashCommandMenu({
               className={tw(
                 "block w-full px-3 py-2 text-left text-sm",
                 selectedIndex === index
-                  ? "bg-gray-200 text-gray-900"
-                  : "text-gray-700 hover:bg-gray-100"
+                  ? "bg-color-200 text-color-900"
+                  : "text-color-700 hover:bg-color-100"
               )}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => onRun(command)}
               onMouseEnter={() => onSelect(index)}
             >
               <div className="font-medium">{command.label}</div>
-              <div className="text-xs text-gray-500">{command.description}</div>
+              <div className="text-xs text-color-500">
+                {command.description}
+              </div>
             </button>
           </li>
         ))}

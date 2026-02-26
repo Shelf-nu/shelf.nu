@@ -11,9 +11,9 @@ export default function InventoryValueChart() {
     useLoaderData<typeof loader>();
 
   return (
-    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+    <div className="flex h-full flex-col rounded border border-color-200 bg-surface">
       <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
-        <span className="text-[14px] font-semibold text-gray-900">
+        <span className="text-[14px] font-semibold text-color-900">
           Inventory value
         </span>
       </div>
@@ -34,9 +34,9 @@ export default function InventoryValueChart() {
                     color="orange"
                     className="relative"
                   >
-                    <span className="block text-center text-xs font-medium text-gray-600">
+                    <span className="block text-center text-xs font-medium text-color-600">
                       Value Known <br />
-                      <span className="block text-[14px] font-semibold leading-6 text-gray-900">
+                      <span className="block text-[14px] font-semibold leading-6 text-color-900">
                         {valueKnownAssets}/{totalAssets} assets
                       </span>
                       {`(${((valueKnownAssets / totalAssets) * 100).toFixed(
@@ -47,10 +47,10 @@ export default function InventoryValueChart() {
                 )}
               </ClientOnly>
               <div className="min-w-0 text-center md:text-right">
-                <Text className="mb-2 !text-[14px] font-medium text-gray-600">
+                <Text className="mb-2 !text-[14px] font-medium text-color-600">
                   Inventory value
                 </Text>
-                <Text className="mb-3 break-all !text-[22px] font-semibold text-gray-900 md:!text-[30px]">
+                <Text className="mb-3 break-all !text-[22px] font-semibold text-color-900 md:!text-[30px]">
                   {formatCurrency({
                     value: totalValuation || 0,
                     locale,

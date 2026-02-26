@@ -161,17 +161,17 @@ export default function EmailSettingsPage() {
       <div className="flex flex-1 flex-col gap-4">
         <div>
           <h3 className="text-text-lg font-semibold">Custom email footer</h3>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-color-600">
             Add a custom message that appears at the bottom of all workspace
             emails sent to team members.
           </p>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <p className="mb-2 text-sm font-medium text-gray-700">
+        <div className="rounded-lg border border-color-200 bg-color-50 p-4">
+          <p className="mb-2 text-sm font-medium text-color-700">
             This footer will appear on the following emails:
           </p>
-          <ul className="space-y-1 text-sm text-gray-600">
+          <ul className="space-y-1 text-sm text-color-600">
             <li>
               <span className="font-medium">Bookings:</span> Reserved, checkout
               reminder, check-in reminder, overdue, completed, extended,
@@ -204,7 +204,7 @@ export default function EmailSettingsPage() {
           <div>
             <label
               htmlFor={zo.fields.customEmailFooter()}
-              className="mb-1.5 block text-sm font-medium text-gray-700"
+              className="mb-1.5 block text-sm font-medium text-color-700"
             >
               Footer message
             </label>
@@ -215,7 +215,7 @@ export default function EmailSettingsPage() {
               disabled={disabled}
               maxLength={EMAIL_FOOTER_MAX_LENGTH}
               rows={10}
-              className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 disabled:opacity-50"
+              className="w-full rounded-lg border border-color-300 px-3.5 py-2.5 text-sm text-color-900 placeholder:text-color-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 disabled:opacity-50"
               placeholder="e.g., ACME Corp - support@acme.com - (555) 123-4567"
               onChange={(e) => {
                 setCharCount(e.target.value.length);
@@ -230,17 +230,17 @@ export default function EmailSettingsPage() {
               </p>
             )}
             <div className="mt-1 flex items-center justify-between">
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-color-500">
                 Links are not allowed. Email addresses and phone numbers are
                 permitted.
               </p>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-color-500">
                 {charCount} / {EMAIL_FOOTER_MAX_LENGTH} characters
               </span>
             </div>
           </div>
 
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-color-500">
             Note: Custom footers with certain content may affect email
             deliverability and spam scores.
           </p>
@@ -256,7 +256,7 @@ export default function EmailSettingsPage() {
       {/* Right column: Email preview */}
       <div className="flex-1">
         <div className="mb-2 flex items-center justify-between">
-          <p className="text-sm font-medium text-gray-700">Preview</p>
+          <p className="text-sm font-medium text-color-700">Preview</p>
           <ViewButtonGroup
             views={[
               { label: "Desktop", value: "desktop" },
@@ -291,7 +291,7 @@ function EmailPreview({
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-gray-300 shadow-lg"
+      className="overflow-hidden rounded-xl border border-color-300 shadow-lg"
       style={isMobile ? { maxWidth: "375px", margin: "0 auto" } : undefined}
     >
       {/* Title bar — macOS-style window chrome */}
@@ -302,20 +302,20 @@ function EmailPreview({
       </div>
 
       {/* Email header — From / To / Subject */}
-      <div className="border-b border-gray-200 bg-gray-100 px-5 py-3 text-[13px] leading-relaxed text-gray-600">
+      <div className="border-b border-color-200 bg-color-100 px-5 py-3 text-[13px] leading-relaxed text-color-600">
         <p>
-          <span className="text-gray-400">From:</span>{" "}
-          <span className="text-gray-700">
+          <span className="text-color-400">From:</span>{" "}
+          <span className="text-color-700">
             Shelf &lt;notifications@shelf.nu&gt;
           </span>
         </p>
         <p>
-          <span className="text-gray-400">To:</span>{" "}
-          <span className="text-gray-700">jane@example.com</span>
+          <span className="text-color-400">To:</span>{" "}
+          <span className="text-color-700">jane@example.com</span>
         </p>
         <p>
-          <span className="text-gray-400">Subject:</span>{" "}
-          <span className="text-gray-700">
+          <span className="text-color-400">Subject:</span>{" "}
+          <span className="text-color-700">
             ✅ Booking reserved (Office Equipment Booking) - shelf.nu
           </span>
         </p>
@@ -323,11 +323,11 @@ function EmailPreview({
 
       {/* Email body viewport — scrollable gray area with white card */}
       <div
-        className="overflow-y-auto bg-gray-200 p-6"
+        className="overflow-y-auto bg-color-200 p-6"
         style={{ maxHeight: "600px" }}
       >
         <div
-          className="mx-auto rounded-lg bg-white shadow-sm"
+          className="mx-auto rounded-lg bg-surface shadow-sm"
           style={{
             maxWidth: "600px",
             fontFamily: "Arial, Helvetica, sans-serif",

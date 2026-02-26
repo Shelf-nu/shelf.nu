@@ -71,7 +71,7 @@ interface ParagraphSelectProps {
 export function ParagraphSelect({ value, onChange }: ParagraphSelectProps) {
   const normalized = value === "raw_block" ? "paragraph" : value;
   return (
-    <label className="text-muted-foreground inline-flex h-9 items-center gap-2 rounded border bg-white px-2 text-sm">
+    <label className="text-muted-foreground inline-flex h-9 items-center gap-2 rounded border bg-surface px-2 text-sm">
       <Type size={18} strokeWidth={1.5} aria-hidden="true" />
       <span className="sr-only">Text style</span>
       <select

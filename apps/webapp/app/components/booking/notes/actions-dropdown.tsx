@@ -28,7 +28,7 @@ export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
     <AlertDialog>
       <DropdownMenu>
         <DropdownMenuTrigger className="outline-none focus-visible:border-0">
-          <span className="flex size-6 cursor-pointer items-center justify-center rounded-md p-1 text-gray-700 hover:bg-gray-50">
+          <span className="flex size-6 cursor-pointer items-center justify-center rounded-md p-1 text-color-700 hover:bg-color-50">
             <svg
               width="12"
               height="4"
@@ -54,11 +54,11 @@ export const BookingActionsDropdown = ({ noteId }: { noteId: string }) => {
 
         <DropdownMenuContent
           align="end"
-          className="order w-[180px] rounded bg-white p-1.5 text-right"
+          className="order w-[180px] rounded bg-surface p-1.5 text-right"
         >
-          <div className="relative flex  select-none items-center rounded text-left text-[13px] leading-none outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-gradient-to-br hover:bg-gray-100">
+          <div className="relative flex  select-none items-center rounded text-left text-[13px] leading-none outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-gradient-to-br hover:bg-color-100">
             <AlertDialogTrigger asChild>
-              <DropdownMenuItem className="w-full cursor-pointer rounded  py-2 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700">
+              <DropdownMenuItem className="w-full cursor-pointer rounded  py-2 text-left text-sm text-color-700 hover:bg-color-50 hover:text-color-700">
                 <span className="flex items-center gap-2">
                   <TrashIcon />
                   Delete

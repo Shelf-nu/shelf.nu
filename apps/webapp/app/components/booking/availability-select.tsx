@@ -37,7 +37,7 @@ export function AvailabilitySelect({ label = "assets" }: { label?: string }) {
       onValueChange={handleSelectChange}
     >
       <SelectTrigger
-        className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit"
+        className="text-left text-base text-color-500 md:mt-0 md:max-w-fit"
         aria-label="Select availability"
       >
         <SelectValue placeholder="Select availability" />
@@ -53,18 +53,18 @@ export function AvailabilitySelect({ label = "assets" }: { label?: string }) {
           <SelectItem
             value={"show"}
             key={"show"}
-            className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+            className="rounded-none border-b border-color-200 px-6 py-4 pr-[5px]"
           >
-            <span className="mr-4 block lowercase text-gray-700 first-letter:uppercase">
+            <span className="mr-4 block lowercase text-color-700 first-letter:uppercase">
               All {label}
             </span>
           </SelectItem>
           <SelectItem
             value={"hide"}
             key={"hide"}
-            className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+            className="rounded-none border-b border-color-200 px-6 py-4 pr-[5px]"
           >
-            <span className="mr-4 block lowercase text-gray-700 first-letter:uppercase">
+            <span className="mr-4 block lowercase text-color-700 first-letter:uppercase">
               Hide unavailable
             </span>
           </SelectItem>

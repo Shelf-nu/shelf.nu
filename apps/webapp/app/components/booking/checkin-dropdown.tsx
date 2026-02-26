@@ -109,7 +109,7 @@ export default function CheckinDropdown({
         <DropdownMenuContent
           ref={dropdownRef}
           asChild
-          className="order actions-dropdown w-screen rounded-b-none rounded-t bg-white p-0 text-right md:static md:w-56"
+          className="order actions-dropdown w-screen rounded-b-none rounded-t bg-surface p-0 text-right md:static md:w-56"
           align="end"
           portalContainer={portalContainer}
         >
@@ -128,7 +128,7 @@ export default function CheckinDropdown({
               <Button
                 variant="link"
                 className={tw(
-                  "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                  "w-full justify-start px-4 py-3 text-color-700 hover:text-color-700"
                 )}
                 width="full"
                 onClick={closeMenu}

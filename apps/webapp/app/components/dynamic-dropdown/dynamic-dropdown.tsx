@@ -161,7 +161,7 @@ export default function DynamicDropdown({
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger
           className={tw(
-            "inline-flex items-center gap-1 text-gray-500",
+            "inline-flex items-center gap-1 text-color-500",
             triggerWrapperClassName
           )}
           asChild
@@ -179,14 +179,14 @@ export default function DynamicDropdown({
           <PopoverContent
             align="end"
             className={tw(
-              "z-[100]  overflow-y-auto rounded-md border border-gray-300 bg-white p-0",
+              "z-[100]  overflow-y-auto rounded-md border border-color-300 bg-surface p-0",
               className
             )}
             style={style}
           >
             <div className="flex items-center justify-between ">
               {!hideLabel && (
-                <div className="p-3 text-xs font-semibold text-gray-700">
+                <div className="p-3 text-xs font-semibold text-color-700">
                   {label}
                 </div>
               )}
@@ -194,7 +194,7 @@ export default function DynamicDropdown({
                 <Button
                   as="button"
                   variant="link"
-                  className="whitespace-nowrap p-3 text-xs font-normal text-gray-500 hover:text-gray-600"
+                  className="whitespace-nowrap p-3 text-xs font-normal text-color-500 hover:text-color-600"
                   onClick={clearFilters}
                 >
                   Clear filter
@@ -211,7 +211,7 @@ export default function DynamicDropdown({
                     placeholder ? placeholder : `Search ${model.name}s`
                   }
                   hideLabel
-                  className="text-gray-500"
+                  className="text-color-500"
                   icon={searchIcon}
                   autoFocus
                   value={searchQuery}
@@ -226,7 +226,7 @@ export default function DynamicDropdown({
                       resetModelFiltersFetcher();
                       setSearchQuery("");
                     }}
-                    className="z-100 pointer-events-auto absolute right-[14px] top-0 mr-2 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                    className="z-100 pointer-events-auto absolute right-[14px] top-0 mr-2 h-full border-0 p-0 text-center text-color-400 hover:text-color-900"
                   />
                 </When>
               </div>
@@ -243,7 +243,7 @@ export default function DynamicDropdown({
                   allowSelectAll || withValueItem || withoutValueItem
                 )}
               >
-                <div className="h-2 w-full  bg-gray-50" />
+                <div className="h-2 w-full  bg-color-50" />
               </When>
 
               <When truthy={!!allowSelectAll}>
@@ -251,7 +251,7 @@ export default function DynamicDropdown({
                   key="select-all"
                   role="button"
                   tabIndex={0}
-                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100"
                   onClick={handleSelectAll}
                 >
                   <span className="pr-2">Select all</span>
@@ -263,9 +263,9 @@ export default function DynamicDropdown({
                   key={withValueItem?.id}
                   htmlFor={withValueItem?.id}
                   className={tw(
-                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
                     selectedItems.includes(withValueItem?.id ?? "") &&
-                      "bg-gray-50"
+                      "bg-color-50"
                   )}
                 >
                   <span className="pr-2 normal-case">
@@ -297,9 +297,9 @@ export default function DynamicDropdown({
                   key={withoutValueItem?.id}
                   htmlFor={withoutValueItem?.id}
                   className={tw(
-                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm  outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
                     selectedItems.includes(withoutValueItem?.id ?? "") &&
-                      "bg-gray-50"
+                      "bg-color-50"
                   )}
                 >
                   <span className="pr-2 normal-case">
@@ -334,7 +334,7 @@ export default function DynamicDropdown({
                   allowSelectAll || withValueItem || withoutValueItem
                 )}
               >
-                <div className="h-2 w-full  bg-gray-50" />
+                <div className="h-2 w-full  bg-color-50" />
               </When>
 
               {items.map((item) => {
@@ -344,8 +344,8 @@ export default function DynamicDropdown({
                     key={item.id}
                     htmlFor={item.id}
                     className={tw(
-                      "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                      checked && "bg-gray-50"
+                      "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
+                      checked && "bg-color-50"
                     )}
                   >
                     <span className="max-w-[350px] truncate whitespace-nowrap pr-2">
@@ -378,7 +378,7 @@ export default function DynamicDropdown({
                 <button
                   disabled={isSearching}
                   onClick={getAllEntries}
-                  className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                  className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-color-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100"
                 >
                   Show all
                   <span>
@@ -392,7 +392,7 @@ export default function DynamicDropdown({
               )}
             </div>
             <When truthy={withoutValueItem ? totalItems > 7 : totalItems > 6}>
-              <div className="border-t p-3 text-gray-500">
+              <div className="border-t p-3 text-color-500">
                 Showing {withoutValueItem ? items.length - 1 : items.length} out
                 of {totalItems}, type to search for more
               </div>

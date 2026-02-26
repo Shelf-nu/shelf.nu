@@ -89,10 +89,7 @@ export default function BulkListHeader({
           />
         ) : (
           <FakeCheckbox
-            className={tw(
-              "text-color-400",
-              allItemsSelected ? "text-primary" : ""
-            )}
+            className={tw("text-white", allItemsSelected ? "text-primary" : "")}
             onClick={handleSelectAllIncomingItems}
             checked={allItemsSelected}
           />

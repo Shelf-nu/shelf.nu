@@ -185,10 +185,10 @@ export default function SelectPlan() {
     <div className="flex flex-col items-center p-4 sm:p-6">
       <ShelfSymbolLogo className="my-4 size-8 md:mt-0" />
       <div className="mb-8 text-center">
-        <h3 className="text-2xl font-semibold text-gray-900">
+        <h3 className="text-2xl font-semibold text-color-900">
           Select your payment plan
         </h3>
-        <p className="mt-3 text-base text-gray-600">
+        <p className="mt-3 text-base text-color-600">
           No credit card or payment required to start your 7-day trial.{" "}
         </p>
       </div>
@@ -229,7 +229,7 @@ export default function SelectPlan() {
                     "relative flex flex-col gap-2 rounded border px-6 py-5 transition",
                     isSelected
                       ? "border-primary-400 bg-primary-50"
-                      : "border-gray-200 bg-white hover:border-gray-300"
+                      : "border-color-200 bg-surface hover:border-color-300"
                   )}
                 >
                   {interval === "year" ? (
@@ -245,10 +245,10 @@ export default function SelectPlan() {
                   <span className="text-sm font-semibold text-primary-700">
                     {display.label}
                   </span>
-                  <span className="text-2xl font-semibold text-gray-900">
+                  <span className="text-2xl font-semibold text-color-900">
                     {display.price}
                   </span>
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm text-color-600">
                     {display.footnote}
                   </span>
                 </div>
@@ -259,10 +259,10 @@ export default function SelectPlan() {
 
         <section className="space-y-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 className="text-lg font-semibold text-color-900">
               Optional add-ons
             </h3>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-color-600">
               Advanced capabilities for migrations & IT environments.
             </p>
           </div>
@@ -274,7 +274,7 @@ export default function SelectPlan() {
                   className={tw(
                     "flex h-full cursor-pointer flex-col gap-3 p-0",
                     "transition-shadow",
-                    wantsAudits ? "" : "hover:border-gray-300"
+                    wantsAudits ? "" : "hover:border-color-300"
                   )}
                 >
                   <button
@@ -292,8 +292,8 @@ export default function SelectPlan() {
                         className={tw(
                           "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border-2",
                           wantsAudits
-                            ? "border-primary-500 bg-primary-500"
-                            : "border-gray-300 bg-white"
+                            ? "bg-primary-500 border-primary-500"
+                            : "border-color-300 bg-surface"
                         )}
                         aria-hidden="true"
                       >
@@ -315,7 +315,7 @@ export default function SelectPlan() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <h4 className="text-base font-semibold text-gray-900">
+                          <h4 className="text-base font-semibold text-color-900">
                             Audits
                           </h4>
                           <Tag className="bg-primary-50 text-primary-700">
@@ -324,20 +324,20 @@ export default function SelectPlan() {
                         </div>
                       </div>
                     </div>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-color-600">
                       Create audits, assign auditors, scan QR codes, and track
                       asset verification in real-time.
                     </p>
                     {activeAuditPrice ? (
                       <div className="mt-1">
-                        <span className="text-lg font-semibold text-gray-900">
+                        <span className="text-lg font-semibold text-color-900">
                           {fmtPerMonth(
                             activeAuditPrice.unit_amount || 0,
                             activeAuditPrice.currency
                           )}
                           /mo
                         </span>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-color-500">
                           Billed{" "}
                           {isYearly
                             ? `annually ${fmtPrice(
@@ -359,7 +359,7 @@ export default function SelectPlan() {
               <article key={addOn.title} className="h-full">
                 <Card className="flex h-full flex-col gap-3">
                   <div>
-                    <h4 className="text-base font-semibold text-gray-900">
+                    <h4 className="text-base font-semibold text-color-900">
                       {addOn.title}
                     </h4>
                     <div className="mt-1">
@@ -368,8 +368,8 @@ export default function SelectPlan() {
                       </GrayBadge>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-600">{addOn.description}</p>
-                  <p className="text-xs text-gray-500">{addOn.footnote}</p>
+                  <p className="text-sm text-color-600">{addOn.description}</p>
+                  <p className="text-xs text-color-500">{addOn.footnote}</p>
                 </Card>
               </article>
             ))}
@@ -379,24 +379,24 @@ export default function SelectPlan() {
         {/* SSO — separate category, full width */}
         <section className="space-y-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 className="text-lg font-semibold text-color-900">
               Enterprise integrations
             </h3>
           </div>
           <Card className="flex flex-col gap-3">
             <div>
-              <h4 className="text-base font-semibold text-gray-900">
+              <h4 className="text-base font-semibold text-color-900">
                 SSO Integration (Team only)
               </h4>
               <div className="mt-1">
                 <GrayBadge className="whitespace-nowrap">Paid add-on</GrayBadge>
               </div>
             </div>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-color-600">
               Single sign-on for your organization; centralized identity &
               access.
             </p>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-color-500">
               Available for Team workspaces. Pricing provided during evaluation.
             </p>
           </Card>
@@ -404,42 +404,42 @@ export default function SelectPlan() {
 
         {/* Cost summary */}
         {activePrice && (
-          <section className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-            <h3 className="mb-3 text-sm font-semibold text-gray-700">
+          <section className="rounded-xl border border-color-200 bg-color-50 p-5">
+            <h3 className="mb-3 text-sm font-semibold text-color-700">
               Cost summary{" "}
-              <span className="font-normal text-gray-600">
+              <span className="font-normal text-color-600">
                 (applied after free trial ends)
               </span>
             </h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-gray-600">
+                <span className="text-color-600">
                   Team ({isYearly ? "yearly" : "monthly"})
                 </span>
-                <span className="font-medium text-gray-900">
+                <span className="font-medium text-color-900">
                   {fmtPrice(teamPriceAmount, teamPriceCurrency)}/{billingLabel}
                 </span>
               </div>
               {wantsAudits && activeAuditPrice ? (
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600">
+                  <span className="text-color-600">
                     Audits ({isYearly ? "yearly" : "monthly"})
                   </span>
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-color-900">
                     {fmtPrice(auditPriceAmount, activeAuditPrice.currency)}/
                     {billingLabel}
                   </span>
                 </div>
               ) : null}
-              <div className="border-t border-gray-200 pt-2">
+              <div className="border-t border-color-200 pt-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-gray-900">Total</span>
-                  <span className="font-semibold text-gray-900">
+                  <span className="font-semibold text-color-900">Total</span>
+                  <span className="font-semibold text-color-900">
                     {fmtPrice(totalAmount, teamPriceCurrency)}/{billingLabel}
                   </span>
                 </div>
                 {isYearly && (
-                  <p className="mt-1 text-right text-xs text-gray-500">
+                  <p className="mt-1 text-right text-xs text-color-500">
                     {fmtPrice(Math.round(totalAmount / 12), teamPriceCurrency)}
                     /mo effective rate
                   </p>
@@ -449,7 +449,7 @@ export default function SelectPlan() {
           </section>
         )}
 
-        <p className="text-center text-sm text-gray-600">{trialText}</p>
+        <p className="text-center text-sm text-color-600">{trialText}</p>
 
         <input type="hidden" name="priceId" value={activePrice?.id ?? ""} />
         <input

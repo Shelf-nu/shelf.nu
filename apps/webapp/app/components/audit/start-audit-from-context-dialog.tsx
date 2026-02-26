@@ -171,7 +171,7 @@ export function StartAuditFromContextDialog({
       {showTrigger ? (
         <Button
           variant="link"
-          className="w-full justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+          className="w-full justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
           width="full"
           onClick={openDialog}
         >
@@ -189,7 +189,7 @@ export function StartAuditFromContextDialog({
           title={
             <div className="-mb-3 w-full pb-6">
               <h3>Create audit</h3>
-              <p className="text-gray-600">{getDescriptionText()}</p>
+              <p className="text-color-600">{getDescriptionText()}</p>
             </div>
           }
           headerClassName="border-b"
@@ -230,7 +230,7 @@ export function StartAuditFromContextDialog({
                   className="mb-1"
                   onChange={handleDescriptionChange}
                 />
-                <div className="text-right text-xs text-gray-500">
+                <div className="text-right text-xs text-color-500">
                   {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
                 </div>
 

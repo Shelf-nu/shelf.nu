@@ -39,7 +39,7 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
         <Button
           type="button"
           variant="link"
-          className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
+          className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-color-700 outline-none hover:bg-slate-100 hover:text-color-700"
           width="full"
         >
           Cancel
@@ -64,17 +64,17 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
           <div className="mb-4">
             <label
               htmlFor="cancellationReason"
-              className="mb-1 block text-left text-[14px] font-medium text-gray-700"
+              className="mb-1 block text-left text-[14px] font-medium text-color-700"
             >
               Cancellation reason{" "}
-              <span className="font-normal text-gray-500">(optional)</span>
+              <span className="font-normal text-color-500">(optional)</span>
             </label>
             <textarea
               id="cancellationReason"
               name={zo.fields.cancellationReason()}
               rows={3}
               maxLength={500}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-500 focus:ring-primary-500"
+              className="w-full rounded-lg border border-color-300 px-3 py-2 text-sm text-color-900 placeholder:text-color-500 focus:border-primary-500 focus:ring-primary-500"
               placeholder="Let the custodian know why this booking was cancelled..."
               disabled={disabled}
               aria-describedby="cancellationReason-description"
@@ -88,7 +88,7 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
             )}
             <p
               id="cancellationReason-description"
-              className="-mt-1 text-text-sm text-gray-500"
+              className="-mt-1 text-text-sm text-color-500"
             >
               If the custodian has an associated user account with an email
               address, they will be notified of the cancellation reason.

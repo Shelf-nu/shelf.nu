@@ -193,7 +193,7 @@ export default function ListAssetContent({
       </Td>
       <Td
         className={tw(
-          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+          isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
         )}
       >
         <ListItemTagsColumn tags={tags} />
@@ -204,11 +204,11 @@ export default function ListAssetContent({
           {/* Checked in on */}
           <Td
             className={tw(
-              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+              isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
             )}
           >
             {isPartiallyCheckedIn ? (
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-color-600">
                 <DateS
                   date={partialCheckinDetails[item.id].checkinDate}
                   includeTime
@@ -222,11 +222,11 @@ export default function ListAssetContent({
           {/* Checked in by */}
           <Td
             className={tw(
-              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+              isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
             )}
           >
             {isPartiallyCheckedIn ? (
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-color-600">
                 {(() => {
                   const details = partialCheckinDetails[item.id];
                   const firstName = details.checkedInBy.firstName || "";

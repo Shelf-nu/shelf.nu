@@ -55,7 +55,7 @@ export default function CheckinDialog({
         className={tw(
           "whitespace-nowrap",
           variant === "dropdown"
-            ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+            ? "w-full justify-start px-4 py-3 text-color-700 hover:text-color-700"
             : ""
         )}
         variant={variant === "dropdown" ? "link" : "primary"}
@@ -85,7 +85,7 @@ export default function CheckinDialog({
           className={tw(
             "whitespace-nowrap",
             variant === "dropdown"
-              ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+              ? "w-full justify-start px-4 py-3 text-color-700 hover:text-color-700"
               : ""
           )}
           variant={variant === "dropdown" ? "link" : "primary"}

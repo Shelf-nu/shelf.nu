@@ -240,14 +240,14 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showShelfBranding"
                 className={tw(
                   "cursor-pointer text-[14px] font-medium",
-                  canHideShelfBranding ? "text-gray-700" : "text-gray-400"
+                  canHideShelfBranding ? "text-color-700" : "text-color-400"
                 )}
               >
                 Display Shelf branding on labels
               </label>
               <p
                 id="showShelfBranding-desc"
-                className="text-[14px] text-gray-600"
+                className="text-[14px] text-color-600"
               >
                 Toggle Shelf branding on downloadable QR and barcode labels.
               </p>

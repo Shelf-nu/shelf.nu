@@ -13,10 +13,12 @@ function KpiCard({
   return (
     <Link
       to={to}
-      className="flex flex-1 flex-col rounded border border-gray-200 bg-white p-4 transition-colors hover:border-gray-300 hover:bg-gray-50 md:p-6"
+      className="flex flex-1 flex-col rounded border border-color-200 bg-surface p-4 transition-colors hover:border-color-300 hover:bg-color-50 md:p-6"
     >
-      <span className="text-xs font-medium text-gray-600">{label}</span>
-      <span className="mt-1 text-2xl font-semibold text-gray-900">{value}</span>
+      <span className="text-xs font-medium text-color-600">{label}</span>
+      <span className="mt-1 text-2xl font-semibold text-color-900">
+        {value}
+      </span>
     </Link>
   );
 }

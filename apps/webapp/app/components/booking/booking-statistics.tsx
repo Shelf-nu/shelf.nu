@@ -54,7 +54,9 @@ export function BookingStatistics({
             <Separator />
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Check-in progress</span>
+                <span className="text-sm text-color-500">
+                  Check-in progress
+                </span>
                 <span className="flex min-w-[150px] items-center gap-2 text-right text-sm font-medium">
                   <span className="whitespace-nowrap">
                     {partialCheckinProgress.checkedInCount} /{" "}
@@ -139,7 +141,7 @@ export function BookingStatistics({
           <>
             <Separator />
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-color-500">
                 Automatically archived
               </span>
               <span className="text-right font-medium">

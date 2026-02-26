@@ -73,7 +73,7 @@ export default function NewAnnouncement() {
         <Input label={"name"} name="name" required />
         <div>
           <label
-            className="mb-[6px] text-text-sm font-medium text-gray-700"
+            className="mb-[6px] text-text-sm font-medium text-color-700"
             htmlFor="content"
           >
             Announcement Content
@@ -92,7 +92,7 @@ export default function NewAnnouncement() {
         <Input label={"Link"} name="link" required />
         <Input label={"Link text"} name="linkText" required />
         <div className="">
-          <label className="font-medium text-gray-700" htmlFor="published">
+          <label className="font-medium text-color-700" htmlFor="published">
             <span>Published</span>
           </label>
           <div>

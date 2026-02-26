@@ -40,7 +40,7 @@ export default function SidebarUserMenu() {
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="!h-auto border !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50"
+              className="!h-auto border !p-1 data-[state=open]:bg-color-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-color-50"
             >
               <ProfilePicture
                 width="w-8"
@@ -79,7 +79,7 @@ export default function SidebarUserMenu() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               asChild
-              className="cursor-pointer gap-2 border-b border-gray-200 p-2"
+              className="cursor-pointer gap-2 border-b border-color-200 p-2"
               onClick={closeDropdown}
             >
               <NavLink to="/me">
@@ -89,7 +89,7 @@ export default function SidebarUserMenu() {
             </DropdownMenuItem>
             <DropdownMenuItem
               asChild
-              className="cursor-pointer gap-2 border-b border-gray-200 p-2"
+              className="cursor-pointer gap-2 border-b border-color-200 p-2"
               onClick={closeDropdown}
             >
               <NavLink to="/account-details">
@@ -99,7 +99,7 @@ export default function SidebarUserMenu() {
             </DropdownMenuItem>
             <DropdownMenuItem
               asChild
-              className="cursor-pointer gap-2 border-b border-gray-200 p-2"
+              className="cursor-pointer gap-2 border-b border-color-200 p-2"
               onClick={closeDropdown}
             >
               <NavLink to="/account-details/subscription">
@@ -108,7 +108,7 @@ export default function SidebarUserMenu() {
               </NavLink>
             </DropdownMenuItem>
             <DropdownMenuItem
-              className="mt-1 cursor-pointer gap-2 border-b border-gray-200 p-2"
+              className="mt-1 cursor-pointer gap-2 border-b border-color-200 p-2"
               onSelect={logOut}
             >
               <LogOutIcon className="size-4" />

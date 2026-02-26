@@ -140,7 +140,7 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="button"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                  className="justify-start px-4 py-3  text-color-700 hover:bg-slate-100 hover:text-color-700 focus:bg-slate-100"
                   width="full"
                   disabled={
                     isCurrentUser

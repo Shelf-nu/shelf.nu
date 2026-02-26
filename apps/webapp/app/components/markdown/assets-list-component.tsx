@@ -83,14 +83,14 @@ export function AssetsListComponent({
       </PopoverTrigger>
 
       <PopoverContent
-        className="z-[999999] max-h-48 w-80 overflow-y-auto rounded border bg-white p-3"
+        className="z-[999999] max-h-48 w-80 overflow-y-auto rounded border bg-surface p-3"
         side="top"
         sideOffset={8}
       >
         {isLoading && (
           <div className="flex items-center justify-center py-4">
             <Spinner className="size-4" />
-            <span className="ml-2 text-sm text-gray-500">
+            <span className="ml-2 text-sm text-color-500">
               Loading assets...
             </span>
           </div>
@@ -101,7 +101,7 @@ export function AssetsListComponent({
             {data.assets.map((asset) => (
               <div
                 key={asset.id}
-                className="flex items-center gap-2 text-sm text-gray-700"
+                className="flex items-center gap-2 text-sm text-color-700"
               >
                 <AssetImage
                   className="size-5"
@@ -117,7 +117,7 @@ export function AssetsListComponent({
                   variant="link"
                   to={`/assets/${asset.id}`}
                   target="_blank"
-                  className="h-auto p-0 font-medium text-gray-700 hover:text-gray-900"
+                  className="h-auto p-0 font-medium text-color-700 hover:text-color-900"
                 >
                   {asset.title}
                 </Button>
@@ -127,13 +127,13 @@ export function AssetsListComponent({
         )}
 
         {!isLoading && error && (
-          <div className="py-2 text-sm text-gray-500">
+          <div className="py-2 text-sm text-color-500">
             Failed to load asset details
           </div>
         )}
 
         {!isLoading && data?.assets.length === 0 && (
-          <div className="py-2 text-sm text-gray-500">No assets found</div>
+          <div className="py-2 text-sm text-color-500">No assets found</div>
         )}
       </PopoverContent>
     </Popover>

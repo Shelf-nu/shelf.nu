@@ -200,7 +200,7 @@ function CustomFieldRow({
         )}
       </Td>
       <Td>
-        <span className="text-text-sm font-medium text-gray-600">
+        <span className="text-text-sm font-medium text-color-600">
           {item.usageCount === 1 ? "1 asset" : `${item.usageCount} assets`}
         </span>
       </Td>

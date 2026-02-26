@@ -73,7 +73,7 @@ export function ExpectedAssetsList({
 
       {/* Instructions */}
       <div className="text-center">
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-color-600">
           {stats.foundCount === 0
             ? `Start scanning assets to begin auditing this ${contextLabel.toLowerCase()}.`
             : `Keep scanning! ${stats.missingCount} asset${
@@ -84,13 +84,13 @@ export function ExpectedAssetsList({
 
       {/* Expected assets list */}
       <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-color-500">
           Expected Assets ({expectedAssets.length})
         </h3>
 
-        <div className="max-h-96 space-y-1 overflow-y-auto rounded-md border border-gray-200 bg-white">
+        <div className="max-h-96 space-y-1 overflow-y-auto rounded-md border border-color-200 bg-surface">
           {expectedAssets.length === 0 ? (
-            <div className="p-4 text-center text-sm text-gray-500">
+            <div className="p-4 text-center text-sm text-color-500">
               No expected assets for this audit.
             </div>
           ) : (
@@ -100,13 +100,13 @@ export function ExpectedAssetsList({
                 <div
                   key={asset.id}
                   className={tw(
-                    "flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2",
+                    "flex items-center justify-between gap-2 border-b border-color-100 px-3 py-2",
                     "last:border-b-0"
                   )}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <CheckCircle2 className="size-5 shrink-0 text-green-600" />
-                    <span className="truncate text-sm font-medium text-gray-900">
+                    <span className="truncate text-sm font-medium text-color-900">
                       {asset.name}
                     </span>
                   </div>
@@ -121,17 +121,17 @@ export function ExpectedAssetsList({
                 <div
                   key={asset.id}
                   className={tw(
-                    "flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2",
+                    "flex items-center justify-between gap-2 border-b border-color-100 px-3 py-2",
                     "last:border-b-0"
                   )}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <Clock className="size-5 shrink-0 text-gray-400" />
-                    <span className="truncate text-sm text-gray-600">
+                    <Clock className="size-5 shrink-0 text-color-400" />
+                    <span className="truncate text-sm text-color-600">
                       {asset.name}
                     </span>
                   </div>
-                  <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                  <span className="shrink-0 rounded-full bg-color-100 px-2 py-0.5 text-xs font-medium text-color-600">
                     Pending
                   </span>
                 </div>

@@ -91,33 +91,35 @@ export default function CompleteAuditDialog({
             <div className="space-y-4">
               <p>
                 You are about to complete the audit{" "}
-                <span className="font-semibold text-gray-900">{auditName}</span>
+                <span className="font-semibold text-color-900">
+                  {auditName}
+                </span>
                 . This action cannot be undone.
               </p>
 
-              <div className="rounded-lg bg-gray-50 p-4">
-                <h4 className="mb-2 text-sm font-semibold text-gray-700">
+              <div className="rounded-lg bg-color-50 p-4">
+                <h4 className="mb-2 text-sm font-semibold text-color-700">
                   Audit Summary
                 </h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Expected:</span>
+                    <span className="text-color-600">Expected:</span>
                     <span className="font-medium">{stats.expectedCount}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Found:</span>
+                    <span className="text-color-600">Found:</span>
                     <span className="font-medium text-success-600">
                       {stats.foundCount}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Missing:</span>
+                    <span className="text-color-600">Missing:</span>
                     <span className="font-medium text-error-600">
                       {stats.missingCount}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Unexpected:</span>
+                    <span className="text-color-600">Unexpected:</span>
                     <span className="font-medium text-warning-600">
                       {stats.unexpectedCount}
                     </span>
@@ -128,11 +130,11 @@ export default function CompleteAuditDialog({
               <div className="space-y-2">
                 <label
                   htmlFor="completion-note"
-                  className="text-sm font-medium text-gray-700"
+                  className="text-sm font-medium text-color-700"
                 >
                   Completion Note (Optional)
                 </label>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-color-500">
                   Add any final observations or notes about this audit.
                 </p>
                 <textarea
@@ -140,7 +142,7 @@ export default function CompleteAuditDialog({
                   id="completion-note"
                   name="note"
                   placeholder="Add completion notes here..."
-                  className="min-h-[120px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
+                  className="min-h-[120px] w-full rounded-md border border-color-300 px-3 py-2 text-sm placeholder:text-color-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
                   rows={5}
                 />
               </div>

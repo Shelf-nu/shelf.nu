@@ -72,7 +72,7 @@ export default function UpdatesPage() {
           alt="Updates"
           className="mx-auto mb-6"
         />
-        <h1 className="text-5xl font-bold tracking-tight text-gray-900">
+        <h1 className="text-5xl font-bold tracking-tight text-color-900">
           Latest Updates
         </h1>
       </div>

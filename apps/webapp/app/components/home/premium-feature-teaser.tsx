@@ -49,10 +49,10 @@ export function PremiumFeatureTeaser({
       </div>
 
       {/* Headline */}
-      <div className="font-semibold text-gray-900">{headline}</div>
+      <div className="font-semibold text-color-900">{headline}</div>
 
       {/* Benefit description */}
-      <p className="max-w-[260px] text-sm leading-relaxed text-gray-600">
+      <p className="max-w-[260px] text-sm leading-relaxed text-color-600">
         {description}
       </p>
 
@@ -66,7 +66,7 @@ export function PremiumFeatureTeaser({
         <Button
           to={secondaryTo}
           variant="link"
-          className="text-xs text-gray-500"
+          className="text-xs text-color-500"
         >
           {secondaryLabel}
         </Button>

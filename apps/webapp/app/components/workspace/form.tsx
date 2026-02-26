@@ -147,9 +147,9 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
                 <div className=" max-h-[320px] overflow-auto">
                   {ISO_4217_CURRENCIES.map((c) => (
                     <SelectItem value={c.code} key={c.code}>
-                      <span className="mr-4 text-[14px] text-gray-700">
+                      <span className="mr-4 text-[14px] text-color-700">
                         <span className="font-medium">{c.code}</span>
-                        <span className="ml-2 text-gray-500">{c.name}</span>
+                        <span className="ml-2 text-color-500">{c.name}</span>
                       </span>
                     </SelectItem>
                   ))}

@@ -61,7 +61,7 @@ function FieldLabel({
 }) {
   return (
     <label className="flex flex-col gap-2" htmlFor={htmlFor}>
-      <span className="text-sm font-medium text-gray-700">
+      <span className="text-sm font-medium text-color-700">
         {children}
         {required ? <span className="ml-1 text-error-500">*</span> : null}
       </span>
@@ -181,8 +181,8 @@ export function SelectWithOther({
             type="button"
             tabIndex={0}
             className={tw(
-              "flex h-[44px] w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-gray-900 hover:border-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary",
-              !selection && "text-gray-500",
+              "flex h-[44px] w-full items-center justify-between rounded-md border border-color-300 bg-surface px-3 py-2 text-left text-color-900 hover:border-color-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary",
+              !selection && "text-color-500",
               error &&
                 "border-error-300 focus:border-error-300 focus:ring-error-100",
               className
@@ -190,12 +190,12 @@ export function SelectWithOther({
             aria-label={typeof label === "string" ? label : undefined}
           >
             <span className="truncate">{selectedLabel}</span>
-            <ChevronDownIcon className="ml-2 size-4 shrink-0 text-gray-500" />
+            <ChevronDownIcon className="ml-2 size-4 shrink-0 text-color-500" />
           </button>
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent
-            className="z-[999999] max-h-[320px] overflow-auto rounded-md border border-gray-200 bg-white shadow-lg"
+            className="z-[999999] max-h-[320px] overflow-auto rounded-md border border-color-200 bg-surface shadow-lg"
             side="bottom"
             align="start"
             style={{ width: triggerRef?.current?.clientWidth }}
@@ -210,8 +210,8 @@ export function SelectWithOther({
                   id={`${name}-option-${index}`}
                   key={option}
                   className={tw(
-                    "flex items-center justify-between px-4 py-3 text-sm text-gray-700 hover:cursor-pointer hover:bg-gray-50",
-                    isHovered && "bg-gray-50"
+                    "flex items-center justify-between px-4 py-3 text-sm text-color-700 hover:cursor-pointer hover:bg-color-50",
+                    isHovered && "bg-color-50"
                   )}
                   role="button"
                   tabIndex={0}
@@ -230,8 +230,8 @@ export function SelectWithOther({
             <div
               id={`${name}-option-${options.length}`}
               className={tw(
-                "flex items-center justify-between px-4 py-3 text-sm text-gray-700 hover:cursor-pointer hover:bg-gray-50",
-                selectedIndex === options.length && "bg-gray-50"
+                "flex items-center justify-between px-4 py-3 text-sm text-color-700 hover:cursor-pointer hover:bg-color-50",
+                selectedIndex === options.length && "bg-color-50"
               )}
               role="button"
               tabIndex={0}

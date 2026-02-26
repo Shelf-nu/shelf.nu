@@ -729,7 +729,7 @@ export default function AuditAssetDetails() {
   return (
     <div className="flex h-full flex-col">
       {/* Add note form */}
-      <div className="shrink-0 border-b border-gray-200 px-6 py-4">
+      <div className="shrink-0 border-b border-color-200 px-6 py-4">
         <Form method="post" ref={noteFormRef}>
           <input type="hidden" name="intent" value="create-note" />
           <div className="space-y-2">
@@ -737,7 +737,7 @@ export default function AuditAssetDetails() {
               name="content"
               placeholder="Add a note..."
               rows={3}
-              className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
+              className="w-full resize-none rounded-md border border-color-300 p-2 text-sm focus:border-color-500 focus:outline-none"
             />
             <div className="flex justify-end">
               <Button type="submit" size="sm" disabled={disabled}>
@@ -749,18 +749,18 @@ export default function AuditAssetDetails() {
       </div>
 
       {/* Notes section - scrollable, takes remaining space */}
-      <div className="flex-1 overflow-y-auto border-b border-gray-200 px-6 py-4">
+      <div className="flex-1 overflow-y-auto border-b border-color-200 px-6 py-4">
         <div className="mb-6">
           <div className="mb-3 flex items-center gap-2">
-            <MessageSquare className="size-5 text-gray-600" />
-            <h3 className="text-base font-semibold text-gray-900">Notes</h3>
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+            <MessageSquare className="size-5 text-color-600" />
+            <h3 className="text-base font-semibold text-color-900">Notes</h3>
+            <span className="rounded-full bg-color-100 px-2 py-0.5 text-xs text-color-600">
               {localNotes.length}
             </span>
           </div>
 
           {localNotes.length === 0 ? (
-            <p className="text-sm text-gray-500">No notes yet</p>
+            <p className="text-sm text-color-500">No notes yet</p>
           ) : (
             <div className="space-y-3">
               {localNotes.map((note) => (
@@ -780,11 +780,11 @@ export default function AuditAssetDetails() {
       </div>
 
       {/* Images section - fixed height at bottom */}
-      <div className="h-68 shrink-0 overflow-y-auto  border-gray-200 px-6 py-4">
+      <div className="h-68 shrink-0 overflow-y-auto  border-color-200 px-6 py-4">
         <div className="mb-3 flex items-center gap-2">
-          <Paperclip className="size-5 text-gray-600" />
-          <h3 className="text-base font-semibold text-gray-900">Images</h3>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+          <Paperclip className="size-5 text-color-600" />
+          <h3 className="text-base font-semibold text-color-900">Images</h3>
+          <span className="rounded-full bg-color-100 px-2 py-0.5 text-xs text-color-600">
             {localImages.length}
           </span>
         </div>

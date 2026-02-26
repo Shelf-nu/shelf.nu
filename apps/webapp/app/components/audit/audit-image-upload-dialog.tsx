@@ -175,11 +175,11 @@ export function AuditImageUploadDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-medium text-color-700">
                   Selected Images ({selectedImages.length}/{maxCount})
                 </label>
                 {totalImages < maxCount && (
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-color-500">
                     You can add {remainingSlots} more image
                     {remainingSlots === 1 ? "" : "s"}
                   </p>
@@ -191,7 +191,7 @@ export function AuditImageUploadDialog({
                   {selectedImages.map((image) => (
                     <div
                       key={image.id}
-                      className="group relative size-24 shrink-0 overflow-hidden rounded-lg border-2 border-gray-200"
+                      className="group relative size-24 shrink-0 overflow-hidden rounded-lg border-2 border-color-200"
                     >
                       <img
                         src={image.previewUrl}
@@ -219,9 +219,9 @@ export function AuditImageUploadDialog({
                           ? "Add more images"
                           : `Maximum ${maxCount} images allowed`
                       }
-                      className="flex size-24 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 transition-colors hover:border-gray-400 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:bg-gray-50"
+                      className="flex size-24 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-color-300 bg-color-50 transition-colors hover:border-color-400 hover:bg-color-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-color-300 disabled:hover:bg-color-50"
                     >
-                      <span className="text-xs text-gray-600">Add more</span>
+                      <span className="text-xs text-color-600">Add more</span>
                     </button>
                   )}
                 </div>
@@ -231,11 +231,11 @@ export function AuditImageUploadDialog({
                 <div className="space-y-2">
                   <label
                     htmlFor="image-note"
-                    className="text-sm font-medium text-gray-700"
+                    className="text-sm font-medium text-color-700"
                   >
                     Note (Optional)
                   </label>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-color-500">
                     Add a note to accompany these images.
                   </p>
                   <textarea
@@ -245,14 +245,14 @@ export function AuditImageUploadDialog({
                     value={noteContent}
                     onChange={(e) => setNoteContent(e.target.value)}
                     placeholder="Add a note about these images..."
-                    className="min-h-[100px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
+                    className="min-h-[100px] w-full rounded-md border border-color-300 px-3 py-2 text-sm placeholder:text-color-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-300/20"
                     rows={4}
                     disabled={isSubmitting}
                   />
                 </div>
               )}
               {existingNoteId && (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-color-500">
                   Images will be added to the existing note.
                 </p>
               )}

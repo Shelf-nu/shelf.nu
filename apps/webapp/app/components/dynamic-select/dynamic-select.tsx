@@ -280,12 +280,12 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50"
+                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-color-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50"
               >
                 <span
                   className={tw(
                     "truncate whitespace-nowrap pr-2",
-                    selectedValue === undefined && "text-gray-500"
+                    selectedValue === undefined && "text-color-500"
                   )}
                 >
                   {triggerValue}
@@ -298,7 +298,7 @@ export default function DynamicSelect({
             <PopoverContent
               className={tw(
                 popoverZIndexClassName ?? "z-[100]",
-                "overflow-y-auto rounded-md border border-gray-300 bg-white",
+                "overflow-y-auto rounded-md border border-color-300 bg-surface",
                 className
               )}
               style={{
@@ -309,14 +309,14 @@ export default function DynamicSelect({
               sideOffset={5}
             >
               <div className="flex items-center justify-between p-3">
-                <div className="text-xs font-semibold text-gray-700">
+                <div className="text-xs font-semibold text-color-700">
                   {contentLabel}
                 </div>
                 <When truthy={selectedItems?.length > 0 && showSearch}>
                   <Button
                     as="button"
                     variant="link"
-                    className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                    className="whitespace-nowrap text-xs font-normal text-color-500 hover:text-color-600"
                     onClick={() => {
                       setSelectedValue(undefined);
                       clearFilters();
@@ -334,7 +334,7 @@ export default function DynamicSelect({
                     label={`Search ${contentLabel}`}
                     placeholder={`Search ${contentLabel}`}
                     hideLabel
-                    className="text-gray-500"
+                    className="text-color-500"
                     icon={searchIcon}
                     value={searchQuery}
                     onChange={handleSearchQueryChange}
@@ -349,7 +349,7 @@ export default function DynamicSelect({
                         setSelectedValue(undefined);
                         resetModelFiltersFetcher();
                       }}
-                      className="z-100 pointer-events-auto absolute right-6 top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                      className="z-100 pointer-events-auto absolute right-6 top-0 h-full border-0 p-0 text-center text-color-400 hover:text-color-900"
                     />
                   </When>
                 </div>
@@ -365,13 +365,13 @@ export default function DynamicSelect({
                 {/* Show special items only when there's no search query */}
                 {(withValueItem || withoutValueItem) && searchQuery === "" && (
                   <>
-                    <div className="h-2 w-full bg-gray-50" />
+                    <div className="h-2 w-full bg-color-50" />
                     {withValueItem && (
                       <div
                         key={withValueItem.id}
                         className={tw(
-                          "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                          withValueItem.id === selectedValue && "bg-gray-100"
+                          "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
+                          withValueItem.id === selectedValue && "bg-color-100"
                         )}
                         role="option"
                         aria-selected={withValueItem.id === selectedValue}
@@ -397,8 +397,9 @@ export default function DynamicSelect({
                       <div
                         key={withoutValueItem.id}
                         className={tw(
-                          "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                          withoutValueItem.id === selectedValue && "bg-gray-100"
+                          "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
+                          withoutValueItem.id === selectedValue &&
+                            "bg-color-100"
                         )}
                         role="option"
                         aria-selected={withoutValueItem.id === selectedValue}
@@ -420,7 +421,7 @@ export default function DynamicSelect({
                         </When>
                       </div>
                     )}
-                    <div className="h-2 w-full bg-gray-50" />
+                    <div className="h-2 w-full bg-color-50" />
                   </>
                 )}
                 {itemsToRender.map((item) => {
@@ -440,8 +441,8 @@ export default function DynamicSelect({
                     <div
                       key={item.id}
                       className={tw(
-                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                        item.id === selectedValue && "bg-gray-100"
+                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100",
+                        item.id === selectedValue && "bg-color-100"
                       )}
                       role="option"
                       aria-selected={item.id === selectedValue}
@@ -471,7 +472,7 @@ export default function DynamicSelect({
                       type="button"
                       disabled={isSearching}
                       onClick={getAllEntries}
-                      className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                      className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-color-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-100 focus:bg-color-100"
                     >
                       Show all
                       <span>
@@ -486,7 +487,7 @@ export default function DynamicSelect({
               </div>
 
               <When truthy={totalItems > 6}>
-                <div className="border-t p-3 text-gray-500">
+                <div className="border-t p-3 text-color-500">
                   Showing {items.length} out of {totalItems}, type to search for
                   more
                 </div>

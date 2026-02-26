@@ -31,7 +31,7 @@ export function LocationTree({
         return (
           <li key={node.id} className="space-y-1">
             {isActive ? (
-              <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-900">
+              <div className="rounded border border-color-200 bg-color-50 px-3 py-2 text-sm font-semibold text-color-900">
                 {node.name}
               </div>
             ) : (
@@ -44,7 +44,7 @@ export function LocationTree({
               </Button>
             )}
             {node.children.length ? (
-              <div className="ml-4 border-l border-gray-200 pl-4">
+              <div className="ml-4 border-l border-color-200 pl-4">
                 <LocationTree
                   nodes={node.children}
                   activeId={activeId}

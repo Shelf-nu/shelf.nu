@@ -61,7 +61,7 @@ export default function ContextualSidebar({
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         className={tw(
-          "flex w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]",
+          "flex w-full border-l-0 bg-surface p-0 md:w-[85vw] md:max-w-[85vw]",
           className
         )}
       >

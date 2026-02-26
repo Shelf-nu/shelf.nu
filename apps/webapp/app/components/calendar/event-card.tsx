@@ -241,9 +241,9 @@ export function EventCardContent({
         />
       </div>
 
-      <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-gray-600">
+      <div className="mb-3 flex w-full items-center gap-x-2 text-sm text-color-600">
         <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
-        <ArrowRightIcon className="size-3 text-gray-600" />
+        <ArrowRightIcon className="size-3 text-color-600" />
         <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
       </div>
 
@@ -273,7 +273,7 @@ export function EventCardContent({
       ) : null}
 
       {booking.description ? (
-        <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
+        <div className="wordwrap rounded border border-color-200 bg-color-25 p-2 text-color-500">
           {booking.description}
         </div>
       ) : null}

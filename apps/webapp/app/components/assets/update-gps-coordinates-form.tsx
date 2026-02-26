@@ -83,7 +83,7 @@ export const UpdateGpsCoordinatesForm = ({
     <Button
       variant="link"
       className={tw(
-        "justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+        "justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
       )}
       width="full"
       onClick={handleSubmit}

@@ -67,12 +67,12 @@ export default function Header({
           ) : null}
           <div>
             {preHeading ? (
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-color-500">
                 {preHeading}
               </div>
             ) : (
               header?.preHeading && (
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-color-500">
                   {header.preHeading}
                 </div>
               )

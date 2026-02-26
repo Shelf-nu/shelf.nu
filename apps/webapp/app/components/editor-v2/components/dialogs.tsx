@@ -40,7 +40,7 @@ export function LinkDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-3">
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-color-700">
             URL
             <input
               type="url"
@@ -48,7 +48,7 @@ export function LinkDialog({
               onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 onHrefChange(event.target.value)
               }
-              className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-[16px] focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="mt-1 w-full rounded border border-color-300 px-2 py-1 text-[16px] focus:border-color-500 focus:outline-none focus:ring-2 focus:ring-color-200"
               placeholder="https://example.com"
             />
           </label>
@@ -98,7 +98,7 @@ export function RawBlockDialog({
         </AlertDialogHeader>
         <div className="space-y-3">
           <textarea
-            className="h-48 w-full rounded border border-gray-300 p-2 font-mono text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-200"
+            className="h-48 w-full rounded border border-color-300 p-2 font-mono text-sm focus:border-color-500 focus:outline-none focus:ring-2 focus:ring-color-200"
             value={state.raw}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
               onChange(event.target.value)

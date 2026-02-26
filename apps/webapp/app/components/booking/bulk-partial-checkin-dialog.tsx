@@ -174,7 +174,7 @@ export default function BulkPartialCheckinDialog({
             ))}
 
           {/* List of items being checked in */}
-          <div className="mb-4 max-h-48 overflow-y-auto rounded border bg-gray-50 p-3">
+          <div className="mb-4 max-h-48 overflow-y-auto rounded border bg-color-50 p-3">
             {(() => {
               // Separate kits and individual assets
               const kits = selectedItems.filter(
@@ -214,7 +214,7 @@ export default function BulkPartialCheckinDialog({
                           className="size-5"
                         />
                         <span className="text-sm font-medium">{kit.name}</span>
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-color-500">
                           ({kitAssets.length} assets)
                         </span>
                         <span className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600">
@@ -227,7 +227,7 @@ export default function BulkPartialCheckinDialog({
                         {kitAssets.map((asset: any) => (
                           <li
                             key={asset.id}
-                            className="flex items-center gap-2 text-sm text-gray-700"
+                            className="flex items-center gap-2 text-sm text-color-700"
                           >
                             <AssetImage
                               className="size-5"
@@ -241,7 +241,7 @@ export default function BulkPartialCheckinDialog({
                             />
                             <span className="font-medium">{asset.title}</span>
                             {asset.category && (
-                              <span className="text-gray-500">
+                              <span className="text-color-500">
                                 {" "}
                                 ({asset.category.name})
                               </span>
@@ -258,7 +258,7 @@ export default function BulkPartialCheckinDialog({
                       {individualAssets.map((asset: any) => (
                         <li
                           key={asset.id}
-                          className="flex items-center gap-2 text-sm text-gray-700"
+                          className="flex items-center gap-2 text-sm text-color-700"
                         >
                           <AssetImage
                             className="size-5"
@@ -272,7 +272,7 @@ export default function BulkPartialCheckinDialog({
                           />
                           <span className="font-medium">{asset.title}</span>
                           {asset.category && (
-                            <span className="text-gray-500">
+                            <span className="text-color-500">
                               {" "}
                               ({asset.category.name})
                             </span>

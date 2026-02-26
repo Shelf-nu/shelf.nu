@@ -50,7 +50,7 @@ function UploadedImageBox({
   disabled,
 }: UploadedImageBoxProps) {
   return (
-    <div className="group relative size-24 shrink-0 overflow-hidden rounded-lg border-2 border-gray-200">
+    <div className="group relative size-24 shrink-0 overflow-hidden rounded-lg border-2 border-color-200">
       <img src={previewUrl} alt="Audit" className="size-full object-cover" />
       {!disabled && (
         <button
@@ -178,8 +178,8 @@ export function AuditImageUploadBox({
       className={tw(
         "flex size-24 shrink-0 items-center justify-center rounded-lg border-2 border-dashed transition-colors",
         canAddMore && !disabled
-          ? "border-gray-300 bg-gray-50 text-gray-400 hover:border-gray-400 hover:bg-gray-100 hover:text-gray-500"
-          : "cursor-not-allowed border-gray-200 bg-gray-50 text-gray-300"
+          ? "border-color-300 bg-color-50 text-color-400 hover:border-color-400 hover:bg-color-100 hover:text-color-500"
+          : "cursor-not-allowed border-color-200 bg-color-50 text-color-300"
       )}
     >
       <input
@@ -352,19 +352,19 @@ export function AuditImageUploadSection({
       <div className="flex items-center justify-between">
         <label
           htmlFor="audit-images"
-          className="text-sm font-medium text-gray-700"
+          className="text-sm font-medium text-color-700"
         >
           Add Photos (Optional)
         </label>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-color-500">
           {totalCount}/{maxCount} images
         </span>
       </div>
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-color-500">
         Add up to {maxCount} photos to document this audit completion.
       </p>
       {isUploading && (
-        <div className="flex items-center gap-2 text-sm text-gray-600">
+        <div className="flex items-center gap-2 text-sm text-color-600">
           <Spinner className="size-4" />
           Uploading images...
         </div>
@@ -380,7 +380,7 @@ export function AuditImageUploadSection({
               alt="Audit image"
               withPreview
               disablePortal
-              className="size-24 rounded-lg border-2 border-gray-200"
+              className="size-24 rounded-lg border-2 border-color-200"
               images={existingImages.map((img) => ({
                 id: img.id,
                 imageUrl: img.imageUrl,

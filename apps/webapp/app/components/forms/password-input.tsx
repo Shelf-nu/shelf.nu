@@ -14,7 +14,7 @@ export default function PasswordInput(props: InputProps) {
     <div className="relative">
       <Input {...props} type={showPassword ? "text" : "password"} />
       <span
-        className="absolute right-[14px] top-[35px] flex h-6 w-[20px] cursor-pointer flex-col items-end justify-center text-gray-500"
+        className="absolute right-[14px] top-[35px] flex h-6 w-[20px] cursor-pointer flex-col items-end justify-center text-color-500"
         role="button"
         tabIndex={-1}
         onClick={togglePasswordVisibility}

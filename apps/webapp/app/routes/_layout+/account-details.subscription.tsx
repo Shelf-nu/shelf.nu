@@ -314,11 +314,11 @@ export default function SubscriptionPage() {
    */
   if (isCustomTier && hasNoSubscription) {
     return (
-      <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+      <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
         <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <InfoIcon />
         </div>
-        <p className="text-[14px] font-medium text-gray-700">
+        <p className="text-[14px] font-medium text-color-700">
           You’re currently using the{" "}
           {isEnterprise ? (
             <>
@@ -353,11 +353,11 @@ export default function SubscriptionPage() {
           <div className="mb-8">
             {hasNoSubscription ? (
               <>
-                <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
+                <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-color-300 p-4">
                   <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                     <InfoIcon />
                   </div>
-                  <p className="text-[14px] font-medium text-gray-700">
+                  <p className="text-[14px] font-medium text-color-700">
                     You're currently using the{" "}
                     <span className="font-semibold">FREE</span> version of Shelf
                   </p>
@@ -369,16 +369,16 @@ export default function SubscriptionPage() {
               </>
             ) : (
               <>
-                <div className="mb-2 mt-3 flex items-center justify-between gap-3 rounded border border-gray-300 p-4">
+                <div className="mb-2 mt-3 flex items-center justify-between gap-3 rounded border border-color-300 p-4">
                   <div className="flex items-center gap-3">
                     <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                       <InfoIcon />
                     </div>
                     <div>
-                      <p className="text-[14px] font-medium text-gray-700">
+                      <p className="text-[14px] font-medium text-color-700">
                         You have no workspace plan
                       </p>
-                      <p className="text-[13px] text-gray-500">
+                      <p className="text-[13px] text-color-500">
                         Upgrade to a workspace plan to unlock the full potential
                         of Shelf alongside your add-ons.
                       </p>
@@ -416,7 +416,7 @@ export default function SubscriptionPage() {
         <div className="mb-8 justify-between border-b pb-5 lg:flex">
           <div className="mb-8 lg:mb-0">
             <h3 className="text-text-lg font-semibold">{title}</h3>
-            <p className="text-sm text-gray-600">{subTitle}</p>
+            <p className="text-sm text-color-600">{subTitle}</p>
           </div>
           {!hasNoSubscription && (
             <CustomerPortalForm buttonText="Manage subscriptions" />
@@ -456,7 +456,7 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
     <WarningBox className="mb-8 mt-3">
       <div>
         <h4 className="font-semibold">Unpaid invoice/s</h4>
-        <p className="mt-1 text-gray-800">
+        <p className="mt-1 text-color-800">
           We were unable to process your latest payment. If payment is not
           resolved, your subscription will be fully canceled. Any existing
           pricing, discounts, or legacy plans tied to your subscription cannot
@@ -473,10 +473,10 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
               >
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium text-gray-900">
+                    <p className="font-medium text-color-900">
                       {inv.subscriptionName}
                     </p>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="mt-1 text-sm text-color-500">
                       Invoice {inv.number}
                       {inv.dueDate ? (
                         <>
@@ -487,7 +487,7 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-gray-900">
+                    <span className="text-sm font-semibold text-color-900">
                       {new Intl.NumberFormat("en-US", {
                         style: "currency",
                         currency: inv.currency,
@@ -511,7 +511,7 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
           </ul>
         ) : null}
 
-        <div className="mt-2 text-gray-800">
+        <div className="mt-2 text-color-800">
           Please update your payment method through the{" "}
           <CustomerPortalForm
             buttonText="customer portal"

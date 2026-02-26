@@ -34,7 +34,7 @@ export function ClickableTr({
       tabIndex={0}
       role="link"
       className={tw(
-        "cursor-pointer hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1",
+        "cursor-pointer hover:bg-color-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1",
         className
       )}
       onClick={(e) => {

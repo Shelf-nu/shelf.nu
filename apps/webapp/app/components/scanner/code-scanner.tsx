@@ -242,7 +242,7 @@ export const CodeScanner = ({
     >
       <div className="relative size-full overflow-hidden">
         {!forceMode && (
-          <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
+          <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-surface px-4 py-2 text-color-900">
             <div
               className={tw(
                 "flex items-center gap-2",
@@ -351,7 +351,7 @@ export const CodeScanner = ({
           >
             <div
               className={tw(
-                "flex flex-col items-center rounded bg-white p-4 shadow-md",
+                "flex flex-col items-center rounded bg-surface p-4 shadow-md",
                 overlayPosition === "fullscreen"
                   ? "h-full justify-center text-center"
                   : "min-h-[200px]",
@@ -498,7 +498,7 @@ function ScannerMode({
           }
           icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
           iconClassName={tw(
-            "text-gray-600",
+            "text-color-600",
             !inputIsFocused && "animate-bounce"
           )}
           onChange={(e) => setInputValue(e.target.value)}

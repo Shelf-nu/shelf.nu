@@ -127,18 +127,18 @@ export default function KitSelector({
             <span className="truncate">
               {isLoading ? "Loading..." : selectedKitName || placeholder}
             </span>
-            <ChevronDownIcon className="ml-2 size-4 shrink-0 text-gray-500" />
+            <ChevronDownIcon className="ml-2 size-4 shrink-0 text-color-500" />
             <input type="hidden" name={name} value={selectedKit} />
           </button>
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent
-            className="z-[999999] !mt-1 max-h-[400px] overflow-hidden rounded border bg-white shadow-lg"
+            className="z-[999999] !mt-1 max-h-[400px] overflow-hidden rounded border bg-surface shadow-lg"
             side="bottom"
             style={{ width: triggerRef?.current?.clientWidth }}
           >
             <div className="flex items-center border-b">
-              <SearchIcon className="ml-4 size-4 text-gray-500" />
+              <SearchIcon className="ml-4 size-4 text-color-500" />
               <input
                 placeholder="Search kits..."
                 className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
@@ -161,8 +161,8 @@ export default function KitSelector({
                     id={`kit-option-${index}`}
                     key={kit.id}
                     className={tw(
-                      "flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                      isHovered && "bg-gray-50"
+                      "flex items-center justify-between px-4 py-3 text-sm text-color-600 hover:cursor-pointer hover:bg-color-50",
+                      isHovered && "bg-color-50"
                     )}
                     role="option"
                     aria-selected={isSelected}
@@ -182,12 +182,12 @@ export default function KitSelector({
                 );
               })}
               {filteredKits.length === 0 && !isLoading && (
-                <div className="px-4 py-3 text-sm text-gray-500">
+                <div className="px-4 py-3 text-sm text-color-500">
                   {searchQuery ? "No kits found" : "No kits available"}
                 </div>
               )}
               {isLoading && (
-                <div className="px-4 py-3 text-sm text-gray-500">
+                <div className="px-4 py-3 text-sm text-color-500">
                   Loading kits...
                 </div>
               )}

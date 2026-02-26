@@ -148,7 +148,7 @@ export default function ImageWithPreview({
         {isLoading ? (
           <div
             className={tw(
-              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "absolute inset-0 flex items-center justify-center bg-color-100",
               "z-10 transition-opacity"
             )}
           >
@@ -160,14 +160,14 @@ export default function ImageWithPreview({
           <div
             className={tw(
               "absolute inset-0 z-10 flex flex-col items-center justify-center gap-2",
-              "bg-gray-100 text-gray-500"
+              "bg-color-100 text-color-500"
             )}
           >
             <div className="px-2 text-center text-xs">Failed to load</div>
             <button
               type="button"
               onClick={handleRetry}
-              className="flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs text-gray-700 transition-colors hover:bg-gray-300"
+              className="flex items-center gap-1 rounded bg-color-200 px-2 py-1 text-xs text-color-700 transition-colors hover:bg-color-300"
               title="Retry loading image"
             >
               <RefreshCwIcon className="size-4" />
@@ -204,10 +204,10 @@ export default function ImageWithPreview({
               wrapperClassName="z-[100]"
               title={
                 <div>
-                  <div className="text-lg font-semibold text-gray-900">
+                  <div className="text-lg font-semibold text-color-900">
                     {currentImage.alt}
                   </div>
-                  <div className="text-sm font-normal text-gray-600">
+                  <div className="text-sm font-normal text-color-600">
                     {hasNavigation
                       ? `${currentIndex + 1} of ${images!.length} image(s)`
                       : "1 image(s)"}
@@ -217,17 +217,17 @@ export default function ImageWithPreview({
             >
               <div
                 ref={handleDialogContentMount}
-                className="relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
+                className="relative z-10 flex h-full flex-col bg-surface shadow-lg md:rounded"
                 role="dialog"
                 tabIndex={-1}
                 onKeyDown={handleKeyDown}
               >
-                <div className="relative flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+                <div className="relative flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-color-200 bg-color-50">
                   {hasNavigation && canGoPrevious && (
                     <button
                       type="button"
                       onClick={handlePrevious}
-                      className="absolute left-4 top-1/2 z-10 -translate-y-1/2 text-gray-900 transition-all hover:text-gray-600"
+                      className="absolute left-4 top-1/2 z-10 -translate-y-1/2 text-color-900 transition-all hover:text-color-600"
                       aria-label="Previous"
                     >
                       <ChevronRight className="size-8 rotate-180" />
@@ -244,7 +244,7 @@ export default function ImageWithPreview({
                     <button
                       type="button"
                       onClick={handleNext}
-                      className="absolute right-4 top-1/2 z-10 -translate-y-1/2 text-gray-900 transition-all hover:text-gray-600"
+                      className="absolute right-4 top-1/2 z-10 -translate-y-1/2 text-color-900 transition-all hover:text-color-600"
                       aria-label="Next"
                     >
                       <ChevronRight className="size-8" />

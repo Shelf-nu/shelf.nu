@@ -1,5 +1,5 @@
 .booking-route-form-wrapper {
-  @apply bg-white my-4 overflow-hidden rounded border px-4 py-3 w-full lg:w-min;
+  @apply bg-surface my-4 overflow-hidden rounded border px-4 py-3 w-full lg:w-min;
 }
 
 .booking-route-form-wrapper .actions-wrapper {

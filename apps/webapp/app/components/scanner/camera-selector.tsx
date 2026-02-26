@@ -45,7 +45,7 @@ export function CameraSelector({
           disabled={disabled}
           className={tw(
             "gap-2 py-[7px] text-[12px] font-normal",
-            open ? "bg-gray-50" : ""
+            open ? "bg-color-50" : ""
           )}
           aria-label="Switch camera"
         >
@@ -58,7 +58,7 @@ export function CameraSelector({
           align="end"
           onOpenAutoFocus={(e) => e.preventDefault()}
           className={tw(
-            "z-[999999] mt-2 min-w-[200px] max-w-[300px] rounded-md border border-gray-200 bg-white shadow-md"
+            "z-[999999] mt-2 min-w-[200px] max-w-[300px] rounded-md border border-color-200 bg-surface shadow-md"
           )}
         >
           <div className="p-1" role="listbox" aria-label="Camera selection">
@@ -69,8 +69,8 @@ export function CameraSelector({
                 aria-selected={currentDeviceId === device.deviceId}
                 className={tw(
                   "flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-left text-sm",
-                  "hover:bg-gray-50 focus:bg-gray-50 focus:outline-none",
-                  currentDeviceId === device.deviceId && "bg-gray-50"
+                  "hover:bg-color-50 focus:bg-color-50 focus:outline-none",
+                  currentDeviceId === device.deviceId && "bg-color-50"
                 )}
                 onClick={() => handleSelect(device.deviceId)}
               >

@@ -22,7 +22,7 @@ function FilterOperatorDisplay({
 }) {
   return (
     <div className="flex items-center gap-2 text-[14px] ">
-      <span className="font-semibold text-gray-500">{symbol}</span>
+      <span className="font-semibold text-color-500">{symbol}</span>
       <span className=" whitespace-nowrap font-normal">{text}</span>
     </div>
   );
@@ -152,7 +152,7 @@ export function OperatorSelector({
           disabled={disabled}
         >
           <span className="flex items-center gap-3">
-            <ChevronRight className="mt-px inline-block rotate-90 text-gray-600" />
+            <ChevronRight className="mt-px inline-block rotate-90 text-color-600" />
             <span className="ml-[6px]">{operatorsMap[operator][0]}</span>
           </span>
         </Button>
@@ -161,7 +161,7 @@ export function OperatorSelector({
         <PopoverContent
           align="start"
           className={tw(
-            "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
+            "z-[999999]  mt-2  rounded-md border border-color-200 bg-surface"
           )}
           onKeyDown={handleKeyDown}
         >
@@ -173,8 +173,8 @@ export function OperatorSelector({
                 id={`operator-option-${index}`}
                 key={k + index}
                 className={tw(
-                  "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                  selectedIndex === index && "bg-gray-50"
+                  "px-4 py-2 text-[14px] font-medium text-color-600 hover:cursor-pointer hover:bg-color-50",
+                  selectedIndex === index && "bg-color-50"
                 )}
                 role="option"
                 aria-selected={selectedIndex === index}

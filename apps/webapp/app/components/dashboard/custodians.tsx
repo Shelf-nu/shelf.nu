@@ -27,9 +27,9 @@ export default function CustodiansList() {
     action: PermissionAction.read,
   });
   return (
-    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+    <div className="flex h-full flex-col rounded border border-color-200 bg-surface">
       <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
-        <span className="text-[14px] font-semibold text-gray-900">
+        <span className="text-[14px] font-semibold text-color-900">
           Top custodians
         </span>
         <div className="flex items-center gap-2">
@@ -128,7 +128,7 @@ function Row({
     <>
       <Td className="w-full">
         <div className="flex items-center justify-between">
-          <span className="text-text-sm font-medium text-gray-900">
+          <span className="text-text-sm font-medium text-color-900">
             <div className="flex items-center gap-3">
               <img
                 src={
@@ -145,7 +145,7 @@ function Row({
                     <Button
                       to={`/settings/team/users/${custodian.userId}/assets`}
                       variant="link"
-                      className="text-left font-medium text-gray-900 hover:text-gray-700"
+                      className="text-left font-medium text-color-900 hover:text-color-700"
                       target={"_blank"}
                       onlyNewTabIconOnHover={true}
                     >
@@ -155,7 +155,7 @@ function Row({
                     <span className="mt-px">{teamMemberName}</span>
                   )}
                 </span>
-                <span className="block text-gray-600">{count} Assets</span>
+                <span className="block text-color-600">{count} Assets</span>
               </div>
             </div>
           </span>

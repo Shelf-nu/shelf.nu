@@ -29,7 +29,7 @@ export function CustodianField({
       className="mobile-styling-only border-b-0 p-0"
     >
       <label
-        className="mb-2.5 block font-medium text-gray-700"
+        className="mb-2.5 block font-medium text-color-700"
         htmlFor="custodian"
       >
         <span className="required-input-label">Custodian</span>
@@ -74,7 +74,7 @@ export function CustodianField({
       />
 
       {error ? <div className="text-sm text-error-500">{error}</div> : null}
-      <p className="mt-2 text-[14px] text-gray-600">
+      <p className="mt-2 text-[14px] text-color-600">
         The person that will be in custody of or responsible for the assets
         during the duration of the booking period.
       </p>

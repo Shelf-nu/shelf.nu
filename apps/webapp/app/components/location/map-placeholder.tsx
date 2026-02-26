@@ -18,7 +18,7 @@ export const MapPlaceholder = ({
       >
         <Icon disableWrap={true} icon="map" />
       </div>
-      <div className="text-[18px] font-semibold text-gray-900">{title}</div>
+      <div className="text-[18px] font-semibold text-color-900">{title}</div>
       <p>{description}</p>
     </div>
   </div>

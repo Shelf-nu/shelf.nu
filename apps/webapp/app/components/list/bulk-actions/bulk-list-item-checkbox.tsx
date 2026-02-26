@@ -79,7 +79,7 @@ export default function BulkListItemCheckbox({
           className={tw(
             "overflow-visible text-white",
             checked ? "text-primary" : "",
-            disabled ? "text-color-300" : ""
+            disabled ? "text-gray-200" : ""
           )}
           checked={checked}
         />

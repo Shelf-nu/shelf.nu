@@ -93,7 +93,7 @@ export function SubscriptionsOverview({
     <div className="space-y-6">
       {workspaceSubscriptions.length > 0 && (
         <div>
-          <h4 className="mb-3 text-sm font-medium uppercase text-gray-500">
+          <h4 className="mb-3 text-sm font-medium uppercase text-color-500">
             Workspace Subscriptions
           </h4>
           {workspaceSubscriptions.map((subscription) => (
@@ -116,7 +116,7 @@ export function SubscriptionsOverview({
 
       {addonSubscriptions.length > 0 && (
         <div>
-          <h4 className="mb-3 text-sm font-medium uppercase text-gray-500">
+          <h4 className="mb-3 text-sm font-medium uppercase text-color-500">
             Add-ons
           </h4>
           {addonSubscriptions.map((subscription) => (

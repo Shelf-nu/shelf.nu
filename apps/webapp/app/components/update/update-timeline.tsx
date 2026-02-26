@@ -17,13 +17,13 @@ export function UpdateTimeline({ updates }: UpdateTimelineProps) {
   if (updates.length === 0) {
     return (
       <div className="py-24 text-center">
-        <div className="mx-auto mb-6 flex size-20 items-center justify-center rounded-full bg-gray-100">
-          <BellIcon className="size-10 text-gray-400" />
+        <div className="mx-auto mb-6 flex size-20 items-center justify-center rounded-full bg-color-100">
+          <BellIcon className="size-10 text-color-400" />
         </div>
-        <h3 className="mb-2 text-xl font-semibold text-gray-900">
+        <h3 className="mb-2 text-xl font-semibold text-color-900">
           No updates yet
         </h3>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-color-600">
           Check back later for the latest news and updates
         </p>
       </div>

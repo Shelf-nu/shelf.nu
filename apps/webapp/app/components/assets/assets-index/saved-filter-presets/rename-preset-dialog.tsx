@@ -50,7 +50,7 @@ export function RenamePresetDialog({
         title={
           <div className="-mb-3 w-full pb-6">
             <h3>Rename filter preset</h3>
-            <p className="text-gray-500">
+            <p className="text-color-500">
               Update the name of your saved filter preset.
             </p>
           </div>

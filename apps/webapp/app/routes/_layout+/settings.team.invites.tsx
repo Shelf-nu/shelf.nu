@@ -237,18 +237,20 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
 
 function InviteMessageCell({ message }: { message?: string | null }) {
   if (!message) {
-    return <span className="text-gray-400">-</span>;
+    return <span className="text-color-400">-</span>;
   }
 
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger className="text-gray-500 hover:text-gray-700">
+        <TooltipTrigger className="text-color-500 hover:text-color-700">
           <MailIcon className="size-4" />
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[300px]">
           <h5 className="mb-1">Invite message</h5>
-          <p className="whitespace-pre-wrap text-sm text-gray-600">{message}</p>
+          <p className="whitespace-pre-wrap text-sm text-color-600">
+            {message}
+          </p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
