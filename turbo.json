@@ -27,6 +27,7 @@
         ".eslintrc",
         ".eslintrc.*",
         "eslint.config.*",
+        ".eslintignore",
         "tsconfig.json"
       ]
     },
