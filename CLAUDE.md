@@ -26,6 +26,7 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 
 ### Code Quality
 
+- `pnpm webapp:lint` - ESLint checking (webapp only)
 - `pnpm turbo lint` - ESLint checking (all packages)
 - `pnpm --filter @shelf/webapp lint:fix` - Fix ESLint issues automatically
 - `pnpm turbo typecheck` - TypeScript type checking (all packages)
