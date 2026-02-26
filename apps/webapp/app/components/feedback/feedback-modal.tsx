@@ -11,8 +11,8 @@ import {
 } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
-import { z } from "zod";
 import { useDisabled } from "~/hooks/use-disabled";
+import { feedbackSchema } from "~/modules/feedback/schema";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -20,14 +20,6 @@ import { tw } from "~/utils/tw";
 import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
-
-export const feedbackSchema = z.object({
-  type: z.enum(["issue", "idea"]),
-  message: z
-    .string()
-    .min(10, "Please provide at least 10 characters")
-    .max(5000, "Message is too long"),
-});
 
 type FeedbackModalProps = {
   open: boolean;
@@ -44,6 +36,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
   const [showSuccess, setShowSuccess] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const validationErrors = getValidationErrors<typeof feedbackSchema>(
     fetcher.data?.error
@@ -55,6 +48,10 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
       : null;
 
   const handleClose = useCallback(() => {
+    if (autoCloseTimerRef.current) {
+      clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    }
     setFeedbackType("issue");
     setScreenshot(null);
     setPreviewUrl(null);
@@ -67,10 +64,16 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
     function handleSuccess() {
       if (fetcher.data && !fetcher.data.error && fetcher.state === "idle") {
         setShowSuccess(true);
-        const timer = setTimeout(() => {
+        autoCloseTimerRef.current = setTimeout(() => {
+          autoCloseTimerRef.current = null;
           handleClose();
         }, 2000);
-        return () => clearTimeout(timer);
+        return () => {
+          if (autoCloseTimerRef.current) {
+            clearTimeout(autoCloseTimerRef.current);
+            autoCloseTimerRef.current = null;
+          }
+        };
       }
     },
     [fetcher.data, fetcher.state, handleClose]

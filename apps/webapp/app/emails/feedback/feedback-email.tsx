@@ -32,8 +32,9 @@ export const sendFeedbackEmail = async ({
 }: FeedbackEmailProps) => {
   try {
     const typeLabel = type === "issue" ? "Issue" : "Idea";
+    const sanitized = message.replace(/[\r\n\t]+/g, " ").trim();
     const subjectPreview =
-      message.length > 50 ? `${message.slice(0, 50)}...` : message;
+      sanitized.length > 50 ? `${sanitized.slice(0, 50)}...` : sanitized;
     const subject = `New feedback [${typeLabel}]: ${subjectPreview}`;
 
     const html = await feedbackEmailHtml({

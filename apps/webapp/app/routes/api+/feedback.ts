@@ -1,21 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { type ActionFunctionArgs, data } from "react-router";
-import { z } from "zod";
 import { sendFeedbackEmail } from "~/emails/feedback/feedback-email";
+import { feedbackSchema } from "~/modules/feedback/schema";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
-
-export const feedbackSchema = z.object({
-  type: z.enum(["issue", "idea"]),
-  message: z
-    .string()
-    .min(10, "Please provide at least 10 characters")
-    .max(5000, "Message is too long"),
-});
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -24,17 +17,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const user = await getUserByID(userId, {
-      include: {
-        userOrganizations: {
-          where: { userId },
-          select: {
-            organization: { select: { name: true } },
-          },
-          take: 1,
-        },
-      },
-    } satisfies { include: Prisma.UserInclude });
+    // Validate text fields before uploading the screenshot to avoid
+    // orphaned files in storage when validation fails
+    const clonedRequest = request.clone();
+    const rawFormData = await clonedRequest.formData();
+    const { type, message } = parseData(rawFormData, feedbackSchema);
+
+    const [user, { currentOrganization }] = await Promise.all([
+      getUserByID(userId, {
+        select: {
+          firstName: true,
+          lastName: true,
+          username: true,
+          email: true,
+        } satisfies Prisma.UserSelect,
+      }),
+      getSelectedOrganization({ userId, request }),
+    ]);
 
     const formData = await parseFileFormData({
       request,
@@ -42,8 +41,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       bucketName: "files",
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
     });
-
-    const { type, message } = parseData(formData, feedbackSchema);
 
     const screenshotPath = formData.get("screenshot") as string | null;
     const screenshotUrl =
@@ -59,8 +56,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       user.username ||
       "Unknown user";
 
-    const organizationName =
-      user.userOrganizations?.[0]?.organization?.name || "Unknown";
+    const organizationName = currentOrganization?.name || "Unknown";
 
     await sendFeedbackEmail({
       userName,
