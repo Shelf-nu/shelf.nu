@@ -1,0 +1,311 @@
+import type { ReactElement } from "react";
+import { cloneElement, useCallback, useEffect, useState } from "react";
+import { OrganizationRoles } from "@prisma/client";
+import { UserIcon } from "lucide-react";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
+import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
+import Input from "../forms/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "../forms/select";
+import { Dialog, DialogPortal } from "../layout/dialog";
+import { Button } from "../shared/button";
+import { Image } from "../shared/image";
+import When from "../when/when";
+
+type InviteUserDialogProps = {
+  className?: string;
+  teamMemberId?: string;
+  trigger?: ReactElement<{ onClick: () => void }>;
+  open?: boolean;
+  onClose?: () => void;
+};
+
+export const InviteUserFormSchema = z.object({
+  email: z
+    .string()
+    .transform((email) => email.toLowerCase())
+    .refine(validEmail, () => ({
+      message: "Please enter a valid email",
+    })),
+  teamMemberId: z.string().optional(),
+  role: z.preprocess(
+    (value) => String(value).trim().toUpperCase(),
+    z.enum(
+      [
+        OrganizationRoles.ADMIN,
+        OrganizationRoles.BASE,
+        OrganizationRoles.SELF_SERVICE,
+      ],
+      { message: "Please select a role" }
+    )
+  ),
+  inviteMessage: z.string().max(1000).optional(),
+});
+
+const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+  [OrganizationRoles.ADMIN]: "Administrator",
+  [OrganizationRoles.BASE]: "Base",
+  [OrganizationRoles.SELF_SERVICE]: "Self service",
+};
+
+export default function InviteUserDialog({
+  className,
+  trigger,
+  teamMemberId,
+  open = false,
+  onClose,
+}: InviteUserDialogProps) {
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [messageCharCount, setMessageCharCount] = useState(0);
+  const organization = useCurrentOrganization();
+
+  const fetcher =
+    useFetcherWithReset<DataOrErrorResponse<{ success?: boolean }>>();
+
+  const disabled = isFormProcessing(fetcher.state);
+
+  const zo = useZorm("NewQuestionWizardScreen", InviteUserFormSchema);
+
+  /** Handle server-side validation errors as fallback */
+  const validationErrors = getValidationErrors<typeof InviteUserFormSchema>(
+    fetcher.data?.error
+  );
+
+  function openDialog() {
+    setIsDialogOpen(true);
+  }
+
+  const closeDialog = useCallback(() => {
+    zo.form?.reset();
+    setMessageCharCount(0);
+    setIsDialogOpen(false);
+    onClose && onClose();
+  }, [onClose, zo.form]);
+
+  useEffect(
+    function handleSuccess() {
+      // Type narrowing: check for success data (no error, has success flag)
+      if (fetcher.data && !fetcher.data.error && "success" in fetcher.data) {
+        closeDialog();
+        fetcher.reset();
+      }
+    },
+    [closeDialog, fetcher]
+  );
+
+  if (!organization) {
+    return null;
+  }
+
+  return (
+    <>
+      {trigger ? cloneElement(trigger, { onClick: openDialog }) : null}
+
+      <DialogPortal>
+        <Dialog
+          className={className}
+          title={
+            <div className="mt-4 inline-flex items-center justify-center rounded-full border-4 border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+              <UserIcon />
+            </div>
+          }
+          open={isDialogOpen || open}
+          onClose={closeDialog}
+        >
+          <div className="px-6 py-4">
+            <div className="mb-5">
+              <h4>Invite team members</h4>
+              <p>
+                Invite a user to this workspace. Make sure to give them the
+                proper role.
+              </p>
+            </div>
+
+            <fetcher.Form
+              ref={zo.ref}
+              action="/api/settings/invite-user"
+              method="post"
+              className="flex flex-col gap-3"
+            >
+              <When truthy={!!teamMemberId}>
+                <input
+                  type="hidden"
+                  name="teamMemberId"
+                  value={teamMemberId!}
+                />
+              </When>
+
+              <SelectGroup>
+                <SelectLabel className="pl-0">Workspace</SelectLabel>
+                <Select name="organizationId" defaultValue={organization.id}>
+                  <div className="flex h-10 w-full items-center justify-between truncate rounded-md border border-color-300 bg-transparent px-3.5 py-3 text-[16px] text-color-500 placeholder:text-color-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50  [&_span]:max-w-full [&_span]:truncate">
+                    <SelectValue />
+                  </div>
+                  <SelectContent
+                    position="popper"
+                    className="w-full min-w-[300px] max-w-full"
+                    align="start"
+                  >
+                    <div className=" max-h-[320px] overflow-auto ">
+                      <SelectItem
+                        value={organization.id}
+                        key={organization.id}
+                        className="p-2"
+                      >
+                        <div className="flex max-w-full items-center gap-2 truncate">
+                          <Image
+                            imageId={organization.imageId}
+                            alt="img"
+                            className="size-6 rounded-[2px] object-cover"
+                          />
+
+                          <div className=" ml-px max-w-full truncate text-sm text-color-900">
+                            {organization.name}
+                          </div>
+                        </div>
+                      </SelectItem>
+                    </div>
+                  </SelectContent>
+                </Select>
+              </SelectGroup>
+
+              <SelectGroup>
+                <SelectLabel className="pl-0">Role</SelectLabel>
+                <Select name="role">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select user role" />
+                  </SelectTrigger>
+                  <SelectContent
+                    position="popper"
+                    className="w-full min-w-[300px]"
+                    align="start"
+                  >
+                    <div className=" max-h-[320px] overflow-auto">
+                      {Object.entries(organizationRolesMap).map(([k, v]) => (
+                        <SelectItem value={k} key={k} className="p-2">
+                          <div className="flex items-center gap-2">
+                            <div className=" ml-px block text-sm lowercase text-color-900 first-letter:uppercase">
+                              {v}
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </div>
+                  </SelectContent>
+                </Select>
+              </SelectGroup>
+              <When
+                truthy={
+                  !!(
+                    validationErrors?.role?.message || zo.errors.role()?.message
+                  )
+                }
+              >
+                <p className="-mt-1 text-sm text-error-500">
+                  {validationErrors?.role?.message ||
+                    zo.errors?.role()?.message}
+                </p>
+              </When>
+
+              <div className="pt-1.5">
+                <Input
+                  name={zo.fields.email()}
+                  type="email"
+                  autoComplete="email"
+                  disabled={disabled}
+                  error={
+                    validationErrors?.email?.message ||
+                    zo.errors.email()?.message
+                  }
+                  icon="mail"
+                  label={"Email address"}
+                  placeholder="zaans@huisje.com"
+                  required
+                />
+              </div>
+
+              <div className="pt-1.5">
+                <label
+                  htmlFor="inviteMessage"
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                >
+                  Personal Message (Optional)
+                </label>
+                <textarea
+                  id="inviteMessage"
+                  name={zo.fields.inviteMessage()}
+                  rows={4}
+                  maxLength={1000}
+                  disabled={disabled}
+                  aria-describedby="inviteMessage-helper"
+                  className="block w-full rounded-md border border-gray-300 px-3.5 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50"
+                  placeholder="Add a personal note to help them understand why you're inviting them to this workspace..."
+                  onChange={(e) => setMessageCharCount(e.target.value.length)}
+                />
+                <div id="inviteMessage-helper" className="mt-1">
+                  <span className="text-xs text-gray-500">
+                    {messageCharCount} / 1000 characters
+                  </span>
+                  <When
+                    truthy={
+                      !!(
+                        validationErrors?.inviteMessage?.message ||
+                        zo.errors.inviteMessage()?.message
+                      )
+                    }
+                  >
+                    <p className="text-sm text-error-500">
+                      {validationErrors?.inviteMessage?.message ||
+                        zo.errors.inviteMessage()?.message}
+                    </p>
+                  </When>
+                </div>
+              </div>
+
+              <When truthy={!!fetcher?.data?.error}>
+                <p className="text-sm text-error-500">
+                  {fetcher.data?.error?.message}
+                </p>
+              </When>
+
+              <div className="mt-7 flex gap-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  width="full"
+                  disabled={disabled}
+                  onClick={closeDialog}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  width="full"
+                  disabled={disabled}
+                >
+                  Send Invite
+                </Button>
+              </div>
+            </fetcher.Form>
+          </div>
+        </Dialog>
+      </DialogPortal>
+    </>
+  );
+}

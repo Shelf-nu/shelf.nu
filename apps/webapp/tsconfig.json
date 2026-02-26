@@ -1,0 +1,28 @@
+{
+  "include": ["env.d.ts", "**/*.ts", "**/*.tsx", ".react-router/types/**/*"],
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "types": ["@react-router/node", "vitest/globals"],
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "target": "es2022",
+    "strict": true,
+    "allowJs": true,
+    "forceConsistentCasingInFileNames": true,
+    "rootDirs": [".", "./.react-router/types"],
+    "paths": {
+      "~/*": ["./app/*"],
+      "@factories": ["./test/factories"],
+      "@mocks/*": ["./test/mocks/*"],
+      "@mocks": ["./test/mocks"],
+      "@server/*": ["./server/*"]
+    },
+    "skipLibCheck": true,
+    // Remix takes care of building everything in `remix build`.
+    "noEmit": true
+  }
+}

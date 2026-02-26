@@ -1,7 +1,12 @@
 node_modules
 
-/build
-/public/build
+# Webapp build outputs
+apps/webapp/build
+apps/webapp/public/build
+apps/webapp/app/styles/tailwind.css
+
+# Environment files
 .env
 
-/app/styles/tailwind.css
+# Lock file
+pnpm-lock.yaml

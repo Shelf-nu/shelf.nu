@@ -1,0 +1,117 @@
+import type {
+  ActionFunctionArgs,
+  MetaFunction,
+  LoaderFunctionArgs,
+} from "react-router";
+import { data, Link } from "react-router";
+import { z } from "zod";
+import { ImportContent } from "~/components/assets/import-content";
+import Header from "~/components/layout/header";
+import { createAssetsFromContentImport } from "~/modules/asset/service.server";
+import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { csvDataFromRequest } from "~/utils/csv.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { payload, error, parseData } from "~/utils/http.server";
+import { extractCSVDataFromContentImport } from "~/utils/import.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanImportAssets } from "~/utils/subscription.server";
+
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const { organizationId, organizations, canUseBarcodes } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.import,
+      });
+
+    await assertUserCanImportAssets({ organizationId, organizations });
+
+    const { intent } = parseData(
+      await request.clone().formData(),
+      z.object({
+        intent: z.enum(["content"]),
+      })
+    );
+
+    const csvData = await csvDataFromRequest({ request });
+    if (csvData.length < 2) {
+      throw new ShelfError({
+        cause: null,
+        message: "CSV file is empty",
+        additionalData: { intent },
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    const contentData = extractCSVDataFromContentImport(
+      csvData,
+      ASSET_CSV_HEADERS
+    );
+
+    await createAssetsFromContentImport({
+      data: contentData,
+      userId,
+      organizationId,
+      canUseBarcodes,
+    });
+    return payload({ success: true });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return data(error(reason), { status: reason.status });
+  }
+};
+
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const { organizationId, organizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    });
+
+    await assertUserCanImportAssets({ organizationId, organizations });
+
+    return payload({
+      header: {
+        title: "Import assets",
+      },
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw data(error(reason), { status: reason.status });
+  }
+};
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export const handle = {
+  breadcrumb: () => <Link to="/import">Import</Link>,
+};
+
+export default function AssetsImport() {
+  return (
+    <div className="h-full">
+      <Header />
+      <div className="mx-auto flex h-auto w-full max-w-screen-sm flex-col items-center py-10">
+        <ImportContent />
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,16 @@
+npx --no -- commitlint --edit "$1" || {
+  echo ""
+  echo "Commit message doesn't follow Conventional Commits format"
+  echo ""
+  echo "Required format: type(scope?): description"
+  echo ""
+  echo "Examples:"
+  echo "  feat: add user authentication"
+  echo "  fix(api): resolve database connection issue"
+  echo "  docs: update README with installation steps"
+  echo "  chore: bump dependencies to latest versions"
+  echo ""
+  echo "Learn more: https://www.conventionalcommits.org"
+  echo ""
+  exit 1
+}

@@ -1,0 +1,824 @@
+import type { ReactNode } from "react";
+import {
+  TierId,
+  type Asset,
+  type Qr,
+  type User,
+  type CustomTierLimit,
+  OrganizationRoles,
+  type UserBusinessIntel,
+  type Prisma,
+} from "@prisma/client";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, useLoaderData, Link, useFetcher } from "react-router";
+
+import { z } from "zod";
+import { Form } from "~/components/custom-form";
+import FormRow from "~/components/forms/form-row";
+import Input from "~/components/forms/input";
+import { Switch } from "~/components/forms/switch";
+import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
+import { Spinner } from "~/components/shared/spinner";
+import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
+import { Table, Td, Th, Tr } from "~/components/table";
+import { DeleteUser } from "~/components/user/delete-user";
+import { config } from "~/config/shelf.config";
+import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
+import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
+import { updateUserTierId } from "~/modules/tier/service.server";
+import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import {
+  payload,
+  error,
+  getParams,
+  isDelete,
+  parseData,
+} from "~/utils/http.server";
+import { requireAdmin } from "~/utils/roles.server";
+import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+import {
+  createStripeCustomer,
+  getOrCreateCustomerId,
+  getStripeCustomer,
+  getStripePricesAndProducts,
+  getCustomerSubscriptionsWithProducts,
+} from "~/utils/stripe.server";
+
+export const meta = () => [{ title: appendToMetaTitle("User details") }];
+
+export type QrCodeWithAsset = Qr & {
+  asset: {
+    title: Asset["title"];
+  };
+};
+
+export type UserWithQrCodes = User & {
+  qrCodes: QrCodeWithAsset[];
+};
+
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { userId: shelfUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    { additionalData: { userId } }
+  );
+  const premiumIsEnabled = config.enablePremiumFeatures;
+
+  try {
+    await requireAdmin(userId);
+
+    const user = await getUserByID(shelfUserId, {
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        profilePicture: true,
+        createdAt: true,
+        updatedAt: true,
+        tierId: true,
+        skipSubscriptionCheck: true,
+        customerId: true,
+        usedFreeTrial: true,
+        sso: true,
+        onboarded: true,
+        createdWithInvite: true,
+        hasUnpaidInvoice: true,
+        warnForNoPaymentMethod: true,
+        customTierLimit: {
+          select: {
+            maxOrganizations: true,
+            isEnterprise: true,
+          },
+        },
+        qrCodes: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            createdAt: true,
+            asset: {
+              select: {
+                title: true,
+              },
+            },
+          },
+        },
+        businessIntel: {
+          select: {
+            howDidYouHearAboutUs: true,
+            jobTitle: true,
+            teamSize: true,
+            companyName: true,
+            primaryUseCase: true,
+            currentSolution: true,
+            timeline: true,
+          },
+        },
+      } satisfies Prisma.UserSelect,
+    });
+
+    const userOrganizations = await db.userOrganization
+      .findMany({
+        where: {
+          userId: shelfUserId,
+        },
+        select: {
+          organization: {
+            include: {
+              ssoDetails: true,
+              userOrganizations: {
+                // Include ALL users in each org with SSO enabled so we cna count them
+                where: {
+                  user: {
+                    sso: true,
+                  },
+                },
+                select: {
+                  userId: true,
+                },
+              },
+            },
+          },
+          roles: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load user organizations",
+          additionalData: { userId, shelfUserId },
+          label: "Admin dashboard",
+        });
+      });
+
+    /** Which organizations of the user have SSO enabled */
+    const organizationsOwnedByUserWithSso = userOrganizations.filter(
+      (uo) =>
+        uo.organization.enabledSso &&
+        uo.organization.ssoDetails &&
+        uo.roles.some((role) => role === OrganizationRoles.OWNER)
+    );
+
+    /** Process the data you already have - no second query needed! */
+    const usersByDomain = organizationsOwnedByUserWithSso.reduce(
+      (acc, uo) => {
+        const domain = uo.organization.ssoDetails?.domain;
+
+        if (domain) {
+          if (!acc[domain]) {
+            acc[domain] = new Set<string>();
+          }
+          // Add all SSO users from this organization
+          uo.organization.userOrganizations.forEach((userOrg) => {
+            acc[domain].add(userOrg.userId);
+          });
+        }
+
+        return acc;
+      },
+      {} as Record<string, Set<string>>
+    );
+
+    /** Convert Sets to counts */
+    const ssoUsersByDomain = Object.entries(usersByDomain).reduce(
+      (acc, [domain, userSet]) => {
+        acc[domain] = userSet.size;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    /** Get the Stripe customer */
+    const customerId = premiumIsEnabled
+      ? await getOrCreateCustomerId(user)
+      : null;
+    const customer = customerId
+      ? ((await getStripeCustomer(customerId)) as CustomerWithSubscriptions)
+      : null;
+
+    /* Get the prices, products, and subscriptions from Stripe */
+    const [prices, subscriptionsWithProducts] = await Promise.all([
+      getStripePricesAndProducts(),
+      customerId ? getCustomerSubscriptionsWithProducts(customerId) : [],
+    ]);
+
+    return payload({
+      user,
+      organizations: userOrganizations.map((uo) => uo.organization),
+      ssoUsersByDomain,
+      customer,
+      subscriptionsWithProducts,
+      prices,
+      premiumIsEnabled,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, shelfUserId });
+    throw data(error(reason), { status: reason.status });
+  }
+};
+
+export const handle = {
+  breadcrumb: () => "User details",
+};
+
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { userId: shelfUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    { additionalData: { userId } }
+  );
+
+  try {
+    await requireAdmin(userId);
+
+    const { intent } = parseData(
+      await request.clone().formData(),
+      z.object({
+        intent: z.enum([
+          "updateTier",
+          "updateCustomTierDetails",
+          "createCustomerId",
+          "deleteUser",
+          "toggleSubscriptionCheck",
+          "toggleBooleanField",
+        ]),
+      })
+    );
+
+    switch (intent) {
+      case "updateTier": {
+        const { tierId } = parseData(
+          await request.formData(),
+          z.object({
+            tierId: z.nativeEnum(TierId),
+          })
+        );
+
+        // Get current tier before updating
+        const currentUser = await db.user.findUniqueOrThrow({
+          where: { id: shelfUserId },
+          select: { tierId: true },
+        });
+
+        const user = await updateUserTierId(shelfUserId, tierId);
+
+        // Reset personal workspace branding when downgrading from Plus to Free
+        if (currentUser.tierId === TierId.tier_1 && tierId === TierId.free) {
+          await resetPersonalWorkspaceBranding(shelfUserId);
+        }
+
+        sendNotification({
+          title: "Tier updated",
+          message: `The user's tier has been updated successfully to ${user.tierId}`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+
+        break;
+      }
+      case "updateCustomTierDetails": {
+        const { maxOrganizations, isEnterprise } = parseData(
+          await request.formData(),
+          z.object({
+            maxOrganizations: z.string().transform((val) => +val),
+            isEnterprise: z
+              .string()
+              .optional()
+              .transform((val) => (val === "on" ? true : false)),
+          })
+        );
+
+        await db.customTierLimit.upsert({
+          where: { userId: shelfUserId },
+          create: {
+            userId: shelfUserId,
+            maxOrganizations,
+            isEnterprise,
+          },
+          update: {
+            maxOrganizations,
+            isEnterprise,
+          },
+        });
+
+        break;
+      }
+      case "deleteUser":
+        if (isDelete(request)) {
+          await softDeleteUser(shelfUserId);
+
+          sendNotification({
+            title: "User deleted",
+            message: "The user has been deleted successfully",
+            icon: { name: "trash", variant: "error" },
+            senderId: userId,
+          });
+          return payload({ success: true });
+        }
+        break;
+      case "createCustomerId": {
+        const user = await getUserByID(shelfUserId, {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        await createStripeCustomer({
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          userId: user.id,
+        });
+        return payload(null);
+      }
+      case "toggleSubscriptionCheck": {
+        const { skipSubscriptionCheck } = parseData(
+          await request.formData(),
+          z.object({
+            skipSubscriptionCheck: z.coerce.boolean(),
+          })
+        );
+
+        await db.user.update({
+          where: { id: shelfUserId },
+          data: { skipSubscriptionCheck },
+          select: { id: true },
+        });
+
+        sendNotification({
+          title: "Subscription check updated",
+          message: `The user's subscription check has been ${
+            skipSubscriptionCheck ? "disabled" : "enabled"
+          } successfully`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
+      case "toggleBooleanField": {
+        const { fieldName, fieldValue } = parseData(
+          await request.formData(),
+          z.object({
+            fieldName: z.enum(["hasUnpaidInvoice", "warnForNoPaymentMethod"]),
+            fieldValue: z.string().transform((val) => val === "true"),
+          })
+        );
+
+        await db.user.update({
+          where: { id: shelfUserId },
+          data: { [fieldName]: fieldValue },
+          select: { id: true },
+        });
+
+        sendNotification({
+          title: "Field updated",
+          message: `${fieldName} has been set to ${fieldValue}`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
+    }
+
+    return payload(null);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, shelfUserId });
+    return data(error(reason), { status: reason.status });
+  }
+};
+
+export default function Area51UserPage() {
+  const {
+    user,
+    organizations,
+    ssoUsersByDomain,
+    customer,
+    subscriptionsWithProducts,
+    prices,
+    premiumIsEnabled,
+  } = useLoaderData<typeof loader>();
+  const hasCustomTier =
+    user?.tierId === "custom" && user?.customTierLimit !== null;
+  // Extract user type from loader data
+  type User = NonNullable<Awaited<ReturnType<typeof loader>>["user"]>;
+  type BusinessIntel = Pick<
+    UserBusinessIntel,
+    | "howDidYouHearAboutUs"
+    | "jobTitle"
+    | "teamSize"
+    | "companyName"
+    | "primaryUseCase"
+    | "currentSolution"
+    | "timeline"
+  >;
+
+  const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
+    switch (key) {
+      case "tierId":
+        return <TierUpdateForm tierId={user.tierId} />;
+      case "customerId":
+        if (!premiumIsEnabled) return null;
+        return !value ? (
+          <Form className="inline-block" method="POST">
+            <input type="hidden" name="intent" value="createCustomerId" />
+            <Button type="submit" variant="link" size="sm">
+              Create customer ID
+            </Button>
+          </Form>
+        ) : (
+          <>
+            <Button
+              to={`https://dashboard.stripe.com/customers/${value}`}
+              target="_blank"
+              variant={"block-link"}
+            >
+              {value}
+            </Button>
+          </>
+        );
+      case "skipSubscriptionCheck":
+        return (
+          <SubscriptionCheckUpdateForm
+            skipSubscriptionCheck={user.skipSubscriptionCheck}
+          />
+        );
+      case "hasUnpaidInvoice":
+        return (
+          <BooleanToggleForm
+            fieldName="hasUnpaidInvoice"
+            fieldValue={user.hasUnpaidInvoice}
+          />
+        );
+      case "warnForNoPaymentMethod":
+        return (
+          <BooleanToggleForm
+            fieldName="warnForNoPaymentMethod"
+            fieldValue={user.warnForNoPaymentMethod}
+          />
+        );
+      case "createdAt":
+      case "updatedAt":
+        return <DateS date={value as string | Date} />;
+      default:
+        return typeof value === "string"
+          ? value
+          : typeof value === "boolean"
+          ? String(value)
+          : null;
+    }
+  };
+  const renderBusinessIntelValue = (
+    value: BusinessIntel[keyof BusinessIntel]
+  ): ReactNode => {
+    if (value === null || value === undefined) {
+      return "—";
+    }
+
+    if (typeof value === "string" && value.trim().length === 0) {
+      return "—";
+    }
+
+    return value;
+  };
+
+  const hasSubscription = (customer?.subscriptions?.data?.length ?? 0) > 0;
+
+  return user ? (
+    <div>
+      <div>
+        <div className="flex justify-between">
+          <h1>User: {user?.email}</h1>
+          <DeleteUser />
+        </div>
+        <div className="flex gap-4">
+          <div className="w-[400px]">
+            <ul className="mt-5">
+              {user
+                ? Object.entries(user)
+                    .filter(
+                      ([k, _v]) =>
+                        ![
+                          "qrCodes",
+                          "customTierLimit",
+                          "businessIntel",
+                        ].includes(k)
+                    )
+                    .map(([key, value]) => (
+                      <li key={key}>
+                        <span className="font-semibold">{key}</span>:{" "}
+                        {renderValue(key as keyof User, value)}
+                      </li>
+                    ))
+                : null}
+            </ul>
+            {user.businessIntel ? (
+              <div className="mt-6">
+                <h4 className="font-semibold">Business intel</h4>
+                <ul className="mt-2 space-y-1">
+                  {Object.entries(user.businessIntel).map(([key, value]) => (
+                    <li key={key}>
+                      <span className="font-semibold">{key}</span>:{" "}
+                      {renderBusinessIntelValue(
+                        value as BusinessIntel[keyof BusinessIntel]
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+
+          {hasCustomTier && (
+            <div className="flex w-[400px] flex-col gap-2 bg-color-200 p-4">
+              <CustomTierDetailsForm customTierLimit={user.customTierLimit!} />
+            </div>
+          )}
+          <div>
+            <SsoUsersByDomainTable ssoUsersByDomain={ssoUsersByDomain} />
+          </div>
+          <div>
+            <h3>User subscriptions</h3>
+            {!hasSubscription ? (
+              <div>No subscription found</div>
+            ) : (
+              <SubscriptionsOverview
+                customer={customer}
+                subscriptions={subscriptionsWithProducts}
+                prices={prices}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="mt-10">
+        <Table>
+          <thead>
+            <tr>
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
+                Name
+              </th>
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
+                Type
+              </th>
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
+                Created at
+              </th>
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
+                Is Owner
+              </th>
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
+                SSO
+              </th>
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
+                Workspace disabled
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {organizations.map((org) => (
+              <Tr key={org.id}>
+                <Td>
+                  <Link
+                    to={`/admin-dashboard/org/${org.id}/assets`}
+                    className="underline hover:text-color-500"
+                  >
+                    {org.name}
+                  </Link>
+                </Td>
+                <Td>{org.type}</Td>
+                <Td>
+                  <DateS date={org.createdAt} />
+                </Td>
+                <Td>{org.userId === user.id ? "yes" : "no"}</Td>
+                <Td>{org.enabledSso ? "yes" : "no"}</Td>
+                <Td>{org.workspaceDisabled ? "yes" : "no"}</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+    </div>
+  ) : null;
+}
+
+function TierUpdateForm({ tierId }: { tierId: TierId }) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        void fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="updateTier" />
+
+      <select
+        style={{ all: "revert" }}
+        disabled={disabled}
+        defaultValue={tierId}
+        name="tierId"
+      >
+        {Object.keys(TierId).map((tier) => (
+          <option key={tier} value={tier}>
+            {tier}
+          </option>
+        ))}
+      </select>
+      {disabled && <Spinner />}
+    </fetcher.Form>
+  );
+}
+
+function SubscriptionCheckUpdateForm({
+  skipSubscriptionCheck,
+}: {
+  skipSubscriptionCheck: boolean;
+}) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        void fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="toggleSubscriptionCheck" />
+
+      <input
+        type="checkbox"
+        name="skipSubscriptionCheck"
+        defaultChecked={skipSubscriptionCheck}
+        disabled={disabled}
+      />
+    </fetcher.Form>
+  );
+}
+
+function BooleanToggleForm({
+  fieldName,
+  fieldValue,
+}: {
+  fieldName: string;
+  fieldValue: boolean;
+}) {
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
+  return (
+    <fetcher.Form
+      method="post"
+      onChange={(e) => {
+        const form = e.currentTarget;
+        void fetcher.submit(form);
+      }}
+      className="inline-flex items-center gap-2"
+    >
+      <input type="hidden" name="intent" value="toggleBooleanField" />
+      <input type="hidden" name="fieldName" value={fieldName} />
+
+      <select
+        style={{ all: "revert" }}
+        disabled={disabled}
+        defaultValue={String(fieldValue)}
+        name="fieldValue"
+      >
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+      {disabled && <Spinner />}
+    </fetcher.Form>
+  );
+}
+
+function CustomTierDetailsForm({
+  customTierLimit,
+}: {
+  customTierLimit: Pick<CustomTierLimit, "maxOrganizations" | "isEnterprise">;
+}) {
+  return (
+    <div>
+      <h4>Custom tier details</h4>
+      <p>
+        NOTE: We have more fields but for custom tier for now, the only relevant
+        one is number of workspaces so I only added this to form so we can ship
+        faster. Fields that are not added are: <b>canImportAssets</b>,
+        <b>canExportAssets</b>, <b>maxCustomFields</b>
+      </p>
+      <Form method="post">
+        <FormRow
+          rowLabel="Is Enterprise?"
+          className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+        >
+          <div className="flex items-center gap-3">
+            <Switch
+              name={"isEnterprise"}
+              defaultChecked={customTierLimit.isEnterprise}
+            />
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Max workspaces (organizations)"}
+          className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+          subHeading={
+            "How many workspaces should this user be allowed to create/own? Keep in mind that the user always has 1 Personal workspace so you need to do the desired number + 1."
+          }
+          required
+        >
+          <Input
+            label="Max workspaces (organizations)"
+            name="maxOrganizations"
+            type="number"
+            min={1}
+            max={1000}
+            hideLabel
+            className="disabled my-2 w-full"
+            defaultValue={customTierLimit.maxOrganizations}
+            required
+          />
+        </FormRow>
+
+        <Button type="submit" name="intent" value="updateCustomTierDetails">
+          Save
+        </Button>
+      </Form>
+    </div>
+  );
+}
+
+interface SsoUsersByDomainTableProps {
+  ssoUsersByDomain: Record<string, number>;
+}
+const SsoUsersByDomainTable = ({
+  ssoUsersByDomain,
+}: SsoUsersByDomainTableProps) => {
+  // Convert object to array and sort by domain name for consistent display
+  const sortedDomains = Object.entries(ssoUsersByDomain).sort(
+    ([domainA], [domainB]) => domainA.localeCompare(domainB)
+  );
+
+  if (sortedDomains.length === 0) {
+    return (
+      <div className="p-4 text-center text-color-500">
+        No SSO users found in workspaces owned by this user.
+      </div>
+    );
+  }
+
+  const totalUsers = sortedDomains.reduce((sum, [, count]) => sum + count, 0);
+
+  return (
+    <div className="flex flex-col bg-color-200 p-4">
+      <h4>SSO user count</h4>
+
+      <div className="">
+        <table className="w-full border">
+          <thead className="bg-color-50">
+            <Tr>
+              <Th className="">Domain</Th>
+              <Th className="whitespace-nowrap">SSO Users</Th>
+            </Tr>
+          </thead>
+          <tbody className="divide-y divide-color-200">
+            {sortedDomains.map(([domain, userCount]) => (
+              <Tr key={domain} className="transition-colors hover:bg-color-50">
+                <Td className="max-w-none">{domain}</Td>
+                <Td className="text-right">{userCount.toLocaleString()}</Td>
+              </Tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t-2 border-color-200 bg-color-50">
+            <Tr>
+              <Td className="text-color-800 px-4 py-3 text-sm font-semibold">
+                Total
+              </Td>
+              <Td className="text-color-800 px-4 py-3 text-right font-mono text-sm font-semibold">
+                {totalUsers.toLocaleString()}
+              </Td>
+            </Tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+};

@@ -36,22 +36,23 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
-      - name: ⎔ Setup node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
         with:
-          useLockFile: false
+          node-version: 22
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
 
       - name: 🔬 Lint
-        run: npm run lint
+        run: pnpm run lint
 
   typecheck:
     needs: authorize
@@ -62,22 +63,23 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
-      - name: ⎔ Setup node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
         with:
-          useLockFile: false
+          node-version: 22
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
 
       - name: 🔎 Type check
-        run: npm run typecheck --if-present
+        run: pnpm run typecheck
 
   vitest:
     needs: authorize
@@ -88,22 +90,26 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
-      - name: ⎔ Setup node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
         with:
-          useLockFile: false
+          node-version: 22
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: 🔧 Generate Prisma client
+        run: pnpm --filter @shelf/database run db:generate
 
       - name: ⚡ Run vitest
-        run: npm run test
+        run: pnpm --filter @shelf/webapp test -- --run
 
   # playwright:
   #   needs: authorize

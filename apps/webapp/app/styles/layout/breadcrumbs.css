@@ -1,0 +1,25 @@
+/** Breadcrumbs */
+.breadcrumbs {
+  @apply flex items-center font-semibold text-gray-600 max-w-full truncate py-4 px-2;
+}
+
+.breadcrumb {
+  @apply flex h-[20px] items-center;
+}
+.breadcrumb:last-child {
+  @apply pointer-events-none text-primary truncate;
+}
+
+.breadcrumb a,
+.breadcrumb span {
+  @apply mb-[-1px] block h-full text-[12px] md:text-[14px];
+}
+
+.breadcrumb a:not(#homeCrumb),
+.breadcrumb .single-crumb {
+  @apply mb-[-3px];
+}
+
+.breadcrumb .single-crumb {
+  @apply w-full truncate;
+}

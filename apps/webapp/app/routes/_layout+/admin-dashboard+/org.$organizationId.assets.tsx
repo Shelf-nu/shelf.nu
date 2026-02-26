@@ -1,0 +1,175 @@
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { z } from "zod";
+import { AssetsList } from "~/components/assets/assets-index/assets-list";
+import {
+  bulkDeleteAssets,
+  getPaginatedAndFilterableAssets,
+  updateAssetsWithBookingCustodians,
+} from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requireAdmin, requirePermission } from "~/utils/roles.server";
+
+export const meta = () => [{ title: appendToMetaTitle("Organization assets") }];
+
+export const loader = async ({
+  request,
+  context,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    { additionalData: { userId } }
+  );
+
+  try {
+    await requireAdmin(userId);
+
+    let {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      assets,
+      totalPages,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      teamMembers,
+      totalTeamMembers,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+    });
+
+    assets = await updateAssetsWithBookingCustodians(assets);
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    return payload({
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      modelName,
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      teamMembers,
+      totalTeamMembers,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, organizationId });
+    throw data(error(reason), { status: reason.status });
+  }
+};
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const formData = await request.formData();
+
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["bulk-delete"]) })
+    );
+
+    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+      "bulk-delete": PermissionAction.delete,
+    };
+
+    const { organizationId, canUseBarcodes, role } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: intent2ActionMap[intent],
+    });
+
+    // Fetch asset index settings to determine mode
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
+    });
+
+    switch (intent) {
+      case "bulk-delete": {
+        const { assetIds, currentSearchParams } = parseData(
+          formData,
+          z
+            .object({ assetIds: z.array(z.string()).min(1) })
+            .and(CurrentSearchParamsSchema)
+        );
+
+        await bulkDeleteAssets({
+          assetIds,
+          organizationId,
+          userId,
+          currentSearchParams,
+          settings,
+        });
+
+        sendNotification({
+          title: "Assets deleted",
+          message: "Your assets has been deleted successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      default: {
+        checkExhaustiveSwitch(intent);
+        return payload(null);
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return data(error(reason), { status: reason.status });
+  }
+}
+
+export default function AdminOrgQrAssets() {
+  return (
+    <>
+      <div className="flex justify-between">
+        <div className="flex items-end gap-3">
+          <h2>Assets</h2>
+        </div>
+      </div>
+      <AssetsList disableBulkActions />
+    </>
+  );
+}

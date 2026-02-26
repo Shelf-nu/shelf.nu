@@ -1,0 +1,66 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "afplay ~/Documents/jobs_done.aiff"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx prettier --write \"$FILE_PATH\""
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(ls:*)",
+      "Bash(npm view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(git status:*)",
+      "Bash(pnpm turbo typecheck:*)",
+      "Bash(pnpm --filter @shelf/webapp exec prisma generate:*)",
+      "Bash(pnpm --filter @shelf/webapp test -- --run)",
+      "Bash(pnpm --filter @shelf/webapp test:*)",
+      "Bash(grep:*)",
+      "Bash(pnpm run typecheck:*)",
+      "Bash(pnpm webapp:validate:*)",
+      "Bash(pnpm --filter @shelf/docs build:*)",
+      "Bash(node -e:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm --filter @shelf/database exec tsc:*)",
+      "Bash(pnpm turbo build:*)",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.stripe.com)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.production)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.test)",
+      "Write(**/.env)",
+      "Write(**/.env.*)"
+    ]
+  }
+}

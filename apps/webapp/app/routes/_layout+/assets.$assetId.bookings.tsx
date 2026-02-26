@@ -1,0 +1,168 @@
+import { BookingStatus } from "@prisma/client";
+import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import { z } from "zod";
+import type { HeaderData } from "~/components/layout/header/types";
+import { hasGetAllValue } from "~/hooks/use-model-filters";
+import {
+  getBookings,
+  getBookingsFilterData,
+} from "~/modules/booking/service.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
+import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
+import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
+import { makeShelfError } from "~/utils/error";
+import {
+  payload,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import { parseMarkdownToReact } from "~/utils/md";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+import BookingsIndexPage, {
+  bookingsSearchFieldTooltipText,
+} from "./bookings._index";
+
+const BOOKING_STATUS_TO_SHOW = [
+  BookingStatus.DRAFT,
+  BookingStatus.COMPLETE,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+  BookingStatus.RESERVED,
+];
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      });
+
+    const searchParams = getCurrentSearchParams(request);
+    const { perPageParam } = getParamsValues(searchParams);
+
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
+
+    const {
+      page,
+      search,
+      status,
+      teamMemberIds,
+      orderBy,
+      orderDirection,
+      selfServiceData,
+      tags: filterTags,
+    } = await getBookingsFilterData({
+      request,
+      canSeeAllBookings,
+      organizationId,
+      userId,
+    });
+
+    const [{ bookings, bookingCount }, teamMembersData, tagsData] =
+      await Promise.all([
+        getBookings({
+          organizationId,
+          page,
+          perPage,
+          search,
+          userId: authSession?.userId,
+          assetIds: [assetId],
+          statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
+          ...selfServiceData,
+          orderBy,
+          orderDirection,
+          custodianTeamMemberIds: teamMemberIds,
+          tags: filterTags,
+          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+        }),
+
+        // team members/custodian
+        getTeamMemberForCustodianFilter({
+          organizationId,
+          selectedTeamMembers: teamMemberIds,
+          getAll:
+            searchParams.has("getAll") &&
+            hasGetAllValue(searchParams, "teamMember"),
+          filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
+          userId,
+        }),
+        getTagsForBookingTagsFilter({
+          organizationId,
+        }),
+      ]);
+
+    const totalPages = Math.ceil(bookingCount / perPage);
+
+    const header: HeaderData = {
+      title: "Bookings",
+    };
+    const modelName = {
+      singular: "booking",
+      plural: "bookings",
+    };
+
+    return data(
+      payload({
+        header,
+        items: bookings,
+        search,
+        page,
+        totalItems: bookingCount,
+        totalPages,
+        perPage,
+        modelName,
+        ...teamMembersData,
+        ...tagsData,
+        searchFieldTooltip: {
+          title: "Search your bookings",
+          text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
+        },
+      }),
+      {
+        headers: [
+          setCookie(await userPrefs.serialize(cookie)),
+          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+        ],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw data(error(reason), { status: reason.status });
+  }
+}
+
+export const handle = {
+  name: "$assetId.bookings",
+};
+
+export default function AssetBookings() {
+  return <BookingsIndexPage className="!mt-0" />;
+}
