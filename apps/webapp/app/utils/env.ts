@@ -16,6 +16,7 @@ declare global {
       CHROME_EXECUTABLE_PATH: string;
       URL_SHORTENER: string;
       FREE_TRIAL_DAYS: string;
+      SENTRY_DSN: string;
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
@@ -162,6 +163,7 @@ export const DIRECT_URL = getEnv("DIRECT_URL", {
   isRequired: false,
 });
 export const SENTRY_DSN = getEnv("SENTRY_DSN", {
+  isSecret: false,
   isRequired: false,
 });
 
@@ -287,5 +289,6 @@ export function getBrowserEnv() {
     FREE_TRIAL_DAYS,
     SUPPORT_EMAIL,
     FULL_CALENDAR_LICENSE_KEY,
+    SENTRY_DSN,
   };
 }

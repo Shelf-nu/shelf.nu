@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import * as Sentry from "@sentry/react-router";
 import { useLocation, useRouteError } from "react-router";
 
 import { isRouteError } from "~/utils/http";
@@ -22,6 +24,15 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
     title = response.data.error.title || "Oops, something went wrong";
     traceId = response.data.error.traceId;
   }
+
+  // Only capture unhandled Error instances client-side.
+  // Route errors from ShelfError are already captured server-side via handleError.
+  const sentryEventId = useMemo(() => {
+    if (response instanceof Error) {
+      return Sentry.captureException(response);
+    }
+    return null;
+  }, [response]);
 
   const error404 = parse404ErrorData(response);
   if (error404.isError404) {
@@ -50,6 +61,9 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
         <h2 className="mb-2">{title}</h2>
         <p className="max-w-[550px]" dangerouslySetInnerHTML={messageHtml} />
         {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
+        {sentryEventId && (
+          <p className="text-gray-400">(Error ID: {sentryEventId})</p>
+        )}
         <div className=" mt-8 flex gap-3">
           <Button to="/" variant="secondary" icon="home">
             Back to home
