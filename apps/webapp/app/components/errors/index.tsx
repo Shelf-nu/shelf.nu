@@ -1,5 +1,7 @@
-import { useLocation, useRouteError } from "react-router";
+import { useState } from "react";
+import { isRouteErrorResponse, useLocation, useRouteError } from "react-router";
 
+import { Check, Copy } from "lucide-react";
 import { isRouteError } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import Error404Handler from "./error-404-handler";
@@ -36,6 +38,13 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
   // Creating a string with <br/> tags for line breaks
   const messageHtml = { __html: message.split("\n").join("<br/>") };
 
+  const errorDetails =
+    response instanceof Error
+      ? `${response.message}\n${response.stack}`
+      : isRouteErrorResponse(response)
+      ? JSON.stringify(response, null, 2)
+      : null;
+
   return (
     <div
       className={tw(
@@ -58,10 +67,43 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
             Reload page
           </Button>
         </div>
+        {errorDetails && (
+          <details className="mt-8 w-full max-w-[550px]">
+            <summary className="cursor-pointer text-sm text-gray-500">
+              Error details (for support)
+            </summary>
+            <div className="relative mt-2">
+              <CopyButton text={errorDetails} />
+              <pre className="max-h-[200px] overflow-auto rounded bg-gray-100 p-3 pr-10 text-left text-xs text-gray-700">
+                {errorDetails}
+              </pre>
+            </div>
+          </details>
+        )}
       </div>
     </div>
   );
 };
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="absolute right-2 top-2 rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+      title="Copy to clipboard"
+    >
+      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+    </button>
+  );
+}
 
 export const ErrorIcon = () => (
   <svg
