@@ -63,7 +63,7 @@ export function ExpectedAssetsList({
           Expected: {stats.totalExpected} • Found: {stats.foundCount} • Missing:{" "}
           {stats.missingCount}
           {stats.unexpectedCount > 0 && (
-            <span className="text-orange-700">
+            <span className="text-warning-700">
               {" "}
               • Unexpected: {stats.unexpectedCount}
             </span>
@@ -100,7 +100,7 @@ export function ExpectedAssetsList({
                 <div
                   key={asset.id}
                   className={tw(
-                    "flex items-center justify-between gap-2 border-b border-color-100 px-3 py-2",
+                    "border-color-100 flex items-center justify-between gap-2 border-b px-3 py-2",
                     "last:border-b-0"
                   )}
                 >
@@ -121,7 +121,7 @@ export function ExpectedAssetsList({
                 <div
                   key={asset.id}
                   className={tw(
-                    "flex items-center justify-between gap-2 border-b border-color-100 px-3 py-2",
+                    "border-color-100 flex items-center justify-between gap-2 border-b px-3 py-2",
                     "last:border-b-0"
                   )}
                 >
@@ -143,12 +143,12 @@ export function ExpectedAssetsList({
 
       {/* Show unexpected assets if any */}
       {stats.unexpectedCount > 0 && (
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-          <p className="text-sm font-medium text-orange-900">
+        <div className="rounded-lg border border-warning-200 bg-warning-50 p-3">
+          <p className="text-sm font-medium text-warning-900">
             ⚠️ {stats.unexpectedCount} unexpected asset
             {stats.unexpectedCount === 1 ? "" : "s"} scanned
           </p>
-          <p className="mt-1 text-xs text-orange-700">
+          <p className="mt-1 text-xs text-warning-700">
             These assets were not expected in this audit but were scanned.
           </p>
         </div>

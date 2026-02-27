@@ -717,6 +717,7 @@ export default function Onboarding() {
             data-test-id="onboard"
             type="submit"
             width="full"
+            variant="accent"
             disabled={disabled}
           >
             Submit

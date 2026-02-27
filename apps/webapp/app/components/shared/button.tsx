@@ -120,9 +120,14 @@ function isLinkProps(props: ButtonProps): props is LinkButtonProps {
  */
 const variants: Record<ButtonVariant, string> = {
   primary: tw(
-    `border-primary bg-primary text-white focus:ring-2`,
+    `border-btn-primary-border bg-btn-primary text-btn-primary-text focus:ring-2`,
     "disabled:opacity-50",
-    "enabled:hover:bg-primary-hover"
+    "enabled:hover:bg-btn-primary-hover"
+  ),
+  accent: tw(
+    `border-btn-accent-border bg-btn-accent text-btn-accent-text focus:ring-2`,
+    "disabled:opacity-50",
+    "enabled:hover:bg-btn-accent-hover"
   ),
   secondary: tw(
     `border-color-300 bg-surface text-color-700`,

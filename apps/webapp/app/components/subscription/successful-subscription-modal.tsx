@@ -70,13 +70,13 @@ export default function SuccessfulSubscriptionModal() {
                           return prev;
                         });
                       }}
-                      variant="primary"
+                      variant="accent"
                     >
                       Create Team workspace
                     </Button>
                   </>
                 ) : (
-                  <Button width="full" to="/assets" variant="primary">
+                  <Button width="full" to="/assets" variant="accent">
                     Get started
                   </Button>
                 )}

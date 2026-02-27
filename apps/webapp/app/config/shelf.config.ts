@@ -24,7 +24,7 @@ export const config: Config = {
     symbolDark: "/static/images/shelf-symbol.png",
   },
   faviconPath: "/static/favicon.ico",
-  emailPrimaryColor: "#EF6820",
+  emailPrimaryColor: "#171717",
   showHowDidYouFindUs: SHOW_HOW_DID_YOU_FIND_US || false,
   collectBusinessIntel:
     COLLECT_BUSINESS_INTEL || SHOW_HOW_DID_YOU_FIND_US || false,

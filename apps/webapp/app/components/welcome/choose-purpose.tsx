@@ -179,6 +179,7 @@ export function ChoosePurpose({
             <Button
               width="full"
               type="submit"
+              variant="accent"
               disabled={disabled}
               data-analytics="cta-start-personal-with-audits"
             >
@@ -189,6 +190,7 @@ export function ChoosePurpose({
           <Button
             to={ctaHref}
             width="full"
+            variant="accent"
             className="mt-8"
             disabled={disabled}
             data-analytics={selectedDetails?.analytics}
@@ -401,7 +403,7 @@ function PlanCard({
       >
         <div className="absolute right-1.5 top-1.5">
           {badgeLabel ? (
-            <Tag className={tw("w-max", " bg-orange-100 text-orange-700")}>
+            <Tag className={tw("w-max", " bg-color-100 text-color-700")}>
               {badgeLabel}
             </Tag>
           ) : null}

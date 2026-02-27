@@ -25,21 +25,33 @@
   --border-color-400: #98a2b3; /* gray-400 */
   --border-color-600: #475467; /* gray-600 */
 
-  /* Primary color */
-  --primary-color: #ef6820;
-  --primary-color-hover: #d92d20;
-  --primary-bg: #ef6820;
-  --primary-bg-hover: #f38744;
-  --primary-bg-50: #fef6ee;
-  --primary-bg-100: #fdead7;
-  --primary-bg-200: #f9dbaf;
-  --primary-bg-700: #ef6820;
-  --primary-text-600: #ef6820;
-  --primary-text-700: #ef6820;
-  --primary-text-800: #932f19;
-  --primary-border-50: #fef6ee;
-  --primary-border-200: #f9dbaf;
-  --primary-border-600: #ef6820;
+  /* Primary color (neutral) */
+  --primary-color: #171717;
+  --primary-color-hover: #2d2d2d;
+  --primary-bg: #171717;
+  --primary-bg-hover: #2d2d2d;
+  --primary-bg-50: #f9fafb;
+  --primary-bg-100: #f2f4f7;
+  --primary-bg-200: #eaecf0;
+  --primary-bg-700: #344054;
+  --primary-text-600: #475467;
+  --primary-text-700: #344054;
+  --primary-text-800: #1d2939;
+  --primary-border-50: #f9fafb;
+  --primary-border-200: #eaecf0;
+  --primary-border-600: #475467;
+
+  /* Neutral button tokens (Vercel-style) */
+  --btn-primary-bg: #171717;
+  --btn-primary-bg-hover: #2d2d2d;
+  --btn-primary-text: #ffffff;
+  --btn-primary-border: #171717;
+
+  /* Accent button tokens (orange, for specific CTAs) */
+  --btn-accent-bg: #ef6820;
+  --btn-accent-bg-hover: #f38744;
+  --btn-accent-text: #ffffff;
+  --btn-accent-border: #ef6820;
 
   /* Opacity-based adaptive colors */
   --bg-soft: color-mix(in srgb, var(--text-color-900) 4%, transparent);
@@ -83,21 +95,33 @@
   --border-color-400: #6a6a71; /* Slightly lighter than text-400 */
   --border-color-600: #98989f; /* Slightly lighter than text-600 */
 
-  /* Primary color */
-  --primary-color: #ff8a50;
-  --primary-color-hover: #ef6820;
-  --primary-bg: #ff8a50;
-  --primary-bg-hover: #ef6820;
-  --primary-bg-50: #2a1f1a; /* Dark variant of primary-50 */
-  --primary-bg-100: #3a2b22; /* Dark variant of primary-100 */
-  --primary-bg-200: #4a3b2f; /* Dark variant of primary-200 */
-  --primary-bg-700: #ff8a50;
-  --primary-text-600: #ff8a50;
-  --primary-text-700: #ff8a50;
-  --primary-text-800: #ffb380;
-  --primary-border-50: #2a1f1a;
-  --primary-border-200: #4a3b2f;
-  --primary-border-600: #ff8a50;
+  /* Primary color (neutral) */
+  --primary-color: #ededed;
+  --primary-color-hover: #d4d4d4;
+  --primary-bg: #ededed;
+  --primary-bg-hover: #d4d4d4;
+  --primary-bg-50: #27272a;
+  --primary-bg-100: #2e2e32;
+  --primary-bg-200: #3c3f44;
+  --primary-bg-700: #ededed;
+  --primary-text-600: #d4d4d4;
+  --primary-text-700: #ededed;
+  --primary-text-800: #f5f5f5;
+  --primary-border-50: #27272a;
+  --primary-border-200: #3c3f44;
+  --primary-border-600: #d4d4d4;
+
+  /* Neutral button tokens — inverted for dark mode */
+  --btn-primary-bg: #ededed;
+  --btn-primary-bg-hover: #d4d4d4;
+  --btn-primary-text: #0a0a0a;
+  --btn-primary-border: #ededed;
+
+  /* Accent button tokens */
+  --btn-accent-bg: #ff8a50;
+  --btn-accent-bg-hover: #ef6820;
+  --btn-accent-text: #ffffff;
+  --btn-accent-border: #ff8a50;
 
   /* Opacity-based adaptive colors - same as light mode, automatically adapt */
   --bg-soft: color-mix(in srgb, var(--text-color-900) 4%, transparent);

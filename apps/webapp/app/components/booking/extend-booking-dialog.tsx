@@ -160,7 +160,7 @@ export default function ExtendBookingDialog({
                 className="mb-4"
               />
               {error && (
-                <p className="mt-1 text-sm text-orange-600">
+                <p className="mt-1 text-sm text-warning-600">
                   Working hours validation unavailable: {error}
                 </p>
               )}

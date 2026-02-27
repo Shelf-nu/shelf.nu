@@ -167,17 +167,17 @@ export default {
         },
         primary: {
           DEFAULT: "var(--primary-color)",
-          25: "#FEFAF5",
-          50: "#FEF6EE",
-          100: "#FDEAD7",
-          200: "#F9DBAF",
-          300: "#F7B27A",
-          400: "#F38744",
-          500: "#EF6820",
-          600: "#EF6820",
-          700: "#EF6820",
-          800: "#932F19",
-          900: "#772917",
+          25: "#FCFCFD",
+          50: "#F9FAFB",
+          100: "#F2F4F7",
+          200: "#EAECF0",
+          300: "#D0D5DD",
+          400: "#98A2B3",
+          500: "#667085",
+          600: "#475467",
+          700: "#344054",
+          800: "#1D2939",
+          900: "#101828",
         },
         error: {
           25: "#FFFBFA",
@@ -279,6 +279,18 @@ export default {
             strong: "#f9fafb", // gray-50
             inverted: "#000000", // black
           },
+        },
+        "btn-primary": {
+          DEFAULT: "var(--btn-primary-bg)",
+          hover: "var(--btn-primary-bg-hover)",
+          text: "var(--btn-primary-text)",
+          border: "var(--btn-primary-border)",
+        },
+        "btn-accent": {
+          DEFAULT: "var(--btn-accent-bg)",
+          hover: "var(--btn-accent-bg-hover)",
+          text: "var(--btn-accent-text)",
+          border: "var(--btn-accent-border)",
         },
         sidebar: {
           DEFAULT: "var(--sidebar-background)",

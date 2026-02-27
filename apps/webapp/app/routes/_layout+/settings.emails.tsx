@@ -400,7 +400,7 @@ function EmailPreview({
             <div
               style={{
                 display: "inline-block",
-                backgroundColor: "#EF6820",
+                backgroundColor: "#171717",
                 color: "white",
                 fontSize: "14px",
                 fontWeight: "700",

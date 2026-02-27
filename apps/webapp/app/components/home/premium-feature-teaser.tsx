@@ -57,7 +57,7 @@ export function PremiumFeatureTeaser({
       </p>
 
       {/* Primary CTA */}
-      <Button to={ctaTo} variant="primary" className="mt-1">
+      <Button to={ctaTo} variant="accent" className="mt-1">
         {ctaLabel}
       </Button>
 

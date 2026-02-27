@@ -236,7 +236,7 @@ export default function SelectPlan() {
                     <Tag
                       className={tw(
                         "w-max",
-                        " absolute right-2 top-2 bg-orange-100 text-orange-700"
+                        " absolute right-2 top-2 bg-color-100 text-color-700"
                       )}
                     >
                       Save 54%
@@ -470,6 +470,7 @@ export default function SelectPlan() {
           type="submit"
           name="intent"
           value="trial"
+          variant="accent"
           disabled={disabled}
           data-analytics="cta-start-trial"
         >

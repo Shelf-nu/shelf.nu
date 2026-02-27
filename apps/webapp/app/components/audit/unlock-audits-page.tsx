@@ -269,7 +269,7 @@ function TrialExpiredCTA({ auditSubInfo }: { auditSubInfo?: AuditSubInfo }) {
       {!auditSubInfo && <div className="mb-4" />}
       <CustomerPortalForm
         buttonText="Add payment method to continue"
-        buttonProps={{ variant: "primary", width: "full" }}
+        buttonProps={{ variant: "accent", width: "full" }}
       />
     </div>
   );
@@ -300,7 +300,7 @@ function OwnerCTAs({
           <input type="hidden" name="priceId" value={yearlyPrice.id} />
           <Button
             type="submit"
-            variant="primary"
+            variant="accent"
             width="full"
             disabled={isStartingTrial}
           >
@@ -318,7 +318,7 @@ function OwnerCTAs({
           <input type="hidden" name="priceId" value={selectedPrice.id} />
           <Button
             type="submit"
-            variant={canStartTrial ? "secondary" : "primary"}
+            variant={canStartTrial ? "secondary" : "accent"}
             width="full"
             disabled={isSubscribing}
           >

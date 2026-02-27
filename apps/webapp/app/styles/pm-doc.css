@@ -31,7 +31,7 @@
 }
 
 .pm-doc a:hover {
-  color: #ef6820;
+  color: var(--text-color-600);
 }
 
 .pm-doc hr {
