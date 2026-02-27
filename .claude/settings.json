@@ -48,10 +48,12 @@
       "Bash(pnpm install:*)",
       "Bash(pnpm --filter @shelf/database exec tsc:*)",
       "Bash(pnpm turbo build:*)",
+      "Bash(pnpm webapp:test:*)",
       "WebSearch",
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:docs.stripe.com)"
+      "WebFetch(domain:docs.stripe.com)",
+      "WebFetch(domain:docs.sentry.io)"
     ],
     "deny": [
       "Read(**/.env)",
