@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import * as Sentry from "@sentry/react-router";
 import { useLocation, useRouteError } from "react-router";
 
@@ -25,16 +25,20 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
     traceId = response.data.error.traceId;
   }
 
+  const error404 = parse404ErrorData(response);
+
   // Only capture unhandled Error instances client-side.
   // Route errors from ShelfError are already captured server-side via handleError.
-  const sentryEventId = useMemo(() => {
-    if (response instanceof Error) {
-      return Sentry.captureException(response);
+  const [sentryEventId, setSentryEventId] = useState<string | null>(null);
+  useEffect(() => {
+    if (
+      response instanceof Error &&
+      !error404.isError404 &&
+      window.env?.SENTRY_DSN
+    ) {
+      setSentryEventId(Sentry.captureException(response));
     }
-    return null;
-  }, [response]);
-
-  const error404 = parse404ErrorData(response);
+  }, [response, error404.isError404]);
   if (error404.isError404) {
     return (
       <Error404Handler
