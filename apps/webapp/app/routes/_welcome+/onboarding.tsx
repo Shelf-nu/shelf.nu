@@ -360,11 +360,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
       existingUser.createdWithInvite || verifiedOrganizationId
     );
 
+    /**
+     * Use only the trusted DB flag to decide whether to skip business intel
+     * validation. The looser `createdWithInvite` (which includes
+     * verifiedOrganizationId) is still used for requireCompanyName to
+     * preserve the original behavior, but it must not gate the entire
+     * business-intel requirement — otherwise a non-invited user could
+     * submit any org ID they belong to and bypass validation.
+     */
     const OnboardingFormSchema = createOnboardingSchema({
       userSignedUpWithPassword: metadata.userSignedUpWithPassword,
       collectBusinessIntel: config.collectBusinessIntel,
       requireCompanyName: !createdWithInvite,
-      createdWithInvite,
+      createdWithInvite: existingUser.createdWithInvite,
     });
 
     const payload = parseData(formData, OnboardingFormSchema);
