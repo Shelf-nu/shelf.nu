@@ -279,9 +279,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const title = "Set up your account";
-    const subHeading = createdWithInvite
-      ? "You are almost ready to use Shelf. We just need some basic information to get you started."
-      : "You are almost ready to use Shelf. We just need some basic information to get you started.";
+    const subHeading =
+      "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
     return payload({
       title,
