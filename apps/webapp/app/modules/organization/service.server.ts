@@ -519,6 +519,32 @@ export async function toggleBarcodeEnabled({
   }
 }
 
+export async function toggleAuditEnabled({
+  organizationId,
+  auditsEnabled,
+}: {
+  organizationId: string;
+  auditsEnabled: boolean;
+}) {
+  try {
+    return await db.organization.update({
+      where: { id: organizationId },
+      data: {
+        auditsEnabled,
+        auditsEnabledAt: auditsEnabled ? new Date() : null,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while toggling audit functionality. Please try again or contact support.",
+      additionalData: { organizationId, auditsEnabled },
+      label,
+    });
+  }
+}
+
 /**
  * Utility function to parse and validate domains from a comma-separated string
  * @param domainsString - Comma-separated string of domains

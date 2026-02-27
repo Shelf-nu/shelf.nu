@@ -25,7 +25,8 @@ export function useAssetAvailabilityData(items: Items) {
   const { timeZone } = useHints();
 
   const { resources, events } = useMemo(() => {
-    const resources = items.map((item) => ({
+    const safeItems = items ?? [];
+    const resources = safeItems.map((item) => ({
       id: item.id,
       title: item.title,
       extendedProps: {
@@ -38,7 +39,7 @@ export function useAssetAvailabilityData(items: Items) {
       },
     }));
 
-    const events = items
+    const events = safeItems
       .map((asset) => {
         if (!asset.bookings) {
           return [];

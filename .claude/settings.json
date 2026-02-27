@@ -42,6 +42,7 @@
       "Bash(grep:*)",
       "Bash(pnpm run typecheck:*)",
       "Bash(pnpm webapp:validate:*)",
+      "Bash(pnpm webapp:build:*)",
       "Bash(pnpm --filter @shelf/docs build:*)",
       "Bash(node -e:*)",
       "Bash(pnpm install:*)",
