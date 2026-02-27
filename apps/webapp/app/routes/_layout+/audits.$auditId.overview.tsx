@@ -349,10 +349,10 @@ export default function AuditOverview() {
           <Card className="mt-0 px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                <span className="w-2/5 text-[14px] font-medium text-color-900">
                   Status
                 </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                   <AuditStatusBadgeWithOverdue
                     status={session.status}
                     dueDate={session.dueDate}
@@ -360,10 +360,10 @@ export default function AuditOverview() {
                 </div>
               </li>
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                <span className="w-2/5 text-[14px] font-medium text-color-900">
                   Created
                 </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                   <DateS
                     date={session.createdAt}
                     options={{ dateStyle: "short", timeStyle: "short" }}
@@ -372,10 +372,10 @@ export default function AuditOverview() {
               </li>
               {session.dueDate && (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  <span className="w-2/5 text-[14px] font-medium text-color-900">
                     Due date
                   </span>
-                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                  <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                     <DateS
                       date={session.dueDate}
                       options={{ dateStyle: "short", timeStyle: "short" }}
@@ -385,10 +385,10 @@ export default function AuditOverview() {
               )}
               {session.startedAt && (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  <span className="w-2/5 text-[14px] font-medium text-color-900">
                     Started
                   </span>
-                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                  <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                     <DateS
                       date={session.startedAt}
                       options={{ dateStyle: "short", timeStyle: "short" }}
@@ -398,10 +398,10 @@ export default function AuditOverview() {
               )}
               {session.completedAt && (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                  <span className="w-2/5 text-[14px] font-medium text-color-900">
                     Completed
                   </span>
-                  <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                  <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                     <DateS
                       date={session.completedAt}
                       options={{ dateStyle: "short", timeStyle: "short" }}
@@ -410,10 +410,10 @@ export default function AuditOverview() {
                 </li>
               )}
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                <span className="w-2/5 text-[14px] font-medium text-color-900">
                   Created by
                 </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                   <UserBadge
                     name={
                       session.createdBy?.firstName &&
@@ -429,10 +429,10 @@ export default function AuditOverview() {
                 </div>
               </li>
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-2/5 text-[14px] font-medium text-gray-900">
+                <span className="w-2/5 text-[14px] font-medium text-color-900">
                   Assigned to
                 </span>
-                <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
+                <div className="mt-1 w-3/5 text-[14px] text-color-600 md:mt-0">
                   <div className="flex flex-col gap-2">
                     {assignedUsers.length > 0 ? (
                       assignedUsers.map((assignment) => (
@@ -456,7 +456,7 @@ export default function AuditOverview() {
                         <InfoTooltip
                           iconClassName="size-4"
                           content={
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-color-600">
                               Any user with access can perform this audit
                               because it has no specific assignee.
                             </p>
@@ -478,7 +478,7 @@ export default function AuditOverview() {
             <InfoTooltip
               iconClassName="size-4"
               content={
-                <p className="mb-3 text-sm text-gray-600">
+                <p className="mb-3 text-sm text-color-600">
                   Images captured during the audit. General images are
                   associated with the audit itself, while asset images are
                   linked to specific assets.
@@ -490,7 +490,7 @@ export default function AuditOverview() {
           {/* General Audit Images */}
           {generalImages.length > 0 && (
             <div className="mb-4">
-              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-color-700">
                 <span className="flex size-5 items-center justify-center rounded bg-primary-50 text-xs text-primary-600">
                   {generalImages.length}
                 </span>
@@ -523,7 +523,7 @@ export default function AuditOverview() {
           {/* Asset-Specific Images */}
           {assetImages.length > 0 && (
             <div className="mb-4">
-              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-color-700">
                 <span className="flex size-5 items-center justify-center rounded bg-blue-50 text-xs text-blue-600">
                   {assetImages.length}
                 </span>
@@ -563,7 +563,7 @@ export default function AuditOverview() {
           {/* No Images State */}
           {generalImages.length === 0 && assetImages.length === 0 && (
             <Card className="mt-0 md:border">
-              <div className="px-4 py-6 text-center text-sm text-gray-500">
+              <div className="px-4 py-6 text-center text-sm text-color-500">
                 No images uploaded
               </div>
             </Card>
@@ -657,7 +657,7 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-color-900 hover:text-color-700"
                   target="_blank"
                   onlyNewTabIconOnHover
                 >
@@ -780,8 +780,8 @@ function StatCard({
       className={tw(
         "rounded-lg border p-4 text-left transition-all hover:shadow-md",
         isActive
-          ? "border-gray-900 bg-gray-900 text-white"
-          : "border-gray-200 bg-white text-gray-900 hover:border-gray-300"
+          ? "border-color-900 bg-color-900 text-white"
+          : "border-color-200 bg-surface text-color-900 hover:border-color-300"
       )}
     >
       <div className="text-sm font-medium">{label}</div>

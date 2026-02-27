@@ -222,7 +222,7 @@ export const TimeSelect: FC<TimeSelectProps> = ({
       >
         <SelectTrigger
           aria-label={ariaLabel || "Select time"}
-          className={`mt-2 w-[110px] px-3.5 py-2 text-left text-sm text-gray-500 md:mt-0 ${
+          className={`mt-2 w-[110px] px-3.5 py-2 text-left text-sm text-color-500 md:mt-0 ${
             className || ""
           } ${error ? "border-error-500 focus:border-error-500" : ""}`}
         >
@@ -240,9 +240,9 @@ export const TimeSelect: FC<TimeSelectProps> = ({
               <SelectItem
                 key={option.value}
                 value={option.value}
-                className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+                className="rounded-none border-b border-color-200 px-6 py-4 pr-[5px]"
               >
-                <span className="mr-4 block text-[14px] text-gray-700">
+                <span className="mr-4 block text-[14px] text-color-700">
                   {option.label}
                 </span>
               </SelectItem>

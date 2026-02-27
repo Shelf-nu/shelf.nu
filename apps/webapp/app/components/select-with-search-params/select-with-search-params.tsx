@@ -69,7 +69,7 @@ export default function SelectWithSearchParams({
       onValueChange={handleValueChange}
       disabled={disabled}
     >
-      <SelectTrigger className="px-3.5 py-2 text-left text-base text-gray-500 md:mt-0 md:max-w-fit">
+      <SelectTrigger className="px-3.5 py-2 text-left text-base text-color-500 md:mt-0 md:max-w-fit">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
 
@@ -81,7 +81,7 @@ export default function SelectWithSearchParams({
           <SelectItemComponent
             key={item.value}
             value={item.value}
-            className="rounded-none border-b border-gray-200 px-6 py-4 pr-1.5 text-gray-700 hover:bg-gray-50"
+            className="rounded-none border-b border-color-200 px-6 py-4 pr-1.5 text-color-700 hover:bg-color-50"
           >
             <span className="mr-4 text-sm">{item.label}</span>
           </SelectItemComponent>

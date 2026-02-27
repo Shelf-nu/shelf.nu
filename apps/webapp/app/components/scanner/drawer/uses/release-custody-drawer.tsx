@@ -395,7 +395,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       tooltipTitle: "Asset is in custody",
       tooltipContent: `This asset is in custody of ${asset.custody?.custodian?.name}.`,
       priority: 110,
-      className: "bg-gray-50 border-gray-200 text-gray-700",
+      className: "bg-color-50 border-color-200 text-color-700",
     },
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
     {
@@ -426,9 +426,9 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       <div className="flex flex-wrap items-center gap-1">
         <span
           className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
+            "inline-block bg-color-50 px-[6px] py-[2px]",
+            "rounded-md border border-color-200",
+            "text-xs text-color-700"
           )}
         >
           asset
@@ -448,7 +448,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       tooltipTitle: "Kit is in custody",
       tooltipContent: `This kit is in custody of ${kit.custody?.custodian?.name}.`,
       priority: 110,
-      className: "bg-gray-50 border-gray-200 text-gray-700",
+      className: "bg-color-50 border-color-200 text-color-700",
     },
     // For release custody, we highlight kits that are NOT in custody (opposite of assign custody)
     {
@@ -473,7 +473,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
-        <span className="text-[12px] font-normal text-gray-700">
+        <span className="text-[12px] font-normal text-color-700">
           ({kit._count.assets} assets)
         </span>
       </p>
@@ -481,9 +481,9 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span
           className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
+            "inline-block bg-color-50 px-[6px] py-[2px]",
+            "rounded-md border border-color-200",
+            "text-xs text-color-700"
           )}
         >
           kit

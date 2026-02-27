@@ -25,13 +25,13 @@ export default function BlockInteractions({
         alt="background"
         className="absolute left-0 top-0 -z-10 size-full object-cover"
       />
-      <div className="flex size-full items-center justify-center bg-white shadow-xl">
+      <div className="flex size-full items-center justify-center bg-surface shadow-xl">
         <div className="max-w-[400px] p-6 text-center">
           <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary">
             {iconsMap[icon]}
           </div>
           <h1 className="text-[18px] font-semibold leading-7">{title}</h1>
-          <p className="text-gray-600">{content}</p>
+          <p className="text-color-600">{content}</p>
           {cta?.to && cta?.text && (
             <Button
               to={cta.to}

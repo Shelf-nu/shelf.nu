@@ -170,7 +170,7 @@ export default function CategoriesPage() {
       <ListContentWrapper>
         <Filters
           slots={{
-            "right-of-search": <TagUseForFilter />,
+            "left-of-search": <TagUseForFilter />,
           }}
         />
         <Outlet />

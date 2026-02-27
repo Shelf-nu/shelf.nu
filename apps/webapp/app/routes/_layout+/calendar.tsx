@@ -250,7 +250,7 @@ export default function Calendar() {
       <BookingFilters className="mt-4" hideSortBy />
 
       <div className="mt-4">
-        <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-4 rounded-t-md border bg-surface px-4 py-3">
           <div className="flex items-center gap-2">
             <TitleContainer
               calendarTitle={calendarHeader.title}
@@ -305,7 +305,7 @@ export default function Calendar() {
               eventMouseLeave={handleEventMouseLeave("dayGridMonth")}
               eventClick={handleEventClick}
               windowResize={handleWindowResize}
-              eventContent={renderEventCard}
+              eventContent={(event) => renderEventCard(event)}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",

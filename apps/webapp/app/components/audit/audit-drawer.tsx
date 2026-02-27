@@ -112,7 +112,7 @@ function AuditDrawerFooter({
   return (
     <div
       className={tw(
-        "flex w-full gap-2 border-t border-gray-200 bg-white p-3",
+        "flex w-full gap-2 border-t border-color-200 bg-surface p-3",
         expanded && "sticky bottom-0"
       )}
     >
@@ -170,9 +170,9 @@ export function AuditDrawer({
     [expectedAssets]
   );
   const assetTypeBadgeClass = tw(
-    "inline-block bg-gray-50 px-[6px] py-[2px]",
-    "rounded-md border border-gray-200",
-    "text-xs text-gray-700"
+    "inline-block bg-color-50 px-[6px] py-[2px]",
+    "rounded-md border border-color-200",
+    "text-xs text-color-700"
   );
 
   const scannedAssets = useMemo(
@@ -246,18 +246,18 @@ export function AuditDrawer({
     }
     return (
       <div className="text-right">
-        <span className="block text-gray-600">
+        <span className="block text-color-600">
           Audit: {contextName} • {stats.foundCount}/{stats.totalExpected} found
           {stats.unexpectedCount > 0 &&
             ` • ${stats.unexpectedCount} unexpected`}
         </span>
         {pendingScanCount > 0 ? (
-          <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          <span className="flex items-center gap-1.5 text-xs text-color-500">
             Saving scans: {pendingScanCount} remaining
             <Spinner className="size-3" />
           </span>
         ) : (
-          <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+          <span className="flex h-5 flex-col justify-center font-medium text-color-900">
             <Progress
               aria-label={`Audit progress: ${stats.foundCount} of ${stats.totalExpected} assets found`}
               value={
@@ -414,7 +414,7 @@ export function AuditDrawer({
               <Button
                 asChild
                 variant="link"
-                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
+                className="text-color-800 text-left font-medium hover:text-color-700 hover:underline"
                 to={`${auditAssetId}/details`}
               >
                 <span className="word-break whitespace-break-spaces">
@@ -465,7 +465,7 @@ export function AuditDrawer({
               <Button
                 asChild
                 variant="link"
-                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
+                className="text-color-800 text-left font-medium hover:text-color-700 hover:underline"
                 to={`${asset.auditAssetId}/details`}
               >
                 <span className="word-break whitespace-break-spaces">
@@ -478,7 +478,7 @@ export function AuditDrawer({
                   badgeText="Pending"
                   tooltipTitle="Pending scan"
                   tooltipContent="This asset is expected but has not been scanned yet."
-                  className="border-gray-200 bg-gray-50 text-gray-600"
+                  className="border-color-200 bg-color-50 text-color-600"
                 />
                 {/* Action buttons for notes and images on pending assets */}
                 {auditSession && (
@@ -544,7 +544,7 @@ export function AuditDrawer({
         })
     : (expanded: boolean) => (
         <div className="py-8 text-center">
-          <p className="text-gray-500">
+          <p className="text-color-500">
             {expanded
               ? `No assets scanned yet. Start scanning to audit this ${contextLabel.toLowerCase()}.`
               : `Scan assets to audit this ${contextLabel.toLowerCase()}...`}

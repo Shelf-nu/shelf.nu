@@ -22,7 +22,7 @@ export function AssetReminderCards({
   }
 
   return (
-    <div className={tw("rounded border bg-white", className)} style={style}>
+    <div className={tw("rounded border bg-surface", className)} style={style}>
       <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <h5>Reminders</h5>
 
@@ -45,7 +45,7 @@ export function AssetReminderCards({
           <div key={reminder.id} className="border-b px-4 py-3">
             <Button
               to={`/assets/${asset.id}/reminders`}
-              className="mb-2 text-gray-700"
+              className="mb-2 text-color-700"
               variant="link"
             >
               {reminder.name}
@@ -54,7 +54,7 @@ export function AssetReminderCards({
               <DateS date={reminder.alertDateTime} includeTime />
             </p>
 
-            <p className="mb-2 text-sm text-gray-600">
+            <p className="mb-2 text-sm text-color-600">
               {reminder.message.substring(0, 1000)}
             </p>
 
@@ -64,7 +64,7 @@ export function AssetReminderCards({
               isAlreadySent={isAlreadySent}
               extraContent={
                 remainingTeamMembers > 0 ? (
-                  <div className="flex size-6 items-center justify-center rounded-full border border-white bg-gray-100 text-xs font-medium">
+                  <div className="flex size-6 items-center justify-center rounded-full border border-white bg-color-100 text-xs font-medium">
                     +{remainingTeamMembers}
                   </div>
                 ) : null

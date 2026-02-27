@@ -20,7 +20,7 @@ export function EnableWorkingHoursForm({
     <Card className="mt-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
-        <p className="text-sm text-gray-600">{header.subHeading}</p>
+        <p className="text-sm text-color-600">{header.subHeading}</p>
       </div>
       <div>
         <fetcher.Form
@@ -45,7 +45,7 @@ export function EnableWorkingHoursForm({
               />
               <label
                 htmlFor={`enableWorkingHours-${zo.fields.enableWorkingHours()}`}
-                className=" hidden text-gray-500"
+                className=" hidden text-color-500"
               >
                 Enable working hours
               </label>

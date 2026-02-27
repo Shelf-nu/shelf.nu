@@ -132,16 +132,16 @@ export function useEditorView(
         raw_block: (node, _view, getPos) => {
           const dom = document.createElement("div");
           dom.className =
-            "raw-block relative rounded border border-dashed border-gray-300 bg-gray-50";
+            "raw-block relative rounded border border-dashed border-color-300 bg-color-50";
           const pre = document.createElement("pre");
           pre.className =
-            "overflow-x-auto whitespace-pre-wrap p-3 text-xs font-mono text-gray-700";
+            "overflow-x-auto whitespace-pre-wrap p-3 text-xs font-mono text-color-700";
           pre.textContent = node.attrs.raw ?? "";
           dom.appendChild(pre);
           const button = document.createElement("button");
           button.type = "button";
           button.className =
-            "absolute right-3 top-3 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 shadow-sm hover:bg-gray-100";
+            "absolute right-3 top-3 rounded border border-color-300 bg-surface px-2 py-1 text-xs text-color-700 shadow-sm hover:bg-color-100";
           button.textContent = "Edit source";
           button.addEventListener("mousedown", (event) =>
             event.preventDefault()

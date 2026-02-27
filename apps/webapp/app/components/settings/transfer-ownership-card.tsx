@@ -116,7 +116,7 @@ export default function TransferOwnershipCard({
       <h4 className="mb-1 text-text-lg font-semibold">
         Transfer workspace ownership
       </h4>
-      <p className="mb-2 text-sm text-gray-600">
+      <p className="mb-2 text-sm text-color-600">
         Transfer workspace to another user. To transfer the workspace, the new
         owner must be already be part of the workspace as an admin.
       </p>
@@ -202,12 +202,12 @@ export default function TransferOwnershipCard({
               <When truthy={!!selectedOwner}>
                 {/* Subscription Info Section */}
                 <When truthy={ownerHasSubscription}>
-                  <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-4">
+                  <div className="mt-4 rounded-md border border-color-200 bg-color-50 p-4">
                     <div className="flex items-center gap-2 font-medium">
                       <Icon icon="coins" />
                       <span>Subscription Information</span>
                     </div>
-                    <p className="mt-2 text-sm text-gray-600">
+                    <p className="mt-2 text-sm text-color-600">
                       You have an active{" "}
                       <span className="font-semibold">
                         "{ownerSubscriptionInfo?.subscriptionName}"
@@ -237,7 +237,7 @@ export default function TransferOwnershipCard({
                           </label>
                           <p
                             id="transferSubscription-description"
-                            className="mt-1 text-gray-500"
+                            className="mt-1 text-color-500"
                           >
                             The new owner will continue with the current billing
                             cycle. They will need to add their own payment
@@ -309,7 +309,7 @@ export default function TransferOwnershipCard({
                       setConfirmationInput(event.target.value);
                     }}
                   />
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-color-500">
                     Expected input: {confirmationOrgName}
                   </p>
                 </div>

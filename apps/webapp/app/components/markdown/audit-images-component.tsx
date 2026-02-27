@@ -53,7 +53,7 @@ export const AuditImagesComponent = React.memo(
       return (
         <div className="my-2 flex items-center gap-2">
           <Spinner className="size-4" />
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-color-500">
             Loading {count} image{count === 1 ? "" : "s"}...
           </span>
         </div>
@@ -70,10 +70,10 @@ export const AuditImagesComponent = React.memo(
               {Array.from({ length: expectedCount }).map((_, i) => (
                 <div
                   key={`deleted-${i}`}
-                  className="flex size-16 items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50"
+                  className="flex size-16 items-center justify-center rounded border border-dashed border-color-300 bg-color-50"
                   title="Image deleted"
                 >
-                  <span className="text-xs text-gray-400">Deleted</span>
+                  <span className="text-xs text-color-400">Deleted</span>
                 </div>
               ))}
             </div>
@@ -83,7 +83,7 @@ export const AuditImagesComponent = React.memo(
 
       // No images expected or error
       return (
-        <div className="my-2 text-sm text-gray-500">No images attached</div>
+        <div className="my-2 text-sm text-color-500">No images attached</div>
       );
     }
 
@@ -114,10 +114,10 @@ export const AuditImagesComponent = React.memo(
             Array.from({ length: missingCount }).map((_, i) => (
               <div
                 key={`deleted-${i}`}
-                className="flex size-16 items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50"
+                className="flex size-16 items-center justify-center rounded border border-dashed border-color-300 bg-color-50"
                 title="Image deleted"
               >
-                <span className="text-xs text-gray-400">Deleted</span>
+                <span className="text-xs text-color-400">Deleted</span>
               </div>
             ))}
         </div>

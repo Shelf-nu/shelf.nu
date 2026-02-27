@@ -82,7 +82,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
     }
 
     if (isLoading || !data || !data.location) {
-      return <p className="text-sm text-gray-500">Loading hierarchy…</p>;
+      return <p className="text-sm text-color-500">Loading hierarchy…</p>;
     }
 
     const { location: currentLocation, ancestors, descendants } = data;
@@ -93,7 +93,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
     return (
       <div className="space-y-3 text-sm">
         <div>
-          <p className="font-semibold text-gray-500">Current location</p>
+          <p className="font-semibold text-color-500">Current location</p>
           <Button
             to={`/locations/${currentLocation.id}`}
             variant="block-link"
@@ -105,7 +105,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
 
         {hasAncestors ? (
           <div>
-            <p className="font-semibold text-gray-500">Parent chain</p>
+            <p className="font-semibold text-color-500">Parent chain</p>
             <div className="mt-2">
               <LocationTree
                 nodes={buildParentChainTree(ancestors, currentLocation)}
@@ -116,13 +116,13 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
         ) : null}
 
         <div>
-          <p className="font-semibold text-gray-500">Child locations</p>
+          <p className="font-semibold text-color-500">Child locations</p>
           {hasChildren ? (
             <div className="mt-2">
               <LocationTree nodes={descendants} />
             </div>
           ) : (
-            <p className="mt-2 text-sm text-gray-600">No child locations.</p>
+            <p className="mt-2 text-sm text-color-600">No child locations.</p>
           )}
         </div>
       </div>
@@ -134,7 +134,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
       <HoverCardTrigger asChild>
         <Tag
           className={tw(
-            "ml-2 inline-flex items-center gap-1 text-gray-700",
+            "ml-2 inline-flex items-center gap-1 text-color-700",
             className
           )}
           onMouseEnter={handleMouseEnter}

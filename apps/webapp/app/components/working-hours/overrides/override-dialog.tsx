@@ -48,7 +48,7 @@ export function NewOverrideDialog() {
           title={
             <div className="-mb-3 w-full pb-6">
               <h3>Create new override</h3>
-              <p className="text-gray-600">
+              <p className="text-color-600">
                 Create a new date override for your working hours.
               </p>
             </div>
@@ -171,7 +171,7 @@ export const WorkingHoursOverrideForm = ({
                   required={isOpen}
                   defaultValue="09:00"
                 />
-                <div className="text-gray-500">-</div>
+                <div className="text-color-500">-</div>
                 <TimeSelect
                   name="closeTime"
                   disabled={disabled}

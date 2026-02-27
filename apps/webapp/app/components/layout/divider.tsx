@@ -23,7 +23,7 @@ export const Divider = ({ className, ...props }: { className?: string }) => {
   return (
     <div
       ref={dividerRef}
-      className={tw("my-2 h-px bg-gray-300", className)}
+      className={tw("bg-color-300 my-2 h-px", className)}
       {...props}
     />
   );

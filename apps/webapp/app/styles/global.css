@@ -1,12 +1,141 @@
 :root {
   --tw-ring-color: #eaf2ff;
-  --sidebar-background: theme(colors.white);
+
+  /* Semantic Color Tokens - Light Mode */
+  --text-color-900: #101828; /* gray-900 */
+  --text-color-700: #344054; /* gray-700 */
+  --text-color-600: #475467; /* gray-600 */
+  --text-color-500: #667085; /* gray-500 */
+  --text-color-400: #98a2b3; /* gray-400 */
+  --text-color-300: #d0d5dd; /* gray-300 */
+
+  --bg-color-25: #fcfcfd; /* gray-25 */
+  --bg-color-50: #f9fafb; /* gray-50 */
+  --bg-color-100: #f2f4f7; /* gray-100 */
+  --bg-color-200: #eaecf0; /* gray-200 */
+  --bg-color-300: #d0d5dd; /* gray-300 */
+  --bg-color-400: #98a2b3; /* gray-400 */
+  --bg-color-500: #667085; /* gray-500 */
+  --bg-color-600: #475467; /* gray-600 */
+  --bg-overlay: rgba(52, 64, 84, 0.5); /* gray-700/50 - for overlays */
+  --bg-surface: #ffffff; /* white */
+
+  --border-color-200: #eaecf0; /* gray-200 (unified border color) */
+  --border-color-300: #d0d5dd; /* gray-300 */
+  --border-color-400: #98a2b3; /* gray-400 */
+  --border-color-600: #475467; /* gray-600 */
+
+  /* Primary color (neutral) */
+  --primary-color: #171717;
+  --primary-color-hover: #2d2d2d;
+  --primary-bg: #171717;
+  --primary-bg-hover: #2d2d2d;
+  --primary-bg-50: #f9fafb;
+  --primary-bg-100: #f2f4f7;
+  --primary-bg-200: #eaecf0;
+  --primary-bg-700: #344054;
+  --primary-text-600: #475467;
+  --primary-text-700: #344054;
+  --primary-text-800: #1d2939;
+  --primary-border-50: #f9fafb;
+  --primary-border-200: #eaecf0;
+  --primary-border-600: #475467;
+
+  /* Neutral button tokens (Vercel-style) */
+  --btn-primary-bg: #171717;
+  --btn-primary-bg-hover: #2d2d2d;
+  --btn-primary-text: #ffffff;
+  --btn-primary-border: #171717;
+
+  /* Accent button tokens (orange, for specific CTAs) */
+  --btn-accent-bg: #ef6820;
+  --btn-accent-bg-hover: #f38744;
+  --btn-accent-text: #ffffff;
+  --btn-accent-border: #ef6820;
+
+  /* Opacity-based adaptive colors */
+  --bg-soft: color-mix(in srgb, var(--text-color-900) 4%, transparent);
+  --bg-muted: color-mix(in srgb, var(--text-color-900) 8%, transparent);
+  --bg-subtle: color-mix(in srgb, var(--text-color-900) 12%, transparent);
+
+  /* Sidebar tokens */
+  --sidebar-background: var(--bg-surface);
   --sidebar-foreground: 240 5.3% 26.1%;
   --sidebar-primary: 240 5.9% 10%;
   --sidebar-primary-foreground: 0 0% 98%;
   --sidebar-accent: 240 4.8% 95.9%;
   --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-border: 220 13% 91%;
+  --sidebar-border: 225 15% 27%; /* Equivalent to border-color-300 in HSL */
+}
+
+.dark {
+  /* VitePress actual dark mode text colors */
+  --text-color-900: #dfdfd6; /* VitePress text-1 (primary) */
+  --text-color-700: color-mix(
+    in srgb,
+    #dfdfd6 92%,
+    transparent
+  ); /* 90% of primary text */
+  --text-color-600: #98989f; /* VitePress text-2 (secondary) */
+  --text-color-500: #8c8c93; /* Closer to 600, less gray */
+  --text-color-400: #6a6a71; /* VitePress text-3 (subtle) */
+  --text-color-300: #52525b; /* Even more subtle */
+
+  --bg-color-25: #27272a; /* Soft elevated background */
+  --bg-color-50: #27272a; /* Soft elevated background */
+  --bg-color-100: #18181b; /* Alt background */
+  --bg-color-200: #18181b; /* Same as 100 for simplicity */
+  --bg-color-300: #18181b; /* Same as 100 for simplicity */
+  --bg-color-600: #98989f; /* VitePress text-2 (secondary) */
+  --bg-overlay: rgba(24, 24, 27, 0.5); /* Dark overlay for backdrops */
+  --bg-surface: #1b1b1f; /* Main background */
+
+  --border-color-200: #2e2e32; /* Subtle borders */
+  --border-color-300: #3c3f44; /* VitePress border */
+  --border-color-400: #6a6a71; /* Slightly lighter than text-400 */
+  --border-color-600: #98989f; /* Slightly lighter than text-600 */
+
+  /* Primary color (neutral) */
+  --primary-color: #ededed;
+  --primary-color-hover: #d4d4d4;
+  --primary-bg: #ededed;
+  --primary-bg-hover: #d4d4d4;
+  --primary-bg-50: #27272a;
+  --primary-bg-100: #2e2e32;
+  --primary-bg-200: #3c3f44;
+  --primary-bg-700: #ededed;
+  --primary-text-600: #d4d4d4;
+  --primary-text-700: #ededed;
+  --primary-text-800: #f5f5f5;
+  --primary-border-50: #27272a;
+  --primary-border-200: #3c3f44;
+  --primary-border-600: #d4d4d4;
+
+  /* Neutral button tokens — inverted for dark mode */
+  --btn-primary-bg: #ededed;
+  --btn-primary-bg-hover: #d4d4d4;
+  --btn-primary-text: #0a0a0a;
+  --btn-primary-border: #ededed;
+
+  /* Accent button tokens */
+  --btn-accent-bg: #ff8a50;
+  --btn-accent-bg-hover: #ef6820;
+  --btn-accent-text: #ffffff;
+  --btn-accent-border: #ff8a50;
+
+  /* Opacity-based adaptive colors - same as light mode, automatically adapt */
+  --bg-soft: color-mix(in srgb, var(--text-color-900) 4%, transparent);
+  --bg-muted: color-mix(in srgb, var(--text-color-900) 8%, transparent);
+  --bg-subtle: color-mix(in srgb, var(--text-color-900) 12%, transparent);
+
+  /* Sidebar tokens */
+  --sidebar-background: var(--bg-surface);
+  --sidebar-foreground: 87 0% 87%;
+  --sidebar-primary: 87 0% 87%;
+  --sidebar-primary-foreground: 210 11% 15%;
+  --sidebar-accent: 210 11% 15%;
+  --sidebar-accent-foreground: 87 0% 87%;
+  --sidebar-border: var(--border-color-300);
 }
 
 html {
@@ -16,8 +145,35 @@ html {
   text-size-adjust: 100%;
 }
 
+/* Override Tailwind's default border color with our semantic token */
+* {
+  border-color: var(--border-color-200);
+}
+
+/* Override form element backgrounds for dark mode */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark input[type="search"],
+.dark input[type="tel"],
+.dark input[type="url"],
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark input:where(:not([type])),
+.dark textarea,
+.dark select {
+  background-color: var(--bg-surface);
+  color: var(--text-color-900);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--text-color-500);
+}
+
 body {
-  @apply bg-white text-text-sm text-gray-900;
+  @apply bg-surface text-text-sm text-color-900;
 }
 
 h1,
@@ -25,7 +181,7 @@ h2,
 h3,
 h4,
 h5 {
-  @apply font-semibold text-gray-900;
+  @apply font-semibold text-color-900;
 }
 
 h1 {
@@ -48,7 +204,13 @@ h5 {
 }
 
 p {
-  @apply font-normal;
+  @apply font-normal text-color-900;
+}
+
+ul,
+ol,
+li {
+  @apply text-color-900;
 }
 
 @keyframes spinner {
@@ -66,6 +228,54 @@ p {
   border: 2px solid #ccc;
   @apply border-t-primary-500;
   animation: spinner 0.6s linear infinite;
+}
+
+.markdown-viewer ul {
+  @apply list-inside list-disc;
+}
+
+.markdown-viewer ol {
+  @apply list-inside list-decimal;
+}
+
+.markdown-viewer a {
+  text-decoration: underline;
+}
+.markdown-viewer a:hover {
+  @apply text-primary;
+}
+
+.markdown-viewer blockquote {
+  @apply border-l-4 border-primary-500 pl-4;
+}
+
+.markdown-viewer h1,
+.markdown-viewer h2,
+.markdown-viewer h3,
+.markdown-viewer h4,
+.markdown-viewer h5,
+.markdown-viewer h6 {
+  @apply mb-1;
+}
+
+.markdown-viewer p:not(:last-child) {
+  @apply mb-4;
+}
+
+.markdown-viewer table {
+  @apply w-full border-collapse rounded text-xs;
+}
+.markdown-viewer table td,
+.markdown-viewer table th {
+  @apply border border-color-200 px-6 py-3 text-color-600;
+}
+
+.markdown-viewer table th {
+  @apply bg-color-50 font-medium text-color-600;
+}
+
+.markdown-viewer table th {
+  @apply font-normal;
 }
 
 .maplibregl-ctrl-bottom-right {
@@ -141,11 +351,11 @@ dialog {
   -moz-appearance: textfield;
 }
 .react-tags {
-  @apply bg-white;
+  @apply bg-surface;
 }
 
 .fill-tremor-content-emphasis {
-  @apply text-[24px] font-medium text-gray-900;
+  @apply text-[24px] font-medium text-color-900;
 }
 
 .onboarding-checklist .completed {
@@ -213,7 +423,7 @@ dialog {
   top: 8px;
   bottom: 11px;
   width: 60px;
-  background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #fff 100%);
+  background: linear-gradient(to right, transparent 0%, var(--bg-surface) 100%);
   pointer-events: none;
   z-index: 1;
   display: none;
@@ -296,5 +506,5 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
 }
 
 .pseudo-border-bottom {
-  @apply after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-[''] hover:bg-gray-100;
+  @apply after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-color-200 after:content-[''] hover:bg-color-100;
 }

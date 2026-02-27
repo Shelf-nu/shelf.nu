@@ -47,7 +47,7 @@ export function createBlockers({
 
     return (
       <motion.div
-        className="bg-gray-25 p-4 text-[12px]"
+        className="bg-color-25 p-4 text-[12px]"
         transition={{ duration: 0.2 }}
         exit={{ opacity: 0 }}
       >
@@ -74,7 +74,7 @@ export function createBlockers({
         </div>
 
         <hr className="my-2" />
-        <ul className="list-inside list-disc text-[12px] text-gray-500">
+        <ul className="list-inside list-disc text-[12px] text-color-500">
           {activeBlockers.map((blocker, index) => (
             <li key={index}>
               {blocker.message(blocker.count)}{" "}

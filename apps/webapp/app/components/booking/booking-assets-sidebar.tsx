@@ -128,9 +128,9 @@ export function BookingAssetsSidebar({
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       {trigger || defaultTrigger}
 
-      <SheetContent className="w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]">
+      <SheetContent className="w-full border-l-0 bg-surface p-0 md:w-[85vw] md:max-w-[85vw]">
         <div className="flex h-screen w-full flex-col">
-          <SheetHeader className="border-color-200 border-b px-6 py-3">
+          <SheetHeader className="border-b border-color-200 px-6 py-3">
             <SheetTitle className="text-left">
               Assets in "{booking.name}"
             </SheetTitle>
@@ -142,7 +142,7 @@ export function BookingAssetsSidebar({
 
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Header matching BookingAssetsColumn */}
-            <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
+            <div className="border border-b-0 bg-surface px-4 pb-3 pt-4 text-left font-normal text-color-600 md:mx-0 md:px-6">
               <h5 className="text-left capitalize">Assets & kits</h5>
               <p>
                 <span>{paginatedItems.length} items</span>
@@ -150,15 +150,15 @@ export function BookingAssetsSidebar({
             </div>
 
             {/* Table structure matching BookingAssetsColumn */}
-            <div className="flex-1 overflow-auto border border-b-0 border-gray-200 bg-white md:mx-0">
+            <div className="flex-1 overflow-auto border border-b-0 border-color-200 bg-surface md:mx-0">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr className="border-b border-gray-200 text-left ">
-                    <th className="px-6 py-3 font-normal text-gray-600">
+                  <tr className="border-b border-color-200 text-left ">
+                    <th className="px-6 py-3 font-normal text-color-600">
                       Name
                     </th>
                     <th className="px-6 py-3"> </th>
-                    <th className="px-6 py-3 font-normal text-gray-600">
+                    <th className="px-6 py-3 font-normal text-color-600">
                       Category
                     </th>
                     <th className="px-6 py-3"> </th>
@@ -177,7 +177,7 @@ export function BookingAssetsSidebar({
                       return (
                         <React.Fragment key={`kit-${item.id}`}>
                           {/* Kit Row */}
-                          <tr className="relative border-b border-gray-200 bg-gray-50">
+                          <tr className="relative border-b border-color-200 bg-color-50">
                             <td className="w-full whitespace-normal p-0 md:p-0">
                               <div className="flex items-center gap-3 px-6 py-4 md:justify-normal md:pr-6">
                                 <KitImage
@@ -193,7 +193,7 @@ export function BookingAssetsSidebar({
                                   <Button
                                     to={`/kits/${kit.id}`}
                                     variant="link"
-                                    className="text-gray-900 hover:text-gray-700"
+                                    className="text-color-900 hover:text-color-700"
                                     target="_blank"
                                     onlyNewTabIconOnHover={true}
                                     aria-label="Go to kit"
@@ -202,7 +202,7 @@ export function BookingAssetsSidebar({
                                       {kit.name}
                                     </div>
                                   </Button>
-                                  <p className="text-sm text-gray-600">
+                                  <p className="text-sm text-color-600">
                                     {item.assets.length} assets
                                   </p>
                                 </div>
@@ -220,7 +220,7 @@ export function BookingAssetsSidebar({
                                 <Button
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
-                                  className="text-center font-bold text-gray-600 hover:text-gray-900"
+                                  className="text-center font-bold text-color-600 hover:text-color-900"
                                   aria-label="Toggle kit expand"
                                 >
                                   <ChevronDownIcon
@@ -240,11 +240,11 @@ export function BookingAssetsSidebar({
                             item.assets.map((asset: any) => (
                               <tr
                                 key={`kit-asset-${asset.id}`}
-                                className="relative border-b border-gray-200"
+                                className="relative border-b border-color-200"
                               >
                                 <td className="w-full whitespace-normal p-0 md:p-0">
-                                  <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
-                                  <div className="flex justify-between gap-3 bg-gray-50/50 px-6 py-4 md:justify-normal md:pr-6">
+                                  <div className="absolute inset-y-0 left-0 h-full w-2 bg-color-100" />
+                                  <div className="bg-color-50/50 flex justify-between gap-3 px-6 py-4 md:justify-normal md:pr-6">
                                     <div className="flex items-center gap-3">
                                       <div className="relative flex size-12 shrink-0 items-center justify-center">
                                         <AssetImage
@@ -257,7 +257,7 @@ export function BookingAssetsSidebar({
                                               asset.mainImageExpiration,
                                           }}
                                           alt={`Image of ${asset.title}`}
-                                          className="size-full rounded-[4px] border border-gray-300 object-cover"
+                                          className="size-full rounded-[4px] border border-color-300 object-cover"
                                           withPreview
                                         />
                                       </div>
@@ -266,7 +266,7 @@ export function BookingAssetsSidebar({
                                           <Button
                                             to={`/assets/${asset.id}`}
                                             variant="link"
-                                            className="text-left font-medium text-gray-900 hover:text-gray-700"
+                                            className="text-left font-medium text-color-900 hover:text-color-700"
                                             target="_blank"
                                             onlyNewTabIconOnHover={true}
                                           >
@@ -286,21 +286,21 @@ export function BookingAssetsSidebar({
                                     </div>
                                   </div>
                                 </td>
-                                <td className="bg-gray-50/50 px-6 py-4"> </td>
-                                <td className="bg-gray-50/50 px-6 py-4">
+                                <td className="bg-color-50/50 px-6 py-4"> </td>
+                                <td className="bg-color-50/50 px-6 py-4">
                                   <CategoryBadge
                                     category={asset.category}
                                     className="whitespace-nowrap"
                                   />
                                 </td>
-                                <td className="bg-gray-50/50 px-6 py-4 pr-4 text-right">
+                                <td className="bg-color-50/50 px-6 py-4 pr-4 text-right">
                                   {" "}
                                 </td>
                               </tr>
                             ))}
 
                           {/* Separator row after kit assets */}
-                          <tr className="kit-separator h-1 bg-gray-100">
+                          <tr className="kit-separator h-1 bg-color-100">
                             <td colSpan={4} className="h-1 p-0"></td>
                           </tr>
                         </React.Fragment>
@@ -312,7 +312,7 @@ export function BookingAssetsSidebar({
                     return (
                       <tr
                         key={`asset-${asset.id}`}
-                        className="border-b border-gray-200"
+                        className="border-b border-color-200"
                       >
                         <td className="w-full whitespace-normal p-0 md:p-0">
                           <div className="flex justify-between gap-3 px-6 py-4 md:justify-normal md:pr-6">
@@ -336,7 +336,7 @@ export function BookingAssetsSidebar({
                                   <Button
                                     to={`/assets/${asset.id}`}
                                     variant="link"
-                                    className="text-left font-medium text-gray-900 hover:text-gray-700"
+                                    className="text-left font-medium text-color-900 hover:text-color-700"
                                     target="_blank"
                                     onlyNewTabIconOnHover={true}
                                   >

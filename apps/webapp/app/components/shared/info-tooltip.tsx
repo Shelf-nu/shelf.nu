@@ -20,7 +20,7 @@ export const InfoTooltip = ({
   <TooltipProvider delayDuration={100}>
     <Tooltip>
       <TooltipTrigger asChild>
-        <i className="inline-block cursor-pointer align-middle text-gray-400 hover:text-gray-700">
+        <i className="inline-block cursor-pointer align-middle text-color-400 hover:text-color-700">
           {icon ? icon : <Info className={tw("size-5", iconClassName)} />}
         </i>
       </TooltipTrigger>

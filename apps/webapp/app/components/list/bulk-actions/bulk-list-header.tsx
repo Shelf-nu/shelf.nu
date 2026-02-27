@@ -74,7 +74,7 @@ export default function BulkListHeader({
     <Th
       className={tw(
         "md:pl-4 md:pr-3",
-        modeIsAdvanced ? "bg-gray-25" : "",
+        modeIsAdvanced ? "bg-color-25" : "",
         modeIsAdvanced && freezeColumn
           ? freezeColumnClassNames.checkboxHeader
           : ""

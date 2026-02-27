@@ -9,6 +9,46 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
+      textColor: {
+        "color-300": "var(--text-color-300)",
+        "color-400": "var(--text-color-400)",
+        "color-500": "var(--text-color-500)",
+        "color-600": "var(--text-color-600)",
+        "color-700": "var(--text-color-700)",
+        "color-900": "var(--text-color-900)",
+        "primary-600": "var(--primary-text-600)",
+        "primary-700": "var(--primary-text-700)",
+        "primary-800": "var(--primary-text-800)",
+        "primary-hover": "var(--primary-color-hover)",
+      },
+      backgroundColor: {
+        "color-25": "var(--bg-color-25)",
+        "color-50": "var(--bg-color-50)",
+        "color-100": "var(--bg-color-100)",
+        "color-200": "var(--bg-color-200)",
+        "color-500": "var(--bg-color-500)",
+        "color-600": "var(--bg-color-600)",
+        overlay: "var(--bg-overlay)",
+        surface: "var(--bg-surface)",
+        soft: "var(--bg-soft)",
+        muted: "var(--bg-muted)",
+        subtle: "var(--bg-subtle)",
+        primary: "var(--primary-bg)",
+        "primary-hover": "var(--primary-bg-hover)",
+        "primary-50": "var(--primary-bg-50)",
+        "primary-100": "var(--primary-bg-100)",
+        "primary-200": "var(--primary-bg-200)",
+        "primary-700": "var(--primary-bg-700)",
+      },
+      borderColor: {
+        "color-200": "var(--border-color-200)",
+        "color-300": "var(--border-color-300)",
+        "color-400": "var(--border-color-400)",
+        "color-600": "var(--border-color-600)",
+        "primary-50": "var(--primary-border-50)",
+        "primary-200": "var(--primary-border-200)",
+        "primary-600": "var(--primary-border-600)",
+      },
       fontSize: {
         "text-xs": [
           "0.75rem",
@@ -106,19 +146,38 @@ export default {
           800: "#1D2939",
           900: "#101828",
         },
+        // Semantic Color Tokens (using CSS variables)
+        "text-color": {
+          300: "var(--text-color-300)",
+          400: "var(--text-color-400)",
+          500: "var(--text-color-500)",
+          600: "var(--text-color-600)",
+          700: "var(--text-color-700)",
+          900: "var(--text-color-900)",
+        },
+        "bg-color": {
+          50: "var(--bg-color-50)",
+          100: "var(--bg-color-100)",
+          200: "var(--bg-color-200)",
+        },
+        "bg-surface": "var(--bg-surface)",
+        "border-color": {
+          200: "var(--border-color-200)",
+          300: "var(--border-color-300)",
+        },
         primary: {
-          DEFAULT: "#EF6820",
-          25: "#FEFAF5",
-          50: "#FEF6EE",
-          100: "#FDEAD7",
-          200: "#F9DBAF",
-          300: "#F7B27A",
-          400: "#F38744",
-          500: "#EF6820",
-          600: "#EF6820",
-          700: "#EF6820",
-          800: "#932F19",
-          900: "#772917",
+          DEFAULT: "var(--primary-color)",
+          25: "#FCFCFD",
+          50: "#F9FAFB",
+          100: "#F2F4F7",
+          200: "#EAECF0",
+          300: "#D0D5DD",
+          400: "#98A2B3",
+          500: "#667085",
+          600: "#475467",
+          700: "#344054",
+          800: "#1D2939",
+          900: "#101828",
         },
         error: {
           25: "#FFFBFA",
@@ -220,6 +279,18 @@ export default {
             strong: "#f9fafb", // gray-50
             inverted: "#000000", // black
           },
+        },
+        "btn-primary": {
+          DEFAULT: "var(--btn-primary-bg)",
+          hover: "var(--btn-primary-bg-hover)",
+          text: "var(--btn-primary-text)",
+          border: "var(--btn-primary-border)",
+        },
+        "btn-accent": {
+          DEFAULT: "var(--btn-accent-bg)",
+          hover: "var(--btn-accent-bg-hover)",
+          text: "var(--btn-accent-text)",
+          border: "var(--btn-accent-border)",
         },
         sidebar: {
           DEFAULT: "var(--sidebar-background)",
@@ -354,6 +425,40 @@ export default {
       pattern:
         /^(fill-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950))$/,
     },
+    // Add semantic color tokens to safelist
+    {
+      pattern: /^(text-color-(?:300|400|500|600|700|900))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(bg-color-(?:50|100|200))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(border-color-(?:200|300|400|600))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(bg-color-(?:25|50|100|200|500|600))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(bg-primary-(?:50|100|200|700))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(text-primary-(?:600|700|800))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    {
+      pattern: /^(border-primary-(?:50|200|600))$/,
+      variants: ["hover", "focus", "active"],
+    },
+    "bg-surface",
+    "bg-overlay",
+    "bg-soft",
+    "bg-muted",
+    "bg-subtle",
   ],
   plugins: [
     require("@tailwindcss/typography"),

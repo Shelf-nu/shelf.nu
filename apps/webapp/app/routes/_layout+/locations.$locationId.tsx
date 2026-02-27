@@ -254,10 +254,10 @@ export default function LocationPage() {
         <div className="w-full space-y-4 md:w-[360px] lg:ml-4">
           {childLocations?.length ? (
             <Card>
-              <div className="text-sm font-semibold text-gray-900">
+              <div className="text-sm font-semibold text-color-900">
                 Child locations
               </div>
-              <div className="mt-3 text-sm text-gray-700">
+              <div className="mt-3 text-sm text-color-700">
                 <LocationTree nodes={childLocations} />
               </div>
             </Card>
@@ -265,21 +265,21 @@ export default function LocationPage() {
 
           {location.description ? (
             <Card className="md:rounded-t-none">
-              <p className=" text-gray-600">{location.description}</p>
+              <p className=" text-color-600">{location.description}</p>
             </Card>
           ) : null}
 
           <TextualDivider text="Details" className="my-8 lg:hidden" />
 
-          <div className="flex items-start justify-between gap-10 rounded border border-gray-200 bg-white px-4 py-5">
-            <span className=" text-xs font-medium text-gray-600">Address</span>
+          <div className="flex items-start justify-between gap-10 rounded border border-color-200 bg-surface px-4 py-5">
+            <span className=" text-xs font-medium text-color-600">Address</span>
             <span className="font-medium">{location.address ?? "-"}</span>
           </div>
 
           {mapData ? (
             <div className="mb-10 mt-4 border">
               <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
-              <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
+              <div className="border border-color-200 p-4 text-center text-text-xs text-color-600">
                 <p>
                   <Button
                     to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
@@ -330,18 +330,18 @@ function LocationBreadcrumbs({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+    <div className="flex flex-wrap items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-color-500">
       {breadcrumbs.map((crumb, index) => (
         <span key={crumb.id} className="flex items-center gap-1">
           <Button
             to={`/locations/${crumb.id}`}
             variant="link"
-            className="h-auto p-0 text-[11px] text-gray-600 hover:text-primary-600"
+            className="h-auto p-0 text-[11px] text-color-600 hover:text-primary-600"
           >
             {crumb.name}
           </Button>
           {index < breadcrumbs.length - 1 && (
-            <span className="text-gray-400" aria-hidden="true">
+            <span className="text-color-400" aria-hidden="true">
               ›
             </span>
           )}

@@ -146,8 +146,8 @@ export default function WorkspacePage() {
   return (
     <div>
       <div className="w-full">
-        <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
-          <h2 className=" text-lg text-gray-900">Workspaces</h2>
+        <div className="mb-2.5 flex items-center justify-between bg-surface md:rounded md:border md:border-color-200 md:px-6 md:py-5">
+          <h2 className=" text-lg text-color-900">Workspaces</h2>
 
           <Button
             to="new"
@@ -166,7 +166,7 @@ export default function WorkspacePage() {
             New workspace
           </Button>
         </div>
-        <div className="flex-1 overflow-x-auto rounded border bg-white">
+        <div className="flex-1 overflow-x-auto rounded border bg-surface">
           <Table>
             <ListHeader>
               <Th className="whitespace-nowrap">Owner</Th>

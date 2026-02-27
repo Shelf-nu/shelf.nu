@@ -519,10 +519,10 @@ const RowComponent = ({
                         align="end"
                         className="md:w-80"
                       >
-                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                        <h2 className="mb-1 text-xs font-semibold text-color-700">
                           Asset is in custody
                         </h2>
-                        <div className="text-wrap text-xs font-medium text-gray-500">
+                        <div className="text-wrap text-xs font-medium text-color-500">
                           Asset is currently in custody of a team member. <br />{" "}
                           Make sure the asset has an Available status in order
                           to add it to this kit.
@@ -547,10 +547,10 @@ const RowComponent = ({
                         align="end"
                         className="md:w-80"
                       >
-                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                        <h2 className="mb-1 text-xs font-semibold text-color-700">
                           Asset is checked out
                         </h2>
-                        <div className="text-wrap text-xs font-medium text-gray-500">
+                        <div className="text-wrap text-xs font-medium text-color-500">
                           Asset is currently in checked out via a booking.{" "}
                           <br /> Make sure the asset has an Available status in
                           order to add it to this kit.
@@ -573,10 +573,10 @@ const RowComponent = ({
                         align="end"
                         className="md:w-80"
                       >
-                        <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                        <h2 className="mb-1 text-xs font-semibold text-color-700">
                           Asset is already part of this kit
                         </h2>
-                        <div className="text-wrap text-xs font-medium text-gray-500">
+                        <div className="text-wrap text-xs font-medium text-color-500">
                           Asset is currently in checked out via a booking and is
                           already part of this kit.
                         </div>
@@ -593,7 +593,7 @@ const RowComponent = ({
       {/* Kit */}
       <Td className={allowCursor}>
         {item.kit?.name ? (
-          <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
+          <div className="flex w-max items-center justify-center rounded-full bg-color-100 px-2 py-1 text-center text-xs font-medium">
             {item.kit.name}
           </div>
         ) : null}

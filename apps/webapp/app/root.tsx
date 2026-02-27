@@ -22,12 +22,17 @@ import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
+import { useTheme } from "./hooks/use-theme";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
 import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
-import { ClientHintCheck, getClientHint } from "./utils/client-hints";
+import {
+  ClientHintCheck,
+  getClientHint,
+  ThemeScript,
+} from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
@@ -82,11 +87,17 @@ export function Layout({ children }: { children: ReactNode }) {
     setHasCookies(navigator.cookieEnabled);
   }, []);
 
+  const theme = useTheme();
+  const htmlClasses = `overflow-hidden ${
+    theme === "dark" ? "dark" : ""
+  }`.trim();
+
   return (
-    <html lang="en" className="overflow-hidden">
+    <html lang="en" className={htmlClasses}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <ThemeScript nonce={nonce} />
         <ClientHintCheck nonce={nonce} />
         <style data-fullcalendar />
         <Meta />

@@ -149,7 +149,7 @@ export function ActionSwitcher() {
             variant="secondary"
             className={tw(
               "py-[7px] text-[12px] font-normal ",
-              open ? "bg-gray-50" : ""
+              open ? "bg-color-50" : ""
             )}
           >
             <ChevronRight className="ml-[2px] inline-block rotate-90" />
@@ -160,11 +160,11 @@ export function ActionSwitcher() {
           <PopoverContent
             align="start"
             className={tw(
-              "z-[999999] mt-2 max-h-[400px] overflow-y-scroll rounded-md border border-gray-200 bg-white"
+              "z-[999999] mt-2 max-h-[400px] overflow-y-scroll rounded-md border border-color-200 bg-surface"
             )}
           >
             <div className="flex items-center border-b">
-              <Search className="ml-4 size-4 text-gray-500" />
+              <Search className="ml-4 size-4 text-color-500" />
               <input
                 ref={searchInputRef}
                 placeholder="Search action..."
@@ -179,17 +179,17 @@ export function ActionSwitcher() {
                 id={`action-option-${index}`}
                 key={action + index}
                 className={tw(
-                  "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  "px-4 py-2 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
                   selectedIndex === index && [
-                    "bg-gray-50",
+                    "bg-color-50",
                     // Add borders only when item is selected
                     "relative",
                     // Top border - exclude for first item
                     index !== 0 &&
-                      "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-gray-200",
+                      "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-color-200",
                     // Bottom border - exclude for last item
                     index !== filteredActions.length - 1 &&
-                      "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
+                      "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-color-200",
                   ]
                 )}
                 role="option"
@@ -199,13 +199,13 @@ export function ActionSwitcher() {
                 onKeyDown={handleActivationKeyPress(() => changeAction(action))}
               >
                 <span className="font-medium">{action}</span>
-                <span className="ml-2 font-normal text-gray-500">
+                <span className="ml-2 font-normal text-color-500">
                   {getActionScope(action)}
                 </span>
               </div>
             ))}
             {filteredActions.length === 0 && (
-              <div className="px-4 py-2 text-[14px] text-gray-500">
+              <div className="px-4 py-2 text-[14px] text-color-500">
                 No columns found
               </div>
             )}

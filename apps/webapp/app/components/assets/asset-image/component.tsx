@@ -4,6 +4,7 @@ import { useFetcher } from "react-router";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import type { loader as refreshImageLoader } from "~/routes/api+/asset.refresh-main-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
@@ -22,6 +23,7 @@ export const AssetImage = ({
 }: AssetImageProps) => {
   const imageFetcher = useFetcher<typeof refreshImageLoader>();
   const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
+  const placeholderImage = usePlaceholderImage();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isImageError, setIsImageError] = useState(false);
@@ -66,12 +68,12 @@ export const AssetImage = ({
   const imageUrl =
     (useThumbnail && currentThumbnail
       ? currentThumbnail
-      : currentMainImage || "/static/images/asset-placeholder.jpg") +
+      : currentMainImage || placeholderImage) +
     (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
   // For preview dialog, also add cache buster only when needed
   const previewImageUrl =
-    (currentMainImage || "/static/images/asset-placeholder.jpg") +
+    (currentMainImage || placeholderImage) +
     (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
   // Safe refresh function that prevents loops
@@ -230,11 +232,11 @@ export const AssetImage = ({
               (imageFetcher.state === "submitting" && !thumbnailImage)))) && (
           <div
             className={tw(
-              "absolute inset-0 flex items-center justify-center bg-gray-100",
+              "absolute inset-0 flex items-center justify-center bg-color-100",
               "transition-opacity"
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner className="[&_.spinner]:before:border-t-color-400" />
           </div>
         )}
 
@@ -263,8 +265,10 @@ export const AssetImage = ({
             className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
             title={
               <div>
-                <div className="text-lg font-semibold text-gray-900">{alt}</div>
-                <div className="text-sm font-normal text-gray-600">
+                <div className="text-lg font-semibold text-color-900">
+                  {alt}
+                </div>
+                <div className="text-sm font-normal text-color-600">
                   1 image(s)
                 </div>
               </div>
@@ -272,10 +276,10 @@ export const AssetImage = ({
           >
             <div
               className={
-                "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
+                "relative z-10 flex h-full flex-col bg-surface shadow-lg md:rounded"
               }
             >
-              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
+              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-color-200 bg-color-50">
                 {/* Always use full-size image in the preview dialog */}
                 <img src={previewImageUrl} className={"max-h-full"} alt={alt} />
               </div>

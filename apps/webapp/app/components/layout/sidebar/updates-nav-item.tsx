@@ -22,7 +22,10 @@ export default function UpdatesNavItem() {
         >
           <div className="relative">
             <BellIcon
-              className={tw("size-4 text-gray-600", isActive && "text-primary")}
+              className={tw(
+                "size-4 text-color-600",
+                isActive && "text-primary"
+              )}
             />
             {hasUnread && (
               <div

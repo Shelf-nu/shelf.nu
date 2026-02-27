@@ -114,7 +114,7 @@ const WorkspaceGeneralEditForms = ({
       <Card className={tw("my-0", className)}>
         <div className="mb-6">
           <h3 className="text-text-lg font-semibold">General</h3>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-color-600">
             Manage general workspace settings.
           </p>
         </div>
@@ -240,14 +240,14 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showShelfBranding"
                 className={tw(
                   "cursor-pointer text-[14px] font-medium",
-                  canHideShelfBranding ? "text-gray-700" : "text-gray-400"
+                  canHideShelfBranding ? "text-color-700" : "text-color-400"
                 )}
               >
                 Display Shelf branding on labels
               </label>
               <p
                 id="showShelfBranding-desc"
-                className="text-[14px] text-gray-600"
+                className="text-[14px] text-color-600"
               >
                 Toggle Shelf branding on downloadable QR and barcode labels.
               </p>
@@ -303,7 +303,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
       <Card className={tw("my-0 w-full", className)}>
         <div className="border-b pb-5">
           <h3 className="text-text-lg font-semibold">Permissions</h3>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-color-600">
             Adjust specific permissions for <b>Self Service</b> and <b>Base</b>{" "}
             users.
           </p>
@@ -332,7 +332,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             />
             <label
               htmlFor={`selfServiceCustody`}
-              className=" hidden text-gray-500"
+              className=" hidden text-color-500"
             >
               Allow
             </label>
@@ -360,7 +360,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             />
             <label
               htmlFor={`selfServiceBookings`}
-              className=" hidden text-gray-500"
+              className=" hidden text-color-500"
             >
               Allow
             </label>
@@ -389,7 +389,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             />
             <label
               htmlFor={`baseUserCustody`}
-              className=" hidden text-gray-500"
+              className=" hidden text-color-500"
             >
               Allow
             </label>
@@ -417,7 +417,7 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             />
             <label
               htmlFor={`baseUserBookings`}
-              className=" hidden text-gray-500"
+              className=" hidden text-color-500"
             >
               Allow
             </label>

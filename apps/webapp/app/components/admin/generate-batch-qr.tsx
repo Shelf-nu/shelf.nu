@@ -21,7 +21,7 @@ export const GenerateBatchQr = () => {
     }
   }
   return (
-    <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
+    <div className="flex w-[400px] flex-col gap-2 bg-color-200 p-4">
       <h3>Generate Batch</h3>
       <Input
         type="name"
@@ -56,7 +56,7 @@ export const GenerateBatchQr = () => {
         >
           Generate & Download batch
         </Button>
-        <p className="mt-2 text-sm text-gray-500">
+        <p className="mt-2 text-sm text-color-500">
           Generates and downloads a batch of unclaimed qr codes. Min 1, Max 1000
         </p>
       </div>

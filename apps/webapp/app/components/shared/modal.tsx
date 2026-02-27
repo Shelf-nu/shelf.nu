@@ -55,7 +55,7 @@ const AlertDialogContent = React.forwardRef<
       <AlertDialogPrimitive.Content
         ref={ref}
         className={tw(
-          "fixed z-[100] flex max-h-[90vh] w-full max-w-md scale-100 flex-col gap-4 rounded bg-white p-6 opacity-100 animate-in fade-in-90 slide-in-from-bottom-10 sm:zoom-in-90 sm:slide-in-from-bottom-0 md:w-full",
+          "fixed z-[100] flex max-h-[90vh] w-full max-w-md scale-100 flex-col gap-4 rounded bg-surface p-6 opacity-100 animate-in fade-in-90 slide-in-from-bottom-10 sm:zoom-in-90 sm:slide-in-from-bottom-0 md:w-full",
           className
         )}
         {...props}
@@ -99,7 +99,7 @@ const AlertDialogTitle = React.forwardRef<
   return (
     <AlertDialogPrimitive.Title
       ref={ref}
-      className={tw("text-lg font-semibold text-gray-900", className)}
+      className={tw("text-lg font-semibold text-color-900", className)}
       {...props}
     />
   );
@@ -112,7 +112,7 @@ const AlertDialogDescription = React.forwardRef<
   return (
     <AlertDialogPrimitive.Description
       ref={ref}
-      className={tw("text-sm text-gray-500", className)}
+      className={tw("text-sm text-color-500", className)}
       {...props}
     />
   );

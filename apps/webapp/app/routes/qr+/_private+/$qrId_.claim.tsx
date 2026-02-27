@@ -137,7 +137,7 @@ export default function QrLink() {
             <h1 className="mb-2 text-[24px] font-semibold">
               Unclaimed QR Code
             </h1>
-            <p className="text-gray-600">
+            <p className="text-color-600">
               Select the workspace for which you want to claim the QR code.
             </p>
           </div>

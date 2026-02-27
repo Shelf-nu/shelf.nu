@@ -65,8 +65,8 @@ export function PresetListItem({
     <div
       id={id}
       className={tw(
-        "group flex items-start gap-2 rounded p-2 hover:bg-gray-50",
-        isSelected && "bg-gray-50"
+        "group flex items-start gap-2 rounded p-2 hover:bg-color-50",
+        isSelected && "bg-color-50"
       )}
     >
       {/* Star button */}
@@ -79,7 +79,7 @@ export function PresetListItem({
         className="flex-1 overflow-hidden text-left"
         title={preset.name}
       >
-        <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-color-900">
           <span className="truncate">{preset.name}</span>
           {/* Loading indicator when applying preset */}
           {isApplying && (
@@ -90,10 +90,10 @@ export function PresetListItem({
           {/* Active indicator - checkmark (only show if not currently applying) */}
           {isActive && !isApplying && (
             <div
-              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-gray-100"
+              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-color-100"
               title="Currently active"
             >
-              <Check className="size-3 text-gray-600" />
+              <Check className="size-3 text-color-600" />
             </div>
           )}
         </div>
@@ -112,7 +112,7 @@ export function PresetListItem({
             e.stopPropagation();
             onRename(preset);
           }}
-          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          className="rounded p-1 text-color-400 hover:bg-color-100 hover:text-color-600"
           title="Rename"
         >
           <Pencil className="size-3.5" />
@@ -128,7 +128,7 @@ export function PresetListItem({
                 e.preventDefault();
               }
             }}
-            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+            className="rounded p-1 text-color-400 hover:bg-red-50 hover:text-red-500"
             title="Delete"
           >
             <Trash2 className="size-3.5" />

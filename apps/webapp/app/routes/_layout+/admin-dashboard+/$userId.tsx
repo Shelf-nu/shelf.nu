@@ -544,7 +544,7 @@ export default function Area51UserPage() {
           </div>
 
           {hasCustomTier && (
-            <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
+            <div className="flex w-[400px] flex-col gap-2 bg-color-200 p-4">
               <CustomTierDetailsForm customTierLimit={user.customTierLimit!} />
             </div>
           )}
@@ -569,22 +569,22 @@ export default function Area51UserPage() {
         <Table>
           <thead>
             <tr>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Name
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Type
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Created at
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Is Owner
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 SSO
               </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+              <th className="border-b p-4 text-left text-color-600 md:px-6">
                 Workspace disabled
               </th>
             </tr>
@@ -595,7 +595,7 @@ export default function Area51UserPage() {
                 <Td>
                   <Link
                     to={`/admin-dashboard/org/${org.id}/assets`}
-                    className="underline hover:text-gray-500"
+                    className="underline hover:text-color-500"
                   >
                     {org.name}
                   </Link>
@@ -779,7 +779,7 @@ const SsoUsersByDomainTable = ({
 
   if (sortedDomains.length === 0) {
     return (
-      <div className="p-4 text-center text-gray-500">
+      <div className="p-4 text-center text-color-500">
         No SSO users found in workspaces owned by this user.
       </div>
     );
@@ -788,31 +788,31 @@ const SsoUsersByDomainTable = ({
   const totalUsers = sortedDomains.reduce((sum, [, count]) => sum + count, 0);
 
   return (
-    <div className="flex flex-col bg-gray-200 p-4">
+    <div className="flex flex-col bg-color-200 p-4">
       <h4>SSO user count</h4>
 
       <div className="">
         <table className="w-full border">
-          <thead className="bg-gray-50">
+          <thead className="bg-color-50">
             <Tr>
               <Th className="">Domain</Th>
               <Th className="whitespace-nowrap">SSO Users</Th>
             </Tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-color-200">
             {sortedDomains.map(([domain, userCount]) => (
-              <Tr key={domain} className="transition-colors hover:bg-gray-50">
+              <Tr key={domain} className="transition-colors hover:bg-color-50">
                 <Td className="max-w-none">{domain}</Td>
                 <Td className="text-right">{userCount.toLocaleString()}</Td>
               </Tr>
             ))}
           </tbody>
-          <tfoot className="border-t-2 border-gray-200 bg-gray-50">
+          <tfoot className="border-t-2 border-color-200 bg-color-50">
             <Tr>
-              <Td className="px-4 py-3 text-sm font-semibold text-gray-800">
+              <Td className="text-color-800 px-4 py-3 text-sm font-semibold">
                 Total
               </Td>
-              <Td className="px-4 py-3 text-right font-mono text-sm font-semibold text-gray-800">
+              <Td className="text-color-800 px-4 py-3 text-right font-mono text-sm font-semibold">
                 {totalUsers.toLocaleString()}
               </Td>
             </Tr>

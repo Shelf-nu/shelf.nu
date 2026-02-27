@@ -19,9 +19,9 @@ export function DashboardEmptyState({
         aria-hidden="true"
         className="h-auto w-[45px]"
       />
-      <div className="text-center font-semibold text-gray-900">{text}</div>
+      <div className="text-center font-semibold text-color-900">{text}</div>
       {subText && (
-        <p className="max-w-[240px] text-center text-sm text-gray-600">
+        <p className="max-w-[240px] text-center text-sm text-color-600">
           {subText}
         </p>
       )}

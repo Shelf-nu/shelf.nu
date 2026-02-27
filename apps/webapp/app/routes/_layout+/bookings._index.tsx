@@ -426,7 +426,7 @@ const ListBookingsContent = ({
                 <Button
                   to={`/bookings/${item.id}`}
                   variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-color-900 hover:text-color-700"
                 >
                   {item.name}
                 </Button>
@@ -476,7 +476,7 @@ const ListBookingsContent = ({
             <span className="word-break mb-1 block font-medium">
               <DateS date={item.from} />
             </span>
-            <span className="block text-gray-600">
+            <span className="block text-color-600">
               <DateS date={item.from} onlyTime />
             </span>
           </div>
@@ -490,7 +490,7 @@ const ListBookingsContent = ({
             <span className="word-break mb-1 block font-medium">
               <DateS date={item.to} />
             </span>
-            <span className="block text-gray-600">
+            <span className="block text-color-600">
               <DateS date={item.to} onlyTime />
             </span>
           </div>
@@ -502,7 +502,7 @@ const ListBookingsContent = ({
           items={item.tags}
           idKey="id"
           labelKey="name"
-          emptyMessage={<div className="text-sm text-gray-500">No tags</div>}
+          emptyMessage={<div className="text-sm text-color-500">No tags</div>}
         />
       </Td>
 

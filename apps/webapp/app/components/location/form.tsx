@@ -210,10 +210,10 @@ export const LocationForm = ({
           }
         >
           <div className="mb-2 block lg:hidden">
-            <div className="text-sm font-medium text-gray-700">
+            <div className="text-sm font-medium text-color-700">
               Parent location
             </div>
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-color-600">
               Optional. Nest this location under an existing one to build
               breadcrumbs.
             </p>

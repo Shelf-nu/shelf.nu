@@ -30,12 +30,12 @@ export function getStatusClasses(
     case "ARCHIVED":
     case "CANCELLED":
       statusClasses = [
-        "md:!text-gray-700",
-        "md:bg-gray-50",
-        "md:border-gray-200",
-        "[&_.fc-daygrid-event-dot]:!border-gray-700",
-        "[&_.fc-list-event-dot]:!border-gray-700",
-        "md:focus:!bg-gray-100",
+        "md:!text-color-700",
+        "md:bg-color-50",
+        "md:border-color-200",
+        "[&_.fc-daygrid-event-dot]:!border-color-700",
+        "[&_.fc-list-event-dot]:!border-color-700",
+        "md:focus:!bg-color-100",
       ];
       break;
     case "RESERVED":
@@ -91,9 +91,9 @@ export function getStatusClasses(
 }
 
 export const statusClassesOnHover: Record<BookingStatus, string> = {
-  DRAFT: "md:!bg-gray-100",
-  ARCHIVED: "md:!bg-gray-100",
-  CANCELLED: "md:!bg-gray-100",
+  DRAFT: "md:!bg-color-100",
+  ARCHIVED: "md:!bg-color-100",
+  CANCELLED: "md:!bg-color-100",
   RESERVED: "md:!bg-blue-100",
   ONGOING: "md:!bg-purple-100",
   OVERDUE: "md:!bg-warning-100",

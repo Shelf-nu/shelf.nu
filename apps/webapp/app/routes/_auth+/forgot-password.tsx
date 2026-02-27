@@ -221,7 +221,7 @@ export default function ForgotPassword() {
                 {!disabled ? "Reset password" : "Sending code..."}
               </Button>
             </Form>
-            <p className="mt-2 text-center text-gray-500">
+            <p className="mt-2 text-center text-color-500">
               Tip: Check your spam folder if you don't see the email within a
               few minutes.
             </p>

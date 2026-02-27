@@ -28,6 +28,7 @@ export const PriceCta = ({ price }: { price: PriceType }) => {
           type="submit"
           name="intent"
           value="subscribe"
+          variant="accent"
           disabled={disabled}
         >
           Upgrade to {price.product.name}

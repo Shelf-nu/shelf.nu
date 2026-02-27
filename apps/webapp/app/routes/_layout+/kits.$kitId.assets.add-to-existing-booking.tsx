@@ -285,10 +285,10 @@ export default function ExistingBooking() {
               ) : null
             }
           />
-          <div className="mt-2 text-gray-500">
-            Only <span className="font-medium text-gray-600">Draft</span> and{" "}
-            <span className="font-medium text-gray-600">Reserved</span> bookings
-            are visible
+          <div className="mt-2 text-color-500">
+            Only <span className="font-medium text-color-600">Draft</span> and{" "}
+            <span className="font-medium text-color-600">Reserved</span>{" "}
+            bookings are visible
           </div>
         </div>
         {actionData?.error && (

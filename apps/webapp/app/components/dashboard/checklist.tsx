@@ -19,7 +19,7 @@ export default function OnboardingChecklist() {
   const { checklistOptions } = useLoaderData<typeof loader>();
 
   return (
-    <div className="mt-6 rounded border bg-white px-4 py-5 lg:px-20 lg:py-16">
+    <div className="mt-6 rounded border bg-surface px-4 py-5 lg:px-20 lg:py-16">
       <div className="mb-8">
         <Heading
           as="h2"
@@ -32,7 +32,7 @@ export default function OnboardingChecklist() {
       <div className="mb-8">
         <div className="mb-4">
           <h4 className=" text-lg font-semibold">Stay organized</h4>
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Organizing your assets improves overview and unlocks the power of
             our filters and search bar.
           </p>
@@ -51,10 +51,10 @@ export default function OnboardingChecklist() {
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
-                    <h6 className="font-medium text-gray-700">
+                    <h6 className="font-medium text-color-700">
                       Create your first asset
                     </h6>
-                    <p className=" text-gray-600">
+                    <p className=" text-color-600">
                       Each asset gets it’s own encrypted QR tag.
                     </p>
                   </div>
@@ -62,7 +62,7 @@ export default function OnboardingChecklist() {
                     <Link
                       to="https://www.shelf.nu/knowledge-base/adding-new-assets"
                       target="_blank"
-                      className=" font-semibold text-gray-600"
+                      className=" font-semibold text-color-600"
                     >
                       Learn more
                     </Link>
@@ -90,10 +90,10 @@ export default function OnboardingChecklist() {
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
-                    <h6 className="font-medium text-gray-700">
+                    <h6 className="font-medium text-color-700">
                       Create a custom category
                     </h6>
-                    <p className=" text-gray-600">
+                    <p className=" text-color-600">
                       View, edit or delete our default categories and build your
                       own.
                     </p>
@@ -102,7 +102,7 @@ export default function OnboardingChecklist() {
                     <Link
                       to="https://www.shelf.nu/knowledge-base/using-categories-to-organize-your-asset-inventory"
                       target="_blank"
-                      className=" font-semibold text-gray-600"
+                      className=" font-semibold text-color-600"
                     >
                       Learn more
                     </Link>
@@ -130,8 +130,8 @@ export default function OnboardingChecklist() {
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
-                    <h6 className="font-medium text-gray-700">Create a tag</h6>
-                    <p className=" text-gray-600">
+                    <h6 className="font-medium text-color-700">Create a tag</h6>
+                    <p className=" text-color-600">
                       Tags are small pieces of information that can be added to
                       assets.
                     </p>
@@ -153,7 +153,7 @@ export default function OnboardingChecklist() {
       <div className="mb-8">
         <div className="mb-4">
           <h4 className=" text-lg font-semibold">Team, custody and bookings</h4>
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Assign custody to your team members. Consider upgrading to Team to
             invite other users to your workspace.
           </p>
@@ -172,10 +172,10 @@ export default function OnboardingChecklist() {
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
-                    <h6 className="font-medium text-gray-700">
+                    <h6 className="font-medium text-color-700">
                       Add a team member
                     </h6>
-                    <p className=" text-gray-600">
+                    <p className=" text-color-600">
                       Track who has custody over an asset by adding your team
                       members to shelf.
                     </p>
@@ -184,7 +184,7 @@ export default function OnboardingChecklist() {
                     <Link
                       to="https://www.shelf.nu/knowledge-base/onboarding-your-team-members"
                       target="_blank"
-                      className=" font-semibold text-gray-600"
+                      className=" font-semibold text-color-600"
                     >
                       Learn more
                     </Link>
@@ -212,10 +212,10 @@ export default function OnboardingChecklist() {
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
-                    <h6 className="font-medium text-gray-700">
+                    <h6 className="font-medium text-color-700">
                       Assign custody over an asset
                     </h6>
-                    <p className=" text-gray-600">
+                    <p className=" text-color-600">
                       View, edit or delete our default categories and build your
                       own.
                     </p>
@@ -224,7 +224,7 @@ export default function OnboardingChecklist() {
                     <Link
                       to="https://www.shelf.nu/knowledge-base/custody-feature-for-long-term-equipment-lend-outs"
                       target="_blank"
-                      className=" font-semibold text-gray-600"
+                      className=" font-semibold text-color-600"
                     >
                       Learn more
                     </Link>
@@ -241,7 +241,7 @@ export default function OnboardingChecklist() {
       <div className="mb-8">
         <div className="mb-4">
           <h4 className=" text-lg font-semibold">Customize your experience</h4>
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Optimize your workflow and use Shelf in way that works for you and
             your organizations.
           </p>
@@ -260,10 +260,10 @@ export default function OnboardingChecklist() {
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
-                    <h6 className="font-medium text-gray-700">
+                    <h6 className="font-medium text-color-700">
                       Create a custom field
                     </h6>
-                    <p className=" text-gray-600">
+                    <p className=" text-color-600">
                       Improve your asset database with custom field types.
                     </p>
                   </div>
@@ -271,7 +271,7 @@ export default function OnboardingChecklist() {
                     <Link
                       to="https://www.shelf.nu/knowledge-base/adding-additional-fields-to-assets"
                       target="_blank"
-                      className=" font-semibold text-gray-600"
+                      className=" font-semibold text-color-600"
                     >
                       Learn more
                     </Link>

@@ -565,7 +565,7 @@ export default function MoveLocationImages() {
   const zo = useZorm("moveLocationImages", MigrationFormSchema);
 
   return (
-    <div className="rounded-md border bg-white p-4">
+    <div className="rounded-md border bg-surface p-4">
       <h2 className="mb-1">Move location images</h2>
       <p className="mb-4">
         Move the location images from the database to Supabase Storage and
@@ -591,7 +591,7 @@ export default function MoveLocationImages() {
               name="shouldFix"
               checked={shouldFix}
               onChange={(e) => setShouldFix(e.target.checked)}
-              className="rounded border-gray-300"
+              className="rounded border-color-300"
             />
             <span className="text-sm">
               Fix corrupted JPEG, PNG and WebP images (converts WebP → JPEG,
@@ -609,7 +609,7 @@ export default function MoveLocationImages() {
 
       {/* Show migration results organized by type */}
       {actionData && (
-        <div className="mt-6 rounded-md border bg-gray-50 p-4">
+        <div className="mt-6 rounded-md border bg-color-50 p-4">
           <h3 className="mb-2 font-semibold">Migration Results:</h3>
           <pre className="whitespace-pre-wrap text-sm">
             {`✅ Successfully moved: ${actionData.moved} images

@@ -283,7 +283,7 @@ export default function OrgPage() {
         </div>
       )}
       <div className="my-5 flex gap-3">
-        <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
+        <div className="flex w-[400px] flex-col gap-2 bg-color-200 p-4">
           <h4>Organization details</h4>
           <ol className="">
             {Object.entries(organization).map(
@@ -300,7 +300,7 @@ export default function OrgPage() {
                 )
             )}
           </ol>
-          <hr className="border-1 border-gray-700" />
+          <hr className="border-1 border-color-700" />
           <h4>Enable SSO</h4>
           <p>Enable or disable SSO functionality for a workspace</p>
           <fetcher.Form
@@ -309,7 +309,7 @@ export default function OrgPage() {
           >
             <div className="flex justify-between gap-3">
               <div>
-                <p className="text-[14px] font-medium text-gray-700">
+                <p className="text-[14px] font-medium text-color-700">
                   Toggle SSO
                 </p>
               </div>
@@ -323,7 +323,7 @@ export default function OrgPage() {
               <input type="hidden" value="toggleSso" name="intent" />
             </div>
           </fetcher.Form>
-          <hr className="border-1 border-gray-700" />
+          <hr className="border-1 border-color-700" />
           <h4>Enable/Disable Barcodes</h4>
           <p>Enable or disable barcode functionality for this workspace</p>
           <fetcher.Form
@@ -332,7 +332,7 @@ export default function OrgPage() {
           >
             <div className="flex justify-between gap-3">
               <div>
-                <p className="text-[14px] font-medium text-gray-700">
+                <p className="text-[14px] font-medium text-color-700">
                   Enable Barcodes
                 </p>
               </div>
@@ -346,7 +346,7 @@ export default function OrgPage() {
               <input type="hidden" value="toggleBarcodes" name="intent" />
             </div>
           </fetcher.Form>
-          <hr className="border-1 border-gray-700" />
+          <hr className="border-1 border-color-700" />
           <h4>Enable/Disabled Workspace</h4>
           <fetcher.Form
             method="post"
@@ -354,7 +354,7 @@ export default function OrgPage() {
           >
             <div className="flex justify-between gap-3">
               <div>
-                <p className="text-[14px] font-medium text-gray-700">
+                <p className="text-[14px] font-medium text-color-700">
                   Disabled Workspace
                 </p>
               </div>
@@ -370,7 +370,7 @@ export default function OrgPage() {
           </fetcher.Form>
         </div>
         {organization.enabledSso ? (
-          <div className="w-[400px] bg-gray-200 p-4">
+          <div className="w-[400px] bg-color-200 p-4">
             <Form method="post">
               <div>
                 <div className=" border-b pb-5">
@@ -461,7 +461,7 @@ export default function OrgPage() {
             </Form>
           </div>
         ) : null}
-        <div className="w-[400px] bg-gray-200 p-4">
+        <div className="w-[400px] bg-color-200 p-4">
           <div className="flex flex-col gap-8">
             <div>
               <h3>Export assets backup</h3>

@@ -165,7 +165,7 @@ export const CustomFieldForm = ({
                 <div className=" max-h-[320px] overflow-auto">
                   {Object.keys(FIELD_TYPE_NAME).map((value) => (
                     <SelectItem value={value} key={value}>
-                      <span className="mr-4 text-[14px] text-gray-700">
+                      <span className="mr-4 text-[14px] text-color-700">
                         {FIELD_TYPE_NAME[value as CustomFieldType]}
                       </span>
                     </SelectItem>
@@ -173,7 +173,7 @@ export const CustomFieldForm = ({
                 </div>
               </SelectContent>
             </Select>
-            <div className="mt-2 flex-1 grow rounded border px-6 py-4 text-[14px] text-gray-600 ">
+            <div className="mt-2 flex-1 grow rounded border px-6 py-4 text-[14px] text-color-600 ">
               <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
             </div>
           </FormRow>
@@ -210,7 +210,7 @@ export const CustomFieldForm = ({
             />
             <label
               htmlFor="custom-field-required"
-              className="text-base font-medium text-gray-700"
+              className="text-base font-medium text-color-700"
             >
               Required
             </label>
@@ -226,8 +226,8 @@ export const CustomFieldForm = ({
               defaultChecked={active === undefined || active}
             />
             <label htmlFor="custom-field-active">
-              <div className="text-base font-medium text-gray-700">Active</div>
-              <p className="text-[14px] text-gray-600">
+              <div className="text-base font-medium text-color-700">Active</div>
+              <p className="text-[14px] text-color-600">
                 Deactivating a field will no longer show it on the asset form
                 and page
               </p>
@@ -264,10 +264,10 @@ export const CustomFieldForm = ({
                 onCheckedChange={setUseCategories}
               />
               <label htmlFor="custom-field-use-categories">
-                <div className="text-base font-medium text-gray-700">
+                <div className="text-base font-medium text-color-700">
                   Use for select categories
                 </div>
-                <p className="text-[14px] text-gray-600">
+                <p className="text-[14px] text-color-600">
                   In case you only want to use this custom field for asset with
                   certain categories.
                 </p>

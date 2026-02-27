@@ -30,8 +30,8 @@ export const PageNumber = ({ number }: { number: number }) => {
       <NavLink
         to={to}
         className={tw(
-          "rounded-[8px] px-4 py-[10px] text-gray-600 hover:bg-gray-50 hover:text-gray-800",
-          isActive ? "pointer-events-none bg-gray-50 text-gray-800" : ""
+          "hover:text-color-800 rounded-[8px] px-4 py-[10px] text-color-600 hover:bg-color-50",
+          isActive ? "text-color-800 pointer-events-none bg-color-50" : ""
         )}
       >
         {number}

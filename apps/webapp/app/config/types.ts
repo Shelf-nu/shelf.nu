@@ -21,7 +21,9 @@ export interface Config {
    */
   logoPath?: {
     fullLogo: string;
+    fullLogoDark: string;
     symbol: string;
+    symbolDark: string;
   };
 
   /**

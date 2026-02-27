@@ -24,7 +24,7 @@ export function InnerLabel({
     <div
       className={tw(
         `inner-label`,
-        `mb-[6px] text-text-sm font-medium text-gray-700`,
+        `mb-[6px] text-text-sm font-medium text-color-700`,
         hideLg && "lg:hidden",
         hideMd && "md:hidden",
         required && "required-input-label",

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import _ from "lodash";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, X } from "lucide-react";
 import { ReactTags } from "react-tag-autocomplete";
 import type { Tag } from "react-tag-autocomplete";
 import { tw } from "~/utils/tw";
@@ -94,12 +94,12 @@ export default function MultiSelect<T>({
           <When truthy={!!tooltip}>
             <Tooltip>
               <TooltipTrigger>
-                <InfoIcon className="size-4 text-gray-500" />
+                <InfoIcon className="size-4 text-color-500" />
               </TooltipTrigger>
 
               <TooltipContent className="max-w-xs">
                 <h6>{tooltip?.title}</h6>
-                <p className="text-sm text-gray-600">{tooltip?.content}</p>
+                <p className="text-sm text-color-600">{tooltip?.content}</p>
               </TooltipContent>
             </Tooltip>
           </When>
@@ -118,9 +118,9 @@ export default function MultiSelect<T>({
           renderRoot={({ children, isDisabled }) => (
             <div
               className={tw(
-                "relative w-full max-w-full rounded border border-gray-300 text-base text-gray-900 shadow outline-none placeholder:text-gray-900 focus:border-primary-300 focus:ring-0",
+                "relative w-full max-w-full rounded border border-color-300 text-base text-color-900 shadow outline-none placeholder:text-color-900 focus:border-primary-300 focus:ring-0",
                 isDisabled &&
-                  "cursor-not-allowed border-gray-300 bg-gray-50 placeholder:text-gray-300",
+                  "cursor-not-allowed border-color-300 bg-color-50 placeholder:text-color-300",
                 selected.length === 0 ? "px-3.5 py-2" : "px-3.5 py-1.5"
               )}
             >
@@ -130,9 +130,22 @@ export default function MultiSelect<T>({
           renderInput={({ ...props }) => (
             <input
               {..._.omit(props, ["inputWidth", "classNames"])}
-              className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-gray-300"
+              className={tw(
+                "border-none !bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-color-300"
+              )}
               disabled={disabled}
             />
+          )}
+          renderTag={({ tag, ...props }) => (
+            <span className="mb-1 inline-flex items-center justify-center rounded-2xl bg-muted px-[8px] py-[2px] text-center text-[12px] font-medium text-color-700">
+              {tag.label}
+              <button
+                {...props}
+                className="ml-1 inline-flex items-center justify-center rounded-full hover:bg-soft focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
           )}
         />
 

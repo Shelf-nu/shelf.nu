@@ -19,7 +19,7 @@ export const NoSubscription = () => {
           </i>
         </div>
         <h2 className="mb-2">Workspace disabled</h2>
-        <p className="max-w-[550px] text-gray-600">
+        <p className="max-w-[550px] text-color-600">
           {userIsOwner
             ? "The subscription for this workspace has expired and is therefore set to inactive. Renew your subscription to start using this Team workspace again."
             : "The subscription for this workspace has expired and is therefore set to inactive. Please contact the owner of the workspace for more information."}

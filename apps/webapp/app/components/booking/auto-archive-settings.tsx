@@ -54,7 +54,7 @@ export function AutoArchiveSettings({
     <Card className="my-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
-        <p className="text-sm text-gray-600">{header.subHeading}</p>
+        <p className="text-sm text-color-600">{header.subHeading}</p>
       </div>
       <div>
         {/* Toggle form - auto-submits on change */}

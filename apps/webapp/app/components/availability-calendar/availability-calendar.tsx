@@ -45,7 +45,6 @@ export default function AvailabilityCalendar({
   const { singular, plural } = modelName;
   const calendarRef = useRef<FullCalendar>(null);
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
-
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
     subtitle?: string;
@@ -95,7 +94,7 @@ export default function AvailabilityCalendar({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
+      <div className="flex items-center justify-between gap-4 rounded-t-md border bg-surface px-4 py-3">
         <TitleContainer
           calendarTitle={calendarHeader.title}
           calendarSubtitle={calendarHeader.subtitle}
@@ -149,7 +148,7 @@ export default function AvailabilityCalendar({
                 <div className="px-2 py-1">
                   <div
                     className={tw(
-                      "text-left text-text-sm font-semibold capitalize text-gray-900"
+                      "text-left text-text-sm font-semibold capitalize text-color-900"
                     )}
                   >
                     {plural}
@@ -158,7 +157,7 @@ export default function AvailabilityCalendar({
                     {perPage < totalItems ? (
                       <p>
                         {items.length} {items.length > 1 ? plural : singular}{" "}
-                        <span className="text-gray-400">
+                        <span className="text-color-400">
                           out of {totalItems}
                         </span>
                       </p>
@@ -172,7 +171,7 @@ export default function AvailabilityCalendar({
                   </div>
                 </div>
               }
-              resourceAreaHeaderClassNames="text-md font-semibold text-gray-900"
+              resourceAreaHeaderClassNames="text-md font-semibold text-color-900"
               views={{
                 resourceTimelineMonth: {
                   slotLabelFormat: [
@@ -197,10 +196,10 @@ export default function AvailabilityCalendar({
                 { month: "long", year: "numeric" },
                 { weekday: "short", day: "2-digit" },
               ]}
-              slotLabelClassNames="font-normal text-gray-600"
+              slotLabelClassNames="font-normal text-color-600"
               slotMinWidth={100}
               resourceLabelContent={resourceLabelContent}
-              eventContent={renderEventCard}
+              eventContent={(event) => renderEventCard(event)}
               eventClassNames={(eventInfo) => {
                 const viewType = eventInfo.view.type;
                 const isOneDay = isOneDayEvent(
@@ -230,10 +229,10 @@ export default function AvailabilityCalendar({
 
 function CalendarLoadingFallback() {
   return (
-    <div className="absolute inset-0 z-10 flex justify-center bg-white/90">
+    <div className="bg-surface/90 absolute inset-0 z-10 flex justify-center">
       <div className="flex flex-col items-center gap-4 pt-[300px]">
         <FallbackLoading className="size-16" />
-        <p className="text-sm text-gray-600">Loading calendar...</p>
+        <p className="text-sm text-color-600">Loading calendar...</p>
       </div>
     </div>
   );

@@ -15,9 +15,9 @@ export default function UpcomingReminders() {
   const { upcomingReminders } = useLoaderData<typeof loader>();
 
   return (
-    <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
+    <div className="flex h-full flex-col rounded border border-color-200 bg-surface">
       <div className="flex items-center justify-between border-b px-4 py-3 md:px-6">
-        <span className="text-[14px] font-semibold text-gray-900">
+        <span className="text-[14px] font-semibold text-color-900">
           Upcoming reminders
         </span>
         <div className="flex items-center gap-2">
@@ -43,12 +43,12 @@ export default function UpcomingReminders() {
                     <Button
                       to={`/assets/${reminder.asset.id}/reminders`}
                       variant="link"
-                      className="truncate text-left text-sm font-medium text-gray-900 hover:text-gray-700"
+                      className="truncate text-left text-sm font-medium text-color-900 hover:text-color-700"
                     >
                       {reminder.name}
                     </Button>
-                    <span className="text-xs text-gray-500">
-                      <span className="font-medium text-gray-700">
+                    <span className="text-xs text-color-500">
+                      <span className="font-medium text-color-700">
                         {reminder.asset.title}
                       </span>
                       {" · "}

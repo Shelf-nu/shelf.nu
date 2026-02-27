@@ -15,7 +15,7 @@ export const UserBadge = ({
 }: UserBadgeProps) => (
   <span
     className={tw(
-      "inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700",
+      "inline-flex w-max items-center justify-center rounded-2xl bg-color-100 px-2 py-[2px] text-center text-[12px] font-medium text-color-700",
       className
     )}
   >

@@ -36,7 +36,7 @@ export function ExplicitCheckinSettings({
     <Card className={tw("my-0")}>
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
-        <p className="text-sm text-gray-600">{header.subHeading}</p>
+        <p className="text-sm text-color-600">{header.subHeading}</p>
       </div>
       <div>
         <fetcher.Form
@@ -67,7 +67,7 @@ export function ExplicitCheckinSettings({
               />
               <label
                 htmlFor={`requireExplicitCheckinForAdmin-${zo.fields.requireExplicitCheckinForAdmin()}`}
-                className="hidden text-gray-500"
+                className="hidden text-color-500"
               >
                 Require explicit check-in for Admins
               </label>
@@ -94,14 +94,14 @@ export function ExplicitCheckinSettings({
               />
               <label
                 htmlFor={`requireExplicitCheckinForSelfService-${zo.fields.requireExplicitCheckinForSelfService()}`}
-                className="hidden text-gray-500"
+                className="hidden text-color-500"
               >
                 Require explicit check-in for Self Service
               </label>
             </div>
           </FormRow>
           {!isOwner && (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-color-500">
               Only the workspace owner can change this setting.
             </p>
           )}

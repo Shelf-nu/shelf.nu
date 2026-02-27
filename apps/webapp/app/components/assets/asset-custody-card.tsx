@@ -81,7 +81,7 @@ export function CustodyCard({
                   to={`/settings/team/users/${custody.custodian.userId}/assets`}
                   variant="link"
                   className={tw(
-                    "mt-px font-semibold text-gray-900 hover:text-gray-700 hover:underline",
+                    "mt-px font-semibold text-color-900 hover:text-color-700 hover:underline",
                     "[&_.external-link-icon]:opacity-0 [&_.external-link-icon]:duration-100 [&_.external-link-icon]:ease-in-out [&_.external-link-icon]:hover:opacity-100"
                   )}
                   target="_blank"

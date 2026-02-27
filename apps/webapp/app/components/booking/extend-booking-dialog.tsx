@@ -80,7 +80,7 @@ export default function ExtendBookingDialog({
     <>
       <Button
         variant="link"
-        className="justify-start rounded px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
+        className="justify-start rounded px-2 py-1.5 text-sm font-medium text-color-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-color-50 hover:text-color-700"
         width="full"
         onClick={handleOpen}
       >
@@ -93,7 +93,7 @@ export default function ExtendBookingDialog({
           open={open}
           onClose={handleClose}
           title={
-            <div className="flex size-10 items-center justify-center rounded-full bg-primary-25">
+            <div className="bg-primary-25 flex size-10 items-center justify-center rounded-full">
               <div className="flex size-8 items-center justify-center rounded-full bg-primary-50">
                 <CalendarIcon className="size-4 text-primary-500" />
               </div>
@@ -107,7 +107,7 @@ export default function ExtendBookingDialog({
             </p>
 
             <fetcher.Form ref={zo.ref} method="POST">
-              <div className="required-input-label mb-1 text-text-sm font-medium text-gray-700">
+              <div className="required-input-label mb-1 text-text-sm font-medium text-color-700">
                 New end date
               </div>
 
@@ -160,7 +160,7 @@ export default function ExtendBookingDialog({
                 className="mb-4"
               />
               {error && (
-                <p className="mt-1 text-sm text-orange-600">
+                <p className="mt-1 text-sm text-warning-600">
                   Working hours validation unavailable: {error}
                 </p>
               )}

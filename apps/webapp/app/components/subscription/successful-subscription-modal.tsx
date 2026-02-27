@@ -30,7 +30,7 @@ export default function SuccessfulSubscriptionModal() {
               className="dialog m-auto h-auto w-[90%] sm:w-[400px]"
               open={true}
             >
-              <div className="relative z-10  rounded bg-white p-6 shadow-lg">
+              <div className="relative z-10  rounded bg-surface p-6 shadow-lg">
                 <video
                   height="200"
                   autoPlay
@@ -47,7 +47,7 @@ export default function SuccessfulSubscriptionModal() {
                   <h4 className="mb-1 text-[18px] font-semibold">
                     You are all set!
                   </h4>
-                  <p className="text-gray-600">
+                  <p className="text-color-600">
                     {isTeam ? "Team" : "Plus"} features unlocked.{" "}
                     {isTeam && !hasExistingWorkspace
                       ? "Now, it is time to create your team workspace and start adding assets."
@@ -56,7 +56,7 @@ export default function SuccessfulSubscriptionModal() {
                 </div>
                 {isTeam && !hasExistingWorkspace ? (
                   <>
-                    <div className="my-4 text-gray-700">
+                    <div className="my-4 text-color-700">
                       <strong>IMPORTANT</strong>: To use the Team features you
                       need to use your Team workspace. Make sure to create it
                       before you continue.
@@ -70,13 +70,13 @@ export default function SuccessfulSubscriptionModal() {
                           return prev;
                         });
                       }}
-                      variant="primary"
+                      variant="accent"
                     >
                       Create Team workspace
                     </Button>
                   </>
                 ) : (
-                  <Button width="full" to="/assets" variant="primary">
+                  <Button width="full" to="/assets" variant="accent">
                     Get started
                   </Button>
                 )}

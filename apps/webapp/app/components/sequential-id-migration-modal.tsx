@@ -75,7 +75,7 @@ export function SequentialIdMigrationModal({
           <AlertDialogDescription className="text-left">
             {message}
             {state === "running" && (
-              <div className="mt-3 text-sm text-gray-500">
+              <div className="mt-3 text-sm text-color-500">
                 This may take a moment depending on the number of assets...
               </div>
             )}

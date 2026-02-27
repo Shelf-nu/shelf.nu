@@ -61,7 +61,7 @@ export function CommandPaletteButton({
         aria-label="Open command palette"
         variant={"secondary"}
         className={tw(
-          "flex items-center justify-center rounded border-0 bg-white px-2  py-[2px] text-gray-600 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 md:border-gray-200",
+          "flex items-center justify-center rounded border-0 bg-surface px-2  py-[2px] text-color-600 transition hover:bg-color-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 md:border-color-200",
           className
         )}
       >
@@ -76,14 +76,14 @@ export function CommandPaletteButton({
       onClick={() => setOpen(true)}
       variant={"secondary"}
       className={tw(
-        "flex w-full items-center gap-2 rounded bg-white py-2 text-sm text-gray-600 transition hover:border-gray-300 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 md:w-64 md:border md:border-gray-200",
+        "hover:text-color-800 flex w-full items-center gap-2 rounded bg-surface py-2 text-sm text-color-600 transition hover:border-color-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 md:w-64 md:border md:border-color-200",
         className
       )}
     >
       <div className="flex w-full items-center gap-2">
         <span className="hidden sm:inline">Quick find</span>
         <span className="sm:hidden">Quick find...</span>
-        <span className="ml-auto hidden items-center gap-1 rounded bg-gray-50 px-1 text-[10px] font-medium  text-gray-500 md:inline-flex md:border md:border-gray-200">
+        <span className="ml-auto hidden items-center gap-1 rounded bg-color-50 px-1 text-[10px] font-medium  text-color-500 md:inline-flex md:border md:border-color-200">
           {shortcut}
         </span>
       </div>

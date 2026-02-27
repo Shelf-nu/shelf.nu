@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react";
+import { ThemeToggle } from "~/components/dev/theme-toggle";
 import { ShelfSidebarLogo } from "~/components/marketing/logos";
 import { useSidebarNavItems } from "~/hooks/use-sidebar-nav-items";
 import OrganizationSelector from "./organization-selector";
@@ -35,6 +36,7 @@ export default function AppSidebar(props: AppSidebarProps) {
 
       <SidebarFooter>
         <SidebarNav className="p-0" items={bottomMenuItems} />
+        <ThemeToggle />
         <SidebarUserMenu />
       </SidebarFooter>
       <SidebarRail />

@@ -156,7 +156,7 @@ export default function QrLink() {
               <h1 className="mb-2 text-[24px] font-semibold">
                 Unlinked QR Code
               </h1>
-              <p className="text-gray-600">
+              <p className="text-color-600">
                 {comesFromClaim
                   ? "Thanks for claiming the code. Now its time to link it to a kit or asset."
                   : "This code is part of your Shelf environment but is not linked with an asset. Would you like to link it?"}

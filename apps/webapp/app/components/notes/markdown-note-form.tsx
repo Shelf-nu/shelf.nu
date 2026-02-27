@@ -219,7 +219,7 @@ export function MarkdownNoteForm({
           // Collapsed mode: Simple input that expands on focus
           <Input
             icon="write"
-            className="text-gray-700"
+            className="text-color-700"
             label=""
             placeholder={placeholder}
             onFocus={() => setIsEditing(true)}

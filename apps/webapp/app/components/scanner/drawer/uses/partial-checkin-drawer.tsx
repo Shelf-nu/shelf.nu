@@ -294,7 +294,7 @@ export default function PartialCheckinDrawer({
 
   // Create booking header component
   const BookingHeader = () => (
-    <div className="border border-b-0 bg-gray-50 p-4">
+    <div className="border border-b-0 bg-color-50 p-4">
       <div className="flex items-center justify-between">
         {/* Left side: Booking name and status */}
         <div className="flex items-center gap-3">
@@ -303,7 +303,7 @@ export default function PartialCheckinDrawer({
               <Button
                 to={`/bookings/${booking.id}`}
                 variant="link"
-                className="text-left font-medium text-gray-900 hover:text-gray-700"
+                className="text-left font-medium text-color-900 hover:text-color-700"
               >
                 {booking.name}
               </Button>
@@ -321,16 +321,16 @@ export default function PartialCheckinDrawer({
         <div className="flex items-center gap-6 text-sm">
           {/* From date */}
           <div className="text-right">
-            <span className="block text-gray-600">From</span>
-            <span className="block font-medium text-gray-900">
+            <span className="block text-color-600">From</span>
+            <span className="block font-medium text-color-900">
               <DateS date={booking.from} includeTime />
             </span>
           </div>
 
           {/* To date */}
           <div className="text-right">
-            <span className="block text-gray-600">To</span>
-            <span className="block font-medium text-gray-900">
+            <span className="block text-color-600">To</span>
+            <span className="block font-medium text-color-900">
               <DateS date={booking.to} includeTime />
             </span>
           </div>
@@ -376,12 +376,12 @@ export default function PartialCheckinDrawer({
       }
       title={
         <div className="text-right">
-          <span className="block text-gray-600">
+          <span className="block text-color-600">
             {assetIdsForCheckin.length}/
             {partialCheckinProgress?.uncheckedCount || booking.assets.length}{" "}
             Assets scanned
           </span>
-          <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+          <span className="flex h-5 flex-col justify-center font-medium text-color-900">
             <Progress
               value={
                 (assetIdsForCheckin.length /
@@ -500,9 +500,9 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       <div className="flex flex-wrap items-center gap-1">
         <span
           className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
+            "inline-block bg-color-50 px-[6px] py-[2px]",
+            "rounded-md border border-color-200",
+            "text-xs text-color-700"
           )}
         >
           asset
@@ -599,7 +599,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
-        <span className="text-[12px] font-normal text-gray-700">
+        <span className="text-[12px] font-normal text-color-700">
           {isKitScanned ? (
             <>
               ({uncheckedKitAssetsInBooking.length} of {totalKitAssetsInBooking}{" "}
@@ -617,9 +617,9 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span
           className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
+            "inline-block bg-color-50 px-[6px] py-[2px]",
+            "rounded-md border border-color-200",
+            "text-xs text-color-700"
           )}
         >
           kit

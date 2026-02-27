@@ -168,8 +168,8 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
 
     return (
       <div className={tw("flex flex-col gap-2", className)}>
-        <div className="isolate overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <div className="border-b border-gray-100 bg-white px-3 py-2">
+        <div className="isolate overflow-hidden rounded-lg border border-color-200 bg-surface">
+          <div className="border-color-100 border-b bg-surface px-3 py-2">
             <EditorToolbar
               state={toolbarState}
               onUndo={() => runCommand(undo)}
@@ -194,7 +194,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
             />
           </div>
           <div
-            className="relative bg-gray-50 px-3 py-4 focus-within:ring-2 focus-within:ring-gray-300"
+            className="relative bg-color-50 px-3 py-4 focus-within:ring-2 focus-within:ring-gray-300"
             role="textbox"
             tabIndex={0}
             onMouseDown={(event) => {
@@ -255,7 +255,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
           data-testid="editor-v2-input"
           {...restTextareaProps}
         />
-        <div className="flex flex-col gap-1 text-xs text-gray-500">
+        <div className="flex flex-col gap-1 text-xs text-color-500">
           <span>
             {label} supports Markdown and Markdoc. {HINT_TEXT}
           </span>

@@ -152,7 +152,7 @@ export default function UserInvitesSetting() {
     <div>
       <ContextualModal />
 
-      <p className="mb-6 text-xs text-gray-600">
+      <p className="mb-6 text-xs text-color-600">
         Users by default have a mail registered in shelf and can get reminders,
         log in or perform other actions. Read more about our{" "}
         <Link
@@ -237,18 +237,20 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
 
 function InviteMessageCell({ message }: { message?: string | null }) {
   if (!message) {
-    return <span className="text-gray-400">-</span>;
+    return <span className="text-color-400">-</span>;
   }
 
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger className="text-gray-500 hover:text-gray-700">
+        <TooltipTrigger className="text-color-500 hover:text-color-700">
           <MailIcon className="size-4" />
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[300px]">
           <h5 className="mb-1">Invite message</h5>
-          <p className="whitespace-pre-wrap text-sm text-gray-600">{message}</p>
+          <p className="whitespace-pre-wrap text-sm text-color-600">
+            {message}
+          </p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -259,20 +261,20 @@ const InviteStatusBadge = ({ status }: { status: InviteStatuses }) => {
   const colorClasses = useMemo(() => {
     switch (status) {
       case "PENDING":
-        return "bg-gray-200 text-gray-700";
+        return "bg-color-200 text-color-700";
       case "ACCEPTED":
         return "bg-success-50 text-success-700";
       case "REJECTED":
         return "bg-error-50 text-error-700";
       default:
-        return "bg-gray-200 text-gray-700";
+        return "bg-color-200 text-color-700";
     }
   }, [status]);
 
   return (
     <span
       className={tw(
-        "inline-flex justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700",
+        "inline-flex justify-center rounded-2xl bg-color-100 px-2 py-[2px] text-center text-[12px] font-medium text-color-700",
         colorClasses
       )}
     >

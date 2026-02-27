@@ -83,7 +83,7 @@ export default function ListTitle({
     <div>
       <div
         className={tw(
-          "text-left text-text-sm font-semibold capitalize text-gray-900",
+          "text-left text-text-sm font-semibold capitalize text-color-900",
           titleClassName
         )}
       >
@@ -98,7 +98,7 @@ export default function ListTitle({
               className="p-[2px] text-[14px]"
               aria-label="Clear selected items"
             >
-              <X size={12} strokeWidth={3} className="text-gray-600" />
+              <X size={12} strokeWidth={3} className="text-color-600" />
             </Button>
             {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} selected
             {!disableSelectAllItems &&
@@ -114,7 +114,7 @@ export default function ListTitle({
             {perPage < totalItems ? (
               <p>
                 {items.length} {items.length > 1 ? plural : singular}{" "}
-                <span className="text-gray-400">out of {totalItems}</span>
+                <span className="text-color-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>

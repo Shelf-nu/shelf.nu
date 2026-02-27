@@ -194,7 +194,7 @@ export function ChangeRoleDialog({
                     <PopoverContent
                       align="start"
                       className={tw(
-                        "z-[999999] mt-2 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-gray-200 bg-white"
+                        "z-[999999] mt-2 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-color-200 bg-surface"
                       )}
                     >
                       {Object.entries(roleOptions).map(([k, v]) => (
@@ -204,8 +204,8 @@ export function ChangeRoleDialog({
                           aria-selected={selectedRole === k}
                           tabIndex={0}
                           className={tw(
-                            "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                            selectedRole === k && "bg-gray-50 font-medium"
+                            "px-4 py-2 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
+                            selectedRole === k && "bg-color-50 font-medium"
                           )}
                           onClick={() => {
                             setSelectedRole(k);
@@ -229,17 +229,17 @@ export function ChangeRoleDialog({
                       Demotion — entities will be transferred
                     </p>
                     {isLoadingDemotionData ? (
-                      <p className="mt-2 text-sm text-gray-600">
+                      <p className="mt-2 text-sm text-color-600">
                         Loading entity counts...
                       </p>
                     ) : entityCounts && entityCounts.total > 0 ? (
                       <>
-                        <p className="mt-2 text-sm text-gray-600">
+                        <p className="mt-2 text-sm text-color-600">
                           This user owns{" "}
                           <strong>{entityCounts.total} entities</strong> that
                           will be transferred to the selected recipient:
                         </p>
-                        <ul className="mt-1 list-inside list-disc text-sm text-gray-600">
+                        <ul className="mt-1 list-inside list-disc text-sm text-color-600">
                           {entityCounts.assets > 0 && (
                             <li>{entityCounts.assets} assets</li>
                           )}
@@ -306,7 +306,7 @@ export function ChangeRoleDialog({
                                 <PopoverContent
                                   align="start"
                                   className={tw(
-                                    "z-[999999] mt-2 max-h-[200px] w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-gray-200 bg-white"
+                                    "z-[999999] mt-2 max-h-[200px] w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-color-200 bg-surface"
                                   )}
                                 >
                                   {recipients.map((r) => (
@@ -316,9 +316,9 @@ export function ChangeRoleDialog({
                                       aria-selected={transferToUserId === r.id}
                                       tabIndex={0}
                                       className={tw(
-                                        "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                                        "px-4 py-2 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
                                         transferToUserId === r.id &&
-                                          "bg-gray-50 font-medium"
+                                          "bg-color-50 font-medium"
                                       )}
                                       onClick={() => {
                                         setTransferToUserId(r.id);
@@ -342,7 +342,7 @@ export function ChangeRoleDialog({
                         ) : null}
                       </>
                     ) : entityCounts && entityCounts.total === 0 ? (
-                      <p className="mt-2 text-sm text-gray-600">
+                      <p className="mt-2 text-sm text-color-600">
                         This user has no entities to transfer.
                       </p>
                     ) : null}

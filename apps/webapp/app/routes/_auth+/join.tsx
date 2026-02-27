@@ -210,10 +210,10 @@ export default function Join() {
         <div className="mt-6">
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300" />
+              <div className="w-full border-t border-color-300" />
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="bg-white px-2 text-gray-500">
+              <span className="bg-surface px-2 text-color-500">
                 {"Or use a One Time Password"}
               </span>
             </div>
@@ -223,7 +223,7 @@ export default function Join() {
           </div>
         </div>
         <div className="flex items-center justify-center pt-5">
-          <div className="text-center text-sm text-gray-500">
+          <div className="text-center text-sm text-color-500">
             {"Already have an account? "}
             <Button
               variant="link"

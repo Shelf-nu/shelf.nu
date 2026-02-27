@@ -79,7 +79,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
       <DropdownMenuPortal>
         <DropdownMenuContent
           align="end"
-          className="order w-[220px] rounded-md bg-white p-1.5 text-right"
+          className="order w-[220px] rounded-md bg-surface p-1.5 text-right"
         >
           <When truthy={booking.status === BookingStatus.RESERVED}>
             <RevertToDraftDialog booking={booking} />
@@ -98,7 +98,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             <DropdownMenuItem asChild>
               <Button
                 variant="link"
-                className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
+                className="justify-start text-color-700 hover:cursor-pointer hover:text-color-700"
                 width="full"
                 name="intent"
                 value="archive"
@@ -125,7 +125,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           <DropdownMenuItem asChild>
             <Button
               variant="link"
-              className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
+              className="justify-start text-color-700 hover:cursor-pointer hover:text-color-700"
               width="full"
               to="duplicate"
             >

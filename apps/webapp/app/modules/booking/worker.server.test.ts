@@ -123,7 +123,7 @@ describe("autoArchiveHandler", () => {
   const mockJob = {
     data: {
       id: "booking-1",
-      hints: { timeZone: "UTC", locale: "en-US" },
+      hints: { timeZone: "UTC", locale: "en-US", theme: "light" as const },
       eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveHandler,
     },
   };

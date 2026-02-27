@@ -99,13 +99,13 @@ export default function SecurityTest() {
         {loading ? "Testing..." : "Run Security Test"}
       </Button>
 
-      <div className="whitespace-pre-wrap rounded border border-gray-300 bg-gray-50 p-4">
+      <div className="whitespace-pre-wrap rounded border border-color-300 bg-color-50 p-4">
         <strong>Result:</strong>
         <br />
         {result || "Click button to test"}
       </div>
 
-      <div className="mt-5 text-[14px] text-gray-600">
+      <div className="mt-5 text-[14px] text-color-600">
         <h3>Understanding the Results:</h3>
         <ul>
           <li>

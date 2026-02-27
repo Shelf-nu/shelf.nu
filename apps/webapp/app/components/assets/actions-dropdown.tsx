@@ -111,9 +111,9 @@ const ConditionalActionsDropdown = () => {
               event.preventDefault();
               popoverContentRef.current?.focus();
             }}
-            className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[230px] md:rounded-t-[4px]"
+            className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-color-300 bg-surface p-0 text-right md:static md:mt-auto md:w-[230px] md:rounded-t-[4px]"
           >
-            <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
+            <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-surface p-0 text-right md:static md:w-full md:rounded-t-[4px]">
               <When
                 truthy={userHasPermission({
                   roles,
@@ -130,7 +130,7 @@ const ConditionalActionsDropdown = () => {
                       to="overview/release-custody"
                       role="link"
                       variant="link"
-                      className="justify-start whitespace-nowrap px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      className="justify-start whitespace-nowrap px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                       width="full"
                       onClick={handleMenuClose}
                       disabled={
@@ -148,7 +148,7 @@ const ConditionalActionsDropdown = () => {
                       to="overview/assign-custody"
                       role="link"
                       variant="link"
-                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      className="justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                       width="full"
                       onClick={handleMenuClose}
                       disabled={custodyActionDisabled}
@@ -177,7 +177,7 @@ const ConditionalActionsDropdown = () => {
                     to="overview/update-location"
                     role="link"
                     variant="link"
-                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    className="justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                     width="full"
                     onClick={handleMenuClose}
                     disabled={
@@ -212,7 +212,7 @@ const ConditionalActionsDropdown = () => {
                   <Button
                     role="button"
                     variant="link"
-                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    className="justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                     width="full"
                     onClick={() => {
                       handleMenuClose();
@@ -230,7 +230,7 @@ const ConditionalActionsDropdown = () => {
                     <Button
                       role="button"
                       variant="link"
-                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      className="justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                       width="full"
                       onClick={() => {
                         handleMenuClose();
@@ -249,7 +249,7 @@ const ConditionalActionsDropdown = () => {
                     to="edit"
                     role="link"
                     variant="link"
-                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    className="justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                     width="full"
                   >
                     <span className="flex items-center gap-2">
@@ -262,7 +262,7 @@ const ConditionalActionsDropdown = () => {
                     to="overview/duplicate"
                     role="link"
                     variant="link"
-                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    className="justify-start px-4 py-3 text-color-700 hover:bg-slate-100 hover:text-color-700"
                     width="full"
                     onClick={handleMenuClose}
                   >
@@ -284,7 +284,7 @@ const ConditionalActionsDropdown = () => {
                         variant="link"
                         data-test-id="deleteAssetButton"
                         icon="trash"
-                        className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
+                        className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-color-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-color-700"
                         width="full"
                         disabled={
                           assetIsCheckedOut || assetIsPartOfUnavailableKit
@@ -299,7 +299,7 @@ const ConditionalActionsDropdown = () => {
                   <Button
                     role="button"
                     variant="secondary"
-                    className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                    className="flex items-center justify-center text-color-700 hover:text-color-700 "
                     width="full"
                     onClick={handleMenuClose}
                   >

@@ -260,16 +260,16 @@ export function ValueField({
                 <TooltipProvider delayDuration={100}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-gray-600 hover:text-gray-700">
+                      <i className="absolute right-3.5 top-1/2 flex -translate-y-1/2 cursor-pointer text-color-600 hover:text-color-700">
                         <HelpIcon />
                       </i>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" className="z-[9999999]">
                       <div className="max-w-[260px] sm:max-w-[320px]">
-                        <h6 className="mb-1 text-xs font-semibold text-gray-700">
+                        <h6 className="mb-1 text-xs font-semibold text-color-700">
                           Barcode scanner ready
                         </h6>
-                        <p className="text-xs font-medium text-gray-500">
+                        <p className="text-xs font-medium text-color-500">
                           This fields supports barcode scanners. Simply place
                           your cursor in the field and scan a Shelf QR code with
                           your barcode scanner. The value will be automatically
@@ -291,7 +291,7 @@ export function ValueField({
       ) {
         return (
           <div className="relative">
-            <div className="absolute left-2 top-1/2 z-50 -translate-y-1/2 text-gray-500">
+            <div className="absolute left-2 top-1/2 z-50 -translate-y-1/2 text-color-500">
               SAM-
             </div>
             <Input
@@ -577,14 +577,14 @@ function BooleanField({
           <PopoverContent
             align="start"
             className={tw(
-              "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
+              "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-color-200 bg-surface"
             )}
             onKeyDown={handleKeyDown}
           >
             <div
               className={tw(
-                "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                selectedIndex === 0 && "bg-gray-50"
+                "px-4 py-2 text-[14px] font-medium text-color-600 hover:cursor-pointer hover:bg-color-50",
+                selectedIndex === 0 && "bg-color-50"
               )}
               role="button"
               tabIndex={0}
@@ -595,8 +595,8 @@ function BooleanField({
             </div>
             <div
               className={tw(
-                "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                selectedIndex === 1 && "bg-gray-50"
+                "px-4 py-2 text-[14px] font-medium text-color-600 hover:cursor-pointer hover:bg-color-50",
+                selectedIndex === 1 && "bg-color-50"
               )}
               role="button"
               tabIndex={0}
@@ -746,7 +746,7 @@ function EnumField({
           <PopoverContent
             align="start"
             className={tw(
-              "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+              "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-color-200 bg-surface"
             )}
             onKeyDown={handleKeyDown}
           >
@@ -763,8 +763,8 @@ function EnumField({
                     id={`enum-option-${index}`}
                     key={option.id}
                     className={tw(
-                      "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
-                      selectedIndex === index && "bg-gray-50"
+                      "flex items-center justify-between px-4 py-3 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
+                      selectedIndex === index && "bg-color-50"
                     )}
                     role="button"
                     tabIndex={0}
@@ -917,7 +917,7 @@ function CustodyEnumField({
               <span
                 className={tw(
                   "text-left",
-                  selectedIds.length <= 0 && "text-gray-500"
+                  selectedIds.length <= 0 && "text-color-500"
                 )}
               >
                 {selectedIds.length > 0
@@ -974,7 +974,7 @@ function CustodyEnumField({
         }
       }}
       closeOnSelect={true}
-      triggerWrapperClassName="w-full text-gray-700"
+      triggerWrapperClassName="w-full text-color-700"
       className="z-[999999]"
       contentLabel="Custodian"
     />
@@ -1048,7 +1048,7 @@ function CategoryEnumField({
               <span
                 className={tw(
                   "text-left",
-                  selectedIds.length <= 0 && "text-gray-500"
+                  selectedIds.length <= 0 && "text-color-500"
                 )}
               >
                 {disabled
@@ -1095,7 +1095,7 @@ function CategoryEnumField({
         }
       }}
       closeOnSelect={true}
-      triggerWrapperClassName="w-full text-gray-700"
+      triggerWrapperClassName="w-full text-color-700"
       className="z-[999999]"
       contentLabel="Category"
     />
@@ -1165,7 +1165,7 @@ function LocationEnumField({
               <span
                 className={tw(
                   "text-left",
-                  selectedIds.length <= 0 && "text-gray-500"
+                  selectedIds.length <= 0 && "text-color-500"
                 )}
               >
                 {disabled
@@ -1223,7 +1223,7 @@ function LocationEnumField({
         }
       }}
       closeOnSelect={true}
-      triggerWrapperClassName="w-full text-gray-700"
+      triggerWrapperClassName="w-full text-color-700"
       className="z-[999999]"
       contentLabel="Location"
     />
@@ -1293,7 +1293,7 @@ function KitEnumField({
               <span
                 className={tw(
                   "text-left",
-                  selectedIds.length <= 0 && "text-gray-500"
+                  selectedIds.length <= 0 && "text-color-500"
                 )}
               >
                 {disabled
@@ -1349,7 +1349,7 @@ function KitEnumField({
         }
       }}
       closeOnSelect={true}
-      triggerWrapperClassName="w-full text-gray-700"
+      triggerWrapperClassName="w-full text-color-700"
       className="z-[999999]"
       contentLabel="Kit"
     />
@@ -1419,7 +1419,7 @@ function UpcomingBookingsEnumField({
               <span
                 className={tw(
                   "text-left",
-                  selectedIds.length <= 0 && "text-gray-500"
+                  selectedIds.length <= 0 && "text-color-500"
                 )}
               >
                 {disabled
@@ -1477,7 +1477,7 @@ function UpcomingBookingsEnumField({
         }
       }}
       closeOnSelect={true}
-      triggerWrapperClassName="w-full text-gray-700"
+      triggerWrapperClassName="w-full text-color-700"
       className="z-[999999]"
       contentLabel="Booking"
     />
@@ -1539,7 +1539,7 @@ function TagsField({
               <span
                 className={tw(
                   "text-left",
-                  selectedIds.length <= 0 && "text-gray-500"
+                  selectedIds.length <= 0 && "text-color-500"
                 )}
               >
                 {disabled
@@ -1584,7 +1584,7 @@ function TagsField({
         }
       }}
       closeOnSelect
-      triggerWrapperClassName="w-full text-gray-700"
+      triggerWrapperClassName="w-full text-color-700"
       className="z-[999999]"
       contentLabel="tags"
     />
@@ -1971,7 +1971,7 @@ function MultiDateInput({
           {dates.length > 1 && (
             <Button
               variant="block-link-gray"
-              className="absolute right-0 -mr-1 mt-[2px] shrink-0 translate-x-full  bg-white  text-[10px] font-normal text-gray-600"
+              className="absolute right-0 -mr-1 mt-[2px] shrink-0 translate-x-full  bg-surface  text-[10px] font-normal text-color-600"
               icon="x"
               onClick={() => removeDateField(index)}
             />

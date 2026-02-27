@@ -109,7 +109,7 @@ export function AddBarcodeForm({
         <div>
           <label
             htmlFor="barcodeType"
-            className="mb-1 block text-sm font-medium text-gray-700"
+            className="mb-1 block text-sm font-medium text-color-700"
           >
             Barcode Type
           </label>
@@ -117,7 +117,7 @@ export function AddBarcodeForm({
             id="barcodeType"
             value={barcodeType}
             onChange={handleTypeChange}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-color-300 bg-surface px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             disabled={disabled}
             required
           >
@@ -127,7 +127,7 @@ export function AddBarcodeForm({
               </option>
             ))}
           </select>
-          <p className="mt-1 text-gray-600">{helpText}</p>
+          <p className="mt-1 text-color-600">{helpText}</p>
         </div>
       )}
 

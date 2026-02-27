@@ -110,19 +110,19 @@ export function ChoosePurpose({
       <div className="flex flex-col items-center p-4 sm:p-6">
         <ShelfSymbolLogo className="mb-4 size-8" />
         <div className="mb-4 max-w-2xl text-center">
-          <h3 className="text-2xl font-semibold text-gray-900">
+          <h3 className="text-2xl font-semibold text-color-900">
             How would you like to get started with Shelf?
           </h3>
-          <p className="mt-3 text-base text-gray-600">
+          <p className="mt-3 text-base text-color-600">
             Your choice determines which features we prepare for you. You can
             always switch later.
           </p>
-          <p className="mt-4 rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
+          <p className="mt-4 rounded-lg bg-color-50 px-4 py-3 text-sm text-color-600">
             If your organization already uses Shelf, you don't need to create a
             new workspace — look for your email invite or sign in instead.
           </p>
         </div>
-        <h4 className=" w-full text-left  font-semibold text-gray-700">
+        <h4 className=" w-full text-left  font-semibold text-color-700">
           Select a plan
         </h4>
         <div className="flex w-full gap-4">
@@ -145,7 +145,7 @@ export function ChoosePurpose({
                   badgeLabel={plan.badge}
                 />
                 {plan.helper ? (
-                  <p className="text-sm text-gray-500">{plan.helper}</p>
+                  <p className="text-sm text-color-500">{plan.helper}</p>
                 ) : null}
               </div>
             );
@@ -154,7 +154,7 @@ export function ChoosePurpose({
 
         {showAuditOption ? (
           <>
-            <h4 className="mt-6 w-full text-left font-semibold text-gray-700">
+            <h4 className="mt-6 w-full text-left font-semibold text-color-700">
               Choose optional add-ons
             </h4>
             <AuditAddonToggle
@@ -179,6 +179,7 @@ export function ChoosePurpose({
             <Button
               width="full"
               type="submit"
+              variant="accent"
               disabled={disabled}
               data-analytics="cta-start-personal-with-audits"
             >
@@ -189,6 +190,7 @@ export function ChoosePurpose({
           <Button
             to={ctaHref}
             width="full"
+            variant="accent"
             className="mt-8"
             disabled={disabled}
             data-analytics={selectedDetails?.analytics}
@@ -222,7 +224,7 @@ function AuditAddonToggle({
         className={tw(
           "p-0",
           "transition-shadow",
-          wantsAudits ? "" : "hover:border-gray-300"
+          wantsAudits ? "" : "hover:border-color-300"
         )}
       >
         <button
@@ -239,8 +241,8 @@ function AuditAddonToggle({
             className={tw(
               "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border-2",
               wantsAudits
-                ? "border-primary-500 bg-primary-500"
-                : "border-gray-300 bg-white"
+                ? "bg-primary-500 border-primary-500"
+                : "border-color-300 bg-surface"
             )}
             aria-hidden="true"
           >
@@ -248,10 +250,10 @@ function AuditAddonToggle({
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h4 className="text-base font-semibold text-gray-900">Audits</h4>
+              <h4 className="text-base font-semibold text-color-900">Audits</h4>
               <Tag className="bg-primary-50 text-primary-700">7-day trial</Tag>
             </div>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-color-600">
               Create audits, assign auditors, scan QR codes, and track asset
               verification in real-time.
             </p>
@@ -302,24 +304,26 @@ function AuditBillingCards({
           className={tw(
             "flex flex-1 cursor-pointer flex-col items-center rounded-lg p-4 text-center transition-colors",
             billingInterval === "month"
-              ? "border-2 border-primary-200 bg-primary-25"
-              : "border border-gray-200"
+              ? "bg-primary-25 border-2 border-primary-200"
+              : "border border-color-200"
           )}
         >
           <p
             className={tw(
               "mb-1 text-sm font-medium",
-              billingInterval === "month" ? "text-primary-600" : "text-gray-500"
+              billingInterval === "month"
+                ? "text-primary-600"
+                : "text-color-500"
             )}
           >
             Monthly
           </p>
           <p className="text-2xl font-semibold">
             {fmtPrice(monthlyPrice.unit_amount || 0, monthlyPrice.currency)}
-            <span className="text-sm font-normal text-gray-500">/mo</span>
+            <span className="text-sm font-normal text-color-500">/mo</span>
           </p>
-          <p className="text-xs text-gray-500">Billed monthly</p>
-          <p className="mt-1 text-xs text-gray-500">per workspace</p>
+          <p className="text-xs text-color-500">Billed monthly</p>
+          <p className="mt-1 text-xs text-color-500">per workspace</p>
         </button>
       )}
       {yearlyPrice && (
@@ -329,19 +333,19 @@ function AuditBillingCards({
           className={tw(
             "relative flex flex-1 cursor-pointer flex-col items-center rounded-lg p-4 text-center transition-colors",
             billingInterval === "year"
-              ? "border-2 border-primary-200 bg-primary-25"
-              : "border border-gray-200"
+              ? "bg-primary-25 border-2 border-primary-200"
+              : "border border-color-200"
           )}
         >
           {yearlyDiscount != null && yearlyDiscount > 0 && (
-            <span className="absolute -top-2.5 rounded-full bg-primary-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+            <span className="bg-primary-500 absolute -top-2.5 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white">
               Save {yearlyDiscount}%
             </span>
           )}
           <p
             className={tw(
               "mb-1 text-sm font-medium",
-              billingInterval === "year" ? "text-primary-600" : "text-gray-500"
+              billingInterval === "year" ? "text-primary-600" : "text-color-500"
             )}
           >
             Yearly
@@ -351,13 +355,13 @@ function AuditBillingCards({
               Math.round((yearlyPrice.unit_amount || 0) / 12),
               yearlyPrice.currency
             )}
-            <span className="text-sm font-normal text-gray-500">/mo</span>
+            <span className="text-sm font-normal text-color-500">/mo</span>
           </p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-color-500">
             Billed annually{" "}
             {fmtPrice(yearlyPrice.unit_amount || 0, yearlyPrice.currency)}
           </p>
-          <p className="mt-1 text-xs text-gray-500">per workspace</p>
+          <p className="mt-1 text-xs text-color-500">per workspace</p>
         </button>
       )}
     </div>
@@ -386,27 +390,27 @@ function PlanCard({
       className={tw(
         "p-0",
         "transition-shadow",
-        selected ? "" : "hover:border-gray-300"
+        selected ? "" : "hover:border-color-300"
       )}
     >
       <button
         type="button"
         onClick={() => onSelect(planKey)}
         className={tw(
-          " relative w-full rounded border border-transparent bg-white px-4 py-5 text-left",
+          " relative w-full rounded border border-transparent bg-surface px-4 py-5 text-left",
           selected ? "border-primary-400 bg-primary-50" : "border-transparent"
         )}
       >
         <div className="absolute right-1.5 top-1.5">
           {badgeLabel ? (
-            <Tag className={tw("w-max", " bg-orange-100 text-orange-700")}>
+            <Tag className={tw("w-max", " bg-color-100 text-color-700")}>
               {badgeLabel}
             </Tag>
           ) : null}
         </div>
         <div>
-          <h4 className="text-lg font-semibold text-gray-900">{title}</h4>
-          <p className="mt-2 text-sm text-gray-600">{description}</p>
+          <h4 className="text-lg font-semibold text-color-900">{title}</h4>
+          <p className="mt-2 text-sm text-color-600">{description}</p>
           <GrayBadge className="mt-4">{chipLabel}</GrayBadge>
         </div>
       </button>

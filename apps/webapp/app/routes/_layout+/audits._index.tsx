@@ -208,7 +208,7 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
             <Button
               to={`${item.id}/overview`}
               variant="link"
-              className="text-left font-medium text-gray-900 hover:text-gray-700"
+              className="text-left font-medium text-color-900 hover:text-color-700"
             >
               {item.name}
             </Button>
@@ -234,7 +234,7 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
           <div className="flex items-center gap-1">
             <UserBadge name={assigneeName} img={assigneeImg} />
             {hasMultipleAssignees && (
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-color-500">
                 +{item.assignments.length - 1}
               </span>
             )}

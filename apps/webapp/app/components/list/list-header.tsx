@@ -44,8 +44,8 @@ export const ListHeader = ({
         {hideFirstColumn ? null : (
           <Th
             className={tw(
-              "!border-b-0 border-r border-r-transparent text-left font-normal text-gray-600",
-              modeIsAdvanced ? "bg-gray-25" : "",
+              "!border-b-0 border-r border-r-transparent text-left font-normal text-color-600",
+              modeIsAdvanced ? "bg-color-25" : "",
               bulkActions ? "!pl-0" : "",
 
               modeIsAdvanced && freezeColumn
@@ -63,7 +63,7 @@ export const ListHeader = ({
               <div className="flex items-center gap-1">
                 Name{" "}
                 {modeIsAdvanced && freezeColumn ? (
-                  <span className=" size-4 text-gray-400">
+                  <span className=" size-4 text-color-400">
                     <LockIcon />
                   </span>
                 ) : null}
@@ -85,8 +85,8 @@ export const ListHeader = ({
           "border-b",
           modeIsAdvanced
             ? tw(
-                "sticky top-0 z-10 border-b bg-white",
-                "before:absolute before:inset-x-0 before:bottom-0 before:border-b before:border-gray-200 before:content-['']" // creates a border at the bottom of the header
+                "sticky top-0 z-10 border-b bg-surface",
+                "before:absolute before:inset-x-0 before:bottom-0 before:border-b before:border-color-200 before:content-['']" // creates a border at the bottom of the header
               )
             : "",
           className
@@ -124,7 +124,7 @@ function AdvancedModeDropdown() {
         <PopoverContent
           align="end"
           className={tw(
-            "z-20 mt-2 w-[200px] rounded-md border border-gray-300 bg-white p-0"
+            "z-20 mt-2 w-[200px] rounded-md border border-color-300 bg-surface p-0"
           )}
         >
           <freezeFetcher.Form action="/api/asset-index-settings" method="post">
@@ -134,7 +134,7 @@ function AdvancedModeDropdown() {
               value={freezeColumn ? "no" : "yes"}
             />
             <Button
-              className=" justify-start whitespace-nowrap p-4 text-gray-700 hover:bg-gray-50 hover:text-gray-700 "
+              className=" justify-start whitespace-nowrap p-4 text-color-700 hover:bg-color-50 hover:text-color-700 "
               variant="link"
               icon="lock"
               type="submit"
@@ -156,7 +156,7 @@ function AdvancedModeDropdown() {
               value={showAssetImage ? "no" : "yes"}
             />
             <Button
-              className=" justify-start whitespace-nowrap p-4 text-gray-700 hover:bg-gray-50 hover:text-gray-700  "
+              className=" justify-start whitespace-nowrap p-4 text-color-700 hover:bg-color-50 hover:text-color-700  "
               variant="link"
               icon="image"
               type="submit"

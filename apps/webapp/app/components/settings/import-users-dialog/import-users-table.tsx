@@ -28,7 +28,7 @@ export default function ImportUsersTable({
       <h4 className="px-6 py-3 text-left">{title}</h4>
 
       <table className="w-full text-left text-sm">
-        <thead className="bg-gray-50 text-xs uppercase">
+        <thead className="bg-color-50 text-xs uppercase">
           <tr>
             <th scope="col" className="px-6 py-3">
               Email

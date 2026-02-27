@@ -114,8 +114,8 @@ export default function BulkAddToAuditDialog() {
             ) : !isLoading && data?.audits?.length === 0 ? (
               // Empty state - no pending audits
               <>
-                <div className="mb-6 rounded-md border border-gray-200 bg-gray-50 p-4">
-                  <p className="text-sm text-gray-600">
+                <div className="mb-6 rounded-md border border-color-200 bg-color-50 p-4">
+                  <p className="text-sm text-color-600">
                     There are no pending audits.
                   </p>
                 </div>

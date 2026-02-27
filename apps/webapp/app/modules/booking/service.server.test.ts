@@ -213,6 +213,7 @@ const mockBookingData = {
 const mockClientHints = {
   timeZone: "America/New_York",
   locale: "en-US",
+  theme: "light" as const,
 };
 
 const mockCreateBookingParams = {

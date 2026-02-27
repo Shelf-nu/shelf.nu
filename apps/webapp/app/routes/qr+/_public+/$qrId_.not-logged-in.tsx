@@ -41,7 +41,7 @@ export default function QrNotLoggedIn() {
             <h1 className="mb-2 text-[24px] font-semibold">
               Thank you for scanning
             </h1>
-            <p className="text-gray-600">
+            <p className="text-color-600">
               {canContactOwner
                 ? "Log in if you own this item. Contact the owner to report it found if it's lost."
                 : "Log in if you own this item. This code hasn't been claimed yet."}
@@ -69,7 +69,7 @@ export default function QrNotLoggedIn() {
           </div>
         </div>
       </div>
-      <div className="mt-6 text-center text-sm text-gray-500">
+      <div className="mt-6 text-center text-sm text-color-500">
         Don't have an account?{" "}
         <Button
           variant="link"

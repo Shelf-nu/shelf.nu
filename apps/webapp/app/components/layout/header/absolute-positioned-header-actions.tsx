@@ -11,7 +11,7 @@ export const AbsolutePositionedHeaderActions = ({
 }) => (
   <div
     className={tw(
-      " flex w-screen max-w-full items-center justify-between bg-white py-2 md:absolute md:right-0 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0",
+      " flex w-screen max-w-full items-center justify-between bg-surface py-2 md:absolute md:right-0 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0",
       className
     )}
   >

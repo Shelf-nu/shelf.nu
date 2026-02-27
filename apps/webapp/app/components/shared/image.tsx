@@ -1,3 +1,4 @@
+import { usePlaceholderImage } from "~/hooks/use-placeholder-image";
 import { getDifferenceInSeconds } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
 
@@ -17,12 +18,14 @@ export const Image = ({
   const imageUpdatedAtDiff = getDifferenceInSeconds(imageUpdatedAt, new Date());
   // @NOTE: force reload the image, if image is updated with last 30 seconds.
   const forceReload = imageUpdatedAtDiff < FORCE_RELOAD_WITHIN_SECONDS;
+  const placeholderImage = usePlaceholderImage();
+
   return (
     <img
       src={
         imageId
           ? `/api/image/${imageId}${forceReload ? `?t=${Date.now()}` : ""}`
-          : `/static/images/asset-placeholder.jpg`
+          : placeholderImage
       }
       alt={alt}
       className={tw(className)}

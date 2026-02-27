@@ -101,7 +101,7 @@ export function EditAuditDialog({
         title={
           <div className="-mb-3 w-full pb-6">
             <h3>Edit audit details</h3>
-            <p className="text-gray-600">
+            <p className="text-color-600">
               Update the name, description, due date, and assignee of this
               audit.
             </p>

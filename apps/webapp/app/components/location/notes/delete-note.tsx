@@ -25,7 +25,7 @@ export const DeleteLocationNote = ({ noteId }: { noteId: string }) => {
         <AlertDialogTrigger asChild>
           <Button
             variant="link"
-            className="w-full cursor-default items-center justify-start text-gray-800 hover:text-gray-800"
+            className="text-color-800 hover:text-color-800 w-full cursor-default items-center justify-start"
             data-test-id="deleteLocationNoteButton"
             icon="trash"
             width="full"

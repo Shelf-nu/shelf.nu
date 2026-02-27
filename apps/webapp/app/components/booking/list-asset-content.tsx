@@ -121,12 +121,12 @@ export default function ListAssetContent({
 
       <Td className={tw("w-full whitespace-normal p-0 md:p-0")}>
         {isKitAsset && (
-          <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
+          <div className="absolute inset-y-0 left-0 h-full w-2 bg-color-100 dark:bg-color-25" />
         )}
         <div
           className={tw(
             "flex justify-between gap-3 py-4 md:justify-normal md:pr-6",
-            isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
           )}
         >
           <div className="flex items-center gap-3">
@@ -141,7 +141,7 @@ export default function ListAssetContent({
                 alt={`Image of ${item.title}`}
                 className={tw(
                   "size-full rounded-[4px] border object-cover",
-                  isKitAsset ? "border-gray-300" : ""
+                  isKitAsset ? "border-color-300" : ""
                 )}
                 withPreview
               />
@@ -151,7 +151,7 @@ export default function ListAssetContent({
                 <Button
                   to={`/assets/${item.id}`}
                   variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
+                  className="text-left font-medium text-color-900 hover:text-color-700"
                   target={"_blank"}
                   onlyNewTabIconOnHover={true}
                 >
@@ -177,7 +177,7 @@ export default function ListAssetContent({
       {/* If asset status is different than available, we need to show a label */}
       <Td
         className={tw(
-          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+          isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
         )}
       >
         {!isFinished ? (
@@ -186,14 +186,14 @@ export default function ListAssetContent({
       </Td>
       <Td
         className={tw(
-          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+          isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
         )}
       >
         <CategoryBadge category={category} />
       </Td>
       <Td
         className={tw(
-          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+          isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
         )}
       >
         <ListItemTagsColumn tags={tags} />
@@ -204,11 +204,11 @@ export default function ListAssetContent({
           {/* Checked in on */}
           <Td
             className={tw(
-              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+              isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
             )}
           >
             {isPartiallyCheckedIn ? (
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-color-600">
                 <DateS
                   date={partialCheckinDetails[item.id].checkinDate}
                   includeTime
@@ -222,11 +222,11 @@ export default function ListAssetContent({
           {/* Checked in by */}
           <Td
             className={tw(
-              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+              isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
             )}
           >
             {isPartiallyCheckedIn ? (
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-color-600">
                 {(() => {
                   const details = partialCheckinDetails[item.id];
                   const firstName = details.checkedInBy.firstName || "";
@@ -250,7 +250,7 @@ export default function ListAssetContent({
       <Td
         className={tw(
           "pr-4 text-right",
-          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+          isKitAsset ? "bg-color-50/50" : "" // Light background for kit assets
         )}
       >
         <When truthy={canSeeActions}>

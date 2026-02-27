@@ -50,6 +50,7 @@ export type Action = {
 /** The button variant. Default is primary */
 export type ButtonVariant =
   | "primary"
+  | "accent"
   | "secondary"
   | "tertiary"
   | "link"

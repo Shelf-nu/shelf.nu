@@ -111,7 +111,7 @@ export default function GenerateLocations() {
   const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   return (
-    <div className="rounded-md border bg-white p-4">
+    <div className="rounded-md border bg-surface p-4">
       <h2>Generate locations</h2>
       <p className="mb-4">
         Generate locations for the given number of locations. This is useful for

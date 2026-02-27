@@ -117,11 +117,11 @@ export default function ConfigurableDrawer<T>({
       )}
       <div>
         {expanded && (
-          <div className="text-base font-semibold text-gray-900">
+          <div className="text-base font-semibold text-color-900">
             List is empty
           </div>
         )}
-        <p className="text-sm text-gray-600">Fill list by scanning codes...</p>
+        <p className="text-sm text-color-600">Fill list by scanning codes...</p>
       </div>
     </>
   );

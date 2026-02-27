@@ -32,7 +32,7 @@ export function StarButton({ preset }: { preset: NormalizedPreset }) {
       <input type="hidden" name="starred" value={String(!preset.starred)} />
       <button
         type="submit"
-        className="mt-0.5 text-gray-400 hover:text-yellow-500"
+        className="mt-0.5 text-color-400 hover:text-yellow-500"
         title={optimisticStarred ? "Unstar" : "Star"}
         // why: Prevent form submission from bubbling and closing parent popover
         onClick={(e) => e.stopPropagation()}

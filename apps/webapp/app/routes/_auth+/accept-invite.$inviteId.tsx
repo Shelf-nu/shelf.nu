@@ -228,7 +228,7 @@ export default function AcceptInvite() {
           </div>
         )}
       </div>
-      <div className=" mx-4 mt-20 flex flex-col items-center text-center text-gray-600 md:mx-[-200px]">
+      <div className=" mx-4 mt-20 flex flex-col items-center text-center text-color-600 md:mx-[-200px]">
         <p>
           If you have any questions or need assistance, please don't hesitate to
           contact our support team at{" "}

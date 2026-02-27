@@ -404,7 +404,7 @@ export function SavedFilterPresetsControls() {
           <Button
             variant="secondary"
             size="sm"
-            className={"font-normal text-gray-500"}
+            className={"font-normal text-color-500"}
           >
             <div className="flex items-center gap-2">
               <BookOpen className="size-4" />
@@ -418,20 +418,20 @@ export function SavedFilterPresetsControls() {
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent
-            className="z-[9999] max-h-[500px] w-[480px] rounded-md border bg-white shadow-lg"
+            className="z-[9999] max-h-[500px] w-[480px] rounded-md border bg-surface shadow-lg"
             sideOffset={5}
             align="end"
           >
             {presets.length === 0 ? (
               <div className="space-y-4 p-6 text-center">
-                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-gray-100">
-                  <BookMarked className="size-6 text-gray-400" />
+                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-color-100">
+                  <BookMarked className="size-6 text-color-400" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-gray-900">
+                  <h3 className="text-sm font-medium text-color-900">
                     No saved filters yet
                   </h3>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-color-500">
                     Save your current filter configuration to quickly access it
                     later. Apply filters, then click Save in the filters menu to
                     create your first preset.
@@ -455,7 +455,7 @@ export function SavedFilterPresetsControls() {
               <>
                 {/* Search bar */}
                 <div className="flex items-center border-b">
-                  <Search className="ml-4 size-4 text-gray-500" />
+                  <Search className="ml-4 size-4 text-color-500" />
                   <input
                     ref={searchInputRef}
                     placeholder="Search presets..."
@@ -467,7 +467,7 @@ export function SavedFilterPresetsControls() {
                 </div>
 
                 {allFilteredPresets.length === 0 ? (
-                  <div className="px-3 py-6 text-center text-sm text-gray-500">
+                  <div className="px-3 py-6 text-center text-sm text-color-500">
                     No presets found
                   </div>
                 ) : (
@@ -475,7 +475,7 @@ export function SavedFilterPresetsControls() {
                     {/* Starred section */}
                     {filteredStarredPresets.length > 0 && (
                       <div>
-                        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-color-500">
                           Starred
                         </div>
                         <div className="space-y-1">
@@ -500,14 +500,14 @@ export function SavedFilterPresetsControls() {
                     {/* Divider between sections */}
                     {filteredStarredPresets.length > 0 &&
                       filteredRegularPresets.length > 0 && (
-                        <div className="border-t border-gray-200" />
+                        <div className="border-t border-color-200" />
                       )}
 
                     {/* Regular presets section */}
                     {filteredRegularPresets.length > 0 && (
                       <div>
                         {filteredStarredPresets.length > 0 && (
-                          <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-color-500">
                             All presets
                           </div>
                         )}

@@ -10,7 +10,7 @@ export const Card = ({
 }) => (
   <div
     className={tw(
-      "card my-4 overflow-hidden rounded border bg-white px-4 py-3",
+      "card my-4 overflow-hidden rounded border bg-surface px-4 py-3 dark:border-color-300",
       className
     )}
   >

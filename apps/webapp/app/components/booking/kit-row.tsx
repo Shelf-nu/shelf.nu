@@ -69,7 +69,7 @@ export default function KitRow({
 
   return (
     <React.Fragment>
-      <ListItem item={kit} className="relative bg-gray-50">
+      <ListItem item={kit} className="relative bg-color-50">
         <BulkListItemCheckbox item={kit} bulkItems={assets} />
 
         <Td
@@ -91,7 +91,7 @@ export default function KitRow({
               <Button
                 to={`/kits/${kit.id}`}
                 variant="link"
-                className="font-medium text-gray-900 hover:text-gray-700"
+                className="font-medium text-color-900 hover:text-color-700"
                 target={"_blank"}
                 onlyNewTabIconOnHover={true}
                 aria-label="Go to kit"
@@ -120,7 +120,7 @@ export default function KitRow({
               tooltipContent="This kit is already added to a booking that is overlapping the selected time period."
             />
           </When>
-          <div className="text-sm text-gray-600">{assets.length} assets</div>
+          <div className="text-sm text-color-600">{assets.length} assets</div>
         </Td>
 
         <Td>
@@ -150,7 +150,7 @@ export default function KitRow({
                 onToggleExpansion && onToggleExpansion(kit.id);
               }}
               variant="link"
-              className="text-center font-bold text-gray-600 hover:text-gray-900"
+              className="text-center font-bold text-color-600 hover:text-color-900"
               aria-label="Toggle kit expand"
             >
               <ChevronDownIcon
@@ -191,7 +191,7 @@ export default function KitRow({
       </When>
 
       {/* Add a separator row after the kit assets */}
-      <tr className="kit-separator h-1 bg-gray-100">
+      <tr className="kit-separator h-1 bg-color-100">
         <td colSpan={shouldShowCheckinColumns ? 8 : 6} className="h-1 p-0"></td>
       </tr>
     </React.Fragment>

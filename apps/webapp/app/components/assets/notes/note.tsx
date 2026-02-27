@@ -37,7 +37,7 @@ interface NoteProps {
 }
 
 export const Note = ({ note, actionsDropdown, assetLinkBase }: NoteProps) => (
-  <li key={note.id} className="note mb-2 rounded border bg-white md:mb-4">
+  <li key={note.id} className="note mb-2 rounded border bg-surface md:mb-4">
     <Switch>
       <Comment
         when={note.type === "COMMENT"}
@@ -77,16 +77,16 @@ const Comment = ({
         <Tag>
           <DateS date={note.createdAt} includeTime />
         </Tag>{" "}
-        <span className="commentator font-medium text-gray-900">
+        <span className="commentator font-medium text-color-900">
           {note.user
             ? `${note.user.firstName} ${note.user.lastName}`
             : "Unknown"}
         </span>{" "}
-        <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
+        <span className="text-color-600">{timeAgo(note.createdAt)}</span>
         {note.auditAsset && assetLinkBase && (
           <>
             {" "}
-            <span className="text-gray-600">on</span>{" "}
+            <span className="text-color-600">on</span>{" "}
             <Button
               to={`${assetLinkBase}/${note.auditAsset.id}/details`}
               variant="link-gray"

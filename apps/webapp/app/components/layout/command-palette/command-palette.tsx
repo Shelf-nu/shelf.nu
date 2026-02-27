@@ -663,12 +663,12 @@ export function CommandPalette() {
         onValueChange={setQuery}
         placeholder="Search assets, audits, kits, bookings, locations, team members..."
         autoFocus
-        className="my-4 rounded border-gray-100"
+        className="border-color-100 my-4 rounded"
       />
       <CommandList className="divide-y divide-gray-100">
         <CommandEmpty>
           {isSearching ? (
-            <span className="flex items-center gap-2 text-gray-500">
+            <span className="flex items-center gap-2 text-color-500">
               <Spinner className="size-4" /> Searching...
             </span>
           ) : errorMessage ? (
@@ -689,7 +689,7 @@ export function CommandPalette() {
                 onSelect={() => handleSelect(`/assets/${asset.id}`)}
                 className="gap-3"
               >
-                <div className="flex size-10 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-gray-100">
+                <div className="flex size-10 items-center justify-center overflow-hidden rounded-md border border-color-200 bg-color-100">
                   <img
                     src={getAssetImage(asset)}
                     alt={asset.title}
@@ -698,10 +698,10 @@ export function CommandPalette() {
                   />
                 </div>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium text-gray-900">
+                  <span className="truncate font-medium text-color-900">
                     {asset.title}
                   </span>
-                  <span className="truncate text-xs text-gray-500">
+                  <span className="truncate text-xs text-color-500">
                     {getAssetSubtitle(asset, debouncedQuery)}
                   </span>
                 </div>
@@ -719,12 +719,12 @@ export function CommandPalette() {
                 onSelect={() => handleSelect(`/audits/${audit.id}/overview`)}
                 className="gap-3"
               >
-                <ClipboardListIcon className="size-4 text-gray-500" />
+                <ClipboardListIcon className="size-4 text-color-500" />
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium text-gray-900">
+                  <span className="truncate font-medium text-color-900">
                     {audit.name}
                   </span>
-                  <span className="truncate text-xs text-gray-500">
+                  <span className="truncate text-xs text-color-500">
                     {audit.status}
                     {audit.dueDate
                       ? ` • Due ${new Date(audit.dueDate).toLocaleDateString()}`
@@ -746,12 +746,12 @@ export function CommandPalette() {
                 onSelect={() => handleSelect(`/kits/${kit.id}`)}
                 className="gap-3"
               >
-                <PackageIcon className="size-4 text-gray-500" />
+                <PackageIcon className="size-4 text-color-500" />
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium text-gray-900">
+                  <span className="truncate font-medium text-color-900">
                     {kit.name}
                   </span>
-                  <span className="truncate text-xs text-gray-500">
+                  <span className="truncate text-xs text-color-500">
                     {kit.status} • {kit.assetCount} assets
                     {kit.description ? ` • ${kit.description}` : ""}
                   </span>
@@ -770,12 +770,12 @@ export function CommandPalette() {
                 onSelect={() => handleSelect(`/bookings/${booking.id}`)}
                 className="gap-3"
               >
-                <CalendarIcon className="size-4 text-gray-500" />
+                <CalendarIcon className="size-4 text-color-500" />
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium text-gray-900">
+                  <span className="truncate font-medium text-color-900">
                     {booking.name}
                   </span>
-                  <span className="truncate text-xs text-gray-500">
+                  <span className="truncate text-xs text-color-500">
                     {booking.status}
                     {booking.custodianName ? ` • ${booking.custodianName}` : ""}
                     {booking.from && booking.to
@@ -801,12 +801,12 @@ export function CommandPalette() {
                 onSelect={() => handleSelect(`/locations/${location.id}`)}
                 className="gap-3"
               >
-                <MapPinIcon className="size-4 text-gray-500" />
+                <MapPinIcon className="size-4 text-color-500" />
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium text-gray-900">
+                  <span className="truncate font-medium text-color-900">
                     {location.name}
                   </span>
-                  <span className="truncate text-xs text-gray-500">
+                  <span className="truncate text-xs text-color-500">
                     {location.assetCount} assets
                     {location.address ? ` • ${location.address}` : ""}
                     {location.description ? ` • ${location.description}` : ""}
@@ -826,12 +826,12 @@ export function CommandPalette() {
                 onSelect={() => handleSelect(getTeamMemberHref(member))}
                 className="gap-3"
               >
-                <UserIcon className="size-4 text-gray-500" />
+                <UserIcon className="size-4 text-color-500" />
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium text-gray-900">
+                  <span className="truncate font-medium text-color-900">
                     {member.name}
                   </span>
-                  <span className="truncate text-xs text-gray-500">
+                  <span className="truncate text-xs text-color-500">
                     {member.email || "NRM"}
                   </span>
                 </div>
@@ -855,13 +855,13 @@ export function CommandPalette() {
                   .join(" ")}
                 onSelect={() => handleSelect(command.href)}
               >
-                <command.icon className="size-4 text-gray-500" />
+                <command.icon className="size-4 text-color-500" />
                 <div className="flex flex-col">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-color-900">
                     {command.label}
                   </span>
                   {command.description ? (
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-color-500">
                       {command.description}
                     </span>
                   ) : null}
@@ -886,13 +886,13 @@ export function CommandPalette() {
                   .join(" ")}
                 onSelect={() => handleSelect(command.href)}
               >
-                <command.icon className="size-4 text-gray-500" />
+                <command.icon className="size-4 text-color-500" />
                 <div className="flex flex-col">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-color-900">
                     {command.label}
                   </span>
                   {command.description ? (
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-color-500">
                       {command.description}
                     </span>
                   ) : null}
@@ -903,19 +903,19 @@ export function CommandPalette() {
         ) : null}
       </CommandList>
 
-      <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
+      <div className="border-color-100 flex items-center justify-between border-t px-4 py-3 text-xs text-color-500">
         <div className="flex items-center gap-2">
           <SearchIcon className="size-4" />
           {isPersonalOrg(layoutData?.currentOrganization)
             ? "Search across all assets, audits, kits, and locations"
             : "Search across all assets, audits, kits, bookings, locations, and team members"}
         </div>
-        <CommandShortcut className={tw("bg-white")}>
+        <CommandShortcut className={tw("bg-surface")}>
           {shortcutLabel}
         </CommandShortcut>
       </div>
-      <div className="border-t border-gray-100 px-4 pb-4 pt-2 text-[11px] text-gray-400">
-        <span className="font-medium text-gray-500">Keyboard tips:</span> ↑↓ to
+      <div className="border-color-100 border-t px-4 pb-4 pt-2 text-[11px] text-color-400">
+        <span className="font-medium text-color-500">Keyboard tips:</span> ↑↓ to
         navigate • ↵ to select • esc to close
       </div>
     </CommandDialog>

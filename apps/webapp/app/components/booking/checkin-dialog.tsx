@@ -55,7 +55,7 @@ export default function CheckinDialog({
         className={tw(
           "whitespace-nowrap",
           variant === "dropdown"
-            ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+            ? "w-full justify-start px-4 py-3 text-color-700 hover:text-color-700"
             : ""
         )}
         variant={variant === "dropdown" ? "link" : "primary"}
@@ -85,7 +85,7 @@ export default function CheckinDialog({
           className={tw(
             "whitespace-nowrap",
             variant === "dropdown"
-              ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+              ? "w-full justify-start px-4 py-3 text-color-700 hover:text-color-700"
               : ""
           )}
           variant={variant === "dropdown" ? "link" : "primary"}
@@ -110,11 +110,11 @@ export default function CheckinDialog({
               You are checking in the booking more than 15 minutes before the
               end date, however you are not allowed to adjust the end date
               because the current time(
-              <span className="font-bold text-gray-700">
+              <span className="font-bold text-color-700">
                 <DateS date={new Date()} includeTime />
               </span>
               ) is before the start date(
-              <span className="font-bold text-gray-700">
+              <span className="font-bold text-color-700">
                 <DateS date={booking.from} includeTime />
               </span>
               ) of the booking.
@@ -123,7 +123,7 @@ export default function CheckinDialog({
             <>
               You are checking in the booking more than 15 minutes before the
               end date. If you proceed, the end date will be adjusted to now:{" "}
-              <span className="font-bold text-gray-700">
+              <span className="font-bold text-color-700">
                 <DateS date={new Date()} includeTime />
               </span>
               .

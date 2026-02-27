@@ -93,7 +93,7 @@ export function SubscriptionsOverview({
     <div className="space-y-6">
       {workspaceSubscriptions.length > 0 && (
         <div>
-          <h4 className="mb-3 text-sm font-medium uppercase text-gray-500">
+          <h4 className="mb-3 text-sm font-medium uppercase text-color-500">
             Workspace Subscriptions
           </h4>
           {workspaceSubscriptions.map((subscription) => (
@@ -116,7 +116,7 @@ export function SubscriptionsOverview({
 
       {addonSubscriptions.length > 0 && (
         <div>
-          <h4 className="mb-3 text-sm font-medium uppercase text-gray-500">
+          <h4 className="mb-3 text-sm font-medium uppercase text-color-500">
             Add-ons
           </h4>
           {addonSubscriptions.map((subscription) => (
@@ -258,7 +258,7 @@ function Item({
         <>
           <div>Trial ended</div>
 
-          <div className="text-gray-500">
+          <div className="text-color-500">
             <CustomerPortalForm
               buttonText="Add payment"
               buttonProps={{
@@ -283,7 +283,7 @@ function Item({
         </div>
 
         {isTrial && (
-          <div className="text-gray-500">
+          <div className="text-color-500">
             after trial ends <TrialPaymentTooltip />
           </div>
         )}
@@ -292,7 +292,7 @@ function Item({
   }
 
   return (
-    <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+    <div className="mb-2 flex items-center gap-3 rounded border border-color-300 p-4">
       <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
         <InfoIcon />
       </div>
@@ -351,7 +351,7 @@ function TrialPaymentTooltip() {
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger className="align-middle">
-          <i className="inline cursor-pointer text-gray-400 hover:text-gray-700">
+          <i className="inline cursor-pointer text-color-400 hover:text-color-700">
             <HelpIcon />
           </i>
         </TooltipTrigger>
@@ -380,7 +380,7 @@ function LegacyPricingTooltip() {
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger className="align-middle">
-          <i className="inline cursor-pointer text-gray-400 hover:text-gray-700">
+          <i className="inline cursor-pointer text-color-400 hover:text-color-700">
             <HelpIcon />
           </i>
         </TooltipTrigger>

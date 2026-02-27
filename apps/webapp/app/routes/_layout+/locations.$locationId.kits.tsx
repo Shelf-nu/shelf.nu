@@ -263,7 +263,7 @@ export default function LocationKits() {
                         <ChevronRight className="rotate-90" />
                       </div>
                     }
-                    triggerWrapperClassName="h-[42px] w-full whitespace-nowrap rounded border border-gray-300 px-[14px] text-[14px] text-gray-500 hover:cursor-pointer md:w-auto"
+                    triggerWrapperClassName="h-[42px] w-full whitespace-nowrap rounded border border-color-300 px-[14px] text-[14px] text-color-500 hover:cursor-pointer md:w-auto"
                     model={{
                       name: "teamMember",
                       queryKey: "name",
@@ -398,7 +398,7 @@ const Row = ({
                 <Button
                   to={`/kits/${item.id}`}
                   variant="link"
-                  className="text-left text-gray-900 hover:text-gray-700"
+                  className="text-left text-color-900 hover:text-color-700"
                   target="_blank"
                   onlyNewTabIconOnHover={true}
                 >

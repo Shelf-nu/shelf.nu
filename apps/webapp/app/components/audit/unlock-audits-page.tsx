@@ -76,13 +76,13 @@ export function UnlockAuditsPage({
             <ClipboardCheckIcon className="size-6" />
           </div>
           <h2 className="mb-2 text-display-xs font-semibold">Unlock Audits</h2>
-          <p className="text-gray-600">
+          <p className="text-color-600">
             Add powerful audit capabilities to your workspace.
           </p>
         </div>
 
         {/* Feature list */}
-        <div className="mb-8 rounded-xl border border-gray-200 bg-white p-6">
+        <div className="mb-8 rounded-xl border border-color-200 bg-surface p-6">
           <h3 className="mb-4 text-lg font-semibold">
             What you get with Audits
           </h3>
@@ -90,7 +90,7 @@ export function UnlockAuditsPage({
             {features.map((feature) => (
               <li key={feature} className="flex items-start gap-3">
                 <CheckCircle2Icon className="mt-0.5 size-5 shrink-0 text-primary-500" />
-                <span className="text-gray-700">{feature}</span>
+                <span className="text-color-700">{feature}</span>
               </li>
             ))}
           </ul>
@@ -144,7 +144,7 @@ function PricingSection({
   yearlyDiscount: number | null;
 }) {
   return (
-    <div className="mb-8 rounded-xl border border-gray-200 bg-white p-6">
+    <div className="mb-8 rounded-xl border border-color-200 bg-surface p-6">
       <h3 className="mb-4 text-lg font-semibold">Select your pricing plan</h3>
       <div className="flex flex-wrap items-stretch gap-4">
         {monthlyPrice && (
@@ -207,29 +207,29 @@ function IntervalCard({
       className={tw(
         "relative flex flex-1 cursor-pointer flex-col items-center rounded-lg p-4 text-center transition-colors",
         isSelected
-          ? "border-2 border-primary-200 bg-primary-25"
-          : "border border-gray-200"
+          ? "bg-primary-25 border-2 border-primary-200"
+          : "border border-color-200"
       )}
     >
       {discountBadge && (
-        <span className="absolute -top-2.5 rounded-full bg-primary-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+        <span className="bg-primary-500 absolute -top-2.5 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white">
           {discountBadge}
         </span>
       )}
       <p
         className={tw(
           "mb-1 text-sm font-medium",
-          isSelected ? "text-primary-600" : "text-gray-500"
+          isSelected ? "text-primary-600" : "text-color-500"
         )}
       >
         {label}
       </p>
       <p className="text-2xl font-semibold">
         {mainPrice}
-        <span className="text-sm font-normal text-gray-500">/mo</span>
+        <span className="text-sm font-normal text-color-500">/mo</span>
       </p>
-      <p className="text-xs text-gray-500">{footnote}</p>
-      <p className="mt-1 text-xs text-gray-500">per workspace</p>
+      <p className="text-xs text-color-500">{footnote}</p>
+      <p className="mt-1 text-xs text-color-500">per workspace</p>
     </button>
   );
 }
@@ -237,17 +237,17 @@ function IntervalCard({
 /** Shown when the user's audit trial has expired and subscription is paused */
 function TrialExpiredCTA({ auditSubInfo }: { auditSubInfo?: AuditSubInfo }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 text-center">
-      <p className="mb-1 font-semibold text-gray-900">
+    <div className="rounded-xl border border-color-200 bg-surface p-6 text-center">
+      <p className="mb-1 font-semibold text-color-900">
         Your Audits trial has ended
       </p>
-      <p className="mb-2 text-sm text-gray-600">
+      <p className="mb-2 text-sm text-color-600">
         Add a payment method to continue using Audits.
       </p>
       {auditSubInfo && (
-        <p className="mb-4 text-sm text-gray-500">
+        <p className="mb-4 text-sm text-color-500">
           Your plan:{" "}
-          <span className="font-medium text-gray-700">
+          <span className="font-medium text-color-700">
             {fmtPrice(
               auditSubInfo.interval === "year"
                 ? Math.round(auditSubInfo.amount / 12)
@@ -269,7 +269,7 @@ function TrialExpiredCTA({ auditSubInfo }: { auditSubInfo?: AuditSubInfo }) {
       {!auditSubInfo && <div className="mb-4" />}
       <CustomerPortalForm
         buttonText="Add payment method to continue"
-        buttonProps={{ variant: "primary", width: "full" }}
+        buttonProps={{ variant: "accent", width: "full" }}
       />
     </div>
   );
@@ -300,7 +300,7 @@ function OwnerCTAs({
           <input type="hidden" name="priceId" value={yearlyPrice.id} />
           <Button
             type="submit"
-            variant="primary"
+            variant="accent"
             width="full"
             disabled={isStartingTrial}
           >
@@ -318,7 +318,7 @@ function OwnerCTAs({
           <input type="hidden" name="priceId" value={selectedPrice.id} />
           <Button
             type="submit"
-            variant={canStartTrial ? "secondary" : "primary"}
+            variant={canStartTrial ? "secondary" : "accent"}
             width="full"
             disabled={isSubscribing}
           >
@@ -343,8 +343,8 @@ function OwnerCTAs({
 /** Informational message for non-owners */
 function NonOwnerMessage() {
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 text-center">
-      <p className="text-gray-600">
+    <div className="rounded-xl border border-color-200 bg-color-50 p-6 text-center">
+      <p className="text-color-600">
         Contact your workspace owner to enable the Audits add-on for your
         organization.
       </p>

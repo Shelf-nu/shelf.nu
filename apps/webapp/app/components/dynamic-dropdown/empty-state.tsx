@@ -15,10 +15,10 @@ export const EmptyState = ({
     </div>
 
     <div>
-      <div className="text-base font-semibold text-gray-900">
+      <div className="text-base font-semibold text-color-900">
         No matching results
       </div>
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-color-600">
         Your search “{searchQuery}” did not match any {modelName}.
       </p>
     </div>

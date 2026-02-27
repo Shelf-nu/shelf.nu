@@ -14,9 +14,9 @@ export const SidebarNoticeCard = () => {
   }
 
   return optimisticHideNoticeCard ? null : (
-    <div className="support-banner mb-6 hidden rounded border bg-gray-50 px-2 py-3 md:block">
+    <div className="support-banner mb-6 hidden rounded border bg-color-50 px-2 py-3 md:block">
       <div className="flex justify-between align-middle">
-        <h5 className="mb-1 font-semibold text-gray-900">
+        <h5 className="mb-1 font-semibold text-color-900">
           Install Shelf for Mobile
         </h5>
         <div className="mt-[-6px]">
@@ -32,7 +32,7 @@ export const SidebarNoticeCard = () => {
         </div>
       </div>
 
-      <p className="text-gray-600">
+      <p className="text-color-600">
         Always available access to shelf, with all features you have on desktop.
       </p>
       <img

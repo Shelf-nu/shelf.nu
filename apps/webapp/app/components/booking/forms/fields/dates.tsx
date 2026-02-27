@@ -126,7 +126,7 @@ export function DatesFields({
           }}
         />
 
-        <p className="text-[14px] text-gray-600">
+        <p className="text-[14px] text-color-600">
           Within this period the assets in this booking will be checked out and
           unavailable for other bookings.
         </p>
@@ -134,12 +134,12 @@ export function DatesFields({
           <Separator className="my-2" />
         )}
         {maxBookingLength && (
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Maximum booking length is <strong>{maxBookingLength} hours</strong>.
           </p>
         )}
         {bufferStartTime > 0 && (
-          <p className="text-[14px] text-gray-600">
+          <p className="text-[14px] text-color-600">
             Minimum advance notice: <strong>{bufferStartTime} hours</strong>{" "}
             before booking start time.
           </p>
@@ -150,7 +150,7 @@ export function DatesFields({
         loading={isLoading}
       />
       {error && (
-        <p className="mt-1 text-sm text-orange-600">
+        <p className="mt-1 text-sm text-warning-600">
           Working hours validation unavailable: {error}
         </p>
       )}
@@ -231,7 +231,7 @@ export function WorkingHoursInfo({
           <Spinner className="mt-1 size-4" />
         </div>
       ) : (
-        <div className="mt-1 text-sm text-gray-600">
+        <div className="mt-1 text-sm text-color-600">
           <p>
             <strong>Working days:</strong>{" "}
             {workingDays.length > 0 ? workingDays.join(", ") : "None"}
@@ -248,7 +248,7 @@ export function WorkingHoursInfo({
             </p>
           )}
           {workingHours.overrides.length > 0 && (
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-color-500">
               Special dates and holidays are also considered
             </p>
           )}

@@ -16,7 +16,7 @@ const Command = forwardRef<
   <CommandPrimitive
     ref={ref}
     className={tw(
-      "flex size-full flex-col overflow-hidden rounded-lg bg-white text-gray-900",
+      "flex size-full flex-col overflow-hidden rounded-lg bg-surface text-color-900",
       className
     )}
     {...props}
@@ -34,7 +34,7 @@ const CommandDialog = ({
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-gray-900/40 backdrop-blur-sm" />
       <DialogPrimitive.Content
         className={tw(
-          "fixed left-1/2 top-1/2 z-50 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl",
+          "fixed left-1/2 top-1/2 z-50 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-color-200 bg-surface shadow-2xl",
           className
         )}
       >
@@ -48,11 +48,11 @@ const CommandInput = forwardRef<
   ElementRef<typeof CommandPrimitive.Input>,
   ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
 >(({ className, ...props }, ref) => (
-  <div className="flex items-center border-b border-gray-200 px-4">
+  <div className="flex items-center border-b border-color-200 px-4">
     <CommandPrimitive.Input
       ref={ref}
       className={tw(
-        "flex h-12 w-full bg-transparent text-base outline-none placeholder:text-gray-400 focus:outline-none",
+        "flex h-12 w-full bg-transparent text-base outline-none placeholder:text-color-400 focus:outline-none",
         className
       )}
       {...props}
@@ -80,7 +80,7 @@ const CommandEmpty = forwardRef<
   <CommandPrimitive.Empty
     ref={ref}
     className={tw(
-      "flex flex-col items-center justify-center px-6 py-10 text-center text-sm text-gray-500",
+      "flex flex-col items-center justify-center px-6 py-10 text-center text-sm text-color-500",
       className
     )}
     {...props}
@@ -95,7 +95,7 @@ const CommandGroup = forwardRef<
   <CommandPrimitive.Group
     ref={ref}
     className={tw(
-      "px-2 py-3 text-sm [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-gray-400",
+      "px-2 py-3 text-sm [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-color-400",
       className
     )}
     {...props}
@@ -109,7 +109,7 @@ const CommandSeparator = forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive.Separator
     ref={ref}
-    className={tw("-mx-2 my-1 h-px bg-gray-200", className)}
+    className={tw("-mx-2 my-1 h-px bg-color-200", className)}
     {...props}
   />
 ));
@@ -122,7 +122,7 @@ const CommandItem = forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={tw(
-      "group flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-700 outline-none aria-selected:bg-primary-50 aria-selected:text-primary-700",
+      "group flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-color-700 outline-none aria-selected:bg-primary-50 aria-selected:text-primary-700",
       className
     )}
     {...props}
@@ -136,7 +136,7 @@ const CommandShortcut = ({
 }: HTMLAttributes<HTMLSpanElement>) => (
   <span
     className={tw(
-      "ml-auto inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500",
+      "ml-auto inline-flex items-center gap-1 rounded border border-color-200 bg-color-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-color-500",
       className
     )}
     {...props}

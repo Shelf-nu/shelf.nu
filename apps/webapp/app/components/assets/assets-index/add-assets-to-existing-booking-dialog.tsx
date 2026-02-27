@@ -96,7 +96,7 @@ export default function AddAssetsToExistingBookingDialog() {
                           <div className="semi-bold max-w-[250px] truncate">
                             {booking.name}
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-xs text-color-500">
                             <DateS date={booking.from} includeTime /> -{" "}
                             <DateS date={booking.to} includeTime />
                           </div>
@@ -104,15 +104,15 @@ export default function AddAssetsToExistingBookingDialog() {
                       </SelectItem>
                     ))
                   ) : (
-                    <div className="p-2 text-center text-sm text-gray-500">
+                    <div className="p-2 text-center text-sm text-color-500">
                       No bookings available
                     </div>
                   )}
                 </SelectContent>
               </Select>
               <When truthy={!isFetchingBookings && bookings.length === 0}>
-                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
-                  <p className="text-sm text-gray-600">
+                <div className="mb-4 rounded-md border border-color-300 bg-color-25 p-2">
+                  <p className="text-sm text-color-600">
                     No draft or reserved bookings found. Create a new booking
                     first to add assets to it.
                   </p>
@@ -125,7 +125,7 @@ export default function AddAssetsToExistingBookingDialog() {
               </When>
 
               <When truthy={!!fetcherError || !!fetcherErrorAdditionalData}>
-                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
+                <div className="mb-4 rounded-md border border-color-300 bg-color-25 p-2">
                   <When truthy={!!fetcherError}>
                     <p>{fetcherError}</p>
                   </When>

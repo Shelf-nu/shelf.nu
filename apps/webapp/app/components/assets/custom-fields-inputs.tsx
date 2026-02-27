@@ -80,7 +80,7 @@ export default function AssetCustomFields({
             getCustomFieldVal(field.id) === "Yes" || field.required
           }
         />
-        <label className="font-medium text-gray-700 lg:hidden">
+        <label className="font-medium text-color-700 lg:hidden">
           <span className={field.required ? "required-input-label" : ""}>
             {field.name}
           </span>
@@ -90,7 +90,7 @@ export default function AssetCustomFields({
     DATE: (field) => (
       <div className="flex w-full items-end">
         <Input
-          className="w-full placeholder:text-gray-500"
+          className="w-full placeholder:text-color-500"
           label={field.name}
           hideLabel
           type="date"
@@ -129,7 +129,7 @@ export default function AssetCustomFields({
     ),
     OPTION: (field) => (
       <>
-        <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
+        <label className="mb-1.5 font-medium text-color-700 lg:hidden">
           <span className={field.required ? "required-input-label" : ""}>
             {field.name}
           </span>
@@ -178,7 +178,7 @@ export default function AssetCustomFields({
           className="w-full"
           required={isFieldRequired(field.id)}
         />
-        <span className="absolute bottom-0 border-r px-3 py-2.5  text-gray-600 ">
+        <span className="absolute bottom-0 border-r px-3 py-2.5  text-color-600 ">
           {currency}
         </span>
       </div>
@@ -284,9 +284,9 @@ export default function AssetCustomFields({
         </>
       ) : (
         <div>
-          <div className=" mx-auto max-w-screen-sm rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
+          <div className=" mx-auto max-w-screen-sm rounded-xl border border-color-300 bg-surface px-5 py-10 text-center">
             <div>
-              <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
+              <div className="border-color-50 mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid bg-color-100 p-2 text-color-600">
                 <SearchIcon />
               </div>
               <h4 className="mb-6 text-base">No active custom fields</h4>
@@ -381,7 +381,7 @@ function OptionSelect({
             ref={triggerRef}
           >
             <div className="flex w-full items-center justify-between">
-              <span className={value === "" ? "text-gray-500" : ""}>
+              <span className={value === "" ? "text-color-500" : ""}>
                 {displayValue}
               </span>
               <ChevronDownIcon />
@@ -391,11 +391,11 @@ function OptionSelect({
         <PopoverPortal>
           <PopoverContent
             align="start"
-            className="z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            className="z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-color-200 bg-surface"
           >
             {/* Search input */}
             <div className="flex items-center border-b">
-              <Search className="ml-4 size-4 text-gray-500" />
+              <Search className="ml-4 size-4 text-color-500" />
               <input
                 ref={searchInputRef}
                 placeholder={`Search ${field.name}...`}
@@ -419,14 +419,14 @@ function OptionSelect({
                     id={`option-${index}`}
                     key={option}
                     className={tw(
-                      "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                      "flex items-center justify-between px-4 py-3 text-[14px] text-color-600 hover:cursor-pointer hover:bg-color-50",
                       isHighlighted && [
-                        "bg-gray-50",
+                        "bg-color-50",
                         "relative",
                         index !== 0 &&
-                          "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-gray-200",
+                          "before:absolute before:inset-x-0 before:top-0 before:border-t before:border-color-200",
                         index !== filteredOptions.length - 1 &&
-                          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200",
+                          "after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-color-200",
                       ]
                     )}
                     role="option"

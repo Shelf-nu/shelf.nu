@@ -53,13 +53,15 @@ export function DescriptionComponent({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="z-[999999] w-80 rounded-md border bg-white p-3 shadow-lg"
+          className="z-[999999] w-80 rounded-md border bg-surface p-3 shadow-lg"
           side="top"
           sideOffset={8}
         >
           <div className="text-sm">
-            <div className="font-semibold text-gray-900">Full Description:</div>
-            <div className="mt-1 text-gray-700">{oldText}</div>
+            <div className="font-semibold text-color-900">
+              Full Description:
+            </div>
+            <div className="mt-1 text-color-700">{oldText}</div>
           </div>
         </PopoverContent>
       </Popover>
@@ -84,13 +86,15 @@ export function DescriptionComponent({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="z-[999999] w-80 rounded-md border bg-white p-3 shadow-lg"
+          className="z-[999999] w-80 rounded-md border bg-surface p-3 shadow-lg"
           side="top"
           sideOffset={8}
         >
           <div className="text-sm">
-            <div className="font-semibold text-gray-900">Full Description:</div>
-            <div className="mt-1 text-gray-700">{newText}</div>
+            <div className="font-semibold text-color-900">
+              Full Description:
+            </div>
+            <div className="mt-1 text-color-700">{newText}</div>
           </div>
         </PopoverContent>
       </Popover>
@@ -116,15 +120,15 @@ export function DescriptionComponent({
               </Button>
             </PopoverTrigger>
             <PopoverContent
-              className="z-[999999] w-80 rounded-md border bg-white p-3 shadow-lg"
+              className="z-[999999] w-80 rounded-md border bg-surface p-3 shadow-lg"
               side="top"
               sideOffset={8}
             >
               <div className="text-sm">
-                <div className="font-semibold text-gray-900">
+                <div className="font-semibold text-color-900">
                   Previous Description:
                 </div>
-                <div className="mt-1 text-gray-700">{oldText}</div>
+                <div className="mt-1 text-color-700">{oldText}</div>
               </div>
             </PopoverContent>
           </Popover>
@@ -146,15 +150,15 @@ export function DescriptionComponent({
               </Button>
             </PopoverTrigger>
             <PopoverContent
-              className="z-[999999] w-80 rounded-md border bg-white p-3 shadow-lg"
+              className="z-[999999] w-80 rounded-md border bg-surface p-3 shadow-lg"
               side="top"
               sideOffset={8}
             >
               <div className="text-sm">
-                <div className="font-semibold text-gray-900">
+                <div className="font-semibold text-color-900">
                   New Description:
                 </div>
-                <div className="mt-1 text-gray-700">{newText}</div>
+                <div className="mt-1 text-color-700">{newText}</div>
               </div>
             </PopoverContent>
           </Popover>

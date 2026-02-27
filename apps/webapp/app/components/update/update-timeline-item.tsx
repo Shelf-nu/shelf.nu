@@ -60,13 +60,13 @@ export function UpdateTimelineItem({ update }: UpdateTimelineItemProps) {
     >
       {/* Left: Date/Time - shows on top on mobile, sticky on desktop */}
       <div className="text-left md:sticky md:top-4 md:self-start md:pb-16 md:text-right">
-        <div className="text-sm font-medium text-gray-900">
+        <div className="text-sm font-medium text-color-900">
           <DateS
             date={update.publishDate}
             options={{ month: "long", day: "numeric", year: "numeric" }}
           />
         </div>
-        <div className="mt-1 text-sm text-gray-600">
+        <div className="mt-1 text-sm text-color-600">
           <DateS date={update.publishDate} onlyTime />
         </div>
         {isUnread && (
@@ -84,12 +84,12 @@ export function UpdateTimelineItem({ update }: UpdateTimelineItemProps) {
             isUnread ? "bg-blue-500" : "bg-gray-400"
           )}
         />
-        <div className="absolute top-3 h-full w-px bg-gray-200" />
+        <div className="absolute top-3 h-full w-px bg-color-200" />
       </div>
 
       {/* Right: Content */}
       <div className="pb-8 md:pb-12">
-        <h2 className="mb-4 text-2xl font-bold leading-tight text-gray-900">
+        <h2 className="mb-4 text-2xl font-bold leading-tight text-color-900">
           {update.title}
         </h2>
 
@@ -109,7 +109,7 @@ export function UpdateTimelineItem({ update }: UpdateTimelineItemProps) {
           </div>
         )}
 
-        <div className="prose prose-gray max-w-none text-[15px] leading-relaxed text-gray-700">
+        <div className="prose prose-gray max-w-none text-[15px] leading-relaxed text-color-700">
           <MarkdownViewer content={update.content} />
         </div>
 

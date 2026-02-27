@@ -291,7 +291,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+              <header className="flex items-center justify-between border-b bg-surface py-4 md:hidden">
                 <Link to="." title="Home" className="block h-8">
                   <ShelfMobileLogo />
                 </Link>
@@ -303,7 +303,7 @@ export default function App() {
                     className={({ isActive }) =>
                       tw(
                         "relative flex items-center justify-center px-2 transition",
-                        isActive ? "text-primary-600" : "text-gray-500"
+                        isActive ? "text-primary-600" : "text-color-500"
                       )
                     }
                   >

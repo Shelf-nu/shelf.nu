@@ -68,7 +68,7 @@ export function Th({
   return (
     <th
       className={tw(
-        "p-4 text-left font-normal text-gray-600 md:border-b md:px-6",
+        "p-4 text-left font-normal text-color-600 md:border-b md:px-6",
         className
       )}
       colSpan={colSpan || undefined}
@@ -86,7 +86,7 @@ export function Tr({
   children?: ReactNode;
   className?: string;
 }) {
-  return <tr className={tw("hover:bg-gray-50", className)}>{children}</tr>;
+  return <tr className={tw("hover:bg-color-50", className)}>{children}</tr>;
 }
 
 interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {

@@ -10,7 +10,7 @@ export const BarcodeCard = ({
   barcode: Pick<Barcode, "id" | "value" | "type">;
 }) => (
   <div
-    className="flex w-full max-w-full shrink-0 flex-col rounded-lg border bg-gray-50 p-3 md:w-auto md:max-w-[400px]"
+    className="flex w-full max-w-full shrink-0 flex-col rounded-lg border bg-color-50 p-3 md:w-auto md:max-w-[400px]"
     style={{ minWidth: "280px" }}
   >
     <div
@@ -20,7 +20,7 @@ export const BarcodeCard = ({
       <span className="inline-flex w-fit items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
         {barcode.type}
       </span>
-      <span className="max-w-full  truncate font-mono text-gray-700">
+      <span className="max-w-full  truncate font-mono text-color-700">
         {barcode.value}
       </span>
       {barcode.type === "EAN13" && (
@@ -28,7 +28,7 @@ export const BarcodeCard = ({
       )}
     </div>
     <div
-      className="flex flex-1 flex-col items-center justify-center rounded bg-white p-2"
+      className="flex flex-1 flex-col items-center justify-center rounded bg-surface p-2"
       title={`${barcode.type}: ${barcode.value}`}
     >
       <BarcodeDisplay

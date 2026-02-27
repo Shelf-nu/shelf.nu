@@ -40,13 +40,13 @@ export function BookingStatistics({
       <div className="mt-4 flex flex-col gap-4">
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Booking duration</span>
+          <span className="text-sm text-color-500">Booking duration</span>
           <span className="text-right font-medium">{duration}</span>
         </div>
 
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Assets</span>
+          <span className="text-sm text-color-500">Assets</span>
           <span className="text-right font-medium">{assetsCount}</span>
         </div>
         {partialCheckinProgress?.hasPartialCheckins && (
@@ -54,7 +54,9 @@ export function BookingStatistics({
             <Separator />
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Check-in progress</span>
+                <span className="text-sm text-color-500">
+                  Check-in progress
+                </span>
                 <span className="flex min-w-[150px] items-center gap-2 text-right text-sm font-medium">
                   <span className="whitespace-nowrap">
                     {partialCheckinProgress.checkedInCount} /{" "}
@@ -68,12 +70,12 @@ export function BookingStatistics({
         )}
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Kits</span>
+          <span className="text-sm text-color-500">Kits</span>
           <span className="text-right font-medium">{kitsCount}</span>
         </div>
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="flex items-center gap-1 text-sm text-gray-500">
+          <span className="flex items-center gap-1 text-sm text-color-500">
             Total assets{" "}
             <InfoTooltip
               iconClassName="size-4"
@@ -89,12 +91,12 @@ export function BookingStatistics({
         </div>
         <Separator />
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">Total value</span>
+          <span className="text-sm text-color-500">Total value</span>
           <span className="text-right font-medium">{totalValue}</span>
         </div>
         <Separator />
         <div className="flex items-start justify-between">
-          <span className="text-sm text-gray-500">Categories</span>
+          <span className="text-sm text-color-500">Categories</span>
           <div className="text-right">
             <ItemsWithViewMore
               items={allCategories}
@@ -107,7 +109,7 @@ export function BookingStatistics({
         </div>
         <Separator />
         <div className="flex items-start justify-between">
-          <span className="text-sm text-gray-500">Tags</span>
+          <span className="text-sm text-color-500">Tags</span>
           <div className="text-right">
             <ItemsWithViewMore
               items={tags}
@@ -127,7 +129,7 @@ export function BookingStatistics({
         <Separator />
 
         <div className="flex items-start justify-between">
-          <span className="text-sm text-gray-500">Created by</span>
+          <span className="text-sm text-color-500">Created by</span>
 
           <UserBadge
             name={`${creator.firstName} ${creator.lastName}`}
@@ -139,7 +141,7 @@ export function BookingStatistics({
           <>
             <Separator />
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-color-500">
                 Automatically archived
               </span>
               <span className="text-right font-medium">

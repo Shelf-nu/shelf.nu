@@ -204,7 +204,7 @@ export function GenericItemRow<T>({
       </Td>
       <Td>
         <Button
-          className="border-none text-gray-500 hover:text-gray-700"
+          className="border-none text-color-500 hover:text-color-700"
           variant="ghost"
           icon="trash"
           onClick={() => onRemove(qrId)}
@@ -239,7 +239,7 @@ export function Tr({
       transition={{ duration: 0.2 }}
       exit={{ opacity: 0 }}
       className={tw(
-        "h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0",
+        "h-[80px] items-center border-b hover:bg-color-50 [&_td]:border-b-0",
         className
       )}
       style={{
@@ -281,7 +281,7 @@ export function DefaultLoadingState({
       ) : (
         <TextLoader
           text="Fetching item"
-          className="text-[10px] text-gray-500"
+          className="text-[10px] text-color-500"
         />
       )}
     </div>

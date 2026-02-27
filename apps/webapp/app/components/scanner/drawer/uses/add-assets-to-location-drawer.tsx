@@ -275,9 +275,9 @@ export function AssetRow({
       <div className="flex flex-wrap items-center gap-1">
         <span
           className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
+            "inline-block bg-color-50 px-[6px] py-[2px]",
+            "rounded-md border border-color-200",
+            "text-xs text-color-700"
           )}
         >
           asset
@@ -351,7 +351,7 @@ export function KitRow({
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
-        <span className="text-[12px] font-normal text-gray-700">
+        <span className="text-[12px] font-normal text-color-700">
           ({kit._count.assets} assets)
         </span>
       </p>
@@ -359,9 +359,9 @@ export function KitRow({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span
           className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
+            "inline-block bg-color-50 px-[6px] py-[2px]",
+            "rounded-md border border-color-200",
+            "text-xs text-color-700"
           )}
         >
           kit

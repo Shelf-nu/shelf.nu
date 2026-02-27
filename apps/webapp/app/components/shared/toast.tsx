@@ -19,7 +19,7 @@ export const Toaster = () => {
 
   const variants = {
     primary: tw(`border-primary-50 bg-primary-100 text-primary`),
-    gray: tw(`border-gray-50 bg-gray-100 text-gray-700`),
+    gray: tw(`border-color-50 bg-color-100 text-color-700`),
     success: tw(`border-success-50 bg-success-100 text-success-600`),
     error: tw(`border-error-50 bg-error-100 text-error-600`),
   };
@@ -38,7 +38,7 @@ export const Toaster = () => {
     <Toast.Provider swipeDirection="right" duration={3000}>
       <Toast.Root
         className={tw(
-          "flex gap-4 rounded border border-gray-100 bg-white p-3 shadow-xl",
+          "flex gap-4 rounded border border-color-300 bg-surface p-3 shadow-xl",
           "data-[swipe=cancel]:translate-x-0 data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[state=closed]:animate-hide data-[state=open]:animate-slideIn data-[swipe=end]:animate-swipeOut data-[swipe=cancel]:transition-[transform_200ms_ease-out]"
         )}
         open={open}
@@ -58,12 +58,12 @@ export const Toaster = () => {
           </div>
         </div>
         <div className="flex-1">
-          <Toast.Title className=" text-text-sm font-semibold text-gray-900 ">
+          <Toast.Title className=" text-text-sm font-semibold text-color-900 ">
             {title}
           </Toast.Title>
 
           <When truthy={!!message}>
-            <Toast.Description className="text-gray-600">
+            <Toast.Description className="text-color-600">
               {message}
             </Toast.Description>
           </When>

@@ -660,11 +660,11 @@ export default function Onboarding() {
             <CollapsibleTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-left font-medium text-gray-700 hover:bg-gray-100"
+                className="flex w-full items-center justify-between rounded-md border border-color-200 bg-color-50 px-4 py-3 text-left font-medium text-color-700 hover:bg-color-100"
               >
                 <span>
                   Help us customize Shelf
-                  <span className="ml-1 text-sm font-normal text-gray-500">
+                  <span className="ml-1 text-sm font-normal text-color-500">
                     (optional)
                   </span>
                 </span>
@@ -717,6 +717,7 @@ export default function Onboarding() {
             data-test-id="onboard"
             type="submit"
             width="full"
+            variant="accent"
             disabled={disabled}
           >
             Submit

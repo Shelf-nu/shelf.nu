@@ -145,7 +145,7 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
             variant="secondary"
             className={tw(
               "w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate",
-              !selectedAuditName && "text-gray-400"
+              !selectedAuditName && "text-color-400"
             )}
             disabled={disabled || isLoading}
           >
@@ -157,11 +157,11 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
           <PopoverContent
             align="start"
             className={tw(
-              "z-[999999] mt-2 max-h-[400px] w-[500px] overflow-scroll rounded-md border border-gray-200 bg-white shadow-lg"
+              "z-[999999] mt-2 max-h-[400px] w-[500px] overflow-scroll rounded-md border border-color-200 bg-surface shadow-lg"
             )}
           >
             <div className="flex items-center border-b">
-              <Search className="ml-4 size-4 text-gray-500" />
+              <Search className="ml-4 size-4 text-color-500" />
               <input
                 ref={searchInputRef}
                 placeholder="Search audits..."
@@ -192,8 +192,8 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                     id={`audit-option-${index}`}
                     key={audit.id}
                     className={tw(
-                      "border-b px-4 py-3 hover:cursor-pointer hover:bg-gray-50",
-                      selectedIndex === index && "bg-gray-50"
+                      "border-b px-4 py-3 hover:cursor-pointer hover:bg-color-50",
+                      selectedIndex === index && "bg-color-50"
                     )}
                     role="option"
                     aria-selected={selectedIndex === index}
@@ -203,10 +203,10 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                       handleSelect(audit.id)
                     )}
                   >
-                    <div className="font-semibold text-gray-900">
+                    <div className="font-semibold text-color-900">
                       {audit.name}
                     </div>
-                    <div className="mt-1 flex flex-col gap-0.5 text-xs text-gray-600">
+                    <div className="mt-1 flex flex-col gap-0.5 text-xs text-color-600">
                       <span>Created by: {creatorName}</span>
                       <span>Assignee: {assigneeName}</span>
                       <span>Expected assets: {audit.expectedAssetCount}</span>
@@ -215,7 +215,7 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                 );
               })
             ) : (
-              <div className="px-4 py-3 text-sm text-gray-500">
+              <div className="px-4 py-3 text-sm text-color-500">
                 {isLoading
                   ? "Loading audits..."
                   : searchQuery

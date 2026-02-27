@@ -27,7 +27,7 @@ export const PriceBox = ({ price }: { price: PriceType }) => {
 
   return (
     <div
-      className={tw("price-box mb-8 rounded-2xl border bg-white p-8")}
+      className={tw("price-box mb-8 rounded-2xl border bg-surface p-8")}
       key={price.id}
     >
       <div className="text-center">
@@ -43,7 +43,7 @@ export const PriceBox = ({ price }: { price: PriceType }) => {
         </div>
         {amount != null ? (
           <div className="mb-3 ">
-            <div className=" text-4xl font-semibold text-gray-900">
+            <div className=" text-4xl font-semibold text-color-900">
               {(amount / 100).toLocaleString("en-US", {
                 style: "currency",
                 currency: price.currency,
@@ -51,7 +51,7 @@ export const PriceBox = ({ price }: { price: PriceType }) => {
               })}
               {price.recurring ? <span>/mo</span> : null}
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-color-500">
               {price?.recurring?.interval === "year" && (
                 <>
                   <span>
@@ -69,7 +69,7 @@ export const PriceBox = ({ price }: { price: PriceType }) => {
 
               {shelf_tier === "tier_2" && (
                 <div className="flex items-center justify-center gap-1">
-                  <div className="text-xs font-normal text-gray-500">
+                  <div className="text-xs font-normal text-color-500">
                     per workspace
                   </div>{" "}
                   <PerWorkspaceTooltip />
@@ -78,7 +78,7 @@ export const PriceBox = ({ price }: { price: PriceType }) => {
             </div>
           </div>
         ) : null}
-        <p className="price-slogan min-h-[48px] text-base text-gray-600">
+        <p className="price-slogan min-h-[48px] text-base text-color-600">
           {price.product.metadata.slogan}
         </p>
       </div>
@@ -96,12 +96,12 @@ export const PerWorkspaceTooltip = () => (
   <TooltipProvider delayDuration={100}>
     <Tooltip>
       <TooltipTrigger asChild>
-        <i className="cursor-pointer text-gray-400 hover:text-gray-700">
+        <i className="cursor-pointer text-color-400 hover:text-color-700">
           <HelpIcon />
         </i>
       </TooltipTrigger>
       <TooltipContent side="bottom">
-        <p className="text-xs font-medium text-gray-500">
+        <p className="text-xs font-medium text-color-500">
           To enable multiple workspaces for your account, <br />
           please{" "}
           <CrispButton variant="link" className="!w-auto text-xs">

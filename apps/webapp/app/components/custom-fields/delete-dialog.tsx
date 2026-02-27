@@ -63,7 +63,7 @@ export function DeleteCustomFieldDialog({
     >
       <AlertDialogTrigger asChild>
         <DropdownMenuItem
-          className="cursor-pointer rounded px-4 py-3 text-left text-sm hover:bg-gray-50"
+          className="cursor-pointer rounded px-4 py-3 text-left text-sm hover:bg-color-50"
           onSelect={(e) => {
             e.preventDefault();
           }}
@@ -97,7 +97,7 @@ export function DeleteCustomFieldDialog({
           </AlertDialogHeader>
 
           <div className="mt-4 space-y-2">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-color-600">
               To confirm, type the custom field name below.
             </p>
             <Input
@@ -110,7 +110,7 @@ export function DeleteCustomFieldDialog({
               }}
               required
             />
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-color-500">
               Expected input: {expectedName}
             </p>
             {formError ? (

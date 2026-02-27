@@ -46,7 +46,7 @@ export const placeholderPluginKey = new Plugin({
       }
       const deco = Decoration.widget(1, () => {
         const span = document.createElement("span");
-        span.className = "pointer-events-none text-sm text-gray-400";
+        span.className = "pointer-events-none text-sm text-color-400";
         span.textContent = placeholder;
         return span;
       });

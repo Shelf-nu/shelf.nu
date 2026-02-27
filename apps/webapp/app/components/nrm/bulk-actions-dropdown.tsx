@@ -60,7 +60,7 @@ function ConditionalDropdown() {
       {open && (
         <div
           className={tw(
-            "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-700/50  transition duration-300 ease-in-out md:hidden"
+            "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-overlay  transition duration-300 ease-in-out md:hidden"
           )}
         />
       )}
@@ -116,10 +116,10 @@ function ConditionalDropdown() {
         <DropdownMenuContent
           asChild
           align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
+          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-surface p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
           ref={dropdownRef}
         >
-          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-surface p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {

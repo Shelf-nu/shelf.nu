@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { ClientHint } from "~/utils/client-hints";
+import type { LocaleHint } from "~/utils/client-hints";
 import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
@@ -419,7 +419,7 @@ export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage }
  */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  hints?: ClientHint
+  hints?: LocaleHint
 ): string | RenderableTreeNode => {
   if (value.valueMultiLineText) {
     return parseMarkdownToReact(value.raw as string);
