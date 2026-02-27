@@ -1,6 +1,7 @@
 import type { NotificationType } from "~/atoms/notifications";
 import { emitter } from "./emitter.server";
 import { ShelfError } from "../error";
+import { getTabId } from "../tab-id.server";
 
 export function sendNotification(notification: Omit<NotificationType, "open">) {
   try {
@@ -9,6 +10,7 @@ export function sendNotification(notification: Omit<NotificationType, "open">) {
       JSON.stringify({
         ...notification,
         open: true,
+        tabId: getTabId(),
         /** In the case when the user updates an item 2 times in a row for example, the notification will be the same so useEventStream wont react to the changes as its cached.
          * We send the time to make sure it always updates */
         time: Date.now(),

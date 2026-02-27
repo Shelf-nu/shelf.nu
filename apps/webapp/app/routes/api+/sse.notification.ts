@@ -6,14 +6,23 @@ import { Logger } from "~/utils/logger";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const url = new URL(request.url);
+  const connectionTabId = url.searchParams.get("tabId");
 
   return eventStream(request.signal, function setup(send) {
     /** Notification is a stringified json object with the shape {@link Notification} */
     function handle(notification: string) {
+      const parsed = JSON.parse(notification);
+
       /** We only send the notification if the logged in userId is the same as the senderId.
        * We do this to prevent other users receiving notifications
        */
-      if (authSession.userId !== JSON.parse(notification).senderId) {
+      if (authSession.userId !== parsed.senderId) {
+        return;
+      }
+
+      // Only deliver tab-scoped notifications to the originating tab
+      if (parsed.tabId && connectionTabId && parsed.tabId !== connectionTabId) {
         return;
       }
 
