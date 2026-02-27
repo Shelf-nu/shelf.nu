@@ -82,6 +82,7 @@ export const loader = async ({
     return payload({
       isPersonalOrg: currentOrganization.type === "PERSONAL",
       orgName: currentOrganization.name,
+      organizationId,
       header,
       user: {
         ...user,
@@ -122,17 +123,23 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function UserPage() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, organizationId } = useLoaderData<typeof loader>();
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
   ];
   /**
-   * We assume that the user has only one role in the organization
-   * and we get the first role
-   * We get the first organization as in the query it was already scoped to the current organization
+   * We find the user's role in the current organization
+   * by matching the organizationId, instead of assuming
+   * the first organization is the correct one
    */
-  const userOrgRole = organizationRolesMap[user.userOrganizations[0].roles[0]];
+  const currentOrgMembership = user.userOrganizations.find(
+    (uo) => uo.organizationId === organizationId
+  );
+  const userOrgRole =
+    organizationRolesMap[
+      currentOrgMembership?.roles[0] ?? user.userOrganizations[0].roles[0]
+    ];
   return (
     <>
       <Header
@@ -172,7 +179,7 @@ export default function UserPage() {
               </Button>
             )}
             role={userOrgRole}
-            roleEnum={user.userOrganizations[0].roles[0]}
+            roleEnum={currentOrgMembership?.roles[0] ?? user.userOrganizations[0].roles[0]}
           />
         </AbsolutePositionedHeaderActions>
       </When>
