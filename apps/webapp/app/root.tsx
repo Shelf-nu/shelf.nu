@@ -44,16 +44,16 @@ export const handle = {
 };
 
 export const links: LinksFunction = () => [
+  { rel: "manifest", href: "/static/manifest.json" },
+  { rel: "apple-touch-icon", href: config.faviconPath },
+  { rel: "icon", href: config.faviconPath },
+  ...splashScreenLinks,
   { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
   { rel: "stylesheet", href: pmDocStylesheetUrl },
-  { rel: "manifest", href: "/static/manifest.json" },
-  { rel: "apple-touch-icon", href: config.faviconPath },
-  { rel: "icon", href: config.faviconPath },
   { rel: "stylesheet", href: nProgressStyles },
   { rel: "stylesheet", href: nProgressCustomStyles },
-  ...splashScreenLinks,
 ];
 
 export const meta: MetaFunction = () => [
