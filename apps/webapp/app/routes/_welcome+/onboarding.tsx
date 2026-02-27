@@ -86,11 +86,19 @@ function createOnboardingSchema({
   userSignedUpWithPassword,
   collectBusinessIntel,
   requireCompanyName,
+  createdWithInvite,
 }: {
   userSignedUpWithPassword: boolean;
   collectBusinessIntel: boolean;
   requireCompanyName: boolean;
+  createdWithInvite: boolean;
 }) {
+  /**
+   * Invited users only need name, username, and password.
+   * All business intel fields become optional so the form
+   * submission succeeds without them.
+   */
+  const shouldCollectBusinessIntel = collectBusinessIntel && !createdWithInvite;
   return z
     .object({
       username: z
@@ -104,10 +112,10 @@ function createOnboardingSchema({
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
         : z.string().min(8, "Password is too short. Minimum 8 characters."),
-      referralSource: collectBusinessIntel
+      referralSource: shouldCollectBusinessIntel
         ? z.string().min(5, "Field is required.")
         : z.string().optional().nullable(),
-      jobTitle: collectBusinessIntel
+      jobTitle: shouldCollectBusinessIntel
         ? requiredTrimmedField("Role is required")
         : optionalTrimmedField,
       teamSize: optionalTrimmedField,
@@ -138,9 +146,9 @@ function createOnboardingSchema({
           });
         }
 
-        // Only validate teamSize and companyName if collectBusinessIntel is true
+        // Only validate teamSize and companyName if business intel is collected
         // and jobTitle is not "Personal use"
-        if (collectBusinessIntel && jobTitle !== "Personal use") {
+        if (shouldCollectBusinessIntel && jobTitle !== "Personal use") {
           // teamSize is only required for non-invited users
           if (
             requireCompanyName &&
@@ -267,11 +275,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userSignedUpWithPassword,
       collectBusinessIntel: config.collectBusinessIntel,
       requireCompanyName,
+      createdWithInvite,
     });
 
     const title = "Set up your account";
-    const subHeading =
-      "You are almost ready to use Shelf. We just need some basic information to get you started.";
+    const subHeading = createdWithInvite
+      ? "You are almost ready to use Shelf. We just need some basic information to get you started."
+      : "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
     return payload({
       title,
@@ -354,6 +364,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userSignedUpWithPassword: metadata.userSignedUpWithPassword,
       collectBusinessIntel: config.collectBusinessIntel,
       requireCompanyName: !createdWithInvite,
+      createdWithInvite,
     });
 
     const payload = parseData(formData, OnboardingFormSchema);
@@ -476,6 +487,7 @@ export default function Onboarding() {
     title,
     subHeading,
     collectBusinessIntel,
+    createdWithInvite,
     organizationName,
     requireCompanyName,
     organizationId,
@@ -485,6 +497,7 @@ export default function Onboarding() {
     userSignedUpWithPassword,
     collectBusinessIntel,
     requireCompanyName,
+    createdWithInvite,
   });
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
@@ -596,7 +609,7 @@ export default function Onboarding() {
           </>
         )}
 
-        <When truthy={collectBusinessIntel}>
+        <When truthy={collectBusinessIntel && !createdWithInvite}>
           <>
             <Input
               required
@@ -655,7 +668,7 @@ export default function Onboarding() {
           </>
         </When>
 
-        <When truthy={collectBusinessIntel}>
+        <When truthy={collectBusinessIntel && !createdWithInvite}>
           <Collapsible open={customizeOpen} onOpenChange={setCustomizeOpen}>
             <CollapsibleTrigger asChild>
               <button
