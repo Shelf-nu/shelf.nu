@@ -226,13 +226,13 @@ export async function createUserOrAttachOrg({
   firstName,
   lastName,
   createdWithInvite = false,
-}: Pick<User, "email" | "firstName"> & {
-  organizationId: Organization["id"];
-  roles: OrganizationRoles[];
-  password: string;
-  lastName?: string;
-  createdWithInvite: boolean;
-}) {
+}: Pick<User, "email" | "firstName"> &
+  Partial<Pick<User, "lastName">> & {
+    organizationId: Organization["id"];
+    roles: OrganizationRoles[];
+    password: string;
+    createdWithInvite: boolean;
+  }) {
   try {
     const shelfUser = await db.user.findFirst({
       where: { email },
