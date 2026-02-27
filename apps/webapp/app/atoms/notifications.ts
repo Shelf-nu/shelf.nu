@@ -16,6 +16,10 @@ export interface NotificationType {
   icon: NotificationIcon;
   time?: number;
   senderId: User["id"] | null;
+  /** Identifies the browser tab that triggered this notification.
+   * When set, the SSE handler only delivers the toast to that tab.
+   * Undefined for background-job notifications (broadcast to all tabs). */
+  tabId?: string;
 }
 
 export const notificationAtom = atom<NotificationType>({

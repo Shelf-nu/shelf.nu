@@ -7,6 +7,7 @@ import {
   clearNotificationAtom,
   showNotificationAtom,
 } from "~/atoms/notifications";
+import { useTabId } from "~/hooks/use-tab-id";
 import { tw } from "~/utils/tw";
 import { iconsMap } from "./icons-map";
 import When from "../when/when";
@@ -24,10 +25,13 @@ export const Toaster = () => {
     error: tw(`border-error-50 bg-error-100 text-error-600`),
   };
 
+  const tabId = useTabId();
+
   /** New notification coming from the server */
-  const newNotification = useEventSource(`/api/sse/notification`, {
-    event: "new-notification",
-  });
+  const newNotification = useEventSource(
+    `/api/sse/notification${tabId ? `?tabId=${tabId}` : ""}`,
+    { event: "new-notification" }
+  );
   /** When the stream sends us a new notification update the state so it displays */
   useEffect(() => {
     if (!newNotification) return;

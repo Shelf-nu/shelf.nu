@@ -6,14 +6,27 @@ import { Logger } from "~/utils/logger";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const url = new URL(request.url);
+  const connectionTabId = url.searchParams.get("tabId");
 
   return eventStream(request.signal, function setup(send) {
     /** Notification is a stringified json object with the shape {@link Notification} */
     function handle(notification: string) {
+      const parsed = JSON.parse(notification);
+
       /** We only send the notification if the logged in userId is the same as the senderId.
        * We do this to prevent other users receiving notifications
        */
-      if (authSession.userId !== JSON.parse(notification).senderId) {
+      if (authSession.userId !== parsed.senderId) {
+        return;
+      }
+
+      /** If the notification carries a tabId (user-triggered action), only
+       * deliver it to the SSE connection opened by that specific browser tab.
+       * Notifications without a tabId (e.g. background jobs, reminders) are
+       * broadcast to every tab of the user.
+       * @see https://github.com/Shelf-nu/shelf.nu/issues/1000 */
+      if (parsed.tabId && connectionTabId && parsed.tabId !== connectionTabId) {
         return;
       }
 
