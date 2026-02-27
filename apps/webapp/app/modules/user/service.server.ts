@@ -224,14 +224,15 @@ export async function createUserOrAttachOrg({
   roles,
   password,
   firstName,
+  lastName,
   createdWithInvite = false,
-}: Pick<User, "email" | "firstName"> & {
-  organizationId: Organization["id"];
-  roles: OrganizationRoles[];
-  password: string;
-  /** We mark  */
-  createdWithInvite: boolean;
-}) {
+}: Pick<User, "email" | "firstName"> &
+  Partial<Pick<User, "lastName">> & {
+    organizationId: Organization["id"];
+    roles: OrganizationRoles[];
+    password: string;
+    createdWithInvite: boolean;
+  }) {
   try {
     const shelfUser = await db.user.findFirst({
       where: { email },
@@ -271,6 +272,7 @@ export async function createUserOrAttachOrg({
         organizationId,
         roles,
         firstName,
+        lastName,
         createdWithInvite,
       });
 
@@ -735,7 +737,10 @@ export async function createUser(
                      */
                     members: {
                       create: {
-                        name: `${firstName} ${lastName} (Owner)`,
+                        name: [firstName, lastName]
+                          .filter(Boolean)
+                          .join(" ")
+                          .concat(" (Owner)"),
                         user: { connect: { id: userId } },
                       },
                     },

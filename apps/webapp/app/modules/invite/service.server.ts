@@ -26,7 +26,7 @@ import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
-import { generateRandomCode, inviteEmailText } from "./helpers";
+import { generateRandomCode, inviteEmailText, splitName } from "./helpers";
 import { processInvitationMessage } from "./message-validator.server";
 import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
@@ -361,12 +361,15 @@ export async function updateInviteStatus({
     const data = { status };
 
     if (status === "ACCEPTED") {
+      const { firstName, lastName } = splitName(invite.inviteeTeamMember.name);
+
       const user = await createUserOrAttachOrg({
         email: invite.inviteeEmail,
         organizationId: invite.organizationId,
         roles: invite.roles,
         password,
-        firstName: invite.inviteeTeamMember.name,
+        firstName,
+        lastName,
         createdWithInvite: true,
       });
 
