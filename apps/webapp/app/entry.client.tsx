@@ -5,14 +5,16 @@ import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
-if (window.env?.SENTRY_DSN) {
-  Sentry.init({
-    dsn: window.env.SENTRY_DSN,
-    tracesSampleRate: 0.1,
-  });
-}
-
 function hydrate() {
+  // Init inside hydrate() because window.env is set by an inline <script>
+  // in root.tsx Layout, which hasn't executed at module evaluation time.
+  if (window.env?.SENTRY_DSN) {
+    Sentry.init({
+      dsn: window.env.SENTRY_DSN,
+      tracesSampleRate: 0.1,
+    });
+  }
+
   React.startTransition(() => {
     hydrateRoot(
       document,
