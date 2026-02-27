@@ -12,7 +12,15 @@ function hydrate() {
         <JotaiProvider>
           <HydratedRouter />
         </JotaiProvider>
-      </React.StrictMode>
+      </React.StrictMode>,
+      {
+        onRecoverableError(error, errorInfo) {
+          // eslint-disable-next-line no-console
+          console.error("Hydration error:", error);
+          // eslint-disable-next-line no-console
+          console.error("Component stack:", errorInfo.componentStack);
+        },
+      }
     );
   });
 }
