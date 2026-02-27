@@ -76,7 +76,7 @@ export function CommandPaletteButton({
       onClick={() => setOpen(true)}
       variant={"secondary"}
       className={tw(
-        "flex w-full items-center gap-2 rounded bg-surface py-2 text-sm text-color-600 transition hover:border-color-300 hover:text-color-800 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 md:w-64 md:border md:border-color-200",
+        "hover:text-color-800 flex w-full items-center gap-2 rounded bg-surface py-2 text-sm text-color-600 transition hover:border-color-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 md:w-64 md:border md:border-color-200",
         className
       )}
     >

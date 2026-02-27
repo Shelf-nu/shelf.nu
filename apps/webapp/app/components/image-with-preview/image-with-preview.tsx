@@ -167,7 +167,7 @@ export default function ImageWithPreview({
             <button
               type="button"
               onClick={handleRetry}
-              className="flex items-center gap-1 rounded bg-color-200 px-2 py-1 text-xs text-color-700 transition-colors hover:bg-color-300"
+              className="hover:bg-color-300 flex items-center gap-1 rounded bg-color-200 px-2 py-1 text-xs text-color-700 transition-colors"
               title="Retry loading image"
             >
               <RefreshCwIcon className="size-4" />

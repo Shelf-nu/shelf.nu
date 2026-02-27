@@ -456,7 +456,7 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
     <WarningBox className="mb-8 mt-3">
       <div>
         <h4 className="font-semibold">Unpaid invoice/s</h4>
-        <p className="mt-1 text-color-800">
+        <p className="text-color-800 mt-1">
           We were unable to process your latest payment. If payment is not
           resolved, your subscription will be fully canceled. Any existing
           pricing, discounts, or legacy plans tied to your subscription cannot
@@ -511,7 +511,7 @@ function UnpaidInvoiceWarning({ invoices }: { invoices: OpenInvoice[] }) {
           </ul>
         ) : null}
 
-        <div className="mt-2 text-color-800">
+        <div className="text-color-800 mt-2">
           Please update your payment method through the{" "}
           <CustomerPortalForm
             buttonText="customer portal"

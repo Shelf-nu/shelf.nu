@@ -169,7 +169,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
     return (
       <div className={tw("flex flex-col gap-2", className)}>
         <div className="isolate overflow-hidden rounded-lg border border-color-200 bg-surface">
-          <div className="border-b border-color-100 bg-surface px-3 py-2">
+          <div className="border-color-100 border-b bg-surface px-3 py-2">
             <EditorToolbar
               state={toolbarState}
               onUndo={() => runCommand(undo)}

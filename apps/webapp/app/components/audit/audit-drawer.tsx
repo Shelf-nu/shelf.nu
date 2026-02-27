@@ -414,7 +414,7 @@ export function AuditDrawer({
               <Button
                 asChild
                 variant="link"
-                className="text-left font-medium text-color-800 hover:text-color-700 hover:underline"
+                className="text-color-800 text-left font-medium hover:text-color-700 hover:underline"
                 to={`${auditAssetId}/details`}
               >
                 <span className="word-break whitespace-break-spaces">
@@ -465,7 +465,7 @@ export function AuditDrawer({
               <Button
                 asChild
                 variant="link"
-                className="text-left font-medium text-color-800 hover:text-color-700 hover:underline"
+                className="text-color-800 text-left font-medium hover:text-color-700 hover:underline"
                 to={`${asset.auditAssetId}/details`}
               >
                 <span className="word-break whitespace-break-spaces">

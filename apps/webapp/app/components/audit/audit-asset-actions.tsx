@@ -112,7 +112,7 @@ export function AuditAssetActions({
           <MessageSquarePlus className="inline-block size-4" />
           <span>Add comment</span>
           {totalCount > 0 && (
-            <span className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-color-300 text-[10px] font-medium text-color-800">
+            <span className="bg-color-300 text-color-800 absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full text-[10px] font-medium">
               {totalCount}
             </span>
           )}

@@ -737,7 +737,7 @@ export default function AuditAssetDetails() {
               name="content"
               placeholder="Add a note..."
               rows={3}
-              className="w-full resize-none rounded-md border border-color-300 p-2 text-sm focus:border-color-500 focus:outline-none"
+              className="focus:border-color-500 w-full resize-none rounded-md border border-color-300 p-2 text-sm focus:outline-none"
             />
             <div className="flex justify-end">
               <Button type="submit" size="sm" disabled={disabled}>

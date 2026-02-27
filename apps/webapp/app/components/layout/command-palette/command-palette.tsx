@@ -663,7 +663,7 @@ export function CommandPalette() {
         onValueChange={setQuery}
         placeholder="Search assets, audits, kits, bookings, locations, team members..."
         autoFocus
-        className="my-4 rounded border-color-100"
+        className="border-color-100 my-4 rounded"
       />
       <CommandList className="divide-y divide-gray-100">
         <CommandEmpty>
@@ -903,7 +903,7 @@ export function CommandPalette() {
         ) : null}
       </CommandList>
 
-      <div className="flex items-center justify-between border-t border-color-100 px-4 py-3 text-xs text-color-500">
+      <div className="border-color-100 flex items-center justify-between border-t px-4 py-3 text-xs text-color-500">
         <div className="flex items-center gap-2">
           <SearchIcon className="size-4" />
           {isPersonalOrg(layoutData?.currentOrganization)
@@ -914,7 +914,7 @@ export function CommandPalette() {
           {shortcutLabel}
         </CommandShortcut>
       </div>
-      <div className="border-t border-color-100 px-4 pb-4 pt-2 text-[11px] text-color-400">
+      <div className="border-color-100 border-t px-4 pb-4 pt-2 text-[11px] text-color-400">
         <span className="font-medium text-color-500">Keyboard tips:</span> ↑↓ to
         navigate • ↵ to select • esc to close
       </div>
