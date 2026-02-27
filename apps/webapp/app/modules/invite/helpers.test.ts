@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitName } from "./name-splitter";
+import { splitName } from "./helpers";
 
 describe("splitName", () => {
   it("splits 'John Doe' into firstName and lastName", () => {
@@ -30,6 +30,13 @@ describe("splitName", () => {
     });
   });
 
+  it("trims double spaces between names", () => {
+    expect(splitName("John  Doe")).toEqual({
+      firstName: "John",
+      lastName: "Doe",
+    });
+  });
+
   it("handles empty string", () => {
     expect(splitName("")).toEqual({
       firstName: "",
@@ -39,6 +46,20 @@ describe("splitName", () => {
 
   it("handles whitespace-only string", () => {
     expect(splitName("   ")).toEqual({
+      firstName: "",
+      lastName: "",
+    });
+  });
+
+  it("handles null", () => {
+    expect(splitName(null)).toEqual({
+      firstName: "",
+      lastName: "",
+    });
+  });
+
+  it("handles undefined", () => {
+    expect(splitName(undefined)).toEqual({
       firstName: "",
       lastName: "",
     });
