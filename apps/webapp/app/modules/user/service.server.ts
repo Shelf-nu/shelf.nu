@@ -224,12 +224,13 @@ export async function createUserOrAttachOrg({
   roles,
   password,
   firstName,
+  lastName,
   createdWithInvite = false,
 }: Pick<User, "email" | "firstName"> & {
   organizationId: Organization["id"];
   roles: OrganizationRoles[];
   password: string;
-  /** We mark  */
+  lastName?: string;
   createdWithInvite: boolean;
 }) {
   try {
@@ -271,6 +272,7 @@ export async function createUserOrAttachOrg({
         organizationId,
         roles,
         firstName,
+        lastName,
         createdWithInvite,
       });
 
@@ -735,7 +737,10 @@ export async function createUser(
                      */
                     members: {
                       create: {
-                        name: `${firstName} ${lastName} (Owner)`,
+                        name: [firstName, lastName]
+                          .filter(Boolean)
+                          .join(" ")
+                          .concat(" (Owner)"),
                         user: { connect: { id: userId } },
                       },
                     },
