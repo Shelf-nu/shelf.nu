@@ -558,7 +558,7 @@ export default function Onboarding() {
             placeholder="Zaans"
             name={zo.fields.firstName()}
             error={zo.errors.firstName()?.message}
-            className="mb-5 md:mb-0"
+            className="mb-5 md:mb-0 md:flex-1"
           />
           <Input
             label="Last name"
@@ -569,6 +569,7 @@ export default function Onboarding() {
             placeholder="Huisje"
             name={zo.fields.lastName()}
             error={zo.errors.lastName()?.message}
+            className="md:flex-1"
           />
         </div>
         <div>
