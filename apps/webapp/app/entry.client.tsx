@@ -1,8 +1,16 @@
 import React from "react";
 
+import * as Sentry from "@sentry/react-router";
 import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
+
+if (window.env?.SENTRY_DSN) {
+  Sentry.init({
+    dsn: window.env.SENTRY_DSN,
+    tracesSampleRate: 0.1,
+  });
+}
 
 function hydrate() {
   React.startTransition(() => {
@@ -15,10 +23,11 @@ function hydrate() {
       </React.StrictMode>,
       {
         onRecoverableError(error, errorInfo) {
-          // eslint-disable-next-line no-console
-          console.error("Hydration error:", error);
-          // eslint-disable-next-line no-console
-          console.error("Component stack:", errorInfo.componentStack);
+          if (window.env?.SENTRY_DSN) {
+            Sentry.captureException(error, {
+              extra: { componentStack: errorInfo.componentStack },
+            });
+          }
         },
       }
     );
