@@ -81,8 +81,7 @@ export default createHonoServer<ServerEnv>({
     // Attach a per-request AsyncLocalStorage cache for downstream loaders/actions.
     server.use("*", async (_c, next) => runWithRequestCache(() => next()));
 
-    // Store the X-Tab-Id header so sendNotification() can tag toasts to the
-    // originating browser tab (fixes #1000 — duplicate toasts on multi-tab).
+    // Store the X-Tab-Id header so sendNotification() can tag toasts per tab.
     server.use("*", async (c, next) =>
       runWithTabId(c.req.header("X-Tab-Id"), () => next())
     );

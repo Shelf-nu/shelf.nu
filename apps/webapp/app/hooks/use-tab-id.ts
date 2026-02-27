@@ -1,28 +1,12 @@
 import { useEffect, useRef } from "react";
 
-/**
- * Returns a stable, unique identifier for the current browser tab.
- *
- * The id is persisted in `sessionStorage` so it survives soft navigations and
- * React re-renders but is unique per tab (each tab gets its own
- * `sessionStorage` partition).
- *
- * On the server (SSR) this returns an empty string, which is safe to use as a
- * query-param default — the SSE connection is only opened on the client.
- *
- * As a side-effect, this hook patches `window.fetch` to attach an `X-Tab-Id`
- * header to every same-origin request.  The Hono middleware reads this header
- * and stores it in AsyncLocalStorage, so `sendNotification()` can
- * automatically tag each toast with the originating tab.
- *
- * @see https://github.com/Shelf-nu/shelf.nu/issues/1000
- */
 const SESSION_KEY = "__shelfTabId";
 
+/** Returns a stable, unique identifier for the current browser tab.
+ * Patches `window.fetch` to send it as `X-Tab-Id` on same-origin requests. */
 export function useTabId(): string {
   const tabIdRef = useRef("");
 
-  // Eagerly compute tabId so the SSE URL already contains it on first render
   if (!tabIdRef.current && typeof window !== "undefined") {
     tabIdRef.current =
       sessionStorage.getItem(SESSION_KEY) || crypto.randomUUID();
@@ -39,7 +23,6 @@ export function useTabId(): string {
       input: RequestInfo | URL,
       init?: RequestInit
     ) {
-      // Only add the header to same-origin requests to avoid CORS issues
       const url =
         typeof input === "string"
           ? input

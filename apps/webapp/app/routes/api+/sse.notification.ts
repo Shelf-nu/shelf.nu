@@ -21,11 +21,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
         return;
       }
 
-      /** If the notification carries a tabId (user-triggered action), only
-       * deliver it to the SSE connection opened by that specific browser tab.
-       * Notifications without a tabId (e.g. background jobs, reminders) are
-       * broadcast to every tab of the user.
-       * @see https://github.com/Shelf-nu/shelf.nu/issues/1000 */
+      // Only deliver tab-scoped notifications to the originating tab
       if (parsed.tabId && connectionTabId && parsed.tabId !== connectionTabId) {
         return;
       }
