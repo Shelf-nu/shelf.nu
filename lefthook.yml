@@ -1,0 +1,65 @@
+pre-commit:
+  parallel: true
+  commands:
+    eslint:
+      glob: "apps/webapp/**/*.{js,jsx,ts,tsx}"
+      root: "apps/webapp/"
+      run: >
+        npx eslint
+        --cache
+        --cache-location ./node_modules/.cache/eslint
+        --ext .js,.jsx,.ts,.tsx
+        --fix
+        {staged_files}
+      stage_fixed: true
+      skip:
+        - merge
+        - rebase
+
+    prettier:
+      glob: "**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}"
+      exclude: "pnpm-lock.yaml"
+      run: >
+        npx prettier
+        --write
+        --ignore-unknown
+        {staged_files}
+      stage_fixed: true
+      skip:
+        - merge
+        - rebase
+
+    prisma-generate:
+      glob: "packages/database/prisma/schema.prisma"
+      run: pnpm db:generate
+      skip:
+        - merge
+        - rebase
+
+    typecheck:
+      glob: "apps/webapp/**/*.{ts,tsx}"
+      run: "cd apps/webapp && npx react-router typegen && npx tsc -b"
+      skip:
+        - merge
+        - rebase
+
+commit-msg:
+  commands:
+    commitlint:
+      run: >
+        npx --no -- commitlint --edit {1} || {
+          echo "";
+          echo "Commit message doesn't follow Conventional Commits format";
+          echo "";
+          echo "Required format: type(scope?): description";
+          echo "";
+          echo "Examples:";
+          echo "  feat: add user authentication";
+          echo "  fix(api): resolve database connection issue";
+          echo "  docs: update README with installation steps";
+          echo "  chore: bump dependencies to latest versions";
+          echo "";
+          echo "Learn more: https://www.conventionalcommits.org";
+          echo "";
+          exit 1;
+        }

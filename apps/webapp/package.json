@@ -20,12 +20,11 @@
     "test:e2e:run": "start-server-and-test dev http://localhost:3000 'npx playwright test'",
     "test:e2e:install": "npx playwright install --with-deps chromium",
     "pretest:e2e:run": "pnpm run build",
-    "typecheck": "prisma generate && react-router typegen && tsc -b",
-    "validate": "run-p test:run lint typecheck",
+    "typecheck": "react-router typegen && tsc -b",
+    "validate": "prisma generate && run-p test:run lint typecheck",
     "lint:fix": "eslint --cache --cache-location ./node_modules/.cache/eslint --ext .js,.jsx,.ts,.tsx --fix .",
     "format-code": "pnpm run format && pnpm run lint:fix",
-    "stripe:webhook": "stripe listen --forward-to https://localhost:3000/api/stripe-webhook",
-    "precommit": "prisma generate && pnpm run lint:fix && pnpm run format && pnpm run typecheck"
+    "stripe:webhook": "stripe listen --forward-to https://localhost:3000/api/stripe-webhook"
   },
   "dependencies": {
     "@shelf/database": "workspace:*",

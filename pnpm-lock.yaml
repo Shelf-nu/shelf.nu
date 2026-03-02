@@ -23,9 +23,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^20.0.0
         version: 20.4.2
-      husky:
-        specifier: ^9.0.11
-        version: 9.1.7
+      '@evilmartians/lefthook':
+        specifier: ^1.11.0
+        version: 1.13.6
       prettier:
         specifier: 3.0.3
         version: 3.0.3
@@ -1202,6 +1202,12 @@ packages:
   '@eslint/js@8.57.1':
     resolution: {integrity: sha512-d9zaMRSTIKDLhctzH12MtXvJKSSUhaHcjV+2Z+GK+EEY7XKpP5yR4x+N3TAcHTcu963nIr+TMcCb4DBCYX1z6Q==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
+
+  '@evilmartians/lefthook@1.13.6':
+    resolution: {integrity: sha512-79vplrUBWL4Fkt59YkEBdSpqBVhNrY8t5+jEp+wX5QbsmbQLcSULqwS7FmbNRyECa2LWMrUWpe6ENIfNwB4jiw==}
+    cpu: [x64, arm64, ia32]
+    os: [darwin, linux, win32]
+    hasBin: true
 
   '@faker-js/faker@8.4.1':
     resolution: {integrity: sha512-XQ3cU+Q8Uqmrbf2e0cIC/QN43sTBSC8KF12u29Mb47tWrt2hAgBXSgpZMj4Ao8Uk0iJcU99QsOCaIL8934obCg==}
@@ -4839,11 +4845,6 @@ packages:
     resolution: {integrity: sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==}
     engines: {node: '>= 6'}
 
-  husky@9.1.7:
-    resolution: {integrity: sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==}
-    engines: {node: '>=18'}
-    hasBin: true
-
   iceberg-js@0.8.1:
     resolution: {integrity: sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA==}
     engines: {node: '>=20.0.0'}
@@ -7990,6 +7991,8 @@ snapshots:
       - supports-color
 
   '@eslint/js@8.57.1': {}
+
+  '@evilmartians/lefthook@1.13.6': {}
 
   '@faker-js/faker@8.4.1': {}
 
@@ -11912,8 +11915,6 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
-
-  husky@9.1.7: {}
 
   iceberg-js@0.8.1: {}
 
