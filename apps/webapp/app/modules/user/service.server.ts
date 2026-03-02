@@ -737,10 +737,10 @@ export async function createUser(
                      */
                     members: {
                       create: {
-                        name: [firstName, lastName]
-                          .filter(Boolean)
-                          .join(" ")
-                          .concat(" (Owner)"),
+                        name: [
+                          ...[firstName, lastName].filter(Boolean),
+                          "(Owner)",
+                        ].join(" "),
                         user: { connect: { id: userId } },
                       },
                     },

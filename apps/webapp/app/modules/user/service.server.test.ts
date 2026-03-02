@@ -240,6 +240,7 @@ describe(createUserAccountForTesting.name, () => {
         username: username,
         firstName: undefined,
         lastName: undefined,
+        createdWithInvite: undefined,
         // After the last changes because of SSO we dont need this anymore
         organizations: {
           create: [
@@ -254,7 +255,7 @@ describe(createUserAccountForTesting.name, () => {
               },
               members: {
                 create: {
-                  name: `${undefined} ${undefined} (Owner)`,
+                  name: "(Owner)",
                   user: { connect: { id: USER_ID } },
                 },
               },
