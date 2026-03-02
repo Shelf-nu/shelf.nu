@@ -112,6 +112,7 @@ model User {
 
   scimExternalId String? // External ID from SCIM identity provider (e.g. Entra ID)
 
+
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
   roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
