@@ -23,7 +23,7 @@ import {
   TagUseFor,
 } from "@prisma/client";
 import { LRUCache } from "lru-cache";
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type {
   SortingDirection,
@@ -3952,16 +3952,11 @@ export async function getUserAssetsTabLoaderData({
   organizationId: Organization["id"];
 }) {
   try {
-    const { filters, redirectNeeded } = await getFiltersFromRequest(
+    const { filters } = await getFiltersFromRequest(
       request,
       organizationId,
       { name: "assetFilter_v2", path: "/" } // Use root path for RR7 single fetch
     );
-
-    if (filters && redirectNeeded) {
-      const cookieParams = new URLSearchParams(filters);
-      return redirect(`/assets?${cookieParams.toString()}`);
-    }
 
     const filtersSearchParams = new URLSearchParams(filters);
     filtersSearchParams.set("teamMember", userId);

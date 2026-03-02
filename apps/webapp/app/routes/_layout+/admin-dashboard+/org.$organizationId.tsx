@@ -27,6 +27,7 @@ import {
   toggleOrganizationSso,
   toggleWorkspaceDisabled,
   toggleBarcodeEnabled,
+  toggleAuditEnabled,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -114,6 +115,7 @@ export const action = async ({
           "content",
           "disableWorkspace",
           "toggleBarcodes",
+          "toggleAudits",
         ]),
       })
     );
@@ -164,6 +166,22 @@ export const action = async ({
 
         return payload({
           message: `Barcodes ${barcodesEnabled ? "enabled" : "disabled"}`,
+        });
+      }
+      case "toggleAudits": {
+        const { auditsEnabled } = parseData(
+          await request.formData(),
+          z.object({
+            auditsEnabled: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        await toggleAuditEnabled({ organizationId, auditsEnabled });
+
+        return payload({
+          message: `Audits ${auditsEnabled ? "enabled" : "disabled"}`,
         });
       }
       case "updateSsoDetails": {
@@ -344,6 +362,29 @@ export default function OrgPage() {
                 title={"Toggle Barcodes"}
               />
               <input type="hidden" value="toggleBarcodes" name="intent" />
+            </div>
+          </fetcher.Form>
+          <hr className="border-1 border-gray-700" />
+          <h4>Enable/Disable Audits</h4>
+          <p>Enable or disable audit functionality for this workspace</p>
+          <fetcher.Form
+            method="post"
+            onChange={(e) => fetcher.submit(e.currentTarget)}
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  Enable Audits
+                </p>
+              </div>
+              <Switch
+                name={"auditsEnabled"}
+                disabled={isFormProcessing(fetcher.state)}
+                defaultChecked={organization.auditsEnabled}
+                required
+                title={"Toggle Audits"}
+              />
+              <input type="hidden" value="toggleAudits" name="intent" />
             </div>
           </fetcher.Form>
           <hr className="border-1 border-gray-700" />
