@@ -1,0 +1,925 @@
+import type { KeyboardEvent, ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { BarcodeType } from "@prisma/client";
+import { TriangleLeftIcon } from "@radix-ui/react-icons";
+import { useAtom } from "jotai";
+import {
+  ArrowRight,
+  Camera,
+  CameraIcon,
+  QrCode,
+  ScanQrCode,
+} from "lucide-react";
+import { Link } from "react-router";
+import Webcam from "react-webcam";
+import { ClientOnly } from "remix-utils/client-only";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { parseSequentialId } from "~/utils/sequential-id";
+import { tw } from "~/utils/tw";
+import { CameraSelector } from "./camera-selector";
+import SuccessAnimation from "./success-animation";
+import {
+  getBestBackCamera,
+  handleDetection,
+  processFrame,
+  updateCanvasSize,
+} from "./utils";
+import { extractQrIdFromValue } from "../assets/assets-index/advanced-filters/helpers";
+import { ErrorIcon } from "../errors";
+import Input from "../forms/input";
+import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
+import { scannerActionAtom } from "./drawer/action-atom";
+import type { ActionType } from "./drawer/action-switcher";
+
+export type OnCodeDetectionSuccessProps = {
+  value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
+  type?: "qr" | "barcode" | "samId"; // Code type - optional for backward compatibility
+  error?: string;
+  barcodeType?: BarcodeType; // Specific barcode type when type is "barcode"
+};
+
+export type OnCodeDetectionSuccess = ({
+  value,
+  type,
+  error,
+  barcodeType,
+}: OnCodeDetectionSuccessProps) => void | Promise<void>;
+
+type HandleScannerInputValueArgs = {
+  rawValue: string;
+  paused: boolean;
+  onCodeDetectionSuccess?: OnCodeDetectionSuccess;
+  allowNonShelfCodes: boolean;
+};
+
+/**
+ * Handles the input value from the scanner mode.
+ * If the value is a sequential ID, it triggers the onCodeDetectionSuccess callback directly.
+ * If it's a QR code or barcode, it uses handleDetection to process it.
+ * @param rawValue - The raw input value from the scanner
+ * @param paused - Whether the scanner is currently paused
+ * @param onCodeDetectionSuccess - Callback to trigger on successful code detection
+ * @param allowNonShelfCodes - Whether to allow non-shelf codes (barcodes not in the Shelf system)
+ * @returns true if a value was processed, false otherwise
+ */
+export async function handleScannerInputValue({
+  rawValue,
+  paused,
+  onCodeDetectionSuccess,
+  allowNonShelfCodes,
+}: HandleScannerInputValueArgs) {
+  if (!rawValue) {
+    return false;
+  }
+
+  if (paused) {
+    return false;
+  }
+
+  const sequentialId = parseSequentialId(rawValue);
+
+  if (sequentialId) {
+    await onCodeDetectionSuccess?.({
+      value: sequentialId,
+      type: "samId",
+    });
+    return true;
+  }
+
+  const result = extractQrIdFromValue(rawValue);
+  await handleDetection({
+    result,
+    onCodeDetectionSuccess,
+    allowNonShelfCodes,
+    paused,
+  });
+
+  return true;
+}
+
+// Legacy type aliases for backward compatibility
+export type OnQrDetectionSuccessProps = OnCodeDetectionSuccessProps;
+export type OnQRDetectionSuccess = OnCodeDetectionSuccess;
+
+type CodeScannerProps = {
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
+  isLoading?: boolean;
+  backButtonText?: string;
+  backButtonUrl?: string; // URL to navigate back, defaults to ".." if not provided
+  allowNonShelfCodes?: boolean;
+  hideBackButtonText?: boolean;
+  className?: string;
+  overlayClassName?: string;
+  paused: boolean;
+  setPaused: (paused: boolean) => void;
+  /** Custom message to show when scanner is paused after detecting a code */
+  scanMessage?: string | ReactNode;
+
+  /** Error message to show when scanner encounters an unsupported barcode */
+  errorMessage?: string;
+
+  /** Custom title for the error overlay */
+  errorTitle?: string;
+
+  /** Custom class for the scanner mode.
+   * Can be a string or a function that receives the mode and returns a string
+   */
+  scannerModeClassName?: string | ((mode: Mode) => string);
+
+  /** Custom callback for the scanner mode */
+  scannerModeCallback?: (input: HTMLInputElement, paused: boolean) => void;
+
+  actionSwitcher?: ReactNode;
+
+  /** Force a specific mode and hide mode switching tabs */
+  forceMode?: Mode;
+
+  /** Control the overlay positioning for different contexts */
+  overlayPosition?: "fullscreen" | "centered";
+
+  /** Saved camera device ID from user preferences (cookie) */
+  savedCameraId?: string;
+};
+
+type Mode = "camera" | "scanner";
+
+export const CodeScanner = ({
+  onCodeDetectionSuccess,
+  backButtonText = "Back",
+  backButtonUrl = "..",
+  allowNonShelfCodes = false,
+  hideBackButtonText = false,
+  className,
+  overlayClassName,
+  paused,
+  setPaused,
+  scanMessage,
+  errorMessage,
+  errorTitle,
+
+  scannerModeClassName,
+  scannerModeCallback,
+
+  actionSwitcher,
+  forceMode,
+  overlayPosition = "fullscreen",
+  savedCameraId,
+}: CodeScannerProps) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const { isMd } = useViewportHeight();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [action] = useAtom(scannerActionAtom);
+
+  // Camera selector state - initialize with saved camera ID if available
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(
+    savedCameraId ?? null
+  );
+
+  const [mode, setMode] = useState<Mode>(
+    forceMode || (isMd ? "scanner" : "camera")
+  );
+
+  const handleModeChange = (mode: Mode) => {
+    // Don't allow mode changes if forceMode is set
+    if (forceMode) return;
+
+    if (mode === "camera") {
+      setIsLoading(true);
+      setMode(mode);
+    } else {
+      setMode(mode);
+    }
+  };
+
+  // Determine if we should allow non-shelf codes based on the current action
+  const shouldAllowNonShelfCodes =
+    allowNonShelfCodes || action !== "View asset";
+
+  // Handler for camera device enumeration from CameraMode
+  const handleDevicesEnumerated = useCallback(
+    (devices: MediaDeviceInfo[], activeDeviceId: string | null) => {
+      setCameraDevices(devices);
+      // Only update if we don't have a saved camera ID or the saved one isn't available
+      if (
+        !savedCameraId ||
+        !devices.some((d) => d.deviceId === savedCameraId)
+      ) {
+        setCurrentDeviceId(activeDeviceId);
+      }
+    },
+    [savedCameraId]
+  );
+
+  // Handler for camera change - updates state and saves preference to cookie
+  const handleCameraChange = useCallback((deviceId: string) => {
+    setCurrentDeviceId(deviceId);
+
+    // Save the preference to the user's cookie via API (fire-and-forget)
+    const formData = new FormData();
+    formData.append("scannerCameraId", deviceId);
+    void fetch("/api/user/prefs/scanner-camera", {
+      method: "POST",
+      body: formData,
+    });
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className={tw(
+        "relative size-full min-h-[400px] overflow-hidden",
+        className
+      )}
+      data-mode={mode}
+    >
+      <div className="relative size-full overflow-hidden">
+        {!forceMode && (
+          <div className="absolute inset-x-0 top-0 z-30 flex w-full items-center justify-between bg-white px-4 py-2 text-gray-900">
+            <div
+              className={tw(
+                "flex items-center gap-2",
+                // Full width on mobile when actionSwitcher is present
+                actionSwitcher && !isMd && "w-full justify-between"
+              )}
+            >
+              {!hideBackButtonText && (
+                <Link
+                  to={backButtonUrl}
+                  className={tw(
+                    "inline-flex items-center justify-start text-[11px] leading-[11px]",
+                    actionSwitcher && isMd
+                      ? "absolute bottom-[-20px] left-[2px] text-white"
+                      : ""
+                  )}
+                >
+                  <TriangleLeftIcon className="size-[14px]" />
+                  <span>{backButtonText}</span>
+                </Link>
+              )}
+              <div className="flex items-center gap-1">
+                {/* Camera selector - placed next to action switcher to avoid layout shift */}
+                {mode === "camera" && cameraDevices.length > 1 && (
+                  <CameraSelector
+                    devices={cameraDevices}
+                    currentDeviceId={currentDeviceId}
+                    onCameraChange={handleCameraChange}
+                    disabled={isLoading || paused}
+                    showLabel={isMd}
+                  />
+                )}
+
+                {actionSwitcher && <div>{actionSwitcher}</div>}
+              </div>
+            </div>
+
+            {/* We only show option to switch to scanner on big screens and when not forced to a specific mode */}
+            {isMd && !forceMode && (
+              <div>
+                <Tabs
+                  value={mode}
+                  onValueChange={(mode) => handleModeChange(mode as Mode)}
+                >
+                  <TabsList>
+                    <TabsTrigger value="scanner" disabled={isLoading || paused}>
+                      <ScanQrCode className="mr-2 size-5" /> Scanner
+                    </TabsTrigger>
+                    <TabsTrigger value="camera" disabled={isLoading || paused}>
+                      <CameraIcon className="mr-2 size-5" /> Camera
+                    </TabsTrigger>
+                  </TabsList>
+                  {/* Empty TabsContent elements required for ARIA compliance.
+                      The aria-controls attribute on tab triggers must reference valid DOM IDs.
+                      Actual scanner/camera UI is rendered separately below based on mode state. */}
+                  <TabsContent value="scanner" className="hidden" />
+                  <TabsContent value="camera" className="hidden" />
+                </Tabs>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isLoading && (
+          <InfoOverlay>
+            <Initializing />
+          </InfoOverlay>
+        )}
+
+        {mode === "scanner" ? (
+          <ScannerMode
+            onCodeDetectionSuccess={onCodeDetectionSuccess}
+            allowNonShelfCodes={shouldAllowNonShelfCodes}
+            paused={paused}
+            className={
+              typeof scannerModeClassName === "function"
+                ? scannerModeClassName(mode)
+                : scannerModeClassName
+            }
+            callback={scannerModeCallback}
+            action={action}
+          />
+        ) : (
+          <CameraMode
+            isLoading={isLoading}
+            setIsLoading={setIsLoading}
+            paused={paused}
+            setPaused={setPaused}
+            onCodeDetectionSuccess={onCodeDetectionSuccess}
+            allowNonShelfCodes={shouldAllowNonShelfCodes}
+            action={action}
+            onDevicesEnumerated={handleDevicesEnumerated}
+            currentDeviceId={currentDeviceId}
+            savedCameraId={savedCameraId}
+          />
+        )}
+        {paused && (
+          <div
+            className={tw(
+              "absolute left-1/2 -translate-x-1/2 rounded",
+              overlayPosition === "fullscreen"
+                ? "top-[75px] h-[400px] w-11/12 max-w-[600px]"
+                : "top-1/2 max-h-[90%] w-11/12 max-w-[500px] -translate-y-1/2 overflow-y-auto md:max-h-[95%]",
+              overlayClassName
+            )}
+          >
+            <div
+              className={tw(
+                "flex flex-col items-center rounded bg-white p-4 shadow-md",
+                overlayPosition === "fullscreen"
+                  ? "h-full justify-center text-center"
+                  : "min-h-[200px]",
+                // Use different alignment based on content type
+                typeof scanMessage === "string" || !scanMessage
+                  ? "justify-center text-center"
+                  : "justify-start text-left"
+              )}
+            >
+              {errorMessage ? (
+                <>
+                  <span className="mb-5 size-14 text-primary">
+                    <ErrorIcon />
+                  </span>
+                  <h5 className="mb-2">
+                    {errorTitle || "Unsupported Barcode detected"}
+                  </h5>
+                  <p className="mb-4 max-w-[300px] text-red-600">
+                    {errorMessage}
+                  </p>
+                  <Button
+                    onClick={() => setPaused(false)}
+                    variant="secondary"
+                    className="mt-2"
+                  >
+                    Scan again
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <h5>Code detected</h5>
+
+                  {typeof scanMessage === "string" ? (
+                    <>
+                      <ClientOnly fallback={null}>
+                        {() => <SuccessAnimation />}
+                      </ClientOnly>
+                      <p>{scanMessage || "Scanner paused"}</p>
+                    </>
+                  ) : (
+                    scanMessage || <p>Scanner paused</p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+function ScannerMode({
+  onCodeDetectionSuccess,
+  allowNonShelfCodes = false,
+  paused,
+  className,
+  callback,
+}: {
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
+  allowNonShelfCodes: boolean;
+  paused: boolean;
+  className?: string;
+  /**
+   * Optional callback to pass.
+   * Will run after handleDetection
+   * Receives the input element as argument
+   * By default if not passed, input element will always be cleared after handleDetection
+   * */
+  callback?: (input: HTMLInputElement, paused: boolean) => void;
+  action?: ActionType;
+}) {
+  const [inputIsFocused, setInputIsFocused] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleInputSubmit = useCallback(
+    async (input: HTMLInputElement) => {
+      const rawValue = input.value.trim();
+      if (!rawValue) return;
+
+      await handleScannerInputValue({
+        rawValue,
+        paused,
+        onCodeDetectionSuccess,
+        allowNonShelfCodes,
+      });
+
+      // Run the callback if passed
+      if (callback) {
+        callback(input, paused);
+      } else {
+        /** Clean up the input */
+        input.value = "";
+        setInputValue("");
+      }
+    },
+    [onCodeDetectionSuccess, allowNonShelfCodes, paused, callback]
+  );
+
+  const handleEnterPress = async (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const input = e.target as HTMLInputElement;
+      await handleInputSubmit(input);
+    }
+  };
+
+  const handleButtonClick = async () => {
+    if (inputRef.current) {
+      await handleInputSubmit(inputRef.current);
+    }
+  };
+
+  return (
+    <div
+      className={tw(
+        "flex h-full flex-col items-center justify-center bg-slate-800 text-center ",
+        className
+      )}
+    >
+      <RadialBg />
+      {/* Pulsating QR Icon */}
+      <div className="relative mx-auto mb-4 size-16">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <QrCode className="size-8  text-white/90" />
+        </div>
+        <div className="animate-ping absolute inset-0 rounded-full border-4 text-white/80 opacity-30"></div>
+      </div>
+      <div className="relative flex items-center gap-3">
+        <Input
+          ref={inputRef}
+          autoFocus
+          className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
+          inputClassName="scanner-mode-input max-w-[460px] min-w-[360px] pr-[56px]"
+          disabled={paused}
+          name="code"
+          label={
+            paused
+              ? "Scanner paused"
+              : inputIsFocused
+              ? "Waiting for scan..."
+              : "Please click on the text field before scanning"
+          }
+          icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
+          iconClassName={tw(
+            "text-gray-600",
+            !inputIsFocused && "animate-bounce"
+          )}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleEnterPress}
+          onFocus={() => setInputIsFocused(true)}
+          onBlur={() => setInputIsFocused(false)}
+        />
+        <Button
+          onClick={handleButtonClick}
+          disabled={paused || !inputValue.trim()}
+          variant="secondary"
+          className="absolute bottom-1 right-1"
+          aria-label={`Submit scanned code: ${inputValue}`}
+        >
+          <ArrowRight className="size-4" />
+        </Button>
+      </div>
+      <p className="mt-4 max-w-[360px] text-white/70">
+        Focus the field and use your barcode scanner to scan any code, or type
+        the code ID and press Enter.
+      </p>
+    </div>
+  );
+}
+
+function CameraMode({
+  isLoading,
+  setIsLoading,
+  paused,
+  setPaused,
+  onCodeDetectionSuccess,
+  allowNonShelfCodes = false,
+  onDevicesEnumerated,
+  currentDeviceId,
+  savedCameraId,
+}: {
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  paused: boolean;
+  setPaused: (paused: boolean) => void;
+  onCodeDetectionSuccess: OnCodeDetectionSuccess;
+  allowNonShelfCodes: boolean;
+  action?: ActionType;
+  onDevicesEnumerated?: (
+    devices: MediaDeviceInfo[],
+    activeDeviceId: string | null
+  ) => void;
+  currentDeviceId?: string | null;
+  /** Saved camera ID from user preferences - used for initial constraint */
+  savedCameraId?: string;
+}) {
+  const videoRef = useRef<Webcam>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationFrame = useRef<number>(0);
+  const [error, setError] = useState<string | null>(null);
+  // Use saved camera ID for initial constraint if available, otherwise default to back camera
+  const [videoConstraints, setVideoConstraints] =
+    useState<MediaTrackConstraints>(() =>
+      savedCameraId
+        ? { deviceId: { exact: savedCameraId } }
+        : { facingMode: "environment" }
+    );
+  const [hasRetriedConstraints, setHasRetriedConstraints] = useState(false);
+  // Track internal device ID to detect external changes
+  const [internalDeviceId, setInternalDeviceId] = useState<string | null>(
+    savedCameraId ?? null
+  );
+
+  // Enumerate video devices and get current device ID from stream
+  const enumerateAndReportDevices = useCallback(async () => {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      !onDevicesEnumerated
+    ) {
+      return;
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(
+        (device) => device.kind === "videoinput"
+      );
+
+      // Get current device ID from the active stream
+      let activeDeviceId: string | null = null;
+      const video = videoRef.current?.video;
+      if (video?.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          const settings = videoTrack.getSettings();
+          activeDeviceId = settings.deviceId ?? null;
+        }
+      }
+
+      // Only update internalDeviceId when a non-empty deviceId is available
+      // Safari/iOS may return undefined or empty string from track settings
+      if (activeDeviceId) {
+        setInternalDeviceId(activeDeviceId);
+      }
+      onDevicesEnumerated(videoDevices, activeDeviceId);
+    } catch {
+      // Silently ignore enumeration errors
+    }
+  }, [onDevicesEnumerated]);
+
+  // Effect to switch camera when currentDeviceId changes from parent
+  useEffect(() => {
+    // Only switch if the device ID has changed and differs from internal state
+    if (
+      currentDeviceId &&
+      currentDeviceId !== internalDeviceId &&
+      !paused &&
+      !isLoading
+    ) {
+      // Stop current stream tracks
+      const video = videoRef.current?.video;
+      if (video?.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        stream.getTracks().forEach((track) => track.stop());
+        // Clear srcObject to fully release the previous stream reference
+        video.srcObject = null;
+      }
+
+      // Update constraints to use the new device
+      setVideoConstraints({ deviceId: { exact: currentDeviceId } });
+      setInternalDeviceId(currentDeviceId);
+      setIsLoading(true);
+    }
+  }, [currentDeviceId, internalDeviceId, paused, isLoading, setIsLoading]);
+
+  const handleUserMediaError = useCallback(
+    async (cameraError: unknown) => {
+      const errorName =
+        typeof cameraError === "object" && cameraError !== null
+          ? (cameraError as { name?: string }).name
+          : undefined;
+      const shouldAttemptFallback =
+        !hasRetriedConstraints &&
+        (errorName === "OverconstrainedError" ||
+          errorName === "NotAllowedError" ||
+          errorName === "NotFoundError");
+
+      if (shouldAttemptFallback) {
+        setHasRetriedConstraints(true);
+        setError(null);
+
+        const enumerateDevices =
+          typeof navigator !== "undefined" && navigator.mediaDevices
+            ? navigator.mediaDevices.enumerateDevices.bind(
+                navigator.mediaDevices
+              )
+            : undefined;
+
+        if (enumerateDevices) {
+          try {
+            const devices = await enumerateDevices();
+            const bestBackCamera = getBestBackCamera(devices);
+            const fallbackDevice =
+              bestBackCamera ??
+              devices.find((device) => device.kind === "videoinput") ??
+              null;
+
+            if (fallbackDevice) {
+              setIsLoading(true);
+              setVideoConstraints({ deviceId: fallbackDevice.deviceId });
+              return;
+            }
+          } catch {
+            // Ignore enumeration errors and fall back to a generic constraint.
+          }
+        }
+
+        setIsLoading(true);
+        setVideoConstraints({});
+        return;
+      }
+
+      const errorMessage =
+        cameraError instanceof Error
+          ? cameraError.message
+          : typeof cameraError === "object" && cameraError !== null
+          ? (cameraError as { message?: string }).message ?? String(cameraError)
+          : String(cameraError);
+
+      setError(`Camera error: ${errorMessage}`);
+      setIsLoading(false);
+    },
+    [hasRetriedConstraints, setIsLoading]
+  );
+
+  // Start the animation loop when the video starts playing
+  useEffect(() => {
+    const videoElement = videoRef.current?.video;
+    const canvasElement = canvasRef.current;
+    if (videoElement && canvasElement) {
+      const handleMetadata = async () => {
+        // Video metadata is loaded, safe to start capturing
+        if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+          await processFrame({
+            video: videoElement,
+            canvas: canvasElement,
+            animationFrame,
+            paused,
+            setPaused,
+            onCodeDetectionSuccess,
+            allowNonShelfCodes,
+            setError,
+          });
+        }
+      };
+      videoElement.addEventListener("loadedmetadata", handleMetadata);
+      return () => {
+        videoElement.removeEventListener("loadedmetadata", handleMetadata);
+      };
+    }
+    return () => {
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+      }
+    };
+  }, [allowNonShelfCodes, onCodeDetectionSuccess, paused, setPaused]);
+
+  // Effect to handle pause and resume
+  useEffect(() => {
+    if (paused) {
+      // Cancel the animation frame when paused
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+        animationFrame.current = 0;
+      }
+    } else {
+      // Start processing frames when unpaused
+      const videoElement = videoRef.current?.video;
+      const canvasElement = canvasRef.current;
+      if (videoElement && canvasElement) {
+        const handleMetadata = async () => {
+          // Video metadata is loaded, safe to start capturing
+          if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+            await processFrame({
+              video: videoElement,
+              canvas: canvasElement,
+              animationFrame,
+              paused,
+              setPaused,
+              onCodeDetectionSuccess,
+              allowNonShelfCodes,
+              setError,
+            });
+          }
+        };
+        void handleMetadata();
+      }
+    }
+  }, [paused, allowNonShelfCodes, onCodeDetectionSuccess, setPaused]);
+
+  return (
+    <>
+      {/* Error State Overlay */}
+      {error && error !== "" && (
+        <InfoOverlay>
+          <div className="mx-auto mb-6 flex size-32 items-center justify-center rounded-lg border-2 border-dashed border-white/30">
+            <Camera className="size-12 text-white/50" />
+          </div>
+          <p className="mb-4">{error}</p>
+          <p className="mb-4">If the issue persists, please contact support.</p>
+          <Button onClick={() => window.location.reload()} variant="secondary">
+            Reload Page
+          </Button>
+        </InfoOverlay>
+      )}
+
+      <Webcam
+        ref={videoRef}
+        audio={false}
+        videoConstraints={videoConstraints}
+        onUserMediaError={handleUserMediaError}
+        onUserMedia={() => {
+          setError(null);
+          const video = videoRef.current?.video;
+          const canvas = canvasRef.current;
+
+          /** Error when there is no video element.  */
+          if (!video || !canvas) {
+            setError("Canvas or video element not found");
+            setIsLoading(false);
+            return;
+          }
+
+          /** Once the video can play, update canvas, stop loading, and enumerate devices */
+          video.addEventListener(
+            "canplay",
+            () => {
+              updateCanvasSize({ video, canvas });
+              setIsLoading(false);
+              // Enumerate devices after camera is ready
+              void enumerateAndReportDevices();
+            },
+            { once: true }
+          );
+
+          video.addEventListener("error", (e) => {
+            setError(
+              `Error playing video: ${e instanceof Error ? e.message : e}`
+            );
+            setIsLoading(false);
+          });
+        }}
+        className="pointer-events-none size-full object-cover"
+      />
+
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute left-0 top-0 size-full object-cover"
+      />
+    </>
+  );
+}
+
+function InfoOverlay({ children }: { children: ReactNode }) {
+  return (
+    <div className="info-overlay absolute inset-0 z-20 flex items-center justify-center bg-slate-800 px-5">
+      <RadialBg />
+      <div className="z-10 text-center text-white">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Visible while camera is loading
+ * Displays a spinner and a message
+ * If the process takes more than 10 seconds we can safely assume something went wrong and we give the user the option to reload the page
+ */
+function Initializing() {
+  const [expired, setExpired] = useState(false);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setExpired(true), 10000);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  return (
+    <>
+      <div className="mx-auto mb-6 flex size-32 items-center justify-center rounded-lg border-2 border-dashed border-white/30">
+        <Camera className="size-12 text-white/50" />
+      </div>
+      <Spinner className="mx-auto mb-2" />
+      {expired
+        ? "Camera initialization is taking longer than expected. Please reload the page"
+        : "Initializing camera..."}
+      {expired && (
+        <div>
+          <Button
+            variant={"secondary"}
+            onClick={() => window.location.reload()}
+            className={"mt-4"}
+          >
+            Reload page
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RadialBg() {
+  return (
+    <div className="absolute inset-0">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.3)_0,rgba(59,130,246,0)_50%)]"></div>
+      <div className="absolute inset-0  bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.2)_0,rgba(59,130,246,0)_70%)] "></div>
+      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48Y2lyY2xlIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgY3g9IjEwIiBjeT0iMTAiIHI9IjEiLz48L2c+PC9zdmc+')] opacity-30"></div>
+    </div>
+  );
+}
+
+export function useGlobalModeViaObserver(): Mode {
+  /** Observer to watch for changes in the data-mode attribute */
+  const { isMd } = useViewportHeight();
+  const [mode, setMode] = useState<Mode>(isMd ? "scanner" : "camera");
+  const observerRef = useRef<MutationObserver | null>(null);
+
+  useEffect(() => {
+    // First, check the current state when the component mounts
+    const targetNode = document.querySelector("div[data-mode]");
+    if (targetNode) {
+      const currentMode = targetNode.getAttribute("data-mode") as Mode | null;
+      if (currentMode) {
+        setMode(currentMode);
+      }
+
+      // Then set up the observer for future changes
+      const config: MutationObserverInit = {
+        attributes: true,
+        attributeFilter: ["data-mode"],
+      };
+
+      const callback: MutationCallback = (mutations) => {
+        mutations.forEach((mutation) => {
+          if (
+            mutation.type === "attributes" &&
+            mutation.attributeName === "data-mode"
+          ) {
+            const dataMode = targetNode.getAttribute("data-mode");
+            if (dataMode) {
+              setMode(dataMode as Mode);
+            }
+          }
+        });
+      };
+
+      observerRef.current = new MutationObserver(callback);
+      observerRef.current.observe(targetNode, config);
+
+      return () => {
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+        }
+      };
+    }
+  }, []); // Empty dependency array to run only on mount
+
+  return mode;
+}

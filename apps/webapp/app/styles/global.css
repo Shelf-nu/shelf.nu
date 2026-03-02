@@ -1,0 +1,300 @@
+:root {
+  --tw-ring-color: #eaf2ff;
+  --sidebar-background: theme(colors.white);
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 240 5.9% 10%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 240 4.8% 95.9%;
+  --sidebar-accent-foreground: 240 5.9% 10%;
+  --sidebar-border: 220 13% 91%;
+}
+
+html {
+  @apply font-inter;
+  /** this is neede because tailwind adds just the property for webkit and tailwind adds just the webkit version*/
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-white text-text-sm text-gray-900;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  @apply font-semibold text-gray-900;
+}
+
+h1 {
+  @apply text-display-sm font-semibold;
+}
+h2 {
+  @apply text-display-xs;
+}
+h3 {
+  @apply text-text-xl;
+}
+h4 {
+  @apply text-text-lg;
+}
+h5 {
+  @apply text-text-md;
+}
+h5 {
+  @apply text-text-sm;
+}
+
+p {
+  @apply font-normal;
+}
+
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner:before {
+  content: "";
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid #ccc;
+  @apply border-t-primary-500;
+  animation: spinner 0.6s linear infinite;
+}
+
+.maplibregl-ctrl-bottom-right {
+  display: none;
+}
+
+.dialog-backdrop {
+  @apply fixed inset-0 z-[100] backdrop-blur-sm flex items-center justify-center bg-black/50;
+}
+dialog {
+  @apply fixed m-0 h-full w-full bg-transparent p-0 md:relative   md:m-auto md:h-auto md:w-[600px]  md:py-8;
+}
+
+.dialog > .scrollable-content::-webkit-scrollbar {
+  @apply w-1;
+}
+
+.dialog > .scrollable-content::-webkit-scrollbar-thumb {
+  @apply rounded-br-lg rounded-tr-lg bg-[#a0a0a0];
+}
+
+.dialog > .scrollable-content::-webkit-scrollbar-track {
+  @apply rounded-br-lg rounded-tr-lg bg-[#e2e2e2];
+}
+
+.responsive-filters .form-wrapper {
+  @apply flex-col items-start xl:flex-row xl:items-center;
+}
+
+@media (max-width: 767px) {
+  .word-break {
+    word-break: break-word;
+  }
+}
+
+.search-form label > .inner-label,
+.filters-form label > .inner-label {
+  @apply hidden;
+}
+
+.subscription-plan button {
+  @apply w-full max-w-full;
+}
+
+.switch > span {
+  filter: drop-shadow(0px 1px 2px rgba(16, 24, 40, 0.06))
+    drop-shadow(0px 1px 3px rgba(16, 24, 40, 0.1));
+}
+.required-input-label:after {
+  color: #e32;
+  content: " *";
+  display: inline;
+}
+
+.horizontal-menu {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.horizontal-menu::-webkit-scrollbar {
+  display: none;
+}
+
+/*removing arrows from valuation input field (type = "number")*/
+.valuation-input::-webkit-outer-spin-button,
+.valuation-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+.valuation-input {
+  -moz-appearance: textfield;
+}
+.react-tags {
+  @apply bg-white;
+}
+
+.fill-tremor-content-emphasis {
+  @apply text-[24px] font-medium text-gray-900;
+}
+
+.onboarding-checklist .completed {
+  @apply border-2 border-primary-600 bg-primary-50 rounded;
+}
+.onboarding-checklist .completed p {
+  @apply text-primary-700;
+}
+.onboarding-checklist .completed h6 {
+  @apply text-primary-800;
+}
+
+.onboarding-checklist .completed i {
+  @apply block;
+}
+
+.mobile-styling-only .hidden {
+  display: none;
+}
+
+.mobile-styling-only .lg\:hidden {
+  display: block;
+}
+
+.preview-only-custodian-select svg {
+  display: none;
+}
+
+.header-buttons a,
+.header-buttons button,
+.header-buttons div {
+  @apply grow;
+}
+
+.header-buttons button a,
+.header-buttons button button {
+  @apply flex;
+}
+
+.custodian-selector > span {
+  @apply w-full;
+}
+
+.word-break {
+  word-break: break-word;
+}
+
+/* Disable spacing on first column of list, for lists with bulk actions */
+
+.list.list-with-bulk-actions tr td:nth-child(2),
+.list.list-with-bulk-actions tr td:nth-child(2) > div {
+  @apply !pl-0;
+}
+
+.wordwrap {
+  white-space: pre-wrap; /* Webkit */
+  white-space: -moz-pre-wrap; /* Firefox */
+  white-space: -pre-wrap; /* Opera <7 */
+  white-space: -o-pre-wrap; /* Opera 7 */
+  word-wrap: break-word; /* IE */
+}
+
+.fixed-gradient {
+  position: absolute;
+  top: 8px;
+  bottom: 11px;
+  width: 60px;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #fff 100%);
+  pointer-events: none;
+  z-index: 1;
+  display: none;
+}
+
+.overflowing .fixed-gradient {
+  display: block;
+}
+
+.scrollbar-top {
+  position: relative;
+
+  /* We must explicitely set the overflow on y to hidden or the scrolling gets broken on iOS */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/** Loading text */
+.loading-text {
+  display: inline-block;
+  font-family: monospace;
+  clip-path: inset(0 3ch 0 0);
+  animation: l 1s steps(4) infinite;
+}
+
+@keyframes l {
+  to {
+    clip-path: inset(0 -1ch 0 0);
+  }
+}
+
+.bulk-tagging-dialog .react-tags__listbox {
+  z-index: 1000;
+}
+
+.bulk-tagging-dialog .dialog-body {
+  @apply overflow-visible;
+}
+
+/* Popover animations */
+
+div[data-radix-popper-content-wrapper] > div {
+  @apply mt-2;
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+div[data-radix-popper-content-wrapper] > div[data-side="top"] {
+  animation-name: slideUp;
+}
+div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
+  animation-name: slideDown;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+::target-text {
+  background-color: yellow;
+  color: black;
+}
+
+.pseudo-border-bottom {
+  @apply after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-[''] hover:bg-gray-100;
+}
