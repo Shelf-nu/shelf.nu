@@ -560,6 +560,7 @@ export default function Area51UserPage() {
                 customer={customer}
                 subscriptions={subscriptionsWithProducts}
                 prices={prices}
+                organizations={organizations}
               />
             )}
           </div>

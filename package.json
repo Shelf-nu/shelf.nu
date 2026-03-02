@@ -10,6 +10,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "prepare": "lefthook install || true",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
+    "webapp:dev:production": "pnpm --filter @shelf/webapp run production:dev",
     "webapp:build": "turbo run build --filter=@shelf/webapp",
     "webapp:test": "pnpm --filter @shelf/webapp test",
     "webapp:lint": "pnpm --filter @shelf/webapp lint",
