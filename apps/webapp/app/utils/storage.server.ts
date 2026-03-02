@@ -170,6 +170,47 @@ export async function createSignedUrl({
         });
       }
 
+      // Supabase returns 5xx (502, 503, 504) on transient infrastructure issues
+      // like gateway timeouts. Use exponential backoff before surfacing.
+      if (isSupabaseServerError(error)) {
+        if (attempt < maxAttempts) {
+          const backoffMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s
+          Logger.warn(
+            new ShelfError({
+              cause: error,
+              message:
+                "Supabase server error while creating a signed URL. Retrying with backoff.",
+              additionalData: {
+                filename: normalizedFilename,
+                bucketName,
+                attempt,
+                backoffMs,
+              },
+              label,
+              shouldBeCaptured: false,
+            })
+          );
+          await delay(backoffMs);
+          continue;
+        }
+
+        // All retries exhausted - this is a transient server issue
+        // that shouldn't spam Sentry
+        throw new ShelfError({
+          cause: error,
+          message:
+            "Supabase is experiencing temporary issues. Using existing URL.",
+          additionalData: {
+            filename: normalizedFilename,
+            bucketName,
+            attempts: maxAttempts,
+            errorType: "server_error",
+          },
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
       throw error;
     }
 
@@ -972,4 +1013,33 @@ export function isSupabaseRateLimitError(error: unknown) {
   const isStorageApiError = name === "StorageApiError";
 
   return isStorageApiError && (isRateLimitStatus || isRateLimitMessage);
+}
+
+/**
+ * Supabase returns HTTP 5xx (502, 503, 504, etc.) on transient infrastructure
+ * issues like gateway timeouts. The client surfaces these as StorageApiError.
+ * Detect them so callers can retry instead of immediately failing.
+ */
+export function isSupabaseServerError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const name =
+    "name" in error && typeof error.name === "string" ? error.name : "";
+  const status =
+    "status" in error && typeof error.status === "number" ? error.status : 0;
+  const statusCode =
+    "statusCode" in error && typeof error.statusCode === "string"
+      ? error.statusCode
+      : "";
+
+  const isServerStatus =
+    (status >= 500 && status <= 599) ||
+    (statusCode !== "" &&
+      Number(statusCode) >= 500 &&
+      Number(statusCode) <= 599);
+  const isStorageApiError = name === "StorageApiError";
+
+  return isStorageApiError && isServerStatus;
 }
