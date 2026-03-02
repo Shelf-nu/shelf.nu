@@ -1,34 +1,35 @@
 import React from "react";
 
+import * as Sentry from "@sentry/react-router";
 import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
-function hydrate() {
-  React.startTransition(() => {
-    hydrateRoot(
-      document,
-      <React.StrictMode>
-        <JotaiProvider>
-          <HydratedRouter />
-        </JotaiProvider>
-      </React.StrictMode>,
-      {
-        onRecoverableError(error, errorInfo) {
-          // eslint-disable-next-line no-console
-          console.error("Hydration error:", error);
-          // eslint-disable-next-line no-console
-          console.error("Component stack:", errorInfo.componentStack);
-        },
-      }
-    );
+if (window.env?.SENTRY_DSN) {
+  Sentry.init({
+    dsn: window.env.SENTRY_DSN,
+    tunnel: "/api/sentry-tunnel",
+    integrations: [Sentry.reactRouterTracingIntegration()],
+    tracesSampleRate: 0.1,
   });
 }
 
-if (typeof requestIdleCallback === "function") {
-  requestIdleCallback(hydrate);
-} else {
-  // Safari doesn't support requestIdleCallback
-  // https://caniuse.com/requestidlecallback
-  setTimeout(hydrate, 1);
-}
+React.startTransition(() => {
+  hydrateRoot(
+    document,
+    <React.StrictMode>
+      <JotaiProvider>
+        <HydratedRouter />
+      </JotaiProvider>
+    </React.StrictMode>,
+    {
+      onRecoverableError(error, errorInfo) {
+        if (window.env?.SENTRY_DSN) {
+          Sentry.captureException(error, {
+            extra: { componentStack: errorInfo.componentStack },
+          });
+        }
+      },
+    }
+  );
+});
