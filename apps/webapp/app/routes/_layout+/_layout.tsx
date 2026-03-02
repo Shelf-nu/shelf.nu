@@ -21,11 +21,11 @@ import { feedbackModalOpenAtom } from "~/atoms/feedback";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
+import FeedbackModal from "~/components/feedback/feedback-modal";
 import {
   CommandPaletteButton,
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
-import FeedbackModal from "~/components/feedback/feedback-modal";
 import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
