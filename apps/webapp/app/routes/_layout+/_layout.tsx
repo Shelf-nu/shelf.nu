@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import type {
   LinksFunction,
@@ -17,6 +17,7 @@ import {
 } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
+import { feedbackModalOpenAtom } from "~/atoms/feedback";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
@@ -24,6 +25,7 @@ import {
   CommandPaletteButton,
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
+import FeedbackModal from "~/components/feedback/feedback-modal";
 import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
@@ -265,6 +267,9 @@ export default function App() {
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
   const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
+    feedbackModalOpenAtom
+  );
 
   const renderInstallPwaPromptOnMobile = () =>
     // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
@@ -326,6 +331,11 @@ export default function App() {
               organizationId={currentOrganizationId}
             />
           ) : null}
+
+          <FeedbackModal
+            open={feedbackModalOpen}
+            onClose={() => setFeedbackModalOpen(false)}
+          />
         </SidebarInset>
       </SidebarProvider>
     </CommandPaletteRoot>
