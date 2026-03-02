@@ -1,7 +1,16 @@
 pre-commit:
-  parallel: true
+  piped: true
   commands:
+    prisma-generate:
+      priority: 1
+      glob: "packages/database/prisma/schema.prisma"
+      run: pnpm db:generate
+      skip:
+        - merge
+        - rebase
+
     eslint:
+      priority: 2
       glob: "apps/webapp/**/*.{js,jsx,ts,tsx}"
       root: "apps/webapp/"
       run: >
@@ -17,6 +26,7 @@ pre-commit:
         - rebase
 
     prettier:
+      priority: 3
       glob: "**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}"
       exclude: "pnpm-lock.yaml"
       run: >
@@ -29,14 +39,8 @@ pre-commit:
         - merge
         - rebase
 
-    prisma-generate:
-      glob: "packages/database/prisma/schema.prisma"
-      run: pnpm db:generate
-      skip:
-        - merge
-        - rebase
-
     typecheck:
+      priority: 4
       glob: "apps/webapp/**/*.{ts,tsx}"
       run: "cd apps/webapp && npx react-router typegen && npx tsc -b"
       skip:
