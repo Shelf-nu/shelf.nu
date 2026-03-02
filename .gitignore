@@ -57,3 +57,6 @@ apps/docs/.vitepress/dist
 
 # Turborepo
 .turbo
+
+# Lefthook local overrides
+lefthook-local.yml

@@ -21,6 +21,7 @@ import {
   updateKitQrCode,
   relinkKitQrCode,
   getAvailableKitAssetForBooking,
+  updateKitsWithBookingCustodians,
 } from "./service.server";
 import { getQr } from "../qr/service.server";
 
@@ -925,6 +926,134 @@ describe("getAvailableKitAssetForBooking", () => {
       select: { assets: { select: { id: true, status: true } } },
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);
+  });
+});
+
+describe("updateKitsWithBookingCustodians", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should return non-checked-out kits unchanged", async () => {
+    expect.assertions(1);
+    const kits = [
+      { ...mockKitData, locationId: null, status: KitStatus.AVAILABLE },
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-2",
+        status: KitStatus.IN_CUSTODY,
+      },
+    ];
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect(result).toEqual(kits);
+  });
+
+  it("should resolve custodian from booking for checked-out kit", async () => {
+    expect.assertions(2);
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    // why: simulating asset with active booking and custodian user
+    //@ts-expect-error missing vitest type
+    db.asset.findFirst.mockResolvedValue({
+      id: "asset-1",
+      bookings: [
+        {
+          id: "booking-1",
+          custodianTeamMember: null,
+          custodianUser: {
+            firstName: "Jane",
+            lastName: "Doe",
+            profilePicture: "pic.jpg",
+          },
+        },
+      ],
+    });
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect((result[0] as any).custody).toEqual({
+      custodian: {
+        name: "Jane Doe",
+        user: {
+          firstName: "Jane",
+          lastName: "Doe",
+          profilePicture: "pic.jpg",
+        },
+      },
+    });
+    expect(db.asset.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          kitId: "kit-co",
+          bookings: { some: { status: { in: ["ONGOING", "OVERDUE"] } } },
+        }),
+      })
+    );
+  });
+
+  it("should resolve custodian from team member when no user", async () => {
+    expect.assertions(1);
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    // why: simulating booking with team member custodian instead of user
+    //@ts-expect-error missing vitest type
+    db.asset.findFirst.mockResolvedValue({
+      id: "asset-1",
+      bookings: [
+        {
+          id: "booking-1",
+          custodianTeamMember: { name: "External Contractor" },
+          custodianUser: null,
+        },
+      ],
+    });
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect((result[0] as any).custody).toEqual({
+      custodian: { name: "External Contractor" },
+    });
+  });
+
+  it("should handle kit with no asset having active booking gracefully", async () => {
+    expect.assertions(2);
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    // why: reproducing the Sentry error scenario where findFirst returns null
+    // because no asset in the kit has an ONGOING/OVERDUE booking
+    //@ts-expect-error missing vitest type
+    db.asset.findFirst.mockResolvedValue(null);
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    // Kit should be returned as-is without custody data
+    expect(result[0]).toEqual(kits[0]);
+    // Should not throw
+    expect(result).toHaveLength(1);
   });
 });
 

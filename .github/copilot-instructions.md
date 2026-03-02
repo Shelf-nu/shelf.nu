@@ -159,7 +159,7 @@ These operations require network access and will fail in restricted environments
 - `pnpm install` (package downloads) - Required for initial setup
 - `pnpm webapp:setup` (database migrations) - Requires valid database connection
 - `pnpm webapp:dev` (development server) - Requires database connection
-- `pnpm --filter @shelf/webapp precommit` (includes Prisma generate) - Will fail without network
+- `pnpm --filter @shelf/webapp validate` (includes Prisma generate) - Will fail without network
 - `pnpm webapp:validate` (includes tests requiring database) - Will fail without proper setup
 
 **Commands that work WITHOUT network/database:**
@@ -218,7 +218,7 @@ ALWAYS run before committing changes:
 
 ```bash
 # Complete pre-commit check
-pnpm --filter @shelf/webapp precommit
+pnpm --filter @shelf/webapp validate
 # Includes: prisma generate, lint:fix, format, typecheck
 
 # Full validation (NEVER CANCEL)
@@ -310,7 +310,7 @@ shelf/
 4. **Lint and Format**: `pnpm --filter @shelf/webapp lint:fix && pnpm run format`
 5. **Type Check**: `pnpm turbo typecheck`
 6. **Manual Testing**: Run through user scenarios
-7. **Pre-commit**: `pnpm --filter @shelf/webapp precommit`
+7. **Pre-commit**: `pnpm --filter @shelf/webapp validate`
 8. **Full Validation**: `pnpm webapp:validate` (before major changes)
 
 ## Performance Notes

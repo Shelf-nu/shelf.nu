@@ -849,9 +849,16 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
         continue;
       }
 
-      /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit  */
+      /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit.
+       * We filter for assets that have an active booking to avoid picking
+       * an asset in the kit that is AVAILABLE and has no relevant booking. */
       const kitAsset = await db.asset.findFirst({
-        where: { kitId: kit.id },
+        where: {
+          kitId: kit.id,
+          bookings: {
+            some: { status: { in: ["ONGOING", "OVERDUE"] } },
+          },
+        },
         select: {
           id: true,
           bookings: {
