@@ -8,6 +8,7 @@ import { HydratedRouter } from "react-router/dom";
 if (window.env?.SENTRY_DSN) {
   Sentry.init({
     dsn: window.env.SENTRY_DSN,
+    tunnel: "/api/sentry-tunnel",
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
   });
