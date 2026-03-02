@@ -8,7 +8,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "prepare": "husky install || true",
+    "prepare": "lefthook install || true",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
     "webapp:build": "turbo run build --filter=@shelf/webapp",
     "webapp:test": "pnpm --filter @shelf/webapp test",
@@ -33,7 +33,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
-    "husky": "^9.0.11",
+    "@evilmartians/lefthook": "^1.11.0",
     "prettier": "3.0.3",
     "turbo": "^2.4.4"
   },
