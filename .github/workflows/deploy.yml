@@ -37,7 +37,7 @@ jobs:
         uses: SebRollen/toml-action@v1.0.2
         id: app_name
         with:
-          file: "fly.toml"
+          file: "apps/webapp/fly.toml"
           field: "app"
 
       - name: 🐳 Set up Docker Buildx
@@ -63,22 +63,13 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
+          file: apps/webapp/Dockerfile
           push: true
           tags: registry.fly.io/${{ steps.app_name.outputs.value }}:${{ github.ref_name }}-${{ github.sha }}
           build-args: |
             COMMIT_SHA=${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,mode=max,dest=/tmp/.buildx-cache-new
-
-      # - name: Create Sentry release
-      #   uses: getsentry/action-release@v1
-      #   env:
-      #     SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-      #     SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-      #     SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-      #   with:
-      #     environment: production
-      #     sourcemaps: "./build"
 
       # This ugly bit is necessary if you don't want your cache to grow forever
       # till it hits GitHub's limit of 5GB.
@@ -108,7 +99,7 @@ jobs:
         uses: SebRollen/toml-action@v1.0.2
         id: app_name
         with:
-          file: "fly.toml"
+          file: "apps/webapp/fly.toml"
           field: "app"
 
       - name: 🎈 Setup Fly
@@ -116,12 +107,12 @@ jobs:
 
       - name: 🚀 Deploy Staging
         if: ${{ github.ref == 'refs/heads/dev' }}
-        run: flyctl deploy --remote-only --build-arg COMMIT_SHA=${{ github.sha }} --app ${{ steps.app_name.outputs.value }}-staging
+        run: flyctl deploy --remote-only --build-arg COMMIT_SHA=${{ github.sha }} --app ${{ steps.app_name.outputs.value }}-staging --dockerfile apps/webapp/Dockerfile
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: 🚀 Deploy Production
         if: ${{ github.ref == 'refs/heads/main' }}
-        run: flyctl deploy --remote-only --build-arg COMMIT_SHA=${{ github.sha }} --app ${{ steps.app_name.outputs.value }}
+        run: flyctl deploy --remote-only --build-arg COMMIT_SHA=${{ github.sha }} --app ${{ steps.app_name.outputs.value }} --dockerfile apps/webapp/Dockerfile
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
