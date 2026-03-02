@@ -54,6 +54,6 @@ describe("InventoryValueChart", () => {
     const valueElement = screen.getByText(expectedValue);
 
     expect(valueElement).toBeInTheDocument();
-    expect(valueElement).toHaveClass("break-all");
+    expect(valueElement).toHaveClass("whitespace-nowrap");
   });
 });
