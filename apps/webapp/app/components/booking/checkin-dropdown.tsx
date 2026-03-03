@@ -81,8 +81,9 @@ export default function CheckinDropdown({
           </Button>
         </DropdownMenuTrigger>
 
-        {/* Mobile button */}
+        {/* Mobile button — type="button" prevents implicit form submission */}
         <Button
+          type="button"
           className="flex-1 sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
