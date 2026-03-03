@@ -179,7 +179,10 @@ export default function UserPage() {
               </Button>
             )}
             role={userOrgRole}
-            roleEnum={currentOrgMembership?.roles[0] ?? user.userOrganizations[0].roles[0]}
+            roleEnum={
+              currentOrgMembership?.roles[0] ??
+              user.userOrganizations[0].roles[0]
+            }
           />
         </AbsolutePositionedHeaderActions>
       </When>

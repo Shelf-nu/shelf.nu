@@ -5,6 +5,9 @@ import path from "node:path";
 
 export default {
   ssr: true,
+  future: {
+    v8_viteEnvironmentApi: true,
+  },
   buildEnd: async ({ reactRouterConfig }) => {
     const sentryInstrument = `instrument.server`;
     await esbuild
