@@ -2019,10 +2019,14 @@ export async function updateBookingAssets({
         },
       });
 
+      // Dedupe assetIds so duplicate entries don't cause false validation failures
+      // (findMany returns unique rows, so duplicates would inflate the expected count)
+      const uniqueAssetIds = [...new Set(assetIds)];
+
       // Validate that all asset IDs exist before inserting into the join table
       // to prevent FK violations when assets are deleted between UI load and submission
       const validAssets = await tx.asset.findMany({
-        where: { id: { in: assetIds }, organizationId },
+        where: { id: { in: uniqueAssetIds }, organizationId },
         select: { id: true },
       });
       const validAssetIds = validAssets.map((a) => a.id);
@@ -2038,7 +2042,7 @@ export async function updateBookingAssets({
         });
       }
 
-      if (validAssetIds.length !== assetIds.length) {
+      if (validAssetIds.length !== uniqueAssetIds.length) {
         throw new ShelfError({
           cause: null,
           message:
