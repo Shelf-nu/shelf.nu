@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -202,25 +203,39 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           bucketName: "assets",
         });
       } catch (error) {
-        // If it fails, log the error and keep the existing URL
-        // Preserve shouldBeCaptured flag if it's already a ShelfError
-        const shouldCapture =
-          error &&
-          typeof error === "object" &&
-          "shouldBeCaptured" in error &&
-          typeof error.shouldBeCaptured === "boolean"
-            ? error.shouldBeCaptured
-            : true;
+        // Check if the file was deleted from storage ("Object not found")
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        const isObjectNotFound =
+          errorMessage.includes("Object not found") ||
+          errorMessage.includes("not found");
 
-        Logger.error(
-          new ShelfError({
-            cause: error,
-            message: `Failed to refresh main image URL for asset ${assetId}`,
-            additionalData: { assetId, mainImagePath, userId },
-            label: "Assets",
-            shouldBeCaptured: shouldCapture,
-          })
-        );
+        if (isObjectNotFound) {
+          // File is gone from storage — clear the asset's mainImage
+          newMainImageUrl = null;
+          Logger.info(
+            `Main image file not found in storage for asset ${assetId}, clearing image reference`
+          );
+        } else {
+          // Preserve shouldBeCaptured flag if it's already a ShelfError
+          const shouldCapture =
+            error &&
+            typeof error === "object" &&
+            "shouldBeCaptured" in error &&
+            typeof error.shouldBeCaptured === "boolean"
+              ? error.shouldBeCaptured
+              : true;
+
+          Logger.error(
+            new ShelfError({
+              cause: error,
+              message: `Failed to refresh main image URL for asset ${assetId}`,
+              additionalData: { assetId, mainImagePath, userId },
+              label: "Assets",
+              shouldBeCaptured: shouldCapture,
+            })
+          );
+        }
       }
     }
 
@@ -268,21 +283,33 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     // Update the asset with new signed URLs and expiration date
-    const updatedAsset = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        mainImage: newMainImageUrl,
-        thumbnailImage: thumbnailUrl,
-        mainImageExpiration: oneDayFromNow(),
-      },
-      select: {
-        id: true,
-        mainImage: true,
-        thumbnailImage: true,
-      },
-    });
+    // Wrap in try-catch to handle race condition where asset is deleted between read and update
+    try {
+      const updatedAsset = await db.asset.update({
+        where: { id: assetId, organizationId },
+        data: {
+          mainImage: newMainImageUrl,
+          thumbnailImage: thumbnailUrl,
+          mainImageExpiration: oneDayFromNow(),
+        },
+        select: {
+          id: true,
+          mainImage: true,
+          thumbnailImage: true,
+        },
+      });
 
-    return data(payload({ asset: updatedAsset }));
+      return data(payload({ asset: updatedAsset }));
+    } catch (updateError) {
+      // Asset was deleted between the initial read and this update — not a bug
+      if (
+        updateError instanceof Prisma.PrismaClientKnownRequestError &&
+        updateError.code === "P2025"
+      ) {
+        return data(payload({ asset: null }));
+      }
+      throw updateError;
+    }
   } catch (cause) {
     // Log the error for debugging
     Logger.error(
