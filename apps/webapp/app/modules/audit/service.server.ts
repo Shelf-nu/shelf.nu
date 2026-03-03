@@ -1015,121 +1015,139 @@ export async function recordAuditScan(
       };
     }
 
+    // Pre-fetch user and asset data for note creation outside the transaction
+    const [scannerUser, scannedAsset] = await Promise.all([
+      db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      db.asset.findUnique({
+        where: { id: assetId },
+        select: { id: true, title: true },
+      }),
+    ]);
+
     // Record the scan in a transaction
-    const result = await db.$transaction(async (tx) => {
-      // If this is the first scan and audit is still PENDING, activate it
-      if (session.status === AuditStatus.PENDING) {
-        await tx.auditSession.update({
+    const result = await db.$transaction(
+      async (tx) => {
+        // If this is the first scan and audit is still PENDING, activate it
+        if (session.status === AuditStatus.PENDING) {
+          await tx.auditSession.update({
+            where: { id: auditSessionId },
+            data: {
+              status: AuditStatus.ACTIVE,
+              startedAt: new Date(),
+            },
+          });
+
+          // Create automatic note for audit being started
+          await createAuditStartedNote({
+            auditSessionId,
+            userId,
+            tx,
+            prefetchedUser: scannerUser,
+          });
+        }
+
+        // Create the scan record
+        const scan = await tx.auditScan.create({
+          data: {
+            auditSessionId,
+            code: qrId,
+            assetId,
+            scannedById: userId,
+            scannedAt: new Date(),
+          },
+        });
+
+        let auditAssetId: string | null = null;
+
+        // Update or create the audit asset record
+        if (isExpected) {
+          // Expected asset - update its status to FOUND
+          await tx.auditAsset.updateMany({
+            where: {
+              auditSessionId,
+              assetId,
+              expected: true,
+            },
+            data: {
+              status: AuditAssetStatus.FOUND,
+              scannedAt: new Date(),
+              scannedById: userId,
+            },
+          });
+
+          // Get the audit asset ID for return
+          const updatedAsset = await tx.auditAsset.findFirst({
+            where: {
+              auditSessionId,
+              assetId,
+              expected: true,
+            },
+            select: { id: true },
+          });
+
+          auditAssetId = updatedAsset?.id ?? null;
+        } else {
+          // Unexpected asset - create a new audit asset record
+          const auditAsset = await tx.auditAsset.create({
+            data: {
+              auditSessionId,
+              assetId,
+              expected: false,
+              status: AuditAssetStatus.UNEXPECTED,
+              scannedAt: new Date(),
+              scannedById: userId,
+            },
+          });
+          auditAssetId = auditAsset.id;
+        }
+
+        // Link the scan to the audit asset so we can query it later
+        if (auditAssetId) {
+          await tx.auditScan.update({
+            where: { id: scan.id },
+            data: { auditAssetId },
+          });
+        }
+
+        // Update the audit session counts
+        const updatedSession = await tx.auditSession.update({
           where: { id: auditSessionId },
           data: {
-            status: AuditStatus.ACTIVE,
-            startedAt: new Date(),
+            foundAssetCount: isExpected
+              ? { increment: 1 }
+              : session.foundAssetCount,
+            missingAssetCount: isExpected
+              ? { decrement: 1 }
+              : session.missingAssetCount,
+            unexpectedAssetCount: !isExpected
+              ? { increment: 1 }
+              : session.unexpectedAssetCount,
           },
         });
 
-        // Create automatic note for audit being started
-        await createAuditStartedNote({
+        // Create automatic note for asset scan using pre-fetched data
+        await createAssetScanNote({
           auditSessionId,
-          userId,
-          tx,
-        });
-      }
-
-      // Create the scan record
-      const scan = await tx.auditScan.create({
-        data: {
-          auditSessionId,
-          code: qrId,
           assetId,
-          scannedById: userId,
-          scannedAt: new Date(),
-        },
-      });
-
-      let auditAssetId: string | null = null;
-
-      // Update or create the audit asset record
-      if (isExpected) {
-        // Expected asset - update its status to FOUND
-        await tx.auditAsset.updateMany({
-          where: {
-            auditSessionId,
-            assetId,
-            expected: true,
-          },
-          data: {
-            status: AuditAssetStatus.FOUND,
-            scannedAt: new Date(),
-            scannedById: userId,
-          },
+          userId,
+          isExpected,
+          tx,
+          prefetchedUser: scannerUser,
+          prefetchedAsset: scannedAsset,
         });
 
-        // Get the audit asset ID for return
-        const updatedAsset = await tx.auditAsset.findFirst({
-          where: {
-            auditSessionId,
-            assetId,
-            expected: true,
-          },
-          select: { id: true },
-        });
-
-        auditAssetId = updatedAsset?.id ?? null;
-      } else {
-        // Unexpected asset - create a new audit asset record
-        const auditAsset = await tx.auditAsset.create({
-          data: {
-            auditSessionId,
-            assetId,
-            expected: false,
-            status: AuditAssetStatus.UNEXPECTED,
-            scannedAt: new Date(),
-            scannedById: userId,
-          },
-        });
-        auditAssetId = auditAsset.id;
-      }
-
-      // Link the scan to the audit asset so we can query it later
-      if (auditAssetId) {
-        await tx.auditScan.update({
-          where: { id: scan.id },
-          data: { auditAssetId },
-        });
-      }
-
-      // Update the audit session counts
-      const updatedSession = await tx.auditSession.update({
-        where: { id: auditSessionId },
-        data: {
-          foundAssetCount: isExpected
-            ? { increment: 1 }
-            : session.foundAssetCount,
-          missingAssetCount: isExpected
-            ? { decrement: 1 }
-            : session.missingAssetCount,
-          unexpectedAssetCount: !isExpected
-            ? { increment: 1 }
-            : session.unexpectedAssetCount,
-        },
-      });
-
-      // Create automatic note for asset scan
-      await createAssetScanNote({
-        auditSessionId,
-        assetId,
-        userId,
-        isExpected,
-        tx,
-      });
-
-      return {
-        scanId: scan.id,
-        auditAssetId,
-        foundAssetCount: updatedSession.foundAssetCount,
-        unexpectedAssetCount: updatedSession.unexpectedAssetCount,
-      };
-    });
+        return {
+          scanId: scan.id,
+          auditAssetId,
+          foundAssetCount: updatedSession.foundAssetCount,
+          unexpectedAssetCount: updatedSession.unexpectedAssetCount,
+        };
+      },
+      { timeout: 15000 }
+    );
 
     return result;
   } catch (cause) {

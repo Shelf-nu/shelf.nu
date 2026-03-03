@@ -11,6 +11,19 @@ if (window.env?.SENTRY_DSN) {
     tunnel: "/api/sentry-tunnel",
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
+    beforeSend(event) {
+      const message = event.exception?.values?.[0]?.value || "";
+      // Filter client-side network errors (not actionable)
+      if (
+        message.includes("Load failed") ||
+        message.includes("Failed to fetch") ||
+        message.includes("NetworkError") ||
+        message.includes("fetch failed")
+      ) {
+        return null;
+      }
+      return event;
+    },
   });
 }
 

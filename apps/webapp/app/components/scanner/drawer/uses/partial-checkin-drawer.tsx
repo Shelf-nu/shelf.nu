@@ -677,14 +677,18 @@ const CustomForm = ({
             }}
             label="Check in assets"
             variant="default"
-            disabled={isLoading || hasBlockers}
+            disabled={
+              isLoading || hasBlockers || assetIdsForCheckin.length === 0
+            }
             portalContainer={formRef.current || undefined}
             specificAssetIds={assetIdsForCheckin}
           />
         ) : (
           <Button
             type="submit"
-            disabled={isLoading || hasBlockers}
+            disabled={
+              isLoading || hasBlockers || assetIdsForCheckin.length === 0
+            }
             className="w-auto"
           >
             Check in assets

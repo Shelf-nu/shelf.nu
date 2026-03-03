@@ -30,6 +30,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import {
+  ShelfError,
   isLikeShelfError,
   isZodValidationError,
   makeShelfError,
@@ -74,6 +75,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
+        // Guard against bots sending non-form content types
+        const contentType = request.headers.get("content-type") || "";
+        if (
+          !contentType.includes("application/x-www-form-urlencoded") &&
+          !contentType.includes("multipart/form-data")
+        ) {
+          return data(
+            error(
+              new ShelfError({
+                cause: null,
+                message: "Invalid request",
+                label: "Request validation",
+                shouldBeCaptured: false,
+                status: 400,
+              }),
+              false
+            ),
+            { status: 400 }
+          );
+        }
+
         const { email, password, redirectTo } = parseData(
           await request.formData(),
           LoginFormSchema,
