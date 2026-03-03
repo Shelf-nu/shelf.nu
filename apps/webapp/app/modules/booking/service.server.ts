@@ -2038,6 +2038,17 @@ export async function updateBookingAssets({
         });
       }
 
+      if (validAssetIds.length !== assetIds.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some of the selected assets no longer exist. Please reload and try again.",
+          label,
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
       await Promise.all([
         // Bulk insert into the join table in a single SQL statement instead of
         // N individual connect operations which cause transaction timeouts
