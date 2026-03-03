@@ -31,7 +31,7 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm --filter @shelf/webapp lint:fix` - Fix ESLint issues automatically
 - `pnpm turbo typecheck` - TypeScript type checking (all packages)
 - `pnpm run format` - Prettier code formatting (root-level)
-- `pnpm --filter @shelf/webapp precommit` - Complete pre-commit validation
+- `pnpm --filter @shelf/webapp validate` - Complete pre-commit validation
 
 ### Database
 
@@ -75,7 +75,7 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 ### How packages connect
 
 - **Webapp → Database**: The webapp depends on `@shelf/database` (workspace dependency). Its `app/database/db.server.ts` is a thin wrapper that calls `createDatabaseClient()` from `@shelf/database`. All 135+ `~/database/db.server` imports in the webapp work unchanged.
-- **Webapp → Prisma types**: The webapp's `build`, `typecheck`, and `precommit` scripts run `prisma generate` to ensure types are available. In CI, this is done via `pnpm --filter @shelf/database run db:generate`.
+- **Webapp → Prisma types**: The webapp's `build`, `typecheck`, and `validate` scripts run `prisma generate` to ensure types are available. In CI, this is done via `pnpm --filter @shelf/database run db:generate`.
 - **Vite config**: The webapp's `vite.config.ts` includes `ssr.noExternal: ["@shelf/database"]` so Vite bundles it correctly, and aliases `.prisma/client/index-browser` for browser builds.
 
 ## Architecture Overview

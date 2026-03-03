@@ -22,12 +22,16 @@ export function SubscriptionsOverview({
   customer,
   subscriptions,
   prices,
+  organizations,
 }: {
   customer: CustomerWithSubscriptions | null;
   subscriptions: Stripe.Subscription[];
   prices: {
     [key: string]: PriceWithProduct[];
   };
+  /** When provided, used for workspace name lookup instead of layout data.
+   * Pass the viewed user's organizations when rendering in admin context. */
+  organizations?: { id: string; name: string }[];
 }) {
   // Separate subscriptions into workspace plans and addons
   const { workspaceSubscriptions, addonSubscriptions } = useMemo(() => {
@@ -102,6 +106,7 @@ export function SubscriptionsOverview({
               key={subscription.id}
               prices={prices}
               customer={customer}
+              organizations={organizations}
             />
           ))}
           <div className="mt-2 text-right font-medium">
@@ -125,6 +130,7 @@ export function SubscriptionsOverview({
               key={subscription.id}
               prices={prices}
               customer={customer}
+              organizations={organizations}
             />
           ))}
           <div className="mt-2 text-right font-medium">
@@ -143,12 +149,14 @@ export function SubscriptionsOverview({
 function SubscriptionBox({
   subscription,
   prices,
+  organizations,
 }: {
   subscription: Stripe.Subscription;
   prices: {
     [key: string]: PriceWithProduct[];
   };
   customer: CustomerWithSubscriptions;
+  organizations?: { id: string; name: string }[];
 }) {
   return (
     <div>
@@ -157,6 +165,7 @@ function SubscriptionBox({
           item={item}
           subscription={subscription}
           prices={prices}
+          organizations={organizations}
           key={item.id}
         />
       ))}
@@ -168,12 +177,14 @@ function Item({
   item,
   subscription,
   prices,
+  organizations,
 }: {
   item: Stripe.SubscriptionItem;
   subscription: Stripe.Subscription;
   prices: {
     [key: string]: PriceWithProduct[];
   };
+  organizations?: { id: string; name: string }[];
 }) {
   const interval = item.price?.recurring?.interval;
   const isLegacyPricing = item?.price?.metadata?.legacy === "true";
@@ -197,15 +208,19 @@ function Item({
     return item.price?.nickname || "Subscription";
   }, [subscriptionPrice, item.price]);
 
-  // Look up workspace name from layout data for addon subscriptions
+  // Look up workspace name for addon subscriptions.
+  // Prefer explicit organizations prop (used in admin context for the viewed user's orgs),
+  // fall back to layout data (used when viewing own subscriptions).
   const layoutData = useRouteLoaderData<typeof layoutLoader>(
     "routes/_layout+/_layout"
   );
   const workspaceName = useMemo(() => {
     const orgId = subscription.metadata?.organizationId;
-    if (!orgId || !layoutData?.organizations) return null;
-    return layoutData.organizations.find((o) => o.id === orgId)?.name ?? null;
-  }, [subscription.metadata, layoutData?.organizations]);
+    if (!orgId) return null;
+    const orgs = organizations ?? layoutData?.organizations;
+    if (!orgs) return null;
+    return orgs.find((o) => o.id === orgId)?.name ?? null;
+  }, [subscription.metadata, organizations, layoutData?.organizations]);
 
   const { isTrial, isActive, isPaused } = getSubscriptionStatus(subscription);
   const costPerPrice = item?.price?.unit_amount
