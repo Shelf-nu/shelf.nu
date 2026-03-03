@@ -8,7 +8,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "prepare": "git config --unset core.hooksPath 2>/dev/null; lefthook install || true",
+    "prepare": "git config --unset core.hooksPath || echo ok && npx lefthook install || echo ok",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
     "webapp:dev:production": "pnpm --filter @shelf/webapp run production:dev",
     "webapp:build": "turbo run build --filter=@shelf/webapp",
