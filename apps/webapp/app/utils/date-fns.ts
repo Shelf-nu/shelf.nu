@@ -1,7 +1,5 @@
 import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import type { ClientHint } from "~/utils/client-hints";
-import { getDateTimeFormatFromHints } from "./client-hints";
 
 export function getDifferenceInSeconds(
   dateLeft: Date,
