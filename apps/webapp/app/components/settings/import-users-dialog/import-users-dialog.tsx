@@ -194,7 +194,9 @@ export default function ImportUsersDialog({
                   </p>
                 </When>
 
-                <Button disabled={!selectedFile || disabled}>Import now</Button>
+                <Button type="submit" disabled={!selectedFile || disabled}>
+                  Import now
+                </Button>
               </fetcher.Form>
             </div>
           )}

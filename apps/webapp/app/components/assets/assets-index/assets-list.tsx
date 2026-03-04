@@ -342,7 +342,7 @@ function AdvancedModeMobileFallback() {
       >
         <input type="hidden" name="intent" value="changeMode" />
 
-        <Button name="mode" value="SIMPLE" disabled={disabled}>
+        <Button type="submit" name="mode" value="SIMPLE" disabled={disabled}>
           Change to simple mode
         </Button>
       </fetcher.Form>

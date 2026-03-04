@@ -211,6 +211,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               </Button>
             ) : null}
             <Button
+              type="submit"
               className="whitespace-nowrap"
               icon={assetIds ? undefined : "rows"}
               value="create"
