@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -15,6 +16,40 @@ import { requirePermission } from "~/utils/roles.server";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
+
+/**
+ * Checks if an error (typically a ShelfError from createSignedUrl) indicates
+ * that the storage object was not found. Walks both additionalData and the
+ * cause chain to handle the Supabase StorageApiError wrapped by ShelfError.
+ */
+function isStorageObjectNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  // Check additionalData.errorMessage (set by createSignedUrl wrapper)
+  if (
+    "additionalData" in error &&
+    error.additionalData &&
+    typeof error.additionalData === "object" &&
+    "errorMessage" in error.additionalData &&
+    typeof error.additionalData.errorMessage === "string" &&
+    error.additionalData.errorMessage.toLowerCase().includes("object not found")
+  ) {
+    return true;
+  }
+
+  // Check cause chain (raw Supabase StorageApiError)
+  if ("cause" in error && error.cause) {
+    if (
+      error.cause instanceof Error &&
+      error.cause.message.toLowerCase().includes("object not found")
+    ) {
+      return true;
+    }
+    return isStorageObjectNotFound(error.cause);
+  }
+
+  return false;
+}
 
 /**
  * Generates a thumbnail for an asset if missing, with proper handling for existing files
@@ -202,25 +237,32 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           bucketName: "assets",
         });
       } catch (error) {
-        // If it fails, log the error and keep the existing URL
-        // Preserve shouldBeCaptured flag if it's already a ShelfError
-        const shouldCapture =
-          error &&
-          typeof error === "object" &&
-          "shouldBeCaptured" in error &&
-          typeof error.shouldBeCaptured === "boolean"
-            ? error.shouldBeCaptured
-            : true;
+        if (isStorageObjectNotFound(error)) {
+          // File is gone from storage — not a bug, just log quietly
+          // Keep the existing URL; cleanup is a deliberate user action
+          Logger.info(
+            `Main image file not found in storage for asset ${assetId}, keeping existing URL`
+          );
+        } else {
+          // Preserve shouldBeCaptured flag if it's already a ShelfError
+          const shouldCapture =
+            error &&
+            typeof error === "object" &&
+            "shouldBeCaptured" in error &&
+            typeof error.shouldBeCaptured === "boolean"
+              ? error.shouldBeCaptured
+              : true;
 
-        Logger.error(
-          new ShelfError({
-            cause: error,
-            message: `Failed to refresh main image URL for asset ${assetId}`,
-            additionalData: { assetId, mainImagePath, userId },
-            label: "Assets",
-            shouldBeCaptured: shouldCapture,
-          })
-        );
+          Logger.error(
+            new ShelfError({
+              cause: error,
+              message: `Failed to refresh main image URL for asset ${assetId}`,
+              additionalData: { assetId, mainImagePath, userId },
+              label: "Assets",
+              shouldBeCaptured: shouldCapture,
+            })
+          );
+        }
       }
     }
 
@@ -237,24 +279,31 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             bucketName: "assets",
           });
         } catch (error) {
-          // Preserve shouldBeCaptured flag if it's already a ShelfError
-          const shouldCapture =
-            error &&
-            typeof error === "object" &&
-            "shouldBeCaptured" in error &&
-            typeof error.shouldBeCaptured === "boolean"
-              ? error.shouldBeCaptured
-              : true;
+          if (isStorageObjectNotFound(error)) {
+            // Thumbnail file gone from storage — keep existing URL
+            Logger.info(
+              `Thumbnail file not found in storage for asset ${assetId}, keeping existing URL`
+            );
+          } else {
+            // Preserve shouldBeCaptured flag if it's already a ShelfError
+            const shouldCapture =
+              error &&
+              typeof error === "object" &&
+              "shouldBeCaptured" in error &&
+              typeof error.shouldBeCaptured === "boolean"
+                ? error.shouldBeCaptured
+                : true;
 
-          Logger.error(
-            new ShelfError({
-              cause: error,
-              message: `Failed to refresh thumbnail URL for asset ${assetId}`,
-              additionalData: { assetId, thumbnailPath, userId },
-              label: "Assets",
-              shouldBeCaptured: shouldCapture,
-            })
-          );
+            Logger.error(
+              new ShelfError({
+                cause: error,
+                message: `Failed to refresh thumbnail URL for asset ${assetId}`,
+                additionalData: { assetId, thumbnailPath, userId },
+                label: "Assets",
+                shouldBeCaptured: shouldCapture,
+              })
+            );
+          }
         }
       }
     } else if (asset.mainImage && !asset.thumbnailImage) {
@@ -268,21 +317,33 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     // Update the asset with new signed URLs and expiration date
-    const updatedAsset = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        mainImage: newMainImageUrl,
-        thumbnailImage: thumbnailUrl,
-        mainImageExpiration: oneDayFromNow(),
-      },
-      select: {
-        id: true,
-        mainImage: true,
-        thumbnailImage: true,
-      },
-    });
+    // Wrap in try-catch to handle race condition where asset is deleted between read and update
+    try {
+      const updatedAsset = await db.asset.update({
+        where: { id: assetId, organizationId },
+        data: {
+          mainImage: newMainImageUrl,
+          thumbnailImage: thumbnailUrl,
+          mainImageExpiration: oneDayFromNow(),
+        },
+        select: {
+          id: true,
+          mainImage: true,
+          thumbnailImage: true,
+        },
+      });
 
-    return data(payload({ asset: updatedAsset }));
+      return data(payload({ asset: updatedAsset }));
+    } catch (updateError) {
+      // Asset was deleted between the initial read and this update — not a bug
+      if (
+        updateError instanceof Prisma.PrismaClientKnownRequestError &&
+        updateError.code === "P2025"
+      ) {
+        return data(payload({ asset: null }));
+      }
+      throw updateError;
+    }
   } catch (cause) {
     // Log the error for debugging
     Logger.error(

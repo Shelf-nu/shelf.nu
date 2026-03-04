@@ -137,7 +137,7 @@ export async function handleSubscriptionCreated(
           tierId: tierId as TierId,
           usedFreeTrial: true,
         },
-        select: { email: true },
+        select: { email: true, firstName: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -149,7 +149,10 @@ export async function handleSubscriptionCreated(
         });
       });
 
-    void sendTeamTrialWelcomeEmail({ email: trialUser.email });
+    void sendTeamTrialWelcomeEmail({
+      email: trialUser.email,
+      firstName: trialUser.firstName,
+    });
   } else if (isTransferredSubscription) {
     // Transferred subscription: update tier but skip welcome emails
     // and don't set usedFreeTrial (already handled in transferOwnership)

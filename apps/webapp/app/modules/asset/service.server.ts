@@ -362,15 +362,12 @@ async function validateKitCustodyConflicts({
             existingKit.assets.length
           } existing asset${existingKit.assets.length === 1 ? "" : "s"}`,
         });
-      } else if (
-        existingKit.custody &&
-        existingKit.custody.custodian.name !== asset.custodian
-      ) {
+      } else if (existingKit.custody) {
         conflicts.push({
           asset: asset.title,
           custodian: asset.custodian!,
           kit: asset.kit!,
-          issue: `Kit already in custody with ${existingKit.custody.custodian.name}`,
+          issue: `Kit already has a custodian (${existingKit.custody.custodian.name}). Importing custody for kits that already have a custodian is not allowed`,
         });
       }
     }

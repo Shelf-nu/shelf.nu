@@ -58,7 +58,7 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
               >
                 Cancel
               </Button>
-              <Button className="flex-1" disabled={disabled}>
+              <Button className="flex-1" type="submit" disabled={disabled}>
                 Confirm
               </Button>
             </form>

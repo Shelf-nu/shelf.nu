@@ -201,7 +201,7 @@ export default function SetOrEditReminderDialog({
             >
               Cancel
             </Button>
-            <Button role="button" disabled={disabled}>
+            <Button role="button" type="submit" disabled={disabled}>
               Confirm
             </Button>
           </div>
