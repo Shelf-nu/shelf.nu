@@ -17,6 +17,7 @@ import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { DEFAULT_SSO_DOMAIN } from "~/utils/env";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -37,7 +38,7 @@ const SSOLoginFormSchema = z.object({
   redirectTo: z.string().optional(),
 });
 
-export function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in with SSO";
   const subHeading = "Enter your company's domain to login with SSO.";
   const { disableSSO } = config;
@@ -57,6 +58,13 @@ export function loader({ context }: LoaderFunctionArgs) {
         status: 403,
         shouldBeCaptured: false,
       });
+    }
+
+    // If a default SSO domain is configured, skip the domain input form
+    // and redirect directly to the identity provider.
+    if (DEFAULT_SSO_DOMAIN) {
+      const url = await signInWithSSO(DEFAULT_SSO_DOMAIN);
+      return redirect(url);
     }
 
     return payload({ title, subHeading });
