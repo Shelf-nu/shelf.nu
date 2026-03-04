@@ -251,7 +251,7 @@ export function handleEventClick(info: EventClickArg) {
   info.jsEvent.preventDefault();
   const event = info.event;
   window.open(
-    event.url || `/bookings/${event.id}`,
+    event.extendedProps.url || `/bookings/${event.id}`,
     "_blank",
     "noopener,noreferrer"
   );
