@@ -242,6 +242,7 @@ export function ConfigureColumnsDropdown() {
             </div>
             <footer className="absolute bottom-0 w-full border-t bg-white p-[10px]">
               <Button
+                type="submit"
                 disabled={!hasChanges || disabled}
                 variant="secondary"
                 width="full"

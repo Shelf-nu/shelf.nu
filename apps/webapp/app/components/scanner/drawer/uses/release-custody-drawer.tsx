@@ -372,6 +372,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         <div className="px-4 md:pl-0">
           <div className={tw("mb-4 flex gap-3")}>
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled || disableSubmit || idsTotalCount === 0}

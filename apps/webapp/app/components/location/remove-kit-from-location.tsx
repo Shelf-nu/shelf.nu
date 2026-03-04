@@ -58,7 +58,12 @@ export default function RemoveKitFromLocation({
 
             <Form method="post">
               <input type="hidden" name="kitId" value={kit.id} />
-              <Button name="intent" value="removeKit" disabled={disabled}>
+              <Button
+                type="submit"
+                name="intent"
+                value="removeKit"
+                disabled={disabled}
+              >
                 Remove
               </Button>
             </Form>

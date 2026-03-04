@@ -59,7 +59,12 @@ export default function RemoveAssetFromLocation({
 
             <Form method="post">
               <input type="hidden" name="assetId" value={asset.id} />
-              <Button name="intent" value="removeAsset" disabled={disabled}>
+              <Button
+                type="submit"
+                name="intent"
+                value="removeAsset"
+                disabled={disabled}
+              >
                 Remove
               </Button>
             </Form>

@@ -497,6 +497,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
           <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-4")}>
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled || disableSubmit || idsTotalCount === 0}

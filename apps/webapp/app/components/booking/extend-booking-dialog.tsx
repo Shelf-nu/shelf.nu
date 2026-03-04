@@ -181,7 +181,7 @@ export default function ExtendBookingDialog({
                 >
                   Cancel
                 </Button>
-                <Button className="flex-1" disabled={disabled}>
+                <Button type="submit" className="flex-1" disabled={disabled}>
                   Submit
                 </Button>
               </div>
