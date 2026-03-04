@@ -155,7 +155,6 @@ function ConditionalActionsDropdown() {
 
         {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
-          type="button"
           className="flex-1 sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabledReason}

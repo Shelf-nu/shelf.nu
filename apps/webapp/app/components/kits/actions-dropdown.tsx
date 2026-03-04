@@ -116,7 +116,6 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
-          type="button"
           variant="secondary"
           className="actions-dropdown sm:hidden"
           width="full"

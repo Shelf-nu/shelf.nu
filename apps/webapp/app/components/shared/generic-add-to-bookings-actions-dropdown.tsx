@@ -67,7 +67,6 @@ const ConditionalActionsDropdown = ({
 
         {/* using custom trigger on mobile which only opens popover not toggles menu to avoid conflicts with overlay*/}
         <Button
-          type="button"
           variant="primary"
           className="asset-actions sm:hidden"
           onClick={() => {
