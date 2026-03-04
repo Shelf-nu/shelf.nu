@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { Roles } from "@prisma/client";
-import { Form, useActionData, useLoaderData } from "react-router";
+import { Form, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { type loader } from "~/routes/_layout+/settings.general";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { InnerLabel } from "../forms/inner-label";
@@ -37,12 +37,27 @@ import {
 import { WarningBox } from "../shared/warning-box";
 import When from "../when/when";
 
+type Admin = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+};
+
 type TransferOwnershipCardProps = {
   className?: string;
   /** Form action URL. Defaults to "/settings/general" */
   action?: string;
   /** Organization name for confirmation input. If not provided, uses currentOrganization from context */
   organizationName?: string;
+  /** List of admins eligible to become the new owner */
+  admins: Admin[];
+  /** Subscription info for the current workspace owner */
+  ownerSubscriptionInfo: OwnerSubscriptionInfo;
+  /** Number of other team workspaces the owner has */
+  ownerOtherTeamWorkspacesCount: number;
+  /** Whether premium/subscription features are enabled */
+  premiumIsEnabled: boolean;
 };
 
 export const TransferOwnershipSchema = z.object({
@@ -67,19 +82,15 @@ export default function TransferOwnershipCard({
   className,
   action = "/settings/general",
   organizationName,
+  admins,
+  ownerSubscriptionInfo,
+  ownerOtherTeamWorkspacesCount,
+  premiumIsEnabled,
 }: TransferOwnershipCardProps) {
-  const {
-    admins,
-    ownerSubscriptionInfo,
-    ownerOtherTeamWorkspacesCount,
-    premiumIsEnabled,
-  } = useLoaderData<typeof loader>();
   const { isOwner } = useUserRoleHelper();
   const user = useUserData();
   const [confirmationInput, setConfirmationInput] = useState("");
-  const [selectedOwner, setSelectedOwner] = useState<
-    (typeof admins)[number] | null
-  >(null);
+  const [selectedOwner, setSelectedOwner] = useState<Admin | null>(null);
   const [transferSubscription, setTransferSubscription] = useState(false);
   const disabled = useDisabled();
   const currentOrganization = useCurrentOrganization();
@@ -97,9 +108,11 @@ export default function TransferOwnershipCard({
 
   const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
 
-  // Check if current owner has a subscription that could be transferred
+  // Check if current owner has subscriptions that could be transferred
   const ownerHasSubscription =
     premiumIsEnabled && ownerSubscriptionInfo?.hasActiveSubscription;
+
+  const subscriptionCount = ownerSubscriptionInfo?.subscriptions?.length ?? 0;
 
   // Get general server error (non-validation errors like "user already has subscription")
   const serverError =
@@ -208,12 +221,22 @@ export default function TransferOwnershipCard({
                       <span>Subscription Information</span>
                     </div>
                     <p className="mt-2 text-sm text-gray-600">
-                      You have an active{" "}
-                      <span className="font-semibold">
-                        "{ownerSubscriptionInfo?.subscriptionName}"
-                      </span>{" "}
-                      subscription.
+                      You have the following active{" "}
+                      {subscriptionCount === 1
+                        ? "subscription"
+                        : "subscriptions"}
+                      :
                     </p>
+                    <ul className="mt-1 list-inside list-disc text-sm text-gray-600">
+                      {ownerSubscriptionInfo.subscriptions.map((sub) => (
+                        <li key={sub.subscriptionId}>
+                          <span className="font-semibold">
+                            {sub.subscriptionName}
+                          </span>
+                          {sub.type === "addon" ? " (add-on)" : ""}
+                        </li>
+                      ))}
+                    </ul>
 
                     <div className="mt-3">
                       <div className="flex cursor-pointer select-none items-start gap-2 py-2 text-sm">
@@ -233,15 +256,20 @@ export default function TransferOwnershipCard({
                             htmlFor="transferSubscription"
                             className="font-medium"
                           >
-                            Transfer my subscription to the new owner
+                            Transfer my{" "}
+                            {subscriptionCount === 1
+                              ? "subscription"
+                              : "subscriptions"}{" "}
+                            to the new owner
                           </label>
                           <p
                             id="transferSubscription-description"
                             className="mt-1 text-gray-500"
                           >
-                            The new owner will continue with the current billing
-                            cycle. They will need to add their own payment
-                            method before the next billing date.
+                            The new owner will continue with the current billing{" "}
+                            {subscriptionCount === 1 ? "cycle" : "cycles"}. They
+                            will need to add their own payment method before the
+                            next billing date.
                           </p>
                         </div>
                       </div>
@@ -287,7 +315,11 @@ export default function TransferOwnershipCard({
                   <li>Become an admin member</li>
                   <When truthy={transferSubscription}>
                     <li>
-                      Transfer your subscription to{" "}
+                      Transfer your{" "}
+                      {subscriptionCount === 1
+                        ? "subscription"
+                        : "subscriptions"}{" "}
+                      to{" "}
                       {resolveTeamMemberName(
                         { name: "", user: selectedOwner },
                         true

@@ -124,10 +124,12 @@ export async function handleSubscriptionCreated(
     return OK();
   }
 
+  const isTransferredSubscription =
+    !!subscription.metadata?.transferred_from_subscription;
   const isTrialSubscription =
     !!subscription.trial_end && !!subscription.trial_start;
 
-  if (isTrialSubscription) {
+  if (isTrialSubscription && !isTransferredSubscription) {
     const trialUser = await db.user
       .update({
         where: { customerId },
@@ -148,6 +150,24 @@ export async function handleSubscriptionCreated(
       });
 
     void sendTeamTrialWelcomeEmail({ email: trialUser.email });
+  } else if (isTransferredSubscription) {
+    // Transferred subscription: update tier but skip welcome emails
+    // and don't set usedFreeTrial (already handled in transferOwnership)
+    await db.user
+      .update({
+        where: { customerId },
+        data: { tierId: tierId as TierId },
+        select: { id: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to update user tier",
+          additionalData: { customerId, tierId, event },
+          label: "Stripe webhook",
+          status: 500,
+        });
+      });
   } else {
     await db.user
       .update({
