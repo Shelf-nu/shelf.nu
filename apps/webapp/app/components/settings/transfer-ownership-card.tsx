@@ -229,7 +229,7 @@ export default function TransferOwnershipCard({
                     </p>
                     <ul className="mt-1 list-inside list-disc text-sm text-gray-600">
                       {ownerSubscriptionInfo.subscriptions.map((sub) => (
-                        <li key={sub.subscriptionId}>
+                        <li key={`${sub.subscriptionId}-${sub.type}`}>
                           <span className="font-semibold">
                             {sub.subscriptionName}
                           </span>

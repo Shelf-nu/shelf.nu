@@ -1122,6 +1122,13 @@ export async function transferSubscriptionToCustomer({
       newSubscription = await stripe.subscriptions.create(paramsWithoutAnchor);
     }
 
+    // Mark the old subscription as a transfer so the delete webhook
+    // doesn't undo work done by the new subscription's create webhook
+    // (e.g. disabling audits via handleAuditAddonWebhook).
+    await stripe.subscriptions.update(subscriptionId, {
+      metadata: { transferred_to_subscription: newSubscription.id },
+    });
+
     // Only cancel the old subscription after the new one is successfully created
     // No credits are issued - the remaining value transfers to the new owner
     await stripe.subscriptions.cancel(subscriptionId, {

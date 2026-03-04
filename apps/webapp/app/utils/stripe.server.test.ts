@@ -3,8 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // why: Stripe SDK makes external API calls that should not run in tests
 // Using vi.hoisted to ensure the mock function is available when vi.mock runs
-const { mockCustomersRetrieve } = vi.hoisted(() => ({
+const {
+  mockCustomersRetrieve,
+  mockSubscriptionsList,
+  mockSubscriptionsRetrieve,
+} = vi.hoisted(() => ({
   mockCustomersRetrieve: vi.fn(),
+  mockSubscriptionsList: vi.fn(),
+  mockSubscriptionsRetrieve: vi.fn(),
 }));
 
 vi.mock("stripe", () => ({
@@ -12,14 +18,23 @@ vi.mock("stripe", () => ({
     customers: {
       retrieve: mockCustomersRetrieve,
     },
+    subscriptions: {
+      list: mockSubscriptionsList,
+      retrieve: mockSubscriptionsRetrieve,
+    },
   })),
 }));
 
 // why: Database module tries to connect to Prisma during import
+const { mockUserFindUnique } = vi.hoisted(() => ({
+  mockUserFindUnique: vi.fn(),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     user: {
       update: vi.fn(),
+      findUnique: mockUserFindUnique,
     },
   },
 }));
@@ -28,6 +43,8 @@ vi.mock("~/database/db.server", () => ({
 import {
   getCustomerNotificationData,
   getInvoiceNotificationData,
+  getUserActiveSubscriptions,
+  getOwnerSubscriptionInfo,
 } from "./stripe.server";
 
 describe("getCustomerNotificationData", () => {
@@ -318,5 +335,198 @@ describe("getInvoiceNotificationData", () => {
     // Verify it includes the customer notification data
     expect(result.emailsToNotify.size).toBe(2);
     expect(result.customerName).toBe("Stripe Customer Name");
+  });
+});
+
+// ─── getUserActiveSubscriptions ─────────────────────────────
+
+describe("getUserActiveSubscriptions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should return empty array when user has no customerId", async () => {
+    mockUserFindUnique.mockResolvedValue({ customerId: null });
+
+    const result = await getUserActiveSubscriptions("user_123");
+
+    expect(result).toEqual([]);
+    // Should not call Stripe when there's no customer
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
+  });
+
+  it("should filter to only active and trialing subscriptions", async () => {
+    mockUserFindUnique.mockResolvedValue({ customerId: "cus_456" });
+
+    const activeSub = {
+      id: "sub_active",
+      status: "active",
+      items: { data: [] },
+    };
+    const trialingSub = {
+      id: "sub_trialing",
+      status: "trialing",
+      items: { data: [] },
+    };
+    const canceledSub = {
+      id: "sub_canceled",
+      status: "canceled",
+      items: { data: [] },
+    };
+    const pastDueSub = {
+      id: "sub_past_due",
+      status: "past_due",
+      items: { data: [] },
+    };
+
+    mockSubscriptionsList.mockResolvedValue({
+      data: [activeSub, trialingSub, canceledSub, pastDueSub],
+    });
+
+    // subscriptions.retrieve is called for each sub to expand products
+    mockSubscriptionsRetrieve
+      .mockResolvedValueOnce(activeSub)
+      .mockResolvedValueOnce(trialingSub)
+      .mockResolvedValueOnce(canceledSub)
+      .mockResolvedValueOnce(pastDueSub);
+
+    const result = await getUserActiveSubscriptions("user_123");
+
+    expect(result).toHaveLength(2);
+    expect(result.map((s) => s.id)).toEqual(["sub_active", "sub_trialing"]);
+  });
+});
+
+// ─── getOwnerSubscriptionInfo ───────────────────────────────
+
+describe("getOwnerSubscriptionInfo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should return hasActiveSubscription false when user has no customerId", async () => {
+    mockUserFindUnique.mockResolvedValue({
+      customerId: null,
+      tierId: "free",
+    });
+
+    const result = await getOwnerSubscriptionInfo("owner_1", "org_1");
+
+    expect(result).toEqual({
+      hasActiveSubscription: false,
+      subscriptions: [],
+      tierId: "free",
+    });
+  });
+
+  it("should classify tier subscriptions correctly", async () => {
+    mockUserFindUnique.mockResolvedValue({
+      customerId: "cus_owner",
+      tierId: "tier_2",
+    });
+
+    const tierSub = {
+      id: "sub_tier",
+      status: "active",
+      metadata: {},
+      items: {
+        data: [
+          {
+            price: {
+              product: {
+                name: "Team Plan",
+                metadata: { shelf_tier: "tier_2" },
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    mockSubscriptionsList.mockResolvedValue({ data: [tierSub] });
+    mockSubscriptionsRetrieve.mockResolvedValue(tierSub);
+
+    const result = await getOwnerSubscriptionInfo("owner_1", "org_1");
+
+    expect(result.hasActiveSubscription).toBe(true);
+    expect(result.subscriptions).toEqual([
+      {
+        subscriptionId: "sub_tier",
+        subscriptionName: "Team Plan",
+        type: "tier",
+      },
+    ]);
+  });
+
+  it("should classify addon subscriptions and filter by matching organizationId", async () => {
+    mockUserFindUnique.mockResolvedValue({
+      customerId: "cus_owner",
+      tierId: "tier_2",
+    });
+
+    const addonSub = {
+      id: "sub_addon",
+      status: "active",
+      metadata: { organizationId: "org_1" },
+      items: {
+        data: [
+          {
+            price: {
+              product: {
+                name: "Audit Add-on",
+                metadata: { product_type: "addon", addon_type: "audits" },
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    mockSubscriptionsList.mockResolvedValue({ data: [addonSub] });
+    mockSubscriptionsRetrieve.mockResolvedValue(addonSub);
+
+    const result = await getOwnerSubscriptionInfo("owner_1", "org_1");
+
+    expect(result.hasActiveSubscription).toBe(true);
+    expect(result.subscriptions).toEqual([
+      {
+        subscriptionId: "sub_addon",
+        subscriptionName: "Audit Add-on",
+        type: "addon",
+      },
+    ]);
+  });
+
+  it("should exclude addon subscriptions for different organizations", async () => {
+    mockUserFindUnique.mockResolvedValue({
+      customerId: "cus_owner",
+      tierId: "tier_2",
+    });
+
+    const addonForOtherOrg = {
+      id: "sub_addon_other",
+      status: "active",
+      metadata: { organizationId: "org_other" },
+      items: {
+        data: [
+          {
+            price: {
+              product: {
+                name: "Audit Add-on",
+                metadata: { product_type: "addon", addon_type: "audits" },
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    mockSubscriptionsList.mockResolvedValue({ data: [addonForOtherOrg] });
+    mockSubscriptionsRetrieve.mockResolvedValue(addonForOtherOrg);
+
+    const result = await getOwnerSubscriptionInfo("owner_1", "org_1");
+
+    expect(result.hasActiveSubscription).toBe(false);
+    expect(result.subscriptions).toEqual([]);
   });
 });

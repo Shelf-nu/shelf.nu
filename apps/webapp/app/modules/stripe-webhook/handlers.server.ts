@@ -333,7 +333,15 @@ export async function handleSubscriptionDeleted(
 
   if (isAddonSubscription({ tierId, productType, event })) {
     const organizationId = subscription?.metadata?.organizationId;
-    if (product?.metadata?.addon_type === "audits" && organizationId) {
+    // Skip audit disable when this cancellation is part of a subscription
+    // transfer — the new subscription's create webhook already enabled audits.
+    const isTransferCancellation =
+      !!subscription?.metadata?.transferred_to_subscription;
+    if (
+      product?.metadata?.addon_type === "audits" &&
+      organizationId &&
+      !isTransferCancellation
+    ) {
       await handleAuditAddonWebhook({
         eventType: event.type,
         organizationId,
