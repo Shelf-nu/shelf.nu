@@ -135,7 +135,7 @@ export async function handleSubscriptionCreated(
           tierId: tierId as TierId,
           usedFreeTrial: true,
         },
-        select: { email: true },
+        select: { email: true, firstName: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -147,7 +147,10 @@ export async function handleSubscriptionCreated(
         });
       });
 
-    void sendTeamTrialWelcomeEmail({ email: trialUser.email });
+    void sendTeamTrialWelcomeEmail({
+      email: trialUser.email,
+      firstName: trialUser.firstName,
+    });
   } else {
     await db.user
       .update({

@@ -21,7 +21,6 @@ import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
-import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { useUserData } from "~/hooks/use-user-data";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
@@ -226,12 +225,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         where: { id: userId },
         data: { tierId: shelfTier, usedFreeTrial: true },
         select: { id: true },
-      });
-
-      // Send welcome email (fire-and-forget)
-      void sendTeamTrialWelcomeEmail({
-        firstName: user.firstName,
-        email,
       });
 
       const returnUrl = await generateReturnUrl({
