@@ -259,6 +259,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
           <div className="mb-4 flex gap-3">
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled || disableSubmit || idsTotalCount === 0}
