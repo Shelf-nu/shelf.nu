@@ -71,7 +71,6 @@ export function useKitAvailabilityData(items: Items) {
       return {
         title,
         resourceId: bookingWithRelations.kitId,
-        url: `/bookings/${bookingWithRelations.id}`,
         start: toIsoDateTimeToUserTimezone(
           bookingWithRelations.from!,
           timeZone
@@ -89,6 +88,7 @@ export function useKitAvailabilityData(items: Items) {
           ),
         ],
         extendedProps: {
+          url: `/bookings/${bookingWithRelations.id}`,
           id: bookingWithRelations.id,
           name: bookingWithRelations.name,
           status: bookingWithRelations.status,
