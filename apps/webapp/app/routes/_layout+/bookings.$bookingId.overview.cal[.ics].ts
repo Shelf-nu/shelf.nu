@@ -6,35 +6,12 @@ import { formatDateForICal } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
+import { escapeICalText, foldLine } from "~/utils/ics";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-/** Escapes text for ICS property values per RFC 5545 §3.3.11 */
-function escapeICalText(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,")
-    .replace(/\n/g, "\\n");
-}
-
-/**
- * Folds a content line to 75 octets per RFC 5545 §3.1.
- * Continuation lines start with a single space.
- */
-function foldLine(line: string): string {
-  if (line.length <= 75) return line;
-  const parts: string[] = [line.slice(0, 75)];
-  let i = 75;
-  while (i < line.length) {
-    parts.push(" " + line.slice(i, i + 74));
-    i += 74;
-  }
-  return parts.join("\r\n");
-}
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -76,12 +53,16 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
     const bookingUrl = `${SERVER_URL}/bookings/${bookingId}`;
 
-    // Build custodian display name
-    const custodianName = booking.custodianUser
-      ? `${booking.custodianUser.firstName ?? ""} ${
-          booking.custodianUser.lastName ?? ""
-        }`.trim()
-      : booking.custodianTeamMember?.name ?? "Unassigned";
+    // Build custodian display name, falling through to team member
+    // or "Unassigned" when the user record has no first/last name.
+    const custodianName =
+      (booking.custodianUser
+        ? `${booking.custodianUser.firstName ?? ""} ${
+            booking.custodianUser.lastName ?? ""
+          }`.trim()
+        : null) ||
+      booking.custodianTeamMember?.name ||
+      "Unassigned";
 
     // Build asset list
     const assetNames = booking.assets?.map((a) => a.title) ?? [];
@@ -123,7 +104,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       `DESCRIPTION:${description}`,
       `URL:${bookingUrl}`,
       "BEGIN:VALARM",
-      "TRIGGER:-P1D",
+      "TRIGGER;RELATED=END:-P1D",
       "ACTION:DISPLAY",
       "DESCRIPTION:Equipment due back tomorrow",
       "END:VALARM",
