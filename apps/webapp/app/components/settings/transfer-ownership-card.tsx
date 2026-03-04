@@ -359,6 +359,7 @@ export default function TransferOwnershipCard({
                 </AlertDialogCancel>
 
                 <Button
+                  type="submit"
                   className="flex-1"
                   disabled={
                     !selectedOwner

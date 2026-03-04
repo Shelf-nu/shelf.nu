@@ -71,6 +71,7 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
               )}
               <input type="hidden" value="delete" name="intent" />
               <Button
+                type="submit"
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 disabled={disabled}
               >

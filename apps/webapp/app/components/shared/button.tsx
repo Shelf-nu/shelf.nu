@@ -207,6 +207,12 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     ref
   ) {
     const Component = isLinkProps(props) ? Link : as;
+
+    // Default to type="button" for native button elements to prevent
+    // implicit form submission (HTML spec defaults to type="submit").
+    if (!isLinkProps(props) && as === "button" && !("type" in props)) {
+      (props as Record<string, unknown>).type = "button";
+    }
     const baseButtonClasses =
       variant === "inherit"
         ? "inline-flex items-center"

@@ -58,7 +58,12 @@ export default function RemoveAssetFromKit({
 
             <Form method="post" action={`..`}>
               <input type="hidden" name="assetId" value={asset.id} />
-              <Button name="intent" value="removeAsset" disabled={disabled}>
+              <Button
+                type="submit"
+                name="intent"
+                value="removeAsset"
+                disabled={disabled}
+              >
                 Remove
               </Button>
             </Form>

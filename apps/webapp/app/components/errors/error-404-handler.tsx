@@ -67,7 +67,9 @@ export default function Error404Handler({
                   name="redirectTo"
                   value={additionalData.redirectTo}
                 />
-                <Button disabled={disabled}>Switch workspace</Button>
+                <Button type="submit" disabled={disabled}>
+                  Switch workspace
+                </Button>
               </fetcher.Form>
             </div>
           </div>
@@ -121,7 +123,9 @@ export default function Error404Handler({
                   name="redirectTo"
                   value={additionalData.redirectTo}
                 />
-                <Button disabled={disabled}>Switch workspace</Button>
+                <Button type="submit" disabled={disabled}>
+                  Switch workspace
+                </Button>
               </fetcher.Form>
             </div>
           </div>

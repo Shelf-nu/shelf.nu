@@ -83,6 +83,7 @@ export function AssetIndexPagination() {
 
               <ButtonGroup>
                 <Button
+                  type="submit"
                   variant="secondary"
                   className={tw(
                     "h-[34px]",
@@ -95,6 +96,7 @@ export function AssetIndexPagination() {
                   Simple
                 </Button>
                 <Button
+                  type="submit"
                   variant="secondary"
                   className={tw(
                     "h-[34px]",

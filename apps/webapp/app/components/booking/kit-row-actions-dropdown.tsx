@@ -97,7 +97,12 @@ function RemoveKitFromBooking({ kit }: { kit: Pick<Kit, "id" | "name"> }) {
 
             <Form method="post">
               <input type="hidden" name="kitId" value={kit.id} />
-              <Button name="intent" value="removeKit" disabled={disabled}>
+              <Button
+                type="submit"
+                name="intent"
+                value="removeKit"
+                disabled={disabled}
+              >
                 Remove
               </Button>
             </Form>
