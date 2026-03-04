@@ -60,7 +60,6 @@ export function useAssetAvailabilityData(items: Items) {
             return {
               title,
               resourceId: asset.id,
-              url: `/bookings/${booking.id}`,
               start: toIsoDateTimeToUserTimezone(booking.from, timeZone),
               end: toIsoDateTimeToUserTimezone(booking.to, timeZone),
               classNames: [
@@ -72,6 +71,7 @@ export function useAssetAvailabilityData(items: Items) {
                 ),
               ],
               extendedProps: {
+                url: `/bookings/${booking.id}`,
                 id: booking.id,
                 name: booking.name,
                 status: booking.status,

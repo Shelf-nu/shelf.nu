@@ -3536,7 +3536,6 @@ export async function getBookingsForCalendar(params: {
           title,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
-          url: `/bookings/${booking.id}`,
           classNames: [
             `bookingId-${booking.id}`,
             ...getStatusClasses(
@@ -3545,6 +3544,7 @@ export async function getBookingsForCalendar(params: {
             ),
           ],
           extendedProps: {
+            url: `/bookings/${booking.id}`,
             status: booking.status,
             id: booking.id,
             name: booking.name,
