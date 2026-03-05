@@ -52,7 +52,12 @@ export default function KitBulkLocationUpdateDialog() {
             >
               Cancel
             </Button>
-            <Button variant="primary" width="full" disabled={disabled}>
+            <Button
+              type="submit"
+              variant="primary"
+              width="full"
+              disabled={disabled}
+            >
               Confirm
             </Button>
           </div>
