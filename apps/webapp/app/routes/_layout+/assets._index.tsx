@@ -110,7 +110,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const mode = settings.mode;
 
     /** For base and self service users, we dont allow to view the advanced index */
-    if (mode === "ADVANCED" && ["BASE", "SELF_SERVICE"].includes(role)) {
+    if (
+      mode === "ADVANCED" &&
+      (role === "BASE" ||
+        (role === "SELF_SERVICE" &&
+          !currentOrganization.selfServiceCanUseAdvancedFiltering))
+    ) {
       await changeMode({
         userId,
         organizationId,

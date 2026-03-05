@@ -281,6 +281,10 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
       .string()
       .transform((value) => value === "on")
       .default("false"),
+    selfServiceCanUseAdvancedFiltering: z
+      .string()
+      .transform((value) => value === "on")
+      .default("false"),
     baseUserCanSeeCustody: z
       .string()
       .transform((value) => value === "on")
@@ -360,6 +364,34 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             />
             <label
               htmlFor={`selfServiceBookings`}
+              className=" hidden text-gray-500"
+            >
+              Allow
+            </label>
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={`Use advanced filtering`}
+          subHeading={
+            <div>
+              Allow <b>self service</b> users to use <b>advanced filtering</b>{" "}
+              mode for assets. By default only admins and owners can access
+              advanced filtering.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+          required
+        >
+          <div className="flex flex-col items-center gap-2">
+            <Switch
+              name={zo.fields.selfServiceCanUseAdvancedFiltering()}
+              id="selfServiceAdvancedFiltering"
+              disabled={disabled}
+              defaultChecked={organization.selfServiceCanUseAdvancedFiltering}
+            />
+            <label
+              htmlFor={`selfServiceAdvancedFiltering`}
               className=" hidden text-gray-500"
             >
               Allow

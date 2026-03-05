@@ -370,6 +370,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   workspaceDisabled: true,
   selfServiceCanSeeCustody: true,
   selfServiceCanSeeBookings: true,
+  selfServiceCanUseAdvancedFiltering: true,
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
   barcodesEnabled: true,
@@ -613,6 +614,7 @@ export function updateOrganizationPermissions({
     Organization,
     | "selfServiceCanSeeCustody"
     | "selfServiceCanSeeBookings"
+    | "selfServiceCanUseAdvancedFiltering"
     | "baseUserCanSeeCustody"
     | "baseUserCanSeeBookings"
   >;

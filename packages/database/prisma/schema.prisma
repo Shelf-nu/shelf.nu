@@ -702,10 +702,11 @@ model Organization {
 
   // Permissions configuration
   // those values are used to control the access to the custody and bookings by SELF SERVICE and BASE users
-  selfServiceCanSeeCustody  Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
-  selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
-  baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
-  baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+  selfServiceCanSeeCustody           Boolean @default(false) // If true, the self service users can see custody of assets inside the organization
+  selfServiceCanSeeBookings          Boolean @default(false) // If true, the self service users can see bookings that are not theirs
+  selfServiceCanUseAdvancedFiltering Boolean @default(false) // If true, the self service users can use advanced asset filtering
+  baseUserCanSeeCustody              Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
+  baseUserCanSeeBookings             Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
   // Barcode feature (admin-managed, will later integrate with custom tier limits)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality

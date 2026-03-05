@@ -308,6 +308,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id,
           selfServiceCanSeeCustody,
           selfServiceCanSeeBookings,
+          selfServiceCanUseAdvancedFiltering,
           baseUserCanSeeCustody,
           baseUserCanSeeBookings,
         } = payload;
@@ -326,6 +327,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           configuration: {
             selfServiceCanSeeCustody,
             selfServiceCanSeeBookings,
+            selfServiceCanUseAdvancedFiltering,
             baseUserCanSeeCustody,
             baseUserCanSeeBookings,
           },
