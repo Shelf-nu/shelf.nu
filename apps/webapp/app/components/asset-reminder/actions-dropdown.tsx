@@ -41,6 +41,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
         <When truthy={isPending}>
           <DropdownMenuItem asChild>
             <Button
+              type="button"
               role="button"
               variant="link"
               className="cursor-pointer justify-start text-gray-700 hover:text-gray-700"

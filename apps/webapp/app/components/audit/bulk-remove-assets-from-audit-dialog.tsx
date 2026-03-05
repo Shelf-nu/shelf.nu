@@ -43,6 +43,7 @@ export default function BulkRemoveAssetsFromAuditDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -51,6 +52,7 @@ export default function BulkRemoveAssetsFromAuditDialog() {
               Cancel
             </Button>
             <Button
+              type="button"
               variant="primary"
               width="full"
               disabled={disabled}

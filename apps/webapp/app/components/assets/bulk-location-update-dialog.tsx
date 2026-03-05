@@ -35,6 +35,7 @@ export default function BulkLocationUpdateDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -42,7 +43,12 @@ export default function BulkLocationUpdateDialog() {
             >
               Cancel
             </Button>
-            <Button variant="primary" width="full" disabled={disabled}>
+            <Button
+              type="button"
+              variant="primary"
+              width="full"
+              disabled={disabled}
+            >
               Confirm
             </Button>
           </div>

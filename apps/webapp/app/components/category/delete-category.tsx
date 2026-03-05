@@ -58,7 +58,9 @@ export const DeleteCategory = ({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button variant="secondary">Cancel</Button>
+            <Button type="button" variant="secondary">
+              Cancel
+            </Button>
           </AlertDialogCancel>
           <Form method="delete" action="/categories">
             <input type="hidden" name="id" value={category.id} />

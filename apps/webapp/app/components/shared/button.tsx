@@ -74,8 +74,9 @@ export interface HTMLButtonProps
   extends Omit<CommonButtonProps, "disabled" | "title">,
     Omit<
       ButtonHTMLAttributes<HTMLButtonElement>,
-      keyof CommonButtonProps | "disabled"
-    > {
+      keyof CommonButtonProps | "disabled" | "type"
+    >,
+    Required<Pick<ButtonHTMLAttributes<HTMLButtonElement>, "type">> {
   as?: "button";
   to?: never;
   disabled?: DisabledProp;
@@ -111,7 +112,8 @@ export type ButtonProps =
 /**
  * Type guard to check if props are for a Link button
  */
-function isLinkProps(props: ButtonProps): props is LinkButtonProps {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isLinkProps(props: Record<string, any>): props is LinkButtonProps {
   return "to" in props;
 }
 
@@ -255,7 +257,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     }
 
     // Type guard for checking if props has target property
-    const hasTarget = (props: ButtonProps): props is LinkButtonProps =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hasTarget = (props: Record<string, any>): props is LinkButtonProps =>
       "target" in props;
     const newTab = hasTarget(props) && props.target === "_blank";
 

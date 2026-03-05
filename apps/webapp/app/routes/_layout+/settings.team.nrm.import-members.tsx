@@ -170,6 +170,7 @@ function ImportForm() {
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button
+            type="button"
             title={"Confirm NRM import"}
             disabled={!selectedFile}
             className="mt-4 w-full"
@@ -228,7 +229,9 @@ function ImportForm() {
             ) : (
               <>
                 <AlertDialogCancel asChild>
-                  <Button variant="secondary">Cancel</Button>
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
                 </AlertDialogCancel>
                 <Button
                   type="submit"

@@ -391,7 +391,12 @@ const Actions = ({
     <ButtonGroup>
       {/* When onCancel is provided (inline mode), use onClick instead of navigation */}
       {onCancel ? (
-        <Button onClick={onCancel} variant="secondary" disabled={disabled}>
+        <Button
+          type="button"
+          onClick={onCancel}
+          variant="secondary"
+          disabled={disabled}
+        >
           Cancel
         </Button>
       ) : (

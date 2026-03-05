@@ -130,6 +130,7 @@ export default function NewCategoryForm({
           {/* When onCancel is provided (inline mode), use onClick instead of navigation */}
           {onCancel ? (
             <Button
+              type="button"
               variant="secondary"
               onClick={onCancel}
               size="sm"

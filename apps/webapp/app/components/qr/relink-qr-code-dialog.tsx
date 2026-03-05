@@ -163,6 +163,7 @@ export function RelinkQrCodeDialog({
 
             <div className="flex items-center gap-4 p-4">
               <Button
+                type="button"
                 className="flex-1"
                 variant="secondary"
                 disabled={!newQrId}
@@ -185,6 +186,7 @@ export function RelinkQrCodeDialog({
                 Rescan
               </Button>
               <Button
+                type="button"
                 className="flex-1"
                 disabled={!newQrId || isNewCodeSameAsCurrent || !!errorMessage}
                 onClick={() => {
@@ -234,6 +236,7 @@ export function RelinkQrCodeDialog({
 
             <div className="mt-8 flex items-center gap-3">
               <Button
+                type="button"
                 className="flex-1"
                 variant="secondary"
                 onClick={() => {

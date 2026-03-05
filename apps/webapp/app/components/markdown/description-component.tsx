@@ -45,6 +45,7 @@ export function DescriptionComponent({
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="link"
             className="h-auto p-0 font-semibold text-black underline hover:text-primary"
             onClick={() => setIsOpen(!isOpen)}
@@ -76,6 +77,7 @@ export function DescriptionComponent({
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="link"
             className="h-auto p-0 font-semibold text-black underline hover:text-primary"
             onClick={() => setIsOpen(!isOpen)}
@@ -109,6 +111,7 @@ export function DescriptionComponent({
           <Popover>
             <PopoverTrigger asChild>
               <Button
+                type="button"
                 variant="link"
                 className="h-auto p-0 font-semibold text-black underline hover:text-primary"
               >
@@ -139,6 +142,7 @@ export function DescriptionComponent({
           <Popover>
             <PopoverTrigger asChild>
               <Button
+                type="button"
                 variant="link"
                 className="h-auto p-0 font-semibold text-black underline hover:text-primary"
               >

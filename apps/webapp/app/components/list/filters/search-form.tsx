@@ -75,6 +75,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
         />
         {search || disabled ? (
           <Button
+            type="button"
             icon={disabled ? "spinner" : "x"}
             variant="tertiary"
             disabled={disabled}

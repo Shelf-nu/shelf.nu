@@ -381,7 +381,9 @@ function SubmittingDialog({
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Done</Button>
+              <Button type="button" variant="secondary">
+                Done
+              </Button>
             </AlertDialogCancel>
           </div>
         </AlertDialogFooter>

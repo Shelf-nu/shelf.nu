@@ -41,6 +41,7 @@ export default function BulkArchiveDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -49,6 +50,7 @@ export default function BulkArchiveDialog() {
               Cancel
             </Button>
             <Button
+              type="button"
               variant="primary"
               width="full"
               disabled={disabled}

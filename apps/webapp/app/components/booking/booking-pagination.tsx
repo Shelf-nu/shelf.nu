@@ -31,6 +31,7 @@ export const BookingPagination = ({ className }: { className?: string }) => {
     >
       <div className="inline-flex items-center rounded border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
         <Button
+          type="button"
           variant="secondary"
           size="sm"
           onClick={() => goToPage(1)}
@@ -42,6 +43,7 @@ export const BookingPagination = ({ className }: { className?: string }) => {
         </Button>
 
         <Button
+          type="button"
           variant="secondary"
           size="sm"
           onClick={() => goToPage(page - 1)}
@@ -68,6 +70,7 @@ export const BookingPagination = ({ className }: { className?: string }) => {
         </div>
 
         <Button
+          type="button"
           variant="secondary"
           size="sm"
           onClick={() => goToPage(page + 1)}
@@ -79,6 +82,7 @@ export const BookingPagination = ({ className }: { className?: string }) => {
         </Button>
 
         <Button
+          type="button"
           variant="secondary"
           size="sm"
           onClick={() => goToPage(totalPages)}

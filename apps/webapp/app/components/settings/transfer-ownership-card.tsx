@@ -125,6 +125,7 @@ export default function TransferOwnershipCard({
         truthy={admins.length > 0}
         fallback={
           <Button
+            type="button"
             disabled={{
               reason:
                 "No admins found in this workspace. Please add an admin before transferring ownership.",
@@ -136,7 +137,9 @@ export default function TransferOwnershipCard({
       >
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button variant="secondary">Transfer Ownership</Button>
+            <Button type="button" variant="secondary">
+              Transfer Ownership
+            </Button>
           </AlertDialogTrigger>
 
           <AlertDialogContent aria-describedby="Transfer ownership">

@@ -93,6 +93,7 @@ export default function BulkAddToAuditDialog() {
                 </div>
                 <div className="flex gap-3">
                   <Button
+                    type="button"
                     variant="secondary"
                     width="full"
                     onClick={handleCloseDialog}
@@ -121,6 +122,7 @@ export default function BulkAddToAuditDialog() {
                 </div>
                 <div className="flex gap-3">
                   <Button
+                    type="button"
                     variant="secondary"
                     width="full"
                     onClick={handleCloseDialog}
@@ -154,6 +156,7 @@ export default function BulkAddToAuditDialog() {
 
                 <div className="flex gap-3">
                   <Button
+                    type="button"
                     variant="secondary"
                     width="full"
                     disabled={disabled}
@@ -161,7 +164,12 @@ export default function BulkAddToAuditDialog() {
                   >
                     Cancel
                   </Button>
-                  <Button variant="primary" width="full" disabled={disabled}>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    width="full"
+                    disabled={disabled}
+                  >
                     {disabled ? "Adding..." : "Add to audit"}
                   </Button>
                 </div>

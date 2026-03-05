@@ -63,6 +63,7 @@ export function ExportBookingsButton() {
 
   return (
     <Button
+      type="button"
       onClick={handleExport}
       variant="secondary"
       className="flex-1 whitespace-nowrap font-medium"

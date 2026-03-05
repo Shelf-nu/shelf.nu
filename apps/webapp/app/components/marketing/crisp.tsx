@@ -22,7 +22,7 @@ export function useCrisp() {
   }, [user]);
 }
 
-export const CrispButton = (props: ButtonProps) => (
+export const CrispButton = (props: Omit<ButtonProps, "type">) => (
   <Button {...props} onClick={() => Crisp.chat.open()} type="button">
     {props.children}
   </Button>

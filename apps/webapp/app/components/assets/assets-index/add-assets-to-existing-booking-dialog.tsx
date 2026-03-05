@@ -154,7 +154,11 @@ export default function AddAssetsToExistingBookingDialog() {
                       <When
                         truthy={!fetcherErrorAdditionalData?.allAssetsInBooking}
                       >
-                        <Button className="w-full" variant="secondary">
+                        <Button
+                          type="button"
+                          className="w-full"
+                          variant="secondary"
+                        >
                           Add only the rest of the assets
                         </Button>
                       </When>
@@ -165,6 +169,7 @@ export default function AddAssetsToExistingBookingDialog() {
 
               <div className="flex items-center gap-3">
                 <Button
+                  type="button"
                   variant="secondary"
                   width="full"
                   disabled={disabled}
