@@ -156,9 +156,8 @@ describe("settings.general loader", () => {
     // why: mock Stripe subscription functions to return default values
     getOwnerSubscriptionInfoMock.mockResolvedValue({
       hasActiveSubscription: false,
-      subscriptionName: null,
+      subscriptions: [],
       tierId: null,
-      subscriptionId: null,
     });
     userHasActiveSubscriptionMock.mockResolvedValue(false);
   });

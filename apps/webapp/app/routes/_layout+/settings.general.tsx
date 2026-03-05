@@ -118,7 +118,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       getOrganizationAdmins({ organizationId }),
       // Get subscription info for the workspace owner (for transfer dialog)
-      getOwnerSubscriptionInfo(currentOrganization.userId),
+      getOwnerSubscriptionInfo(currentOrganization.userId, organizationId),
     ]);
 
     const header: HeaderData = {
@@ -434,7 +434,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { organization, canExportAssets } = useLoaderData<typeof loader>();
+  const {
+    organization,
+    canExportAssets,
+    admins,
+    ownerSubscriptionInfo,
+    ownerOtherTeamWorkspacesCount,
+    premiumIsEnabled: premiumEnabled,
+  } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
       <WorkspaceEditForms
@@ -458,7 +465,12 @@ export default function GeneralPage() {
         <ExportBackupButton canExportAssets={canExportAssets} />
       </Card>
 
-      <TransferOwnershipCard />
+      <TransferOwnershipCard
+        admins={admins}
+        ownerSubscriptionInfo={ownerSubscriptionInfo}
+        ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
+        premiumIsEnabled={premiumEnabled}
+      />
     </div>
   );
 }

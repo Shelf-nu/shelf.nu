@@ -1,7 +1,5 @@
 import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import type { ClientHint } from "~/utils/client-hints";
-import { getDateTimeFormatFromHints } from "./client-hints";
 
 export function getDifferenceInSeconds(
   dateLeft: Date,
@@ -53,28 +51,19 @@ export function getTimeRemainingMessage(date1: Date, date2: Date): string {
   }
 }
 
-export function formatDatesForICal(date: Date, hints: ClientHint) {
-  const dateTimeFormat = getDateTimeFormatFromHints(hints, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-  const formatLocalDate = (date: Date, dateTimeFormat: Intl.DateTimeFormat) => {
-    const parts = dateTimeFormat.formatToParts(date);
-    const year = parts.find((part) => part.type === "year")!.value;
-    const month = parts.find((part) => part.type === "month")!.value;
-    const day = parts.find((part) => part.type === "day")!.value;
-    const hour = parts.find((part) => part.type === "hour")!.value;
-    const minute = parts.find((part) => part.type === "minute")!.value;
-    const second = parts.find((part) => part.type === "second")!.value;
-    return `${year}${month}${day}T${hour}${minute}${second}`;
-  };
-
-  return formatLocalDate(date, dateTimeFormat);
+/**
+ * Formats a Date as a UTC iCalendar datetime string with Z suffix.
+ * Output: YYYYMMDDTHHmmssZ (e.g. 20260305T191200Z)
+ */
+export function formatDateForICal(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = pad(date.getUTCMonth() + 1);
+  const day = pad(date.getUTCDate());
+  const hour = pad(date.getUTCHours());
+  const minute = pad(date.getUTCMinutes());
+  const second = pad(date.getUTCSeconds());
+  return `${year}${month}${day}T${hour}${minute}${second}Z`;
 }
 
 export function getWeekNumber(currentDate: Date) {
