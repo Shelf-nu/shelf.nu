@@ -1,3 +1,4 @@
+import { OrganizationType } from "@prisma/client";
 import {
   data,
   redirect,
@@ -9,6 +10,7 @@ import z from "zod";
 import TransferOwnershipCard, {
   TransferOwnershipSchema,
 } from "~/components/settings/transfer-ownership-card";
+import { db } from "~/database/db.server";
 import {
   getOrganizationAdmins,
   getOrganizationById,
@@ -19,6 +21,10 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, parseData, payload } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import {
+  getOwnerSubscriptionInfo,
+  premiumIsEnabled,
+} from "~/utils/stripe.server";
 
 export const meta = () => [
   { title: appendToMetaTitle("Transfer organization ownership") },
@@ -40,10 +46,28 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       getOrganizationById(organizationId),
     ]);
 
+    // Get subscription info for the workspace owner
+    const ownerSubscriptionInfo = await getOwnerSubscriptionInfo(
+      organization.userId,
+      organizationId
+    );
+
+    // Count owner's other team workspaces (for warning about tier downgrade)
+    const ownerOtherTeamWorkspacesCount = await db.organization.count({
+      where: {
+        userId: organization.userId,
+        type: OrganizationType.TEAM,
+        id: { not: organizationId },
+      },
+    });
+
     return payload({
       admins,
       organizationId,
       organizationName: organization.name,
+      ownerSubscriptionInfo,
+      ownerOtherTeamWorkspacesCount,
+      premiumIsEnabled,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -85,6 +109,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       currentOrganization,
       newOwnerId: parsedData.newOwner,
       userId,
+      transferSubscription: parsedData.transferSubscription,
     });
 
     sendNotification({
@@ -102,13 +127,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function TransferOwnership() {
-  const { organizationId, organizationName } = useLoaderData<typeof loader>();
+  const {
+    organizationId,
+    organizationName,
+    admins,
+    ownerSubscriptionInfo,
+    ownerOtherTeamWorkspacesCount,
+    premiumIsEnabled: premiumEnabled,
+  } = useLoaderData<typeof loader>();
 
   return (
     <div>
       <TransferOwnershipCard
         action={`/admin-dashboard/org/${organizationId}/transfer-ownership`}
         organizationName={organizationName}
+        admins={admins}
+        ownerSubscriptionInfo={ownerSubscriptionInfo}
+        ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
+        premiumIsEnabled={premiumEnabled}
       />
     </div>
   );

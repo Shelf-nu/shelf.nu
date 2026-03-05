@@ -330,13 +330,16 @@ export async function handleAuditAddonWebhook({
     case "customer.subscription.created": {
       const isTrialSubscription =
         subscription && !!subscription.trial_end && !!subscription.trial_start;
+      const isTransferredSubscription =
+        !!subscription?.metadata?.transferred_from_subscription;
 
       await db.organization.update({
         where: { id: organizationId },
         data: {
           auditsEnabled: true,
           auditsEnabledAt: new Date(),
-          ...(isTrialSubscription && { usedAuditTrial: true }),
+          ...(isTrialSubscription &&
+            !isTransferredSubscription && { usedAuditTrial: true }),
         },
         select: { id: true },
       });
