@@ -48,6 +48,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  getOwnerSubscriptionInfo,
+  premiumIsEnabled,
+} from "~/utils/stripe.server";
 import { canHideShelfBranding } from "~/utils/subscription.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -119,6 +123,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       canHideBranding &&
       (organization.type === OrganizationType.TEAM || user.tierId === "tier_1");
 
+    // Get subscription info for the workspace owner (for transfer dialog)
+    const ownerSubscriptionInfo = await getOwnerSubscriptionInfo(
+      organization.userId,
+      organization.id
+    );
+
+    // Count owner's other team workspaces (for warning about tier downgrade)
+    const ownerOtherTeamWorkspacesCount = await db.organization.count({
+      where: {
+        userId: organization.userId,
+        type: OrganizationType.TEAM,
+        id: { not: organization.id },
+      },
+    });
+
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,
     };
@@ -130,6 +149,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
       admins,
       canHideShelfBranding: canHideBrandingForThisWorkspace,
+      ownerSubscriptionInfo,
+      ownerOtherTeamWorkspacesCount,
+      premiumIsEnabled,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -401,7 +423,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function WorkspaceEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "Untitled workspace";
-  const { organization } = useLoaderData<typeof loader>();
+  const {
+    organization,
+    admins,
+    ownerSubscriptionInfo,
+    ownerOtherTeamWorkspacesCount,
+    premiumIsEnabled: premiumEnabled,
+  } = useLoaderData<typeof loader>();
   return (
     <>
       <Header
@@ -418,7 +446,12 @@ export default function WorkspaceEditPage() {
         />
       </div>
 
-      <TransferOwnershipCard />
+      <TransferOwnershipCard
+        admins={admins}
+        ownerSubscriptionInfo={ownerSubscriptionInfo}
+        ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
+        premiumIsEnabled={premiumEnabled}
+      />
     </>
   );
 }

@@ -124,10 +124,12 @@ export async function handleSubscriptionCreated(
     return OK();
   }
 
+  const isTransferredSubscription =
+    !!subscription.metadata?.transferred_from_subscription;
   const isTrialSubscription =
     !!subscription.trial_end && !!subscription.trial_start;
 
-  if (isTrialSubscription) {
+  if (isTrialSubscription && !isTransferredSubscription) {
     const trialUser = await db.user
       .update({
         where: { customerId },
@@ -151,6 +153,24 @@ export async function handleSubscriptionCreated(
       email: trialUser.email,
       firstName: trialUser.firstName,
     });
+  } else if (isTransferredSubscription) {
+    // Transferred subscription: update tier but skip welcome emails
+    // and don't set usedFreeTrial (already handled in transferOwnership)
+    await db.user
+      .update({
+        where: { customerId },
+        data: { tierId: tierId as TierId },
+        select: { id: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to update user tier",
+          additionalData: { customerId, tierId, event },
+          label: "Stripe webhook",
+          status: 500,
+        });
+      });
   } else {
     await db.user
       .update({
@@ -313,7 +333,15 @@ export async function handleSubscriptionDeleted(
 
   if (isAddonSubscription({ tierId, productType, event })) {
     const organizationId = subscription?.metadata?.organizationId;
-    if (product?.metadata?.addon_type === "audits" && organizationId) {
+    // Skip audit disable when this cancellation is part of a subscription
+    // transfer — the new subscription's create webhook already enabled audits.
+    const isTransferCancellation =
+      !!subscription?.metadata?.transferred_to_subscription;
+    if (
+      product?.metadata?.addon_type === "audits" &&
+      organizationId &&
+      !isTransferCancellation
+    ) {
       await handleAuditAddonWebhook({
         eventType: event.type,
         organizationId,

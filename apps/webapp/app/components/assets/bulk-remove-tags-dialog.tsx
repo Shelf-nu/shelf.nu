@@ -88,7 +88,7 @@ export default function BulkRemoveTagsDialog() {
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

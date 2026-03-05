@@ -43,7 +43,7 @@ export default function BulkMarkAvailabilityDialog({
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

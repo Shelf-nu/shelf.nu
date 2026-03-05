@@ -71,7 +71,7 @@ export default function BulkAddToKitDialog() {
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

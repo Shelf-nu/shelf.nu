@@ -46,7 +46,7 @@ export default function BulkRemoveKitsFromLocationDialog() {
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

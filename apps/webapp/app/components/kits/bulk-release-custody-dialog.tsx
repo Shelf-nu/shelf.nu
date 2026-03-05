@@ -38,7 +38,7 @@ export default function BulkReleaseCustodyDialog() {
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}
