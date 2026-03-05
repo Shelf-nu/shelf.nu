@@ -20,7 +20,7 @@ export const CustomerPortalForm = ({
       action="/account-details/subscription/customer-portal"
       className={className}
     >
-      <Button disabled={isProcessing} {...buttonProps}>
+      <Button type="submit" disabled={isProcessing} {...buttonProps}>
         {isProcessing ? "Redirecting to Customer Portal..." : buttonText}
       </Button>
     </customerPortalFetcher.Form>

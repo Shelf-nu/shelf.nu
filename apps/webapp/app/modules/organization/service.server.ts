@@ -5,6 +5,7 @@ import {
   Roles,
 } from "@prisma/client";
 import type { Organization, Prisma, TierId, User } from "@prisma/client";
+import type Stripe from "stripe";
 
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -16,6 +17,7 @@ import {
   createStripeCustomer,
   customerHasPaymentMethod,
   getUserActiveSubscription,
+  getUserActiveSubscriptions,
   premiumIsEnabled,
   transferSubscriptionToCustomer,
 } from "~/utils/stripe.server";
@@ -813,12 +815,20 @@ export async function transferOwnership({
     let subscriptionTransferError: Error | null = null;
     if (premiumIsEnabled && transferSubscription) {
       try {
-        const currentOwnerSubscription = await getUserActiveSubscription(
+        const activeSubscriptions = await getUserActiveSubscriptions(
           currentOwnerUserOrg.user.id
         );
 
-        if (currentOwnerSubscription) {
-          // Ensure new owner has a Stripe customer ID
+        // Filter to subscriptions relevant to this workspace:
+        // - Tier subscriptions (always relevant)
+        // - Addon subscriptions linked to THIS workspace
+        const relevantSubscriptions = filterRelevantSubscriptions(
+          activeSubscriptions,
+          currentOrganization.id
+        );
+
+        if (relevantSubscriptions.length > 0) {
+          // Ensure new owner has a Stripe customer ID (only once)
           let newOwnerCustomerId: string | null | undefined =
             newOwnerUserOrg.user.customerId;
           if (!newOwnerCustomerId) {
@@ -830,18 +840,22 @@ export async function transferOwnership({
           }
 
           if (newOwnerCustomerId) {
-            // Transfer the subscription to the new customer in Stripe
-            await transferSubscriptionToCustomer({
-              subscriptionId: currentOwnerSubscription.id,
-              newCustomerId: newOwnerCustomerId,
-            });
+            // Transfer each relevant subscription
+            for (const sub of relevantSubscriptions) {
+              await transferSubscriptionToCustomer({
+                subscriptionId: sub.id,
+                newCustomerId: newOwnerCustomerId,
+              });
+            }
 
-            // Update tiers in database
-            // New owner gets the transferred tier
-            await updateUserTierId(newOwnerId, currentOwnerTierId);
-
-            // Downgrade current owner to free
-            await updateUserTierId(currentOwnerUserOrg.user.id, "free");
+            // Update tier if a tier subscription was transferred
+            const hasTierSubscription = relevantSubscriptions.some((sub) =>
+              isTierSubscription(sub)
+            );
+            if (hasTierSubscription) {
+              await updateUserTierId(newOwnerId, currentOwnerTierId);
+              await updateUserTierId(currentOwnerUserOrg.user.id, "free");
+            }
 
             subscriptionTransferred = true;
 
@@ -977,4 +991,52 @@ export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
       label,
     });
   }
+}
+
+/**
+ * Checks if a Stripe subscription is a tier subscription
+ * by looking at its line-item product metadata.
+ */
+function isTierSubscription(sub: Stripe.Subscription): boolean {
+  return sub.items.data.some((item) => {
+    const product = item.price?.product;
+    if (typeof product === "object" && product && "metadata" in product) {
+      return !!(product as Stripe.Product).metadata?.shelf_tier;
+    }
+    return false;
+  });
+}
+
+/**
+ * Checks if a Stripe subscription is an addon linked to a specific workspace.
+ */
+function isAddonForOrganization(
+  sub: Stripe.Subscription,
+  organizationId: string
+): boolean {
+  const subOrgId = sub.metadata?.organizationId;
+  if (subOrgId !== organizationId) return false;
+
+  return sub.items.data.some((item) => {
+    const product = item.price?.product;
+    if (typeof product === "object" && product && "metadata" in product) {
+      return (product as Stripe.Product).metadata?.product_type === "addon";
+    }
+    return false;
+  });
+}
+
+/**
+ * Filters subscriptions to those relevant to a workspace transfer:
+ * - Tier subscriptions (always relevant)
+ * - Addon subscriptions linked to the specific workspace
+ */
+function filterRelevantSubscriptions(
+  subscriptions: Stripe.Subscription[],
+  organizationId: string
+): Stripe.Subscription[] {
+  return subscriptions.filter(
+    (sub) =>
+      isTierSubscription(sub) || isAddonForOrganization(sub, organizationId)
+  );
 }
