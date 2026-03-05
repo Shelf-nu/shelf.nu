@@ -30,7 +30,7 @@ module.exports = {
     schema: [],
     messages: {
       missingType:
-        'Button is missing an explicit "type" prop. Add type="button" for non-form buttons or type="submit" for form submission.',
+        'Button is missing an explicit "type" prop. Add type="button", type="submit", or type="reset".',
     },
   },
 

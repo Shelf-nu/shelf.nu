@@ -30,11 +30,13 @@ export default function BookSelectedAssetsDropdown() {
   const isHydrated = useHydrated();
 
   if (!isHydrated) {
-    <Button type="button" variant="secondary">
-      <span className="flex items-center gap-2">
-        Book <ChevronRightIcon className="chev size-4" />
-      </span>
-    </Button>;
+    return (
+      <Button type="button" variant="secondary">
+        <span className="flex items-center gap-2">
+          Book <ChevronRightIcon className="chev size-4" />
+        </span>
+      </Button>
+    );
   }
 
   return <ConditionalActionsDropdown />;

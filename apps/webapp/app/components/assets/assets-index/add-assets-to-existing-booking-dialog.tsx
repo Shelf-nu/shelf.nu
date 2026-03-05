@@ -155,7 +155,7 @@ export default function AddAssetsToExistingBookingDialog() {
                         truthy={!fetcherErrorAdditionalData?.allAssetsInBooking}
                       >
                         <Button
-                          type="button"
+                          type="submit"
                           className="w-full"
                           variant="secondary"
                         >
