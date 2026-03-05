@@ -49,6 +49,7 @@ export default function BulkDeleteDialog() {
               Cancel
             </Button>
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}
