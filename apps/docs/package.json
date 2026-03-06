@@ -8,6 +8,6 @@
     "preview": "vitepress preview --port 5174"
   },
   "devDependencies": {
-    "vitepress": "^1.6.3"
+    "vitepress": "^1.6.4"
   }
 }

@@ -33,7 +33,7 @@ function getStripeServerClient() {
   ) {
     // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
-      apiVersion: "2026-01-28.clover",
+      apiVersion: "2026-02-25.clover",
     });
   }
   return _stripe;
