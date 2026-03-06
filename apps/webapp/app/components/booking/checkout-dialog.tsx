@@ -24,12 +24,15 @@ type CheckoutDialogProps = {
   booking: Pick<Booking, "id" | "name" | "from">;
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
+  /** Form ID for explicit form association when buttons render in a portal */
+  formId?: string;
 };
 
 export default function CheckoutDialog({
   disabled,
   booking,
   portalContainer,
+  formId,
 }: CheckoutDialogProps) {
   const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
 
@@ -79,7 +82,7 @@ export default function CheckoutDialog({
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value="checkOut" />
+          <input type="hidden" name="intent" value="checkOut" form={formId} />
           <Button
             disabled={disabled}
             className="flex-1"
@@ -87,6 +90,7 @@ export default function CheckoutDialog({
             variant="secondary"
             name="checkoutIntentChoice"
             value={CheckoutIntentEnum["without-adjusted-date"]}
+            form={formId}
           >
             Don't Adjust Date
           </Button>
@@ -97,6 +101,7 @@ export default function CheckoutDialog({
             type="submit"
             name="checkoutIntentChoice"
             value={CheckoutIntentEnum["with-adjusted-date"]}
+            form={formId}
           >
             Adjust Date
           </Button>
