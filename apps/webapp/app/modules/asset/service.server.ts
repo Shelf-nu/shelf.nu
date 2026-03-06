@@ -3067,6 +3067,77 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
   }
 }
 
+/**
+ * Refreshes expired signed URLs for asset images server-side.
+ * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
+ */
+export async function refreshExpiredAssetImages<
+  T extends {
+    id: string;
+    mainImage: string | null;
+    mainImageExpiration: Date | null;
+  },
+>(assets: T[]): Promise<T[]> {
+  const now = new Date();
+  const expiredAssets = assets.filter(
+    (a) =>
+      a.mainImage &&
+      a.mainImageExpiration &&
+      new Date(a.mainImageExpiration) < now
+  );
+
+  if (expiredAssets.length === 0) return assets;
+
+  const refreshResults = await Promise.allSettled(
+    expiredAssets.map(async (asset) => {
+      const storagePath = extractStoragePath(asset.mainImage!, "assets");
+      if (!storagePath) return null;
+
+      const newSignedUrl = await createSignedUrl({
+        filename: storagePath,
+        bucketName: "assets",
+      });
+
+      const newExpiration = oneDayFromNow();
+
+      await db.asset.update({
+        where: { id: asset.id },
+        data: {
+          mainImage: newSignedUrl,
+          mainImageExpiration: newExpiration,
+        },
+      });
+
+      return {
+        id: asset.id,
+        mainImage: newSignedUrl,
+        mainImageExpiration: newExpiration,
+      };
+    })
+  );
+
+  const refreshedMap = new Map<
+    string,
+    { mainImage: string; mainImageExpiration: Date }
+  >();
+  for (const result of refreshResults) {
+    if (result.status === "fulfilled" && result.value) {
+      refreshedMap.set(result.value.id, {
+        mainImage: result.value.mainImage,
+        mainImageExpiration: result.value.mainImageExpiration,
+      });
+    }
+  }
+
+  return assets.map((a) => {
+    const refreshed = refreshedMap.get(a.id);
+    if (refreshed) {
+      return { ...a, ...refreshed };
+    }
+    return a;
+  });
+}
+
 export async function updateAssetQrCode({
   assetId,
   newQrId,
