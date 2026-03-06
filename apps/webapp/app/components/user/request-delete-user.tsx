@@ -43,6 +43,7 @@ export const RequestDeleteUser = () => {
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         <Button
+          type="button"
           data-test-id="deleteUserButton"
           variant="danger"
           className="mt-3"

@@ -171,6 +171,7 @@ export default function BaseDrawer({
 
               {hasItems && onClear && (
                 <Button
+                  type="button"
                   variant="block-link-gray"
                   onClick={onClear}
                   className="text-[12px] font-normal text-gray-500"

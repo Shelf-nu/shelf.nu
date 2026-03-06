@@ -70,6 +70,7 @@ export default function InlineEntityCreationDialog({
   return (
     <>
       <Button
+        type="button"
         variant="link"
         icon="plus"
         aria-label={buttonLabel}

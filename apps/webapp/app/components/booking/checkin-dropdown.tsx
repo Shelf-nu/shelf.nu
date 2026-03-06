@@ -74,7 +74,7 @@ export default function CheckinDropdown({
           }}
           asChild
         >
-          <Button disabled={disabled} className="grow" size="sm">
+          <Button type="button" disabled={disabled} className="grow" size="sm">
             <span className="flex items-center gap-2">
               Check-in <ChevronRightIcon className="chev size-4 rotate-90" />
             </span>
@@ -83,6 +83,7 @@ export default function CheckinDropdown({
 
         {/* Mobile button */}
         <Button
+          type="button"
           className="flex-1 sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}

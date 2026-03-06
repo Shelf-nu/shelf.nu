@@ -28,6 +28,7 @@ export function CalendarNavigation({
     <div className="mr-4">
       <ButtonGroup>
         <Button
+          type="button"
           variant="secondary"
           className="border-r p-[0.7em] text-gray-500"
           onClick={() => handleCalendarNavigation("prev")}
@@ -36,6 +37,7 @@ export function CalendarNavigation({
           <ChevronLeftIcon className="size-4" />
         </Button>
         <Button
+          type="button"
           variant="secondary"
           className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
           onClick={() => handleCalendarNavigation("today")}
@@ -44,6 +46,7 @@ export function CalendarNavigation({
           Today
         </Button>
         <Button
+          type="button"
           variant="secondary"
           className="p-[0.7em] text-gray-500"
           onClick={() => handleCalendarNavigation("next")}

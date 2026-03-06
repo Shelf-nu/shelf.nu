@@ -142,6 +142,7 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             className={tw(
               "w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate",

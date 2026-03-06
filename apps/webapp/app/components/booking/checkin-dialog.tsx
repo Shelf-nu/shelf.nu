@@ -81,6 +81,7 @@ export default function CheckinDialog({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
+          type="button"
           disabled={disabled}
           className={tw(
             "whitespace-nowrap",

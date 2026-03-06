@@ -55,6 +55,7 @@ const ConditionalActionsDropdown = ({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="primary"
             disabled={disabledTrigger}
             className="asset-actions hidden sm:flex"
@@ -67,6 +68,7 @@ const ConditionalActionsDropdown = ({
 
         {/* using custom trigger on mobile which only opens popover not toggles menu to avoid conflicts with overlay*/}
         <Button
+          type="button"
           variant="primary"
           className="asset-actions sm:hidden"
           onClick={() => {
@@ -131,6 +133,7 @@ const ConditionalActionsDropdown = ({
                 ))}
               <div className="border-t p-4 md:hidden md:p-0">
                 <Button
+                  type="button"
                   role="button"
                   variant="secondary"
                   className="flex items-center justify-center text-gray-700 hover:text-gray-700 "

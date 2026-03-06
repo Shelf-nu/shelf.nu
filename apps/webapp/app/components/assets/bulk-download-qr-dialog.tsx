@@ -244,6 +244,7 @@ export default function BulkDownloadQrDialog({
 
               <div className="flex w-full items-center justify-center gap-4">
                 <Button
+                  type="button"
                   className="flex-1"
                   variant="secondary"
                   onClick={handleClose}
@@ -254,6 +255,7 @@ export default function BulkDownloadQrDialog({
 
                 <When truthy={downloadState.status !== "success"}>
                   <Button
+                    type="button"
                     className="flex-1"
                     onClick={handleBulkDownloadQr}
                     disabled={disabled || isSelectingMoreThan100}
