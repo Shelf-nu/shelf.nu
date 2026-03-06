@@ -1,6 +1,7 @@
+import type React from "react";
 import { useState } from "react";
 import type { Currency } from "@prisma/client";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, UserIcon, UsersIcon } from "lucide-react";
 import { useNavigation } from "react-router";
 import { Form } from "~/components/custom-form";
 import type { PriceWithProduct } from "~/components/subscription/prices";
@@ -24,9 +25,22 @@ const fmtPrice = (amountInCents: number, currency: string) =>
     locale: "en-US",
   });
 
-type AuditPrices = {
+type AddonPrices = {
   month: PriceWithProduct | null;
   year: PriceWithProduct | null;
+};
+
+const PLAN_ICONS: Record<SignupPlan, React.ReactNode> = {
+  personal: (
+    <div className="flex size-10 items-center justify-center rounded-lg bg-gray-100">
+      <UserIcon className="size-5 text-gray-600" />
+    </div>
+  ),
+  team: (
+    <div className="flex size-10 items-center justify-center rounded-lg bg-primary-50">
+      <UsersIcon className="size-5 text-primary-600" />
+    </div>
+  ),
 };
 
 const PLAN_DETAILS: Record<
@@ -65,14 +79,21 @@ const PLAN_DETAILS: Record<
 
 export function ChoosePurpose({
   auditPrices,
+  barcodePrices,
   usedAuditTrial,
+  usedBarcodeTrial,
 }: {
-  auditPrices: AuditPrices;
+  auditPrices: AddonPrices;
+  barcodePrices: AddonPrices;
   usedAuditTrial: boolean;
+  usedBarcodeTrial: boolean;
 }) {
   const [selectedPlan, setSelectedPlan] = useState<SignupPlan | null>(null);
   const [wantsAudits, setWantsAudits] = useState(false);
+  const [wantsBarcodes, setWantsBarcodes] = useState(false);
   const [auditBillingInterval, setAuditBillingInterval] =
+    useState<AuditBillingInterval>("year");
+  const [barcodeBillingInterval, setBarcodeBillingInterval] =
     useState<AuditBillingInterval>("year");
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state) || !selectedPlan;
@@ -80,27 +101,44 @@ export function ChoosePurpose({
   const selectedDetails = selectedPlan ? PLAN_DETAILS[selectedPlan] : null;
 
   const hasAuditPrices = !!(auditPrices.month || auditPrices.year);
+  const hasBarcodePrices = !!(barcodePrices.month || barcodePrices.year);
   const showAuditOption =
     hasAuditPrices && !usedAuditTrial && selectedPlan !== null;
+  const showBarcodeOption =
+    hasBarcodePrices && !usedBarcodeTrial && selectedPlan !== null;
+  const showAddonsSection = showAuditOption || showBarcodeOption;
 
-  // Get the selected audit price based on billing interval
+  // Get the selected addon prices based on billing interval
   const selectedAuditPrice =
     auditPrices[auditBillingInterval] || auditPrices.year || auditPrices.month;
+  const selectedBarcodePrice =
+    barcodePrices[barcodeBillingInterval] ||
+    barcodePrices.year ||
+    barcodePrices.month;
 
-  // Determine CTA label based on plan and audit selection
+  const wantsAnyAddon = wantsAudits || wantsBarcodes;
+
+  // Determine CTA label based on plan and addon selection
+  const selectedAddons = [
+    wantsAudits && "Audit",
+    wantsBarcodes && "Barcode",
+  ].filter(Boolean);
   const ctaLabel =
-    selectedPlan === "personal" && wantsAudits
-      ? "Start with Audit trial"
+    selectedPlan === "personal" && wantsAnyAddon
+      ? `Start with ${selectedAddons.join(" & ")} trial`
       : selectedDetails?.ctaLabel ?? "Start using Shelf";
 
-  // Determine href for team flow (pass withAudits param)
-  const teamHref = wantsAudits
-    ? "/select-plan?withAudits=true"
+  // Determine href for team flow (pass addon params)
+  const teamParams = new URLSearchParams();
+  if (wantsAudits) teamParams.set("withAudits", "true");
+  if (wantsBarcodes) teamParams.set("withBarcodes", "true");
+  const teamHref = teamParams.toString()
+    ? `/select-plan?${teamParams.toString()}`
     : "/select-plan";
 
-  // For personal + audits, we use a Form POST.
-  // For personal (no audits) or team, we use a Link.
-  const isPersonalWithAudits = selectedPlan === "personal" && wantsAudits;
+  // For personal + addons, we use a Form POST.
+  // For personal (no addons) or team, we use a Link.
+  const isPersonalWithAddons = selectedPlan === "personal" && wantsAnyAddon;
 
   const ctaHref =
     selectedPlan === "team" ? teamHref : selectedDetails?.href ?? "/assets";
@@ -125,62 +163,90 @@ export function ChoosePurpose({
         <h4 className=" w-full text-left  font-semibold text-gray-700">
           Select a plan
         </h4>
-        <div className="flex w-full gap-4">
+        <div className="grid w-full grid-cols-2 gap-4">
           {(Object.keys(PLAN_DETAILS) as Array<SignupPlan>).map((planKey) => {
             const plan = PLAN_DETAILS[planKey];
             const isSelected = selectedPlan === planKey;
             return (
-              <div key={planKey} className="h-full flex-1">
-                <PlanCard
-                  planKey={planKey}
-                  onSelect={(key) => {
-                    setSelectedPlan(key);
-                    // Reset audit toggle when switching plans
-                    setWantsAudits(false);
-                  }}
-                  selected={isSelected}
-                  description={plan.description}
-                  title={plan.title}
-                  chipLabel={plan.chip}
-                  badgeLabel={plan.badge}
-                />
-                {plan.helper ? (
-                  <p className="text-sm text-gray-500">{plan.helper}</p>
-                ) : null}
-              </div>
+              <PlanCard
+                key={planKey}
+                planKey={planKey}
+                onSelect={(key) => {
+                  setSelectedPlan(key);
+                  // Reset addon toggles when switching plans
+                  setWantsAudits(false);
+                  setWantsBarcodes(false);
+                }}
+                selected={isSelected}
+                description={plan.description}
+                title={plan.title}
+                chipLabel={plan.chip}
+                badgeLabel={plan.badge}
+                icon={PLAN_ICONS[planKey]}
+              />
             );
           })}
         </div>
+        {PLAN_DETAILS.personal.helper ? (
+          <p className="mt-1 w-full text-sm text-gray-500">
+            {PLAN_DETAILS.personal.helper}
+          </p>
+        ) : null}
 
-        {showAuditOption ? (
+        {showAddonsSection ? (
           <>
             <h4 className="mt-6 w-full text-left font-semibold text-gray-700">
               Choose optional add-ons
             </h4>
-            <AuditAddonToggle
-              wantsAudits={wantsAudits}
-              onToggle={() => setWantsAudits((prev) => !prev)}
-              auditPrices={auditPrices}
-              billingInterval={auditBillingInterval}
-              onBillingIntervalChange={setAuditBillingInterval}
-              showBillingToggle={selectedPlan === "personal"}
-            />
+            {showAuditOption ? (
+              <AddonToggle
+                label="Audits"
+                description="Create audits, assign auditors, scan QR codes, and track asset verification in real-time."
+                selected={wantsAudits}
+                onToggle={() => setWantsAudits((prev) => !prev)}
+                prices={auditPrices}
+                billingInterval={auditBillingInterval}
+                onBillingIntervalChange={setAuditBillingInterval}
+                showBillingToggle={selectedPlan === "personal"}
+              />
+            ) : null}
+            {showBarcodeOption ? (
+              <AddonToggle
+                label="Alternative Barcodes"
+                description="Keep your existing labels. Supports Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for migrations."
+                selected={wantsBarcodes}
+                onToggle={() => setWantsBarcodes((prev) => !prev)}
+                prices={barcodePrices}
+                billingInterval={barcodeBillingInterval}
+                onBillingIntervalChange={setBarcodeBillingInterval}
+                showBillingToggle={selectedPlan === "personal"}
+              />
+            ) : null}
           </>
         ) : null}
 
-        {isPersonalWithAudits ? (
+        {isPersonalWithAddons ? (
           <Form method="POST" className="mt-8 w-full">
-            <input type="hidden" name="intent" value="personal-with-audits" />
-            <input
-              type="hidden"
-              name="auditPriceId"
-              value={selectedAuditPrice?.id ?? ""}
-            />
+            <input type="hidden" name="intent" value="personal-with-addons" />
+            {wantsAudits && selectedAuditPrice ? (
+              <input
+                type="hidden"
+                name="auditPriceId"
+                value={selectedAuditPrice.id}
+              />
+            ) : null}
+            {wantsBarcodes && selectedBarcodePrice ? (
+              <input
+                type="hidden"
+                name="barcodePriceId"
+                value={selectedBarcodePrice.id}
+              />
+            ) : null}
             <Button
               width="full"
               type="submit"
               disabled={disabled}
-              data-analytics="cta-start-personal-with-audits"
+              data-analytics="cta-start-personal-with-addons"
             >
               {ctaLabel}
             </Button>
@@ -201,17 +267,21 @@ export function ChoosePurpose({
   );
 }
 
-function AuditAddonToggle({
-  wantsAudits,
+function AddonToggle({
+  label,
+  description,
+  selected,
   onToggle,
-  auditPrices,
+  prices,
   billingInterval,
   onBillingIntervalChange,
   showBillingToggle,
 }: {
-  wantsAudits: boolean;
+  label: string;
+  description: string;
+  selected: boolean;
   onToggle: () => void;
-  auditPrices: AuditPrices;
+  prices: AddonPrices;
   billingInterval: AuditBillingInterval;
   onBillingIntervalChange: (interval: AuditBillingInterval) => void;
   showBillingToggle: boolean;
@@ -220,9 +290,9 @@ function AuditAddonToggle({
     <div className="mt-2 w-full">
       <Card
         className={tw(
-          "p-0",
+          "my-0 p-0",
           "transition-shadow",
-          wantsAudits ? "" : "hover:border-gray-300"
+          selected ? "" : "hover:border-gray-300"
         )}
       >
         <button
@@ -230,39 +300,34 @@ function AuditAddonToggle({
           onClick={onToggle}
           className={tw(
             "relative flex w-full items-start gap-3 rounded border border-transparent p-4 text-left",
-            wantsAudits
-              ? "border-primary-400 bg-primary-50"
-              : "border-transparent"
+            selected ? "border-primary-400 bg-primary-50" : "border-transparent"
           )}
         >
           <div
             className={tw(
               "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border-2",
-              wantsAudits
+              selected
                 ? "border-primary-500 bg-primary-500"
                 : "border-gray-300 bg-white"
             )}
             aria-hidden="true"
           >
-            {wantsAudits ? <CheckIcon className="size-3 text-white" /> : null}
+            {selected ? <CheckIcon className="size-3 text-white" /> : null}
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h4 className="text-base font-semibold text-gray-900">Audits</h4>
+              <h4 className="text-base font-semibold text-gray-900">{label}</h4>
               <Tag className="bg-primary-50 text-primary-700">7-day trial</Tag>
             </div>
-            <p className="mt-1 text-sm text-gray-600">
-              Create audits, assign auditors, scan QR codes, and track asset
-              verification in real-time.
-            </p>
+            <p className="mt-1 text-sm text-gray-600">{description}</p>
           </div>
         </button>
       </Card>
 
-      {/* Billing interval cards — shown when audits selected on personal plan */}
-      {wantsAudits && showBillingToggle ? (
-        <AuditBillingCards
-          auditPrices={auditPrices}
+      {/* Billing interval cards — shown when addon selected on personal plan */}
+      {selected && showBillingToggle ? (
+        <AddonBillingCards
+          prices={prices}
           billingInterval={billingInterval}
           onBillingIntervalChange={onBillingIntervalChange}
         />
@@ -271,16 +336,16 @@ function AuditAddonToggle({
   );
 }
 
-function AuditBillingCards({
-  auditPrices,
+function AddonBillingCards({
+  prices,
   billingInterval,
   onBillingIntervalChange,
 }: {
-  auditPrices: AuditPrices;
+  prices: AddonPrices;
   billingInterval: AuditBillingInterval;
   onBillingIntervalChange: (interval: AuditBillingInterval) => void;
 }) {
-  const { month: monthlyPrice, year: yearlyPrice } = auditPrices;
+  const { month: monthlyPrice, year: yearlyPrice } = prices;
 
   const yearlyDiscount =
     monthlyPrice && yearlyPrice
@@ -372,6 +437,7 @@ function PlanCard({
   description,
   chipLabel,
   badgeLabel,
+  icon,
 }: {
   planKey: SignupPlan;
   selected: boolean;
@@ -380,11 +446,12 @@ function PlanCard({
   description: string;
   chipLabel: string;
   badgeLabel?: string;
+  icon: React.ReactNode;
 }) {
   return (
     <Card
       className={tw(
-        "p-0",
+        "flex-1 p-0",
         "transition-shadow",
         selected ? "" : "hover:border-gray-300"
       )}
@@ -393,7 +460,7 @@ function PlanCard({
         type="button"
         onClick={() => onSelect(planKey)}
         className={tw(
-          " relative w-full rounded border border-transparent bg-white px-4 py-5 text-left",
+          "relative flex size-full flex-col rounded border border-transparent bg-white px-4 py-5 text-left",
           selected ? "border-primary-400 bg-primary-50" : "border-transparent"
         )}
       >
@@ -405,7 +472,8 @@ function PlanCard({
           ) : null}
         </div>
         <div>
-          <h4 className="text-lg font-semibold text-gray-900">{title}</h4>
+          {icon}
+          <h4 className="mt-3 text-lg font-semibold text-gray-900">{title}</h4>
           <p className="mt-2 text-sm text-gray-600">{description}</p>
           <GrayBadge className="mt-4">{chipLabel}</GrayBadge>
         </div>

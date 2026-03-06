@@ -11,6 +11,7 @@ import { Tag } from "~/components/shared/tag";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { getAuditAddonPrices } from "~/modules/audit/addon.server";
+import { getBarcodeAddonPrices } from "~/modules/barcode/addon.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatCurrency } from "~/utils/currency";
@@ -57,9 +58,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       : null;
 
     /* Get the prices and products from Stripe */
-    const [prices, auditPrices] = await Promise.all([
+    const [prices, auditPrices, barcodePrices] = await Promise.all([
       getStripePricesForTrialPlanSelection(),
       getAuditAddonPrices(),
+      getBarcodeAddonPrices(),
     ]);
 
     return data(
@@ -70,6 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         prices,
         customer,
         auditPrices,
+        barcodePrices,
       })
     );
   } catch (cause) {
@@ -79,7 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export default function SelectPlan() {
-  const { prices, auditPrices } = useLoaderData<typeof loader>();
+  const { prices, auditPrices, barcodePrices } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   type BillingInterval = "month" | "year";
 
@@ -104,17 +107,29 @@ export default function SelectPlan() {
     () => searchParams.get("withAudits") === "true"
   );
 
+  // Initialize barcode toggle from URL param (passed from welcome page)
+  const [wantsBarcodes, setWantsBarcodes] = useState(
+    () => searchParams.get("withBarcodes") === "true"
+  );
+
   const navigation = useNavigation();
   const activePrice = selectedPlan ? planPrices[selectedPlan] : null;
   const disabled = isFormProcessing(navigation.state) || !activePrice;
 
   const hasAuditPrices = !!(auditPrices.month || auditPrices.year);
+  const hasBarcodePrices = !!(barcodePrices.month || barcodePrices.year);
 
   // Get the matching audit price for the selected billing interval
   const activeAuditPrice =
     selectedPlan && auditPrices[selectedPlan]
       ? auditPrices[selectedPlan]
       : auditPrices.year || auditPrices.month;
+
+  // Get the matching barcode price for the selected billing interval
+  const activeBarcodePrice =
+    selectedPlan && barcodePrices[selectedPlan]
+      ? barcodePrices[selectedPlan]
+      : barcodePrices.year || barcodePrices.month;
 
   const fmtPrice = (amountInCents: number, currency: string) =>
     formatCurrency({
@@ -154,22 +169,16 @@ export default function SelectPlan() {
     };
   };
 
-  const staticAddOns = [
-    {
-      title: "Alternative Barcodes",
-      badge: "$14/mo or $170/yr",
-      description:
-        "Keep your existing labels. Supports Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for migrations.",
-      footnote: "Enable any time by contacting our team.",
-    },
-  ];
-
   // Build cost summary
   const teamPriceAmount = activePrice?.unit_amount || 0;
   const teamPriceCurrency = activePrice?.currency || "usd";
   const auditPriceAmount =
     wantsAudits && activeAuditPrice ? activeAuditPrice.unit_amount || 0 : 0;
-  const totalAmount = teamPriceAmount + auditPriceAmount;
+  const barcodePriceAmount =
+    wantsBarcodes && activeBarcodePrice
+      ? activeBarcodePrice.unit_amount || 0
+      : 0;
+  const totalAmount = teamPriceAmount + auditPriceAmount + barcodePriceAmount;
   const isYearly = selectedPlan === "year";
 
   const fmtPerMonth = (cents: number, currency: string) =>
@@ -177,9 +186,18 @@ export default function SelectPlan() {
 
   const billingLabel = isYearly ? "yr" : "mo";
 
-  const trialText = wantsAudits
-    ? `You won't be charged during the trial. After ${config.freeTrialDays} days, continue on Team + Audits or change plans.`
-    : `You won't be charged during the trial. After ${config.freeTrialDays} days, continue on Team or change plans.`;
+  const selectedAddons = [
+    wantsAudits && "Audits",
+    wantsBarcodes && "Barcodes",
+  ].filter(Boolean);
+  const trialText =
+    selectedAddons.length > 0
+      ? `You won't be charged during the trial. After ${
+          config.freeTrialDays
+        } days, continue on Team + ${selectedAddons.join(
+          " + "
+        )} or change plans.`
+      : `You won't be charged during the trial. After ${config.freeTrialDays} days, continue on Team or change plans.`;
 
   return (
     <div className="flex flex-col items-center p-4 sm:p-6">
@@ -318,7 +336,7 @@ export default function SelectPlan() {
                           <h4 className="text-base font-semibold text-gray-900">
                             Audits
                           </h4>
-                          <Tag className="bg-primary-50 text-primary-700">
+                          <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
                             7-day trial
                           </Tag>
                         </div>
@@ -354,25 +372,92 @@ export default function SelectPlan() {
               </article>
             ) : null}
 
-            {/* Static add-on cards */}
-            {staticAddOns.map((addOn) => (
-              <article key={addOn.title} className="h-full">
-                <Card className="flex h-full flex-col gap-3">
-                  <div>
-                    <h4 className="text-base font-semibold text-gray-900">
-                      {addOn.title}
-                    </h4>
-                    <div className="mt-1">
-                      <GrayBadge className="whitespace-nowrap">
-                        {addOn.badge}
-                      </GrayBadge>
+            {/* Interactive Barcode add-on card */}
+            {hasBarcodePrices ? (
+              <article className="h-full">
+                <Card
+                  className={tw(
+                    "flex h-full cursor-pointer flex-col gap-3 p-0",
+                    "transition-shadow",
+                    wantsBarcodes ? "" : "hover:border-gray-300"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setWantsBarcodes((prev) => !prev)}
+                    className={tw(
+                      "flex size-full flex-col gap-3 rounded border border-transparent p-4 text-left",
+                      wantsBarcodes
+                        ? "border-primary-400 bg-primary-50"
+                        : "border-transparent"
+                    )}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={tw(
+                          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border-2",
+                          wantsBarcodes
+                            ? "border-primary-500 bg-primary-500"
+                            : "border-gray-300 bg-white"
+                        )}
+                        aria-hidden="true"
+                      >
+                        {wantsBarcodes ? (
+                          <svg
+                            className="size-3 text-white"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                          >
+                            <path
+                              d="M10 3L4.5 8.5L2 6"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        ) : null}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-base font-semibold text-gray-900">
+                            Alternative Barcodes
+                          </h4>
+                          <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
+                            7-day trial
+                          </Tag>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <p className="text-sm text-gray-600">{addOn.description}</p>
-                  <p className="text-xs text-gray-500">{addOn.footnote}</p>
+                    <p className="text-sm text-gray-600">
+                      Keep your existing labels. Supports Code128, Code39,
+                      EAN-13, DataMatrix & QR codes — ideal for migrations.
+                    </p>
+                    {activeBarcodePrice ? (
+                      <div className="mt-1">
+                        <span className="text-lg font-semibold text-gray-900">
+                          {fmtPerMonth(
+                            activeBarcodePrice.unit_amount || 0,
+                            activeBarcodePrice.currency
+                          )}
+                          /mo
+                        </span>
+                        <p className="text-xs text-gray-500">
+                          Billed{" "}
+                          {isYearly
+                            ? `annually ${fmtPrice(
+                                activeBarcodePrice.unit_amount || 0,
+                                activeBarcodePrice.currency
+                              )}`
+                            : "monthly"}{" "}
+                          per workspace
+                        </p>
+                      </div>
+                    ) : null}
+                  </button>
                 </Card>
               </article>
-            ))}
+            ) : null}
           </div>
         </section>
 
@@ -431,6 +516,17 @@ export default function SelectPlan() {
                   </span>
                 </div>
               ) : null}
+              {wantsBarcodes && activeBarcodePrice ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">
+                    Barcodes ({isYearly ? "yearly" : "monthly"})
+                  </span>
+                  <span className="font-medium text-gray-900">
+                    {fmtPrice(barcodePriceAmount, activeBarcodePrice.currency)}/
+                    {billingLabel}
+                  </span>
+                </div>
+              ) : null}
               <div className="border-t border-gray-200 pt-2">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-gray-900">Total</span>
@@ -462,6 +558,13 @@ export default function SelectPlan() {
             type="hidden"
             name="auditPriceId"
             value={activeAuditPrice.id}
+          />
+        ) : null}
+        {wantsBarcodes && activeBarcodePrice ? (
+          <input
+            type="hidden"
+            name="barcodePriceId"
+            value={activeBarcodePrice.id}
           />
         ) : null}
 

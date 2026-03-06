@@ -73,6 +73,7 @@ export async function createStripeCheckoutSession({
   intent,
   shelfTier,
   auditPriceId,
+  barcodePriceId,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
@@ -81,6 +82,7 @@ export async function createStripeCheckoutSession({
   intent: "trial" | "subscribe";
   shelfTier: "tier_1" | "tier_2";
   auditPriceId?: string;
+  barcodePriceId?: string;
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -114,12 +116,17 @@ export async function createStripeCheckoutSession({
       lineItems.push({ price: auditPriceId, quantity: 1 });
     }
 
+    if (barcodePriceId) {
+      lineItems.push({ price: barcodePriceId, quantity: 1 });
+    }
+
     const successUrl = await generateReturnUrl({
       userId,
       shelfTier,
       intent,
       domainUrl,
       hasAuditAddon: !!auditPriceId,
+      hasBarcodeAddon: !!barcodePriceId,
     });
 
     const { url } = await stripe.checkout.sessions.create({
@@ -138,8 +145,11 @@ export async function createStripeCheckoutSession({
             },
           },
           trial_period_days: config.freeTrialDays,
-          ...(auditPriceId && {
-            metadata: { includesAuditAddon: "true" },
+          ...((auditPriceId || barcodePriceId) && {
+            metadata: {
+              ...(auditPriceId && { includesAuditAddon: "true" }),
+              ...(barcodePriceId && { includesBarcodeAddon: "true" }),
+            },
           }),
         },
         payment_method_collection: "if_required",
@@ -497,6 +507,10 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
     const auditItem = items.find(
       (i) => i.productType === "addon" && i.addonType === "audits"
     );
+    // The barcode addon item is the one marked as addon with barcodes type
+    const barcodeItem = items.find(
+      (i) => i.productType === "addon" && i.addonType === "barcodes"
+    );
 
     // For backward compat: return tier product info, or fall back to first item
     const primaryItem = tierItem || items[0];
@@ -508,6 +522,7 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
       productType: primaryItem.productType,
       product: primaryItem.product,
       hasAuditAddon: !!auditItem,
+      hasBarcodeAddon: !!barcodeItem,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -560,11 +575,13 @@ export async function createTeamTrialSubscription({
   priceId,
   userId,
   auditPriceId,
+  barcodePriceId,
 }: {
   customerId: string;
   priceId: string;
   userId: User["id"];
   auditPriceId?: string;
+  barcodePriceId?: string;
 }) {
   try {
     if (!stripe) {
@@ -579,6 +596,9 @@ export async function createTeamTrialSubscription({
     const lineItems: { price: string }[] = [{ price: priceId }];
     if (auditPriceId) {
       lineItems.push({ price: auditPriceId });
+    }
+    if (barcodePriceId) {
+      lineItems.push({ price: barcodePriceId });
     }
 
     // If the customer already has a payment method, attach it so Stripe
@@ -605,6 +625,7 @@ export async function createTeamTrialSubscription({
         userId,
         createdByAction: "true",
         ...(auditPriceId && { includesAuditAddon: "true" }),
+        ...(barcodePriceId && { includesBarcodeAddon: "true" }),
       },
     });
 
@@ -627,12 +648,14 @@ export async function generateReturnUrl({
   intent,
   domainUrl,
   hasAuditAddon,
+  hasBarcodeAddon,
 }: {
   userId: User["id"];
   shelfTier: "tier_1" | "tier_2" | "free" | "custom";
   intent: "trial" | "subscribe";
   domainUrl: string;
   hasAuditAddon?: boolean;
+  hasBarcodeAddon?: boolean;
 }) {
   /**
    * Here we have a few cases:
@@ -657,6 +680,7 @@ export async function generateReturnUrl({
     ...(intent === "trial" && { trial: "true" }),
     ...(userTeamOrg && { hasExistingWorkspace: "true" }),
     ...(hasAuditAddon && { includesAudits: "true" }),
+    ...(hasBarcodeAddon && { includesBarcodes: "true" }),
   });
 
   return shelfTier === "tier_2" && !userTeamOrg // If the user is on tier_2, and they dont already OWN a team org we redirect them to create a team workspace
