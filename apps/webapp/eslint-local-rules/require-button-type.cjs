@@ -44,8 +44,8 @@ module.exports = {
           node.source.value === "@react-email/components" &&
           node.specifiers.some(
             (s) =>
-              (s.type === "ImportSpecifier" && s.imported.name === "Button") ||
-              s.type === "ImportDefaultSpecifier"
+              (s.type === "ImportSpecifier" && s.local.name === "Button") ||
+              (s.type === "ImportDefaultSpecifier" && s.local.name === "Button")
           )
         ) {
           isReactEmailButton = true;

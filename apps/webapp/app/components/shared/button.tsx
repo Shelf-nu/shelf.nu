@@ -112,9 +112,8 @@ export type ButtonProps =
 /**
  * Type guard to check if props are for a Link button
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function isLinkProps(props: Record<string, any>): props is LinkButtonProps {
-  return "to" in props;
+function isLinkProps(props: object): props is LinkButtonProps {
+  return "to" in props && props.to !== undefined;
 }
 
 /**
@@ -257,8 +256,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     }
 
     // Type guard for checking if props has target property
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const hasTarget = (props: Record<string, any>): props is LinkButtonProps =>
+    const hasTarget = (props: object): props is LinkButtonProps =>
       "target" in props;
     const newTab = hasTarget(props) && props.target === "_blank";
 

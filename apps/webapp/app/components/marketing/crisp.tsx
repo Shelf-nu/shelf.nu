@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Crisp } from "crisp-sdk-web";
 import { useUserData } from "~/hooks/use-user-data";
-import type { ButtonProps } from "../shared/button";
+import type { HTMLButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 
 export function useCrisp() {
@@ -22,7 +22,7 @@ export function useCrisp() {
   }, [user]);
 }
 
-export const CrispButton = (props: Omit<ButtonProps, "type">) => (
+export const CrispButton = (props: Omit<HTMLButtonProps, "type">) => (
   <Button {...props} onClick={() => Crisp.chat.open()} type="button">
     {props.children}
   </Button>
