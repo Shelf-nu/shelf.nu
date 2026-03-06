@@ -52,7 +52,9 @@ const DeleteReminder = forwardRef<HTMLButtonElement, DeleteReminderProps>(
           <AlertDialogFooter>
             <div className="flex justify-center gap-2">
               <AlertDialogCancel disabled={disabled} asChild>
-                <Button variant="secondary">Cancel</Button>
+                <Button type="button" variant="secondary">
+                  Cancel
+                </Button>
               </AlertDialogCancel>
 
               <Form method="delete">

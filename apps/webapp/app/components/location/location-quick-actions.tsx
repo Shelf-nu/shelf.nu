@@ -92,6 +92,7 @@ export default function LocationQuickActions({
           }}
           trigger={
             <Button
+              type="button"
               size="sm"
               variant="secondary"
               className="p-2"

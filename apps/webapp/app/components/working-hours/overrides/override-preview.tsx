@@ -76,6 +76,7 @@ export function OverridePreview({ override }: OverridePreviewProps) {
         </div>
       </div>
       <Button
+        type="button"
         variant="secondary"
         disabled={disabled}
         onClick={handleDelete}

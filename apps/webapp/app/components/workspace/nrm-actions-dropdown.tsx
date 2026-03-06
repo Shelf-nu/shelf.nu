@@ -57,6 +57,7 @@ export function TeamMembersActionsDropdown({
             onSelect={(e) => e.preventDefault()}
           >
             <Button
+              type="button"
               icon="send"
               variant="link"
               className="!hover:text-gray-700 justify-start p-4 !text-gray-700"

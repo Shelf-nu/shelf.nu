@@ -93,6 +93,7 @@ export default function ListTitle({
         {hasBulkActions && hasSelectedItems ? (
           <div className="flex items-start gap-2">
             <Button
+              type="button"
               onClick={clearSelectedItems}
               variant="secondary"
               className="p-[2px] text-[14px]"
@@ -104,7 +105,11 @@ export default function ListTitle({
             {!disableSelectAllItems &&
               !hasSelectedAllItems &&
               selectedBulkItemsCount < totalItems && (
-                <Button onClick={handleSelectAllItems} variant="block-link">
+                <Button
+                  type="button"
+                  onClick={handleSelectAllItems}
+                  variant="block-link"
+                >
                   Select all {totalItems} entries
                 </Button>
               )}

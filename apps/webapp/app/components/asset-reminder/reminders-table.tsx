@@ -60,6 +60,7 @@ export default function RemindersTable({
               What are you waiting for? Create your first{" "}
               {isAssetReminderPage ? (
                 <Button
+                  type="button"
                   variant="link"
                   onClick={() => {
                     setIsReminderDialogOpen(true);

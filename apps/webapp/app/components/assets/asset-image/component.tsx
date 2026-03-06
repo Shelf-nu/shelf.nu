@@ -283,7 +283,11 @@ export const AssetImage = ({
                 <Button to={`/assets/${assetId}/edit`} variant="secondary">
                   Edit image(s)
                 </Button>
-                <Button variant="secondary" onClick={handleCloseDialog}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleCloseDialog}
+                >
                   Close
                 </Button>
               </div>

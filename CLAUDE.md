@@ -163,6 +163,26 @@ All HTML emails must follow the design established in
 - **Send wrapper function** with `try/catch` + `Logger.error` + `ShelfError`
 - **Closing**: `The Shelf Team`
 
+### Button Type Prop (Required)
+
+Every `<Button>` that renders as a native `<button>` element **must** have an explicit `type` prop. This is enforced by the `local-rules/require-button-type` ESLint rule.
+
+- Use `type="submit"` for buttons that submit a form
+- Use `type="button"` for all other buttons (modals, toggles, actions, etc.)
+- Buttons with `to=` (link buttons) or `as="a"`/`as="span"` do not need `type`
+
+```typescript
+// ❌ Bad - missing type
+<Button onClick={handler}>Cancel</Button>
+
+// ✅ Good
+<Button type="button" onClick={handler}>Cancel</Button>
+<Button type="submit" disabled={disabled}>Save</Button>
+<Button to="/home">Home</Button>  // Link button, no type needed
+```
+
+**Why:** The HTML spec defaults `<button>` to `type="submit"`, which can cause accidental form submissions. Explicit types prevent this and make intent clear.
+
 ### Disabled State for Form Submissions
 
 Always use the `useDisabled` hook from `~/hooks/use-disabled` to disable buttons during form submission. Do **not** use `useNavigation` directly to check `navigation.state`.

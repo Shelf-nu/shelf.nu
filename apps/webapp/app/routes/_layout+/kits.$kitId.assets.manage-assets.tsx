@@ -391,7 +391,9 @@ export default function ManageAssetsInKit() {
 
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button disabled={isSearching}>Confirm</Button>
+                <Button type="button" disabled={isSearching}>
+                  Confirm
+                </Button>
               </AlertDialogTrigger>
 
               <AlertDialogContent>
@@ -435,11 +437,15 @@ export default function ManageAssetsInKit() {
 
                 <AlertDialogFooter>
                   <AlertDialogCancel asChild>
-                    <Button variant="secondary">Cancel</Button>
+                    <Button type="button" variant="secondary">
+                      Cancel
+                    </Button>
                   </AlertDialogCancel>
 
                   <AlertDialogAction asChild>
-                    <Button onClick={handleSubmit}>Continue</Button>
+                    <Button type="button" onClick={handleSubmit}>
+                      Continue
+                    </Button>
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

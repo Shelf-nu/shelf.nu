@@ -76,6 +76,7 @@ export const BookingOverviewPDF = ({
   return (
     <>
       <Button
+        type="button"
         variant="link"
         className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
         width="full"
@@ -102,7 +103,9 @@ export const BookingOverviewPDF = ({
               </p>
               {!isFetchingBookings && (
                 <div className="mt-4">
-                  <Button onClick={handlePrint}>Download PDF</Button>
+                  <Button type="button" onClick={handlePrint}>
+                    Download PDF
+                  </Button>
                 </div>
               )}
             </div>
@@ -127,7 +130,11 @@ export const BookingOverviewPDF = ({
               )}
             </div>
             <div className="flex justify-end gap-3 py-4">
-              <Button variant="secondary" onClick={handleCloseDialog}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleCloseDialog}
+              >
                 Cancel
               </Button>
             </div>
@@ -137,6 +144,7 @@ export const BookingOverviewPDF = ({
 
       {/* Only for mobile */}
       <Button
+        type="button"
         variant="link"
         className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
         width="full"

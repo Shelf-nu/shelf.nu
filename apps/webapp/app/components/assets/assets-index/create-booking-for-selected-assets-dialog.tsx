@@ -169,6 +169,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
 
             <div className="flex items-center gap-3">
               <Button
+                type="button"
                 variant="secondary"
                 width="full"
                 disabled={disabled}
