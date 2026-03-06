@@ -121,7 +121,7 @@ The monorepo is managed with pnpm workspaces and Turborepo. The `@shelf/database
 | `pnpm webapp:build`         | Production build                        |
 | `pnpm webapp:test`          | Run tests (Vitest)                      |
 | `pnpm webapp:validate`      | Lint + typecheck + test                 |
-| `pnpm webapp:setup`         | Generate Prisma client + run migrations |
+| `pnpm webapp:setup`         | Generate Prisma client + run migrations |https://github.com/Shelf-nu/shelf.nu/blob/main/README.md
 | `pnpm db:prepare-migration` | Create a new database migration         |
 | `pnpm db:deploy-migration`  | Apply pending migrations                |
 | `pnpm db:reset`             | Reset database (destructive)            |
