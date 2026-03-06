@@ -173,15 +173,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    const { priceId, intent, shelfTier, auditPriceId } = parseData(
-      await request.formData(),
-      z.object({
-        priceId: z.string(),
-        intent: z.enum(["trial", "subscribe"]),
-        shelfTier: z.enum(["tier_1", "tier_2"]),
-        auditPriceId: z.string().optional(),
-      })
-    );
+    const { priceId, intent, shelfTier, auditPriceId, barcodePriceId } =
+      parseData(
+        await request.formData(),
+        z.object({
+          priceId: z.string(),
+          intent: z.enum(["trial", "subscribe"]),
+          shelfTier: z.enum(["tier_1", "tier_2"]),
+          auditPriceId: z.string().optional(),
+          barcodePriceId: z.string().optional(),
+        })
+      );
 
     const user = await getUserByID(userId, {
       select: {
@@ -218,6 +220,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         priceId,
         userId,
         auditPriceId,
+        barcodePriceId,
       });
 
       // Update user tier and mark trial as used
@@ -233,6 +236,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         intent,
         domainUrl,
         hasAuditAddon: !!auditPriceId,
+        hasBarcodeAddon: !!barcodePriceId,
       });
 
       return redirect(returnUrl);
@@ -247,6 +251,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       intent,
       shelfTier,
       auditPriceId,
+      barcodePriceId,
     });
 
     return redirect(stripeRedirectUrl);

@@ -101,7 +101,6 @@ export const getAssetOverviewFields = (
     },
   } satisfies Prisma.AssetInclude;
 
-  // Conditionally add barcodes if enabled
   if (canUseBarcodes) {
     return {
       ...baseFields,
@@ -115,7 +114,15 @@ export const getAssetOverviewFields = (
     } satisfies Prisma.AssetInclude;
   }
 
-  return baseFields;
+  // Always fetch barcode count so we can show a "locked" indicator
+  return {
+    ...baseFields,
+    _count: {
+      select: {
+        barcodes: true,
+      },
+    },
+  } satisfies Prisma.AssetInclude;
 };
 
 /**
