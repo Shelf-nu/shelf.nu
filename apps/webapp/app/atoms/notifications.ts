@@ -16,6 +16,7 @@ export interface NotificationType {
   icon: NotificationIcon;
   time?: number;
   senderId: User["id"] | null;
+  tabId?: string;
 }
 
 export const notificationAtom = atom<NotificationType>({
