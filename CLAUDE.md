@@ -513,14 +513,12 @@ The `.env` file lives at the **monorepo root** (not inside `apps/webapp/`). Copy
 # Rule Updates:
 
 - **Add New Rules When:**
-
   - A new technology/pattern is used in 3+ files
   - Common bugs could be prevented by a rule
   - Code reviews repeatedly mention the same feedback
   - New security or performance patterns emerge
 
 - **Modify Existing Rules When:**
-
   - Better examples exist in the codebase
   - Additional edge cases are discovered
   - Related rules have been updated
