@@ -95,6 +95,7 @@ export type AuditExpectedAsset = {
   auditImagesCount?: number;
   mainImage?: string | null;
   thumbnailImage?: string | null;
+  locationName?: string | null;
 };
 
 export type CreateAuditSessionResult = {
@@ -589,6 +590,11 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                location: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
             _count: {
@@ -653,6 +659,7 @@ export async function getAuditSessionDetails({
         auditImagesCount: auditAsset._count?.images ?? 0,
         mainImage: auditAsset.asset?.mainImage ?? null,
         thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+        locationName: auditAsset.asset?.location?.name ?? null,
       }));
 
     return {
