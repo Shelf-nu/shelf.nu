@@ -1,6 +1,6 @@
 import type { Asset, AssetIndexSettings } from "@shelf/database";
-import { Prisma } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
@@ -58,21 +58,16 @@ async function getAdvancedFilteredAssetIds({
 
     // Minimal query: only SELECT id, but include necessary joins
     // Joins are needed because WHERE clause may reference: c.name, l.name, t.id, tm.name, etc.
-    const query = Prisma.sql`
-      SELECT DISTINCT a.id
-      FROM public."Asset" a
-      LEFT JOIN public."Category" c ON a."categoryId" = c.id
-      LEFT JOIN public."Location" l ON a."locationId" = l.id
-      LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
-      LEFT JOIN public."Tag" t ON att."B" = t.id
-      LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
-      LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
-      LEFT JOIN public."User" u ON tm."userId" = u.id
-      ${whereClause}
-    `;
+    const { data: results, error } = await db.rpc(
+      "get_advanced_filtered_asset_ids",
+      {
+        p_organization_id: organizationId,
+        p_where_clause: whereClause,
+      }
+    );
 
-    const results = await db.$queryRaw<Array<{ id: string }>>(query);
-    return results.map((r) => r.id);
+    if (error) throw error;
+    return (results as Array<{ id: string }>).map((r) => r.id);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -157,9 +152,9 @@ export async function resolveAssetIdsForBulkOperation({
       currentSearchParams,
     });
 
-    const assets = await db.asset.findMany({
+    const assets = await findMany(db, "Asset", {
       where,
-      select: { id: true },
+      select: "id",
     });
 
     return assets.map((a) => a.id);

@@ -1,4 +1,3 @@
-import type { Prisma } from "@shelf/database";
 import {
   AssetStatus,
   BookingStatus,
@@ -127,7 +126,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       deletedAt: null,
       organizationId,
       userId: role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
-    } satisfies Prisma.TeamMemberWhereInput;
+    };
 
     const teamMembers = await db.teamMember
       .findMany({
@@ -194,7 +193,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     // Validate that the custodian belongs to the same organization

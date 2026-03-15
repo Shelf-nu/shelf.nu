@@ -3,11 +3,13 @@ import type {
   Location,
   Category,
   Organization,
-  Prisma,
+  AuditSession,
   OrganizationRoles,
   AuditImage,
   AuditNote,
   AuditAssetStatus,
+  User,
+  AuditAssignment,
 } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -32,31 +34,18 @@ export interface AssetWithAuditStatus extends Asset {
  */
 export interface AuditPdfDbResult {
   // Audit session with creator and assignees
-  session: Prisma.AuditSessionGetPayload<{
-    include: {
-      createdBy: {
-        select: {
-          firstName: true;
-          lastName: true;
-          email: true;
-          profilePicture: true;
-        };
-      };
-      assignments: {
-        include: {
-          user: {
-            select: {
-              id: true;
-              firstName: true;
-              lastName: true;
-              email: true;
-              profilePicture: true;
-            };
-          };
-        };
-      };
-    };
-  }>;
+  session: AuditSession & {
+    createdBy: Pick<
+      User,
+      "firstName" | "lastName" | "email" | "profilePicture"
+    >;
+    assignments: (AuditAssignment & {
+      user: Pick<
+        User,
+        "id" | "firstName" | "lastName" | "email" | "profilePicture"
+      >;
+    })[];
+  };
   // Assets with audit status and metadata
   assets: AssetWithAuditStatus[];
   // Organization details for header

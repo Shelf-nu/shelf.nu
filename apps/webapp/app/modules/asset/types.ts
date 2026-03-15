@@ -6,7 +6,6 @@ import type {
   Category,
   CustomField,
   Kit,
-  Prisma,
   Tag,
   User,
   CustomFieldType,
@@ -17,8 +16,6 @@ import type {
   Barcode,
   TeamMember,
 } from "@shelf/database";
-import type { Return } from "@prisma/client/runtime/library";
-import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
   raw: string | number | boolean;
@@ -108,10 +105,8 @@ export type AssetCustomFieldsValuesWithFields =
     customField: CustomField;
   };
 
-/** Item returned by getAssetsFromView */
-export type AssetsFromViewItem = Prisma.AssetGetPayload<{
-  include: Return<typeof assetIndexFields>;
-}>;
+/** Item returned by getAssetsFromView — uses AdvancedIndexAsset as canonical type */
+export type AssetsFromViewItem = AdvancedIndexAsset;
 
 /** Type for advanced asset booking */
 export type AdvancedAssetBooking = Pick<

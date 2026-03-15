@@ -1,4 +1,4 @@
-import type { Currency } from "@prisma/client";
+import type { Currency } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { render, screen } from "@testing-library/react";

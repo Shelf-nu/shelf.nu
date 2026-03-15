@@ -1,5 +1,5 @@
-import type { Booking } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import type { Booking } from "@shelf/database";
+import { BookingStatus } from "@shelf/database";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

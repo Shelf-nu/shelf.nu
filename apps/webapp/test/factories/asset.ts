@@ -1,4 +1,4 @@
-import type { Asset, AssetStatus } from "@prisma/client";
+import type { Asset, AssetStatus } from "@shelf/database";
 
 /**
  * Factory for creating Asset test data

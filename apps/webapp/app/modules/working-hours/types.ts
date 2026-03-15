@@ -1,4 +1,4 @@
-import type { Prisma, WorkingHoursOverride } from "@shelf/database";
+import type { WorkingHours, WorkingHoursOverride } from "@shelf/database";
 
 // TypeScript types for JSON schedule
 export interface DaySchedule {
@@ -12,7 +12,7 @@ export interface WeeklyScheduleJson {
 }
 
 // Input specific type
-export type WeeklyScheduleForUpdate = Prisma.InputJsonObject &
+export type WeeklyScheduleForUpdate = Record<string, unknown> &
   WeeklyScheduleJson;
 
 export enum DayOfWeek {
@@ -53,11 +53,9 @@ export interface WorkingHoursSchedule extends TimeSlot {
 }
 
 // Comprehensive working hours with all related data
-export type WorkingHoursWithOverrides = Prisma.WorkingHoursGetPayload<{
-  include: {
-    overrides: true;
-  };
-}>;
+export type WorkingHoursWithOverrides = WorkingHours & {
+  overrides: WorkingHoursOverride[];
+};
 
 // For API requests/responses
 export interface CreateWorkingHoursRequest {

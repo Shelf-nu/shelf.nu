@@ -1,5 +1,11 @@
 import { useState } from "react";
-import type { Prisma } from "@shelf/database";
+import type {
+  Asset,
+  AssetReminder,
+  AssetReminderToTeamMember,
+  TeamMember,
+  User,
+} from "@shelf/database";
 import { PencilIcon } from "lucide-react";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -9,15 +15,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import DeleteReminder from "./delete-reminder";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 import When from "../when/when";
 
+type ReminderWithRelations = AssetReminder & {
+  asset: Asset;
+  teamMembers: (AssetReminderToTeamMember & {
+    teamMember: TeamMember & { user: User | null };
+  })[];
+};
+
 type ActionsDropdownProps = {
-  reminder: Prisma.AssetReminderGetPayload<{
-    include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  reminder: ReminderWithRelations;
 };
 
 export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {

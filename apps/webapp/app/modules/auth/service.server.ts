@@ -6,6 +6,7 @@ import {
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { findFirst, findUnique } from "~/database/query-helpers.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
@@ -57,18 +58,22 @@ export async function confirmExistingAuthAccount(
   password: string
 ) {
   try {
-    const result = await db.$queryRaw<{ id: string }[]>`
-      SELECT id FROM auth.users
-      WHERE email = ${email.toLowerCase()}
-      LIMIT 1
-    `;
+    // Use Supabase RPC to query auth.users table
+    const result = await db.rpc("get_auth_user_by_email", {
+      p_email: email.toLowerCase(),
+    });
 
-    if (result.length === 0) {
+    if (result.error) {
+      throw result.error;
+    }
+
+    const users = result.data as { id: string }[] | null;
+    if (!users || users.length === 0) {
       return null;
     }
 
     const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
-      result[0].id,
+      users[0].id,
       {
         email_confirm: true,
         password,
@@ -241,9 +246,9 @@ export async function signInWithSSO(domain: string) {
  * @throws ShelfError if user exists and is SSO-only
  */
 async function validateNonSSOUser(email: string) {
-  const user = await db.user.findUnique({
+  const user = await findUnique(db, "User", {
     where: { email: email.toLowerCase() },
-    select: { sso: true },
+    select: "sso",
   });
 
   if (user?.sso) {
@@ -319,11 +324,9 @@ export async function updateAccountPassword(
   accessToken?: string | undefined
 ) {
   try {
-    const user = await db.user.findFirst({
+    const user = await findFirst(db, "User", {
       where: { id },
-      select: {
-        sso: true,
-      },
+      select: "sso",
     });
     if (user?.sso) {
       throw new ShelfError({
@@ -413,20 +416,28 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 
 export async function validateSession(token: string) {
   try {
-    // const t0 = performance.now();
-    const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
-      SELECT id, revoked FROM auth.refresh_tokens 
-      WHERE token = ${token} 
-      AND revoked = false
-      LIMIT 1 
-    `;
-    // const t1 = performance.now();
+    // Use RPC to query auth.refresh_tokens table
+    const result = await db.rpc("validate_refresh_token", {
+      p_token: token,
+    });
 
-    // eslint-disable-next-line no-console
-    // console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
+    if (result.error) {
+      Logger.error(
+        new ShelfError({
+          cause: result.error,
+          message: "Refresh token validation query failed",
+          label,
+          shouldBeCaptured: false,
+        })
+      );
+      return false;
+    }
 
-    if (result.length === 0) {
-      //logging for debug
+    const isValid = Array.isArray(result.data)
+      ? result.data.length > 0
+      : !!result.data;
+
+    if (!isValid) {
       Logger.error(
         new ShelfError({
           cause: null,
@@ -436,7 +447,7 @@ export async function validateSession(token: string) {
         })
       );
     }
-    return result.length > 0;
+    return isValid;
   } catch (_err) {
     Logger.error(
       new ShelfError({

@@ -1,5 +1,11 @@
 import { forwardRef } from "react";
-import type { Prisma } from "@shelf/database";
+import type {
+  Asset,
+  AssetReminder,
+  AssetReminderToTeamMember,
+  TeamMember,
+  User,
+} from "@shelf/database";
 import { TrashIcon } from "lucide-react";
 import { Form, useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
@@ -13,13 +19,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { isFormProcessing } from "~/utils/form";
 
+type ReminderWithRelations = AssetReminder & {
+  asset: Asset;
+  teamMembers: (AssetReminderToTeamMember & {
+    teamMember: TeamMember & { user: User | null };
+  })[];
+};
+
 type DeleteReminderProps = {
-  reminder: Prisma.AssetReminderGetPayload<{
-    include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  reminder: ReminderWithRelations;
 };
 
 const DeleteReminder = forwardRef<HTMLButtonElement, DeleteReminderProps>(

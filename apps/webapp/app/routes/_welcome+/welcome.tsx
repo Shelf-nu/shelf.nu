@@ -1,4 +1,3 @@
-import type { Prisma } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -94,7 +93,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     const customerId = await getOrCreateCustomerId(user);

@@ -380,13 +380,6 @@ export async function softDeleteCustomField({
   organizationId,
 }: Pick<CustomField, "id"> & { organizationId: Organization["id"] }) {
   try {
-    // Use RPC for the cascade soft delete operation
-    const { error } = await db.rpc("delete_custom_field_cascade", {
-      p_custom_field_id: id,
-      p_organization_id: organizationId,
-      p_custom_field_name: "",
-    });
-
     // 1. Verify the custom field exists, belongs to the organization, and is not already deleted
     const existingCustomField = await findFirst(db, "CustomField", {
       where: { id, organizationId, deletedAt: null },

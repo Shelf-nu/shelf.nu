@@ -1,4 +1,4 @@
-import { OrganizationRoles, AssetStatus } from "@prisma/client";
+import { OrganizationRoles, AssetStatus } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -1,4 +1,4 @@
-import type { Prisma } from "@shelf/database";
+import type { Kit } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -359,18 +359,18 @@ const Row = ({
   item,
   extraProps,
 }: {
-  item: Prisma.KitGetPayload<{
-    include: {
-      category: true;
-      custody: {
-        select: {
-          custodian: {
-            select: { id: true; name: true; user: true };
-          };
-        };
+  item: Kit & {
+    category: { id: string; name: string; color: string } | null;
+    custody: {
+      custodian: {
+        id: string;
+        name: string;
+        user: Record<string, unknown> | null;
       };
-    };
-  }>;
+    } | null;
+    image: string | null;
+    imageExpiration: string | null;
+  };
   extraProps: { canReadCustody: boolean; userRoleCanManageKits: boolean };
 }) => {
   const { category, custody } = item;

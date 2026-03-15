@@ -1,12 +1,5 @@
-import type {
-  Invite,
-  Organization,
-  Prisma,
-  TeamMember,
-  User,
-} from "@shelf/database";
+import type { Invite, Organization, TeamMember, User } from "@shelf/database";
 import { InviteStatuses, OrganizationRoles } from "@shelf/database";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
 import type { AppLoadContext, LoaderFunctionArgs } from "react-router";
@@ -14,6 +7,15 @@ import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
+import {
+  count,
+  create,
+  createMany,
+  findFirst,
+  findMany,
+  update,
+  updateMany,
+} from "~/database/query-helpers.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
@@ -90,7 +92,7 @@ export async function getExistingActiveInvite({
   inviteeEmail,
 }: Pick<Invite, "inviteeEmail" | "organizationId">) {
   try {
-    return await db.invite.findFirst({
+    return await findFirst(db, "Invite", {
       where: {
         organizationId,
         inviteeEmail,
@@ -99,7 +101,7 @@ export async function getExistingActiveInvite({
           {
             status: { notIn: ["REJECTED"] }, //should we allow reinvite if user rejects?
           },
-          { expiresAt: { gt: new Date() } },
+          { expiresAt: { gt: new Date().toISOString() } },
         ],
       },
     });
@@ -153,15 +155,15 @@ export async function createInvite(
     }
     const sanitizedMessage = messageResult.message;
 
-    const existingUser = await db.user.findFirst({
-      where: {
-        email: inviteeEmail,
-        userOrganizations: {
-          some: { organizationId },
-        },
-      },
-      select: { id: true },
+    // Check if user already exists in organization
+    const existingUsers = await findMany(db, "UserOrganization", {
+      where: { organizationId },
+      select: "userId, user:User(id, email)",
     });
+
+    const existingUser = (existingUsers as any[]).find(
+      (uo: any) => uo.user?.email === inviteeEmail
+    );
 
     if (existingUser) {
       //if email is already part of organization, we dont allow new invite
@@ -177,7 +179,7 @@ export async function createInvite(
     }
 
     if (!teamMemberId) {
-      const previousInvite = await db.invite.findFirst({
+      const previousInvite = await findFirst(db, "Invite", {
         where: {
           organizationId,
           inviteeEmail,
@@ -196,12 +198,12 @@ export async function createInvite(
         teamMemberId = member.id;
       }
     } else {
-      const previousActiveInvite = await db.invite.findFirst({
+      const previousActiveInvite = await findFirst(db, "Invite", {
         where: {
           organizationId,
           inviteeEmail,
           status: InviteStatuses.PENDING,
-          expiresAt: { gt: new Date() },
+          expiresAt: { gt: new Date().toISOString() },
         },
       });
 
@@ -222,64 +224,37 @@ export async function createInvite(
       }
     }
 
-    const inviter = {
-      connect: {
-        id: inviterId,
-      },
-    };
-
-    const organization = {
-      connect: {
-        id: organizationId,
-      },
-    };
-
-    const inviteeTeamMember = {
-      connect: {
-        id: teamMemberId,
-      },
-    };
-
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
-    const data = {
-      inviteeTeamMember,
-      organization,
-      inviter,
+    const inviteData: Record<string, unknown> = {
+      teamMemberId,
+      organizationId,
+      inviterId,
       inviteeEmail,
-      expiresAt,
+      expiresAt: expiresAt.toISOString(),
       inviteCode: generateRandomCode(6),
       ...(sanitizedMessage && { inviteMessage: sanitizedMessage }),
     };
 
     if (roles.length) {
-      Object.assign(data, {
-        roles,
-      });
+      inviteData.roles = roles;
     }
 
-    const invite = await db.invite
-      .create({
-        data,
-        include: {
-          organization: true,
-          inviter: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to create invite in database",
-          additionalData: { data },
-          label,
-        });
+    let invite: any;
+    try {
+      invite = await create(db, "Invite", inviteData as any, {
+        select:
+          "*, organization:Organization(*), inviter:User!inviterId(firstName, lastName)",
       });
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message: "Failed to create invite in database",
+        additionalData: { inviteData },
+        label,
+      });
+    }
 
     const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
       expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
@@ -287,7 +262,7 @@ export async function createInvite(
 
     sendEmail({
       to: inviteeEmail,
-      subject: `✉️ You have been invited to ${invite.organization.name}`,
+      subject: `\u2709\uFE0F You have been invited to ${invite.organization.name}`,
       text: inviteEmailText({ invite, token, extraMessage: sanitizedMessage }),
       html: await invitationTemplateString({
         invite,
@@ -316,9 +291,9 @@ export async function updateInviteStatus({
   password,
 }: Pick<Invite, "id" | "status"> & { password: string }) {
   try {
-    const invite = await db.invite.findFirst({
+    const invite = await findFirst(db, "Invite", {
       where: { id },
-      include: { inviteeTeamMember: true },
+      select: "*, inviteeTeamMember:TeamMember!teamMemberId(*)",
     });
 
     if (!invite || invite.status !== InviteStatuses.PENDING) {
@@ -344,7 +319,7 @@ export async function updateInviteStatus({
           "The invitation you are trying to accept is already invalidated. If you think this is a mistake, please ask your administrator to send you a new invite.";
       }
 
-      if (invite?.expiresAt && invite.expiresAt < new Date()) {
+      if (invite?.expiresAt && new Date(invite.expiresAt) < new Date()) {
         title = "Invite expired";
         message =
           "The invitation you are trying to accept is expired. Please ask your administrator to send you a new invite.";
@@ -358,10 +333,12 @@ export async function updateInviteStatus({
       });
     }
 
-    const data = { status };
+    const data: Record<string, unknown> = { status };
 
     if (status === "ACCEPTED") {
-      const { firstName, lastName } = splitName(invite.inviteeTeamMember.name);
+      const { firstName, lastName } = splitName(
+        (invite as any).inviteeTeamMember.name
+      );
 
       const user = await createUserOrAttachOrg({
         email: invite.inviteeEmail,
@@ -373,40 +350,32 @@ export async function updateInviteStatus({
         createdWithInvite: true,
       });
 
-      Object.assign(data, {
-        inviteeUser: {
-          connect: {
-            id: user.id,
-          },
-        },
-      });
+      data.inviteeUserId = user.id;
 
-      await db.teamMember.update({
+      // Update team member: link to user and update bookings
+      await update(db, "TeamMember", {
         where: { id: invite.teamMemberId },
         data: {
           deletedAt: null,
-          user: { connect: { id: user.id } },
-          /**
-           * This handles a special case.
-           * If an invite is still pending, the team member is not yet linked to a user.
-           * However the admin is allowed to assign bookings to that team member.
-           * When the invite is accepted, we need to update all those bookings to also be linked to the user so they can see it on their bookings index.
-           */
-          bookings: {
-            updateMany: {
-              where: { custodianTeamMemberId: invite.teamMemberId },
-              data: { custodianUserId: user.id },
-            },
-          },
+          userId: user.id,
         },
+      });
+
+      // Update bookings that were assigned to this team member
+      await updateMany(db, "Booking", {
+        where: { custodianTeamMemberId: invite.teamMemberId },
+        data: { custodianUserId: user.id },
       });
     }
 
-    const updatedInvite = await db.invite.update({ where: { id }, data });
+    const updatedInvite = await update(db, "Invite", {
+      where: { id },
+      data,
+    });
 
     //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1
     //because user doesnt or want to join that org, so we should update all pending invite to show the same
-    await db.invite.updateMany({
+    await updateMany(db, "Invite", {
       where: {
         status: InviteStatuses.PENDING,
         inviteeEmail: invite.inviteeEmail,
@@ -442,16 +411,15 @@ export async function checkUserAndInviteMatch({
   const { userId } = authSession;
 
   /** We get the user, selecting only the email */
-  const user = await db.user
-    .findFirst({
-      where: {
-        id: userId,
-      },
-      select: {
-        email: true,
-      },
-    })
-    .catch(() => null);
+  let user: { email: string } | null = null;
+  try {
+    user = await findFirst(db, "User", {
+      where: { id: userId },
+      select: "email",
+    });
+  } catch {
+    user = null;
+  }
 
   if (user?.email !== invite?.inviteeEmail) {
     throw new ShelfError({
@@ -480,7 +448,9 @@ export async function getPaginatedAndFilterableSettingInvites({
   const inviteStatus =
     searchParams.get("inviteStatus") === "ALL"
       ? null
-      : (searchParams.get("inviteStatus") as InviteStatuses);
+      : (searchParams.get("inviteStatus") as
+          | (typeof InviteStatuses)[keyof typeof InviteStatuses]
+          | null);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -489,78 +459,57 @@ export async function getPaginatedAndFilterableSettingInvites({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
-    const inviteWhere: Prisma.InviteWhereInput = {
+    const inviteWhere: Record<string, unknown> = {
       organizationId,
       status: InviteStatuses.PENDING,
       inviteeEmail: { not: "" },
     };
 
-    if (search) {
-      /** Or search the input against input user/teamMember */
-      inviteWhere.OR = [
-        {
-          inviteeTeamMember: {
-            name: { contains: search, mode: "insensitive" },
-          },
-        },
-        {
-          inviteeUser: {
-            OR: [
-              { firstName: { contains: search, mode: "insensitive" } },
-              { lastName: { contains: search, mode: "insensitive" } },
-            ],
-          },
-        },
-      ];
-    }
-
     if (inviteStatus) {
       inviteWhere.status = inviteStatus;
     }
 
-    const [invites, totalItemsGrouped] = await Promise.all([
-      /** Get the invites */
-      db.invite.findMany({
+    // Note: Supabase PostgREST does not support relation-based search like Prisma.
+    // For search, we use a simpler approach filtering by inviteeEmail
+    if (search) {
+      inviteWhere.inviteeEmail = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [invites, totalInvites] = await Promise.all([
+      findMany(db, "Invite", {
         where: inviteWhere,
-        distinct: ["inviteeEmail"],
         skip,
         take,
-        select: {
-          id: true,
-          teamMemberId: true,
-          inviteeEmail: true,
-          status: true,
-          inviteeTeamMember: { select: { name: true } },
-          roles: true,
-          inviteMessage: true,
-        },
+        select:
+          "id, teamMemberId, inviteeEmail, status, roles, inviteMessage, inviteeTeamMember:TeamMember!teamMemberId(name)",
       }),
-
-      db.invite.groupBy({
-        by: ["inviteeEmail"],
-        where: inviteWhere,
-      }),
+      count(db, "Invite", inviteWhere),
     ]);
 
     /**
      * Create the same structure for the invites
      */
-    const items = invites.map((invite) => {
-      const roleEnum = invite.roles[0] ?? OrganizationRoles.BASE;
+    const items = (invites as any[]).map((invite: any) => {
+      const roleEnum = invite.roles?.[0] ?? OrganizationRoles.BASE;
       return {
         id: invite.id,
-        name: invite.inviteeTeamMember.name,
+        name: invite.inviteeTeamMember?.name ?? "",
         img: "/static/images/default_pfp.jpg",
         email: invite.inviteeEmail,
         status: invite.status,
-        role: organizationRolesMap[roleEnum],
+        role: organizationRolesMap[
+          roleEnum as keyof typeof organizationRolesMap
+        ],
         roleEnum,
         userId: null,
         sso: false,
         inviteMessage: invite.inviteMessage,
       };
     });
-    const totalItems = totalItemsGrouped.length;
+    const totalItems = totalInvites;
     const totalPages = Math.ceil(totalItems / perPage);
 
     return {
@@ -625,7 +574,7 @@ export async function bulkInviteUsers({
     // Filter out duplicate emails
     const uniquePayloads = lodash.uniqBy(validUsers, (user) => user.email);
 
-    // Batch validate all emails against SS
+    // Batch validate all emails against SSO
     await Promise.all(
       uniquePayloads.map((payload) =>
         validateInvite(payload.email, organizationId)
@@ -636,50 +585,41 @@ export async function bulkInviteUsers({
       .filter((user) => !!user.teamMemberId)
       .map((user) => user.teamMemberId!);
 
-    const teamMembers = await db.teamMember.findMany({
+    const teamMembers = await findMany(db, "TeamMember", {
       where: { id: { in: teamMemberIds }, organizationId },
-      select: { id: true, userId: true },
+      select: "id, userId",
     });
 
     /**
      * These teamMembers has a user already associated.
      * So we will skip them from the invite process.
      * */
-    const teamMembersWithUserId = teamMembers
-      .filter((tm) => !!tm.userId)
-      .map((tm) => tm.id!);
+    const teamMembersWithUserId = (teamMembers as any[])
+      .filter((tm: any) => !!tm.userId)
+      .map((tm: any) => tm.id!);
 
-    // Batch check for existing users
+    // Batch check for existing users in org
     const emails = uniquePayloads.map((p) => p.email);
-    const existingUsers = await db.user.findMany({
-      where: {
-        email: { in: emails },
-        userOrganizations: {
-          some: { organizationId },
-        },
-      },
-      select: { email: true },
+    const existingUserOrgs = await findMany(db, "UserOrganization", {
+      where: { organizationId },
+      select: "userId, user:User(email)",
     });
-
-    const existingEmailsInOrg = new Set(existingUsers.map((u) => u.email));
+    const existingEmailsInOrg = new Set(
+      (existingUserOrgs as any[])
+        .filter((uo: any) => emails.includes(uo.user?.email))
+        .map((uo: any) => uo.user?.email)
+    );
 
     // Batch check for existing invites in one query
-    const existingInvites = await db.invite.findMany({
+    const existingInvites = await findMany(db, "Invite", {
       where: {
         organizationId,
         inviteeEmail: { in: emails },
         status: InviteStatuses.PENDING,
-        expiresAt: { gt: new Date() },
+        expiresAt: { gt: new Date().toISOString() },
       },
-      select: {
-        inviteeEmail: true,
-        inviteeTeamMember: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      select:
+        "inviteeEmail, inviteeTeamMember:TeamMember!teamMemberId(id, name)",
     });
 
     /* All emails are already invited */
@@ -701,7 +641,7 @@ export async function bulkInviteUsers({
     }
 
     /* All emails are already in organization */
-    if (existingUsers.length === emails.length) {
+    if (existingEmailsInOrg.size === emails.length) {
       sendNotification({
         title: "Users already member of organization",
         message: "All user in csv file are already part of your organization.",
@@ -718,7 +658,7 @@ export async function bulkInviteUsers({
     }
 
     /* All emails are either in organization already or invited already */
-    if (existingInvites.length + existingUsers.length === emails.length) {
+    if (existingInvites.length + existingEmailsInOrg.size === emails.length) {
       sendNotification({
         title: "0 users invited",
         message:
@@ -735,7 +675,9 @@ export async function bulkInviteUsers({
       };
     }
 
-    const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
+    const existingInviteEmails = (existingInvites as any[]).map(
+      (i: any) => i.inviteeEmail
+    );
 
     /**
      * We only have to send invite to the
@@ -766,14 +708,7 @@ export async function bulkInviteUsers({
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
-    const INVITE_INCLUDE = {
-      inviter: { select: { firstName: true, lastName: true } },
-      organization: true,
-    } satisfies Prisma.InviteInclude;
-
-    type InviteWithRelations = Prisma.InviteGetPayload<{
-      include: typeof INVITE_INCLUDE;
-    }>;
+    type InviteWithRelations = any;
 
     let createdInvites: InviteWithRelations[] = [];
 
@@ -781,7 +716,7 @@ export async function bulkInviteUsers({
       invites: InviteWithRelations[],
       extraInviteMessage?: string | null
     ) => {
-      invites.forEach((invite, index) => {
+      invites.forEach((invite: any, index: number) => {
         const batchIndex = Math.floor(index / INVITE_EMAIL_BATCH_SIZE);
         const positionInBatch = index % INVITE_EMAIL_BATCH_SIZE;
         const delay =
@@ -801,7 +736,7 @@ export async function bulkInviteUsers({
 
           sendEmail({
             to: invite.inviteeEmail,
-            subject: `✉️ You have been invited to ${invite.organization.name}`,
+            subject: `\u2709\uFE0F You have been invited to ${invite.organization.name}`,
             text: inviteEmailText({
               invite,
               token,
@@ -813,52 +748,66 @@ export async function bulkInviteUsers({
       });
     };
 
-    await db.$transaction(async (tx) => {
-      // Bulk create all required team members
-      const createdTeamMembers = await tx.teamMember.createManyAndReturn({
-        data: validPayloadsWithName.map((p) => ({
-          name: p.name,
-          organizationId,
-        })),
-      });
+    // Convert $transaction to sequential operations
+    // Bulk create all required team members
+    const createdTeamMembers = await createMany(
+      db,
+      "TeamMember",
+      validPayloadsWithName.map((p) => ({
+        name: p.name,
+        organizationId,
+      }))
+    );
 
-      /**
-       * This helper function returns the correct  teamMemberId required for creating an invite
-       */
-      function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
-        if (payload.teamMemberId) {
-          return payload.teamMemberId;
-        }
-
-        const createdTm = createdTeamMembers.find(
-          (tm) => tm.name === payload.name
-        );
-        invariant(
-          createdTm,
-          "Unexpected situation! Could not find teamMember in createdTeamMembers."
-        );
-
-        return createdTm.id;
+    /**
+     * This helper function returns the correct teamMemberId required for creating an invite
+     */
+    function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
+      if (payload.teamMemberId) {
+        return payload.teamMemberId;
       }
 
-      const invitesToCreate = validPayloadsWithName.map((payload) => ({
-        inviterId: userId,
-        organizationId,
-        inviteeEmail: payload.email,
-        teamMemberId: getTeamMemberId(payload),
-        roles: [payload.role],
-        expiresAt,
-        inviteCode: generateRandomCode(6),
-        status: InviteStatuses.PENDING,
-        ...(sanitizedMessage && { inviteMessage: sanitizedMessage }),
-      }));
+      const createdTm = (createdTeamMembers as any[]).find(
+        (tm: any) => tm.name === payload.name
+      );
+      invariant(
+        createdTm,
+        "Unexpected situation! Could not find teamMember in createdTeamMembers."
+      );
 
-      // Bulk create invites
-      createdInvites = await tx.invite.createManyAndReturn({
-        data: invitesToCreate,
-        include: INVITE_INCLUDE,
+      return createdTm.id;
+    }
+
+    const invitesToCreate = validPayloadsWithName.map((payload) => ({
+      inviterId: userId,
+      organizationId,
+      inviteeEmail: payload.email,
+      teamMemberId: getTeamMemberId(payload),
+      roles: [payload.role],
+      expiresAt: expiresAt.toISOString(),
+      inviteCode: generateRandomCode(6),
+      status: InviteStatuses.PENDING,
+      ...(sanitizedMessage && { inviteMessage: sanitizedMessage }),
+    }));
+
+    // Bulk create invites
+    const rawCreatedInvites = await createMany(
+      db,
+      "Invite",
+      invitesToCreate as any[]
+    );
+
+    // Fetch the created invites with relations for email sending
+    if (rawCreatedInvites.length > 0) {
+      const createdInviteIds = (rawCreatedInvites as any[]).map(
+        (i: any) => i.id
+      );
+      createdInvites = await findMany(db, "Invite", {
+        where: { id: { in: createdInviteIds } },
+        select:
+          "*, inviter:User!inviterId(firstName, lastName), organization:Organization(*)",
       });
-    });
+    }
 
     if (createdInvites.length > 0) {
       scheduleInviteEmailSending(createdInvites, sanitizedMessage);
@@ -905,9 +854,12 @@ export async function bulkInviteUsers({
       message = cause.message;
     }
 
+    // Check for foreign key constraint errors
     if (
-      cause instanceof PrismaClientKnownRequestError &&
-      cause.code === "P2003"
+      cause &&
+      typeof cause === "object" &&
+      "code" in cause &&
+      (cause as any).code === "23503"
     ) {
       message = "Received invalid teamMemberId in csv";
     }

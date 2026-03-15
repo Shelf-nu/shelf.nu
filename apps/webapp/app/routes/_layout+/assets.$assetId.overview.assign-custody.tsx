@@ -1,4 +1,3 @@
-import type { Prisma } from "@shelf/database";
 import { AssetStatus, BookingStatus, OrganizationRoles } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -101,7 +100,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       deletedAt: null,
       organizationId,
       userId: role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
-    } satisfies Prisma.TeamMemberWhereInput;
+    };
 
     const teamMembers = await db.teamMember
       .findMany({
@@ -168,7 +167,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     /** We send the data from the form as a json string, so we can easily have both the name and id
@@ -224,7 +223,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const asset = await db.asset
       .update({
-        where: { id: assetId, organizationId } as Prisma.AssetWhereUniqueInput,
+        where: { id: assetId, organizationId },
         data: {
           status: AssetStatus.IN_CUSTODY,
           custody: {

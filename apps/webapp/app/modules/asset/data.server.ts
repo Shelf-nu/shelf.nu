@@ -5,6 +5,7 @@ import { OrganizationRoles } from "@shelf/database";
 import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
+import { findMany, count } from "~/database/query-helpers.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { getClientHint } from "~/utils/client-hints";
@@ -402,14 +403,14 @@ export async function advancedModeLoader({
     }),
 
     // Kits
-    db.kit.findMany({
+    findMany(db, "Kit", {
       where: { organizationId },
       take:
         searchParams.has("getAll") && hasGetAllValue(searchParams, "kit")
           ? undefined
           : 12,
     }),
-    db.kit.count({ where: { organizationId } }),
+    count(db, "Kit", { organizationId }),
     // Tags for booking form
     getTagsForBookingTagsFilter({
       organizationId,
@@ -427,23 +428,21 @@ export async function advancedModeLoader({
       : Promise.resolve(null),
 
     // Bookings for filter dropdown (upcoming bookings only)
-    db.booking.findMany({
+    findMany(db, "Booking", {
       where: {
         organizationId,
         status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
       },
-      select: { id: true, name: true },
+      select: "id, name",
       take:
         searchParams.has("getAll") && hasGetAllValue(searchParams, "booking")
           ? undefined
           : 12,
       orderBy: { from: "asc" },
     }),
-    db.booking.count({
-      where: {
-        organizationId,
-        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-      },
+    count(db, "Booking", {
+      organizationId,
+      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
     }),
   ]);
 

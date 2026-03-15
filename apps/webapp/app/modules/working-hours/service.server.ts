@@ -1,4 +1,12 @@
 import { db } from "~/database/db.server";
+import {
+  create,
+  findFirst,
+  findMany,
+  findUnique,
+  remove,
+  update,
+} from "~/database/query-helpers.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import type { WeeklyScheduleForUpdate } from "./types";
 
@@ -7,35 +15,36 @@ const label = "Working hours";
 export async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
 
-  const workingHours = await db.workingHours.create({
-    data: {
-      organizationId,
-      enabled: false,
-      weeklySchedule: defaultSchedule,
-    },
-    include: {
-      overrides: {
-        orderBy: { date: "asc" },
-      },
-    },
+  const workingHours = await create(db, "WorkingHours", {
+    organizationId,
+    enabled: false,
+    weeklySchedule: defaultSchedule,
   });
-  return workingHours;
+
+  // Fetch overrides (will be empty for newly created)
+  const overrides = await findMany(db, "WorkingHoursOverride", {
+    where: { workingHoursId: workingHours.id },
+    orderBy: { date: "asc" },
+  });
+
+  return { ...workingHours, overrides };
 }
 
 export async function getWorkingHoursForOrganization(organizationId: string) {
   try {
     // First try to find existing working hours
-    const existingWorkingHours = await db.workingHours.findUnique({
+    const existingWorkingHours = await findUnique(db, "WorkingHours", {
       where: { organizationId },
-      include: {
-        overrides: {
-          orderBy: { date: "asc" },
-        },
-      },
     });
 
     if (existingWorkingHours) {
-      return existingWorkingHours;
+      // Fetch overrides separately
+      const overrides = await findMany(db, "WorkingHoursOverride", {
+        where: { workingHoursId: existingWorkingHours.id },
+        orderBy: { date: "asc" },
+      });
+
+      return { ...existingWorkingHours, overrides };
     }
 
     const newWorkingHours = await createDefaultWorkingHours(organizationId);
@@ -59,7 +68,7 @@ export async function toggleWorkingHours({
   enabled: boolean;
 }) {
   try {
-    const updatedWorkingHours = await db.workingHours.update({
+    const updatedWorkingHours = await update(db, "WorkingHours", {
       where: { organizationId },
       data: { enabled },
     });
@@ -83,12 +92,11 @@ export async function updateWorkingHoursSchedule({
   weeklySchedule: WeeklyScheduleForUpdate;
 }) {
   try {
-    // Update the weekly schedule - cast to any for Prisma Json type
-    await db.workingHours.update({
+    await update(db, "WorkingHours", {
       where: { organizationId },
       data: {
-        weeklySchedule, // Prisma Json type requires any
-        updatedAt: new Date(),
+        weeklySchedule,
+        updatedAt: new Date().toISOString(),
       },
     });
   } catch (cause) {
@@ -119,22 +127,22 @@ export async function createWorkingHoursOverride({
   try {
     let workingHoursId: string;
     // First ensure working hours exist for this organization
-    const workingHours = await db.workingHours.findUnique({
+    const workingHours = await findUnique(db, "WorkingHours", {
       where: { organizationId },
-      select: { id: true },
+      select: "id",
     });
     if (!workingHours) {
-      const workingHours = await createDefaultWorkingHours(organizationId);
-      workingHoursId = workingHours.id;
+      const newWorkingHours = await createDefaultWorkingHours(organizationId);
+      workingHoursId = newWorkingHours.id;
     } else {
       workingHoursId = workingHours.id;
     }
 
     // Check if an override already exists for this date
-    const existingOverride = await db.workingHoursOverride.findFirst({
+    const existingOverride = await findFirst(db, "WorkingHoursOverride", {
       where: {
         workingHoursId,
-        date: new Date(date),
+        date: new Date(date).toISOString(),
       },
     });
 
@@ -150,15 +158,13 @@ export async function createWorkingHoursOverride({
     }
 
     // Create the override
-    const override = await db.workingHoursOverride.create({
-      data: {
-        workingHoursId,
-        date: new Date(date),
-        isOpen,
-        openTime: isOpen ? openTime : null,
-        closeTime: isOpen ? closeTime : null,
-        reason,
-      },
+    const override = await create(db, "WorkingHoursOverride", {
+      workingHoursId,
+      date: new Date(date).toISOString(),
+      isOpen,
+      openTime: isOpen ? openTime : null,
+      closeTime: isOpen ? closeTime : null,
+      reason,
     });
 
     return override;
@@ -199,24 +205,24 @@ export async function updateWorkingHoursOverride({
   reason?: string;
 }) {
   try {
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       isOpen,
       openTime: isOpen ? openTime : null,
       closeTime: isOpen ? closeTime : null,
-      updatedAt: new Date(),
+      updatedAt: new Date().toISOString(),
     };
 
     if (date) {
-      updateData.date = new Date(date);
+      updateData.date = new Date(date).toISOString();
     }
 
     if (reason !== undefined) {
       updateData.reason = reason;
     }
 
-    const updatedOverride = await db.workingHoursOverride.update({
+    const updatedOverride = await update(db, "WorkingHoursOverride", {
       where: { id: overrideId },
-      data: updateData,
+      data: updateData as any,
     });
 
     return updatedOverride;
@@ -232,9 +238,7 @@ export async function updateWorkingHoursOverride({
 
 export async function deleteWorkingHoursOverride(overrideId: string) {
   try {
-    await db.workingHoursOverride.delete({
-      where: { id: overrideId },
-    });
+    await remove(db, "WorkingHoursOverride", { id: overrideId });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -249,21 +253,26 @@ export async function getWorkingHoursOverridesForOrganization(
   organizationId: string
 ) {
   try {
-    const workingHours = await db.workingHours.findUnique({
+    const workingHours = await findUnique(db, "WorkingHours", {
       where: { organizationId },
-      include: {
-        overrides: {
-          orderBy: { date: "asc" },
-          where: {
-            date: {
-              gte: new Date(), // Only get future and today's overrides
-            },
-          },
-        },
-      },
+      select: "id",
     });
 
-    return workingHours?.overrides || [];
+    if (!workingHours) {
+      return [];
+    }
+
+    const overrides = await findMany(db, "WorkingHoursOverride", {
+      where: {
+        workingHoursId: workingHours.id,
+        date: {
+          gte: new Date().toISOString(), // Only get future and today's overrides
+        },
+      },
+      orderBy: { date: "asc" },
+    });
+
+    return overrides;
   } catch (cause) {
     throw new ShelfError({
       cause,

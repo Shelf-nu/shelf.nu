@@ -1,6 +1,7 @@
 import type { User } from "@shelf/database";
 
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 
 /**
  * Minimal user name shape used when composing note content.
@@ -23,10 +24,12 @@ export function createLoadUserForNotes(userId: User["id"]): LoadUserForNotesFn {
 
   return async () => {
     if (!cachedUser) {
-      cachedUser = (await db.user.findFirst({
+      const user = await findFirst(db, "User", {
         where: { id: userId },
-        select: { firstName: true, lastName: true },
-      })) ?? { firstName: null, lastName: null };
+      });
+      cachedUser = user
+        ? { firstName: user.firstName, lastName: user.lastName }
+        : { firstName: null, lastName: null };
     }
 
     return cachedUser;

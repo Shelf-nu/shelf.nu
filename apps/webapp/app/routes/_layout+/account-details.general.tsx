@@ -1,4 +1,3 @@
-import type { Prisma } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -242,7 +241,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             firstName: true,
             lastName: true,
             email: true,
-          } satisfies Prisma.UserSelect,
+          },
         });
         // Validate the payload using our schema
         const { email: newEmail } = parseData(
@@ -313,7 +312,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         /** Just to make sure the user exists */
         await getUserByID(userId, {
-          select: { id: true } satisfies Prisma.UserSelect,
+          select: { id: true },
         });
 
         // Attempt to verify the OTP

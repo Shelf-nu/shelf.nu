@@ -738,21 +738,18 @@ export async function handlePaymentMethodDetached(
     const activeSubscription = getCustomerActiveSubscription({ customer });
 
     if (activeSubscription) {
-      await db.user
-        .update({
-          where: { customerId },
-          data: { warnForNoPaymentMethod: true },
-          select: { id: true },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to set missing payment method warning",
-            additionalData: { customerId, event: _event },
-            label: "Stripe webhook",
-            status: 500,
-          });
+      await update(db, "User", {
+        where: { customerId },
+        data: { warnForNoPaymentMethod: true },
+      }).catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to set missing payment method warning",
+          additionalData: { customerId, event: _event },
+          label: "Stripe webhook",
+          status: 500,
         });
+      });
     }
   }
 

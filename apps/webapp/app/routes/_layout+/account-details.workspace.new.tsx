@@ -1,4 +1,3 @@
-import type { Prisma } from "@shelf/database";
 import { Currency } from "@shelf/database";
 import {
   MaxFileSizeExceededError,
@@ -162,7 +161,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             firstName: true,
             lastName: true,
             customerId: true,
-          } satisfies Prisma.UserSelect,
+          },
         });
         const customerId = await getOrCreateCustomerId(user);
         await linkAuditAddonToOrganization({

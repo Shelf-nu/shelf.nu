@@ -17,7 +17,6 @@ import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
-import type { AUDIT_LIST_INCLUDE } from "~/modules/audit/service.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {

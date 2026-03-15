@@ -1,4 +1,4 @@
-import type { Category, Currency, Prisma, User } from "@shelf/database";
+import type { Category, Currency, User } from "@shelf/database";
 import type { LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
 
 import { formatCurrency } from "~/utils/currency";
@@ -146,7 +146,7 @@ export function buildCategoryChangeNote({
 }
 
 /**
- * Convert Prisma decimal / number into number.
+ * Convert a decimal / number value into number.
  */
 export function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) {
@@ -157,10 +157,10 @@ export function toNullableNumber(value: unknown): number | null {
     typeof value === "object" &&
     value !== null &&
     "toNumber" in value &&
-    typeof (value as Prisma.Decimal).toNumber === "function"
+    typeof (value as { toNumber: () => number }).toNumber === "function"
   ) {
     try {
-      return (value as Prisma.Decimal).toNumber();
+      return (value as { toNumber: () => number }).toNumber();
     } catch {
       return null;
     }
@@ -204,8 +204,8 @@ export function buildValuationChangeNote({
   locale,
 }: {
   userLink: string;
-  previous?: Prisma.Decimal | number | null;
-  next?: Prisma.Decimal | number | null;
+  previous?: number | null;
+  next?: number | null;
   currency: Currency;
   locale: string;
 }) {

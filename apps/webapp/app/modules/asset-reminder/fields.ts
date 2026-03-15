@@ -1,22 +1,6 @@
-import type { Prisma } from "@shelf/database";
-
-export const ASSET_REMINDER_INCLUDE_FIELDS = {
-  asset: {
-    select: { id: true, title: true },
-  },
-  teamMembers: {
-    select: {
-      id: true,
-      name: true,
-      user: {
-        select: {
-          firstName: true,
-          lastName: true,
-          profilePicture: true,
-          email: true,
-          id: true,
-        },
-      },
-    },
-  },
-} satisfies Prisma.AssetReminderInclude;
+/**
+ * Supabase select string for asset reminder joins.
+ * Replaces the Prisma include pattern with Supabase join syntax.
+ */
+export const ASSET_REMINDER_SELECT_FIELDS =
+  "*, asset:Asset(id, title), teamMembers:AssetReminderToTeamMember(teamMember:TeamMember(id, name, user:User(firstName, lastName, profilePicture, email, id)))";

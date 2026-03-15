@@ -1,4 +1,4 @@
-import type { TeamMember, Organization } from "@prisma/client";
+import type { TeamMember, Organization } from "@shelf/database";
 
 /**
  * Factory for creating TeamMember test data

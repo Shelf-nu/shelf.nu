@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { Prisma } from "@shelf/database";
+import type { TeamMember, User } from "@shelf/database";
 import { Link } from "react-router";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -11,23 +11,14 @@ import {
 } from "../shared/tooltip";
 import When from "../when/when";
 
+type ReminderTeamMember = Pick<TeamMember, "id" | "name"> & {
+  user: Pick<User, "id" | "firstName" | "lastName" | "profilePicture"> | null;
+};
+
 type ReminderTeamMembersProps = {
   className?: string;
   style?: CSSProperties;
-  teamMembers: Prisma.TeamMemberGetPayload<{
-    select: {
-      id: true;
-      name: true;
-      user: {
-        select: {
-          id: true;
-          firstName: true;
-          lastName: true;
-          profilePicture: true;
-        };
-      };
-    };
-  }>[];
+  teamMembers: ReminderTeamMember[];
   imgClassName?: string;
   extraContent?: ReactNode;
   isAlreadySent?: boolean;

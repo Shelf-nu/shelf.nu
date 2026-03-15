@@ -1,4 +1,4 @@
-import type { Organization, OrganizationType } from "@prisma/client";
+import type { Organization, OrganizationType } from "@shelf/database";
 
 /**
  * Factory for creating Organization test data

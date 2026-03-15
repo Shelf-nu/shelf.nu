@@ -1,4 +1,11 @@
 import { db } from "~/database/db.server";
+import {
+  create,
+  findUnique,
+  remove,
+  update,
+  upsert,
+} from "~/database/query-helpers.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import type {
@@ -16,20 +23,18 @@ export async function createBusinessIntel(
   payload: CreateBusinessIntelPayload
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.create({
-      data: {
-        userId: payload.userId,
-        howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
-        jobTitle: payload.jobTitle,
-        teamSize: payload.teamSize,
-        companyName: payload.companyName,
-        primaryUseCase: payload.primaryUseCase,
-        currentSolution: payload.currentSolution,
-        timeline: payload.timeline,
-      },
+    const businessIntel = await create(db, "UserBusinessIntel", {
+      userId: payload.userId,
+      howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
+      jobTitle: payload.jobTitle,
+      teamSize: payload.teamSize,
+      companyName: payload.companyName,
+      primaryUseCase: payload.primaryUseCase,
+      currentSolution: payload.currentSolution,
+      timeline: payload.timeline,
     });
 
-    return businessIntel;
+    return businessIntel as unknown as UserBusinessIntel;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -50,7 +55,7 @@ export async function updateBusinessIntel(
   payload: UpdateBusinessIntelPayload
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.update({
+    const businessIntel = await update(db, "UserBusinessIntel", {
       where: { userId },
       data: {
         howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
@@ -63,7 +68,7 @@ export async function updateBusinessIntel(
       },
     });
 
-    return businessIntel;
+    return businessIntel as unknown as UserBusinessIntel;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -84,9 +89,10 @@ export async function upsertBusinessIntel(
   payload: CreateBusinessIntelPayload
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.upsert({
-      where: { userId: payload.userId },
-      create: {
+    const businessIntel = await upsert(
+      db,
+      "UserBusinessIntel",
+      {
         userId: payload.userId,
         howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
         jobTitle: payload.jobTitle,
@@ -96,18 +102,10 @@ export async function upsertBusinessIntel(
         currentSolution: payload.currentSolution,
         timeline: payload.timeline,
       },
-      update: {
-        howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
-        jobTitle: payload.jobTitle,
-        teamSize: payload.teamSize,
-        companyName: payload.companyName,
-        primaryUseCase: payload.primaryUseCase,
-        currentSolution: payload.currentSolution,
-        timeline: payload.timeline,
-      },
-    });
+      { onConflict: "userId" }
+    );
 
-    return businessIntel;
+    return businessIntel as unknown as UserBusinessIntel;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -127,11 +125,11 @@ export async function getBusinessIntelByUserId(
   userId: string
 ): Promise<UserBusinessIntel | null> {
   try {
-    const businessIntel = await db.userBusinessIntel.findUnique({
+    const businessIntel = await findUnique(db, "UserBusinessIntel", {
       where: { userId },
     });
 
-    return businessIntel;
+    return businessIntel as unknown as UserBusinessIntel | null;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -150,11 +148,13 @@ export async function deleteBusinessIntel(
   userId: string
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.delete({
-      where: { userId },
-    });
+    const results = await remove(db, "UserBusinessIntel", { userId });
 
-    return businessIntel;
+    if (!results || results.length === 0) {
+      throw new Error("No record found to delete");
+    }
+
+    return results[0] as unknown as UserBusinessIntel;
   } catch (cause) {
     throw new ShelfError({
       cause,

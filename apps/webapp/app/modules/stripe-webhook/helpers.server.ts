@@ -1,6 +1,7 @@
 import type { TierId } from "@shelf/database";
 import Stripe from "stripe";
 import { db } from "~/database/db.server";
+import { findFirstOrThrow } from "~/database/query-helpers.server";
 import { sendEmail } from "~/emails/mail.server";
 import { unpaidInvoiceAdminText } from "~/emails/stripe/unpaid-invoice";
 import {
@@ -214,27 +215,17 @@ export async function constructVerifiedWebhookEvent(request: Request): Promise<{
     });
   }
 
-  const user = await db.user
-    .findFirstOrThrow({
-      where: { customerId },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        tierId: true,
-        warnForNoPaymentMethod: true,
-      },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "No user found",
-        additionalData: { customerId },
-        label: "Stripe webhook",
-        status: 500,
-      });
+  const user = await findFirstOrThrow(db, "User", {
+    where: { customerId },
+  }).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "No user found",
+      additionalData: { customerId },
+      label: "Stripe webhook",
+      status: 500,
     });
+  });
 
   // Custom install users — no processing needed
   const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");

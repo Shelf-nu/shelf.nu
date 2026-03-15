@@ -2,11 +2,16 @@ import {
   AssetIndexMode,
   OrganizationRoles,
   type CustomField,
-  type Prisma,
 } from "@shelf/database";
-import type { ITXClientDenyList } from "@prisma/client/runtime/library";
-import type { ExtendedPrismaClient } from "~/database/db.server";
+import type { SupabaseDataClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import {
+  create,
+  findFirst,
+  findMany,
+  findUnique,
+  update,
+} from "~/database/query-helpers.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import type { Column, ColumnLabelKey } from "./helpers";
 import {
@@ -49,8 +54,8 @@ export async function createUserAssetIndexSettings({
   canUseBarcodes?: boolean;
   /** User's role to determine default mode */
   role?: OrganizationRoles;
-  /** Optionally receive a transaction when the settingsd need to be created together with other entries */
-  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  /** Optionally receive a Supabase client (for consistency with callers that pass a client) */
+  tx?: SupabaseDataClient;
 }) {
   const _db = tx || db;
 
@@ -68,7 +73,7 @@ export async function createUserAssetIndexSettings({
     const barcodeColumns = canUseBarcodes ? generateBarcodeColumns() : [];
     position += barcodeColumns.length;
 
-    const customFieldsColumns = org.customFields.map((cf) => {
+    const customFieldsColumns = org.customFields.map((cf: any) => {
       /** We increment the position for each custom field */
       position += 1;
       return {
@@ -88,13 +93,11 @@ export async function createUserAssetIndexSettings({
     // Align initial mode based on the user's role
     const defaultMode = getDefaultModeForRole(role);
 
-    const settings = await _db.assetIndexSettings.create({
-      data: {
-        userId,
-        organizationId,
-        mode: defaultMode,
-        columns,
-      },
+    const settings = await create(_db, "AssetIndexSettings", {
+      userId,
+      organizationId,
+      mode: defaultMode,
+      columns: columns as any,
     });
 
     return settings;
@@ -122,7 +125,7 @@ export async function getAssetIndexSettings({
   role?: OrganizationRoles;
 }) {
   try {
-    const assetIndexSettings = await db.assetIndexSettings.findFirst({
+    const assetIndexSettings = await findFirst(db, "AssetIndexSettings", {
       where: { userId, organizationId },
     });
 
@@ -169,13 +172,13 @@ export async function ensureAssetIndexModeForRole({
   userId: string;
   organizationId: string;
   role?: OrganizationRoles | null;
-  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  tx?: SupabaseDataClient;
 }) {
   const client = tx || db;
   const desiredMode = getDefaultModeForRole(role);
 
-  let settings = await client.assetIndexSettings.findUnique({
-    where: { userId_organizationId: { userId, organizationId } },
+  let settings = await findUnique(client, "AssetIndexSettings", {
+    where: { userId, organizationId },
   });
 
   if (!settings) {
@@ -191,8 +194,8 @@ export async function ensureAssetIndexModeForRole({
     desiredMode === AssetIndexMode.ADVANCED &&
     settings.mode !== AssetIndexMode.ADVANCED
   ) {
-    settings = await client.assetIndexSettings.update({
-      where: { userId_organizationId: { userId, organizationId } },
+    settings = await update(client, "AssetIndexSettings", {
+      where: { userId, organizationId },
       data: { mode: AssetIndexMode.ADVANCED },
     });
   }
@@ -210,8 +213,8 @@ export async function changeMode({
   mode: AssetIndexMode;
 }) {
   try {
-    const updatedAssetIndexSettings = await db.assetIndexSettings.update({
-      where: { userId_organizationId: { userId, organizationId } },
+    const updatedAssetIndexSettings = await update(db, "AssetIndexSettings", {
+      where: { userId, organizationId },
       data: { mode },
     });
 
@@ -239,9 +242,9 @@ export async function updateColumns({
   columns: Column[];
 }) {
   try {
-    const updatedAssetIndexSettings = await db.assetIndexSettings.update({
-      where: { userId_organizationId: { userId, organizationId } },
-      data: { columns },
+    const updatedAssetIndexSettings = await update(db, "AssetIndexSettings", {
+      where: { userId, organizationId },
+      data: { columns: columns as any },
     });
 
     return updatedAssetIndexSettings;
@@ -269,12 +272,14 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
   newField: CustomField;
 }) {
   try {
-    const settings = await db.assetIndexSettings.findMany({
+    const settings = await findMany(db, "AssetIndexSettings", {
       where: { organizationId: newField.organizationId },
     });
 
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
+      const columns = Array.from(
+        entry.columns as unknown as Column[]
+      ) as Column[];
       const cfIndex = columns.findIndex(
         (col) => col?.name === `cf_${oldField.name}`
       );
@@ -304,9 +309,9 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
         columns.splice(cfIndex, 1);
       }
 
-      return db.assetIndexSettings.update({
+      return update(db, "AssetIndexSettings", {
         where: { id: entry.id },
-        data: { columns },
+        data: { columns: columns as any },
       });
     });
 
@@ -325,36 +330,22 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
 
 /**
  * Removes a custom field column from every asset index configuration that belongs to an organization.
- * Uses a single SQL statement to efficiently filter the JSON columns payload for all matching rows.
+ * Uses an RPC call to efficiently filter the JSON columns payload for all matching rows.
  */
 export async function removeCustomFieldFromAssetIndexSettings({
   customFieldName,
   organizationId,
-  prisma,
 }: {
   customFieldName: string;
   organizationId: string;
-  prisma?: Pick<Prisma.TransactionClient, "$executeRaw">;
 }) {
-  const client = prisma ?? db;
-
   try {
     const columnName = `cf_${customFieldName}`;
 
-    await client.$executeRaw`
-      UPDATE "AssetIndexSettings" AS ais
-      SET "columns" = (
-        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-        FROM jsonb_array_elements(ais."columns") elem
-        WHERE elem->>'name' <> ${columnName}
-      )
-      WHERE ais."organizationId" = ${organizationId}
-        AND EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements(ais."columns") elem
-          WHERE elem->>'name' = ${columnName}
-        );
-    `;
+    await db.rpc("remove_custom_field_from_index_settings", {
+      p_custom_field_name: columnName,
+      p_organization_id: organizationId,
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -381,7 +372,7 @@ export async function updateAssetIndexSettingsWithNewCustomFields({
 }) {
   try {
     // Get all asset index settings for the organization
-    const settings = await db.assetIndexSettings.findMany({
+    const settings = await findMany(db, "AssetIndexSettings", {
       where: { organizationId },
     });
 
@@ -406,10 +397,10 @@ export async function updateAssetIndexSettingsWithNewCustomFields({
           !newCustomFields.some((field) => `cf_${field.name}` === col.name)
       );
 
-      return db.assetIndexSettings.update({
+      return update(db, "AssetIndexSettings", {
         where: { id: setting.id },
         data: {
-          columns: [...existingColumns, ...newColumns],
+          columns: [...existingColumns, ...newColumns] as any,
         },
       });
     });
@@ -529,20 +520,17 @@ async function validateColumns({
     // Only query DB if we found invalid custom fields
     if (hasInvalidCustomFields) {
       // Fetch custom fields data only when needed
-      const customFields = await db.customField.findMany({
+      const customFields = await findMany(db, "CustomField", {
         where: {
           organizationId,
           active: true,
           deletedAt: null,
         },
-        select: {
-          name: true,
-          type: true,
-        },
+        select: "name, type",
       });
 
       const customFieldsMap = new Map(
-        customFields.map((cf) => [cf.name, cf.type])
+        (customFields as any[]).map((cf: any) => [cf.name, cf.type])
       );
 
       // Filter out non-custom field columns

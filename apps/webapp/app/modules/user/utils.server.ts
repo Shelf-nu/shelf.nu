@@ -6,6 +6,14 @@ import {
 import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import {
+  create,
+  findFirst,
+  findUnique,
+  findUniqueOrThrow,
+  update,
+  updateMany,
+} from "~/database/query-helpers.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
@@ -72,25 +80,25 @@ export async function resolveUserAction(
         }
       );
 
-      await db.teamMember
-        .update({
+      try {
+        await update(db, "TeamMember", {
           where: {
             id: teamMemberId,
             organizationId,
             deletedAt: null,
           },
           data: {
-            deletedAt: new Date(),
+            deletedAt: new Date().toISOString(),
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to delete team member",
-            additionalData: { teamMemberId, userId, organizationId },
-            label: "Team",
-          });
         });
+      } catch (cause) {
+        throw new ShelfError({
+          cause,
+          message: "Failed to delete team member",
+          additionalData: { teamMemberId, userId, organizationId },
+          label: "Team",
+        });
+      }
 
       return redirect(`/settings/team/users`);
     }
@@ -113,24 +121,21 @@ export async function resolveUserAction(
         organizationId,
       });
 
-      const org = await db.organization
-        .findUniqueOrThrow({
+      let org;
+      try {
+        org = await findUniqueOrThrow(db, "Organization", {
           where: {
             id: organizationId,
           },
-          select: {
-            name: true,
-            customEmailFooter: true,
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Organization not found",
-            additionalData: { organizationId, targetUserId, userId },
-            label: "Team",
-          });
         });
+      } catch (cause) {
+        throw new ShelfError({
+          cause,
+          message: "Organization not found",
+          additionalData: { organizationId, targetUserId, userId },
+          label: "Team",
+        });
+      }
 
       sendEmail({
         to: user.email,
@@ -164,8 +169,8 @@ export async function resolveUserAction(
         }
       );
 
-      await db.invite
-        .updateMany({
+      try {
+        await updateMany(db, "Invite", {
           where: {
             inviteeEmail,
             organizationId,
@@ -174,15 +179,15 @@ export async function resolveUserAction(
           data: {
             status: InviteStatuses.INVALIDATED,
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to cancel invites",
-            additionalData: { userId, organizationId, inviteeEmail },
-            label: "Team",
-          });
         });
+      } catch (cause) {
+        throw new ShelfError({
+          cause,
+          message: "Failed to cancel invites",
+          additionalData: { userId, organizationId, inviteeEmail },
+          label: "Team",
+        });
+      }
 
       sendNotification({
         title: "Invitation cancelled",
@@ -231,37 +236,37 @@ export async function resolveUserAction(
 
       /** Invalidate all previous invites for current user for current organization */
 
-      const [_invalidatedInvites, invite] = await Promise.all([
-        db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to invalidate previous invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          }),
+      let invalidateError: Error | null = null;
+      try {
+        await updateMany(db, "Invite", {
+          where: {
+            inviteeEmail,
+            organizationId,
+          },
+          data: {
+            status: InviteStatuses.INVALIDATED,
+          },
+        });
+      } catch (cause) {
+        invalidateError = cause as Error;
+        throw new ShelfError({
+          cause,
+          message: "Failed to invalidate previous invites",
+          additionalData: { userId, organizationId, inviteeEmail },
+          label: "Team",
+        });
+      }
 
-        /** Create a new invite, based on the prev invite's role */
-        createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [role],
-          userId,
-        }),
-      ]);
+      /** Create a new invite, based on the prev invite's role */
+      const invite = await createInvite({
+        organizationId,
+        inviteeEmail,
+        teamMemberName,
+        teamMemberId,
+        inviterId: userId,
+        roles: [role],
+        userId,
+      });
 
       if (invite) {
         sendNotification({
@@ -312,7 +317,7 @@ export async function resolveUserAction(
       }
 
       /** Fetch the target's current role to detect demotion */
-      const targetUserOrg = await db.userOrganization.findFirst({
+      const targetUserOrg = await findFirst(db, "UserOrganization", {
         where: { userId: targetUserId, organizationId },
       });
 
@@ -328,16 +333,15 @@ export async function resolveUserAction(
 
       /** Transfer entities on demotion */
       if (isDemotion(currentRole, newRole)) {
-        const org = await db.organization.findUniqueOrThrow({
+        const org = await findUniqueOrThrow(db, "Organization", {
           where: { id: organizationId },
-          select: { userId: true },
         });
 
         const recipientId = transferToUserId || org.userId;
 
         /** Validate that the transfer recipient is a member of this org */
         if (transferToUserId) {
-          const recipientOrg = await db.userOrganization.findFirst({
+          const recipientOrg = await findFirst(db, "UserOrganization", {
             where: { userId: transferToUserId, organizationId },
           });
 
@@ -352,64 +356,53 @@ export async function resolveUserAction(
           }
         }
 
-        await db.$transaction(async (tx) => {
-          await transferEntitiesToNewOwner({
-            tx,
-            id: targetUserId,
-            newOwnerId: recipientId,
-            organizationId,
-            skipInvites: true,
-          });
+        // Transfer entities then change role sequentially
+        await transferEntitiesToNewOwner({
+          id: targetUserId,
+          newOwnerId: recipientId,
+          organizationId,
+          skipInvites: true,
+        });
 
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          callerRole,
+        });
 
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        await create(db, "RoleChangeLog", {
+          userId: targetUserId,
+          changedById: userId,
+          organizationId,
+          previousRole: currentRole,
+          newRole,
         });
       } else {
-        await db.$transaction(async (tx) => {
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
+        // No demotion, just change role
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          callerRole,
+        });
 
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        await create(db, "RoleChangeLog", {
+          userId: targetUserId,
+          changedById: userId,
+          organizationId,
+          previousRole: currentRole,
+          newRole,
         });
       }
 
       /** Send email notification to the affected user */
       const [targetUser, org] = await Promise.all([
-        db.user.findUniqueOrThrow({
+        findUniqueOrThrow(db, "User", {
           where: { id: targetUserId },
-          select: { email: true },
         }),
-        db.organization.findUniqueOrThrow({
+        findUniqueOrThrow(db, "Organization", {
           where: { id: organizationId },
-          select: { name: true, customEmailFooter: true },
         }),
       ]);
 
@@ -473,9 +466,8 @@ export async function generateUniqueUsername(email: string): Promise<string> {
     const username = randomUsernameFromEmail(email);
 
     // Check if username exists
-    const existingUser = await db.user.findUnique({
+    const existingUser = await findUnique(db, "User", {
       where: { username },
-      select: { id: true },
     });
 
     if (!existingUser) {

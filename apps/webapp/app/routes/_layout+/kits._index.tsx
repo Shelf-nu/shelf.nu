@@ -32,6 +32,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { findMany, count } from "~/database/query-helpers.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -41,7 +42,6 @@ import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
 } from "~/modules/kit/service.server";
-import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
@@ -58,7 +58,6 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
-import type { MergeInclude } from "~/utils/utils";
 
 export type KitIndexLoaderData = typeof loader;
 
@@ -136,27 +135,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           location: LOCATION_WITH_HIERARCHY,
         },
       }),
-      db.teamMember
-        .findMany({
-          where: {
-            deletedAt: null,
-            organizationId,
-            userId: !canSeeAllCustody ? userId : undefined,
-          },
-          include: { user: true },
-          orderBy: { userId: "asc" },
-          take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while fetching team members. Please try again or contact support.",
-            additionalData: { userId, organizationId },
-            label: "Assets",
-          });
-        }),
-      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      findMany(db, "TeamMember", {
+        where: {
+          deletedAt: null,
+          organizationId,
+          userId: !canSeeAllCustody ? userId : undefined,
+        },
+        select: "*, user:User(*)",
+        orderBy: { userId: "asc" },
+        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
+      }).catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching team members. Please try again or contact support.",
+          additionalData: { userId, organizationId },
+          label: "Assets",
+        });
+      }),
+      count(db, "TeamMember", { deletedAt: null, organizationId }),
       getLocationsForCreateAndEdit({
         organizationId,
         request,

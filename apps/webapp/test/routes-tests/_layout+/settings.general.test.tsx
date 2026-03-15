@@ -1,4 +1,4 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@shelf/database";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createLoaderArgs, createActionArgs } from "@mocks/remix";
 

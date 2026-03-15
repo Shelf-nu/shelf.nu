@@ -1,8 +1,13 @@
 import { useState } from "react";
-import type { Prisma } from "@shelf/database";
+import type {
+  Asset,
+  AssetReminder,
+  AssetReminderToTeamMember,
+  TeamMember,
+  User,
+} from "@shelf/database";
 import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { List } from "../list";
 import ReminderTeamMembers from "./reminder-team-members";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
@@ -100,13 +105,18 @@ export default function RemindersTable({
   );
 }
 
+type ReminderWithRelations = AssetReminder & {
+  asset: Asset;
+  teamMembers: (AssetReminderToTeamMember & {
+    teamMember: TeamMember & { user: User | null };
+  })[];
+};
+
 function ListContent({
   item,
   extraProps,
 }: {
-  item: Prisma.AssetReminderGetPayload<{
-    include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  item: ReminderWithRelations;
   extraProps: { isAssetReminderPage: boolean };
 }) {
   const now = new Date();

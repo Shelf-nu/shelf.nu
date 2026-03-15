@@ -1,6 +1,7 @@
 import type { Asset } from "@shelf/database";
 import { AssetStatus } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { deleteMany, update } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 export async function releaseCustody({
@@ -11,23 +12,16 @@ export async function releaseCustody({
   organizationId: Asset["organizationId"];
 }) {
   try {
-    return await db.asset.update({
+    // Delete the custody record first
+    await deleteMany(db, "Custody", { assetId });
+
+    // Then update the asset status and return with joined data
+    return await update(db, "Asset", {
       where: { id: assetId, organizationId },
       data: {
         status: AssetStatus.AVAILABLE,
-        custody: {
-          delete: true,
-        },
       },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-        custody: true,
-      },
+      select: "*, user:User(firstName, lastName), custody:Custody(*)",
     });
   } catch (cause) {
     throw new ShelfError({

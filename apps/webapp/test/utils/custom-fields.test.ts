@@ -1,4 +1,4 @@
-import type { CustomField } from "@prisma/client";
+import type { CustomField } from "@shelf/database";
 import { describe, expect, it } from "vitest";
 
 import { buildCustomFieldValue } from "~/utils/custom-fields";

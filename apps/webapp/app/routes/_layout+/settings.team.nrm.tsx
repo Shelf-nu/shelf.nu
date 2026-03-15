@@ -1,4 +1,4 @@
-import type { Prisma } from "@shelf/database";
+import type { TeamMember } from "@shelf/database";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -227,15 +227,9 @@ export default function NrmSettings() {
 function TeamMemberRow({
   item,
 }: {
-  item: Prisma.TeamMemberGetPayload<{
-    include: {
-      _count: {
-        select: {
-          custodies: true;
-        };
-      };
-    };
-  }>;
+  item: TeamMember & {
+    _count: { custodies: number };
+  };
 }) {
   return (
     <>

@@ -1,4 +1,4 @@
-import type { BookingStatus, Prisma } from "@shelf/database";
+import type { BookingStatus } from "@shelf/database";
 
 export const LOCATION_WITH_HIERARCHY = {
   select: {
@@ -11,7 +11,7 @@ export const LOCATION_WITH_HIERARCHY = {
       },
     },
   },
-} satisfies Prisma.LocationDefaultArgs;
+};
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },
@@ -32,7 +32,7 @@ export const KITS_INCLUDE_FIELDS = {
       },
     },
   },
-} satisfies Prisma.KitInclude;
+};
 
 export const getAssetOverviewFields = (
   assetId: string,
@@ -99,7 +99,7 @@ export const getAssetOverviewFields = (
         custodianUser: true,
       },
     },
-  } satisfies Prisma.AssetInclude;
+  };
 
   // Conditionally add barcodes if enabled
   if (canUseBarcodes) {
@@ -112,7 +112,7 @@ export const getAssetOverviewFields = (
           value: true,
         },
       },
-    } satisfies Prisma.AssetInclude;
+    };
   }
 
   return baseFields;
@@ -121,7 +121,7 @@ export const getAssetOverviewFields = (
 /**
  * Generates include fields for asset queries with optimized field selection
  * @param params Optional parameters to customize included fields
- * @returns Prisma include object for asset queries
+ * @returns Include object for asset queries
  */
 export const assetIndexFields = ({
   bookingFrom,
@@ -180,7 +180,7 @@ export const assetIndexFields = ({
       select: { id: true },
       take: 1,
     },
-  } satisfies Prisma.AssetInclude;
+  };
 
   // Conditionally add bookings if date range is provided
   if (bookingTo && bookingFrom && unavailableBookingStatuses) {
@@ -208,7 +208,7 @@ export const assetIndexFields = ({
           name: true,
         },
       },
-    } satisfies Prisma.AssetInclude;
+    };
   }
 
   return fields;

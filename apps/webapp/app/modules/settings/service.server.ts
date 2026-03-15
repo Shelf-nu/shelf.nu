@@ -1,8 +1,9 @@
 import { InviteStatuses } from "@shelf/database";
-import type { Prisma, Organization, OrganizationRoles } from "@shelf/database";
+import type { Organization, OrganizationRoles } from "@shelf/database";
 
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { count, findMany } from "~/database/query-helpers.server";
 import {
   organizationRolesMap,
   type UserFriendlyRoles,
@@ -47,7 +48,7 @@ export async function getPaginatedAndFilterableSettingUsers({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
-    const userOrganizationWhere: Prisma.UserOrganizationWhereInput = {
+    const userOrganizationWhere: Record<string, unknown> = {
       organizationId,
     };
 
@@ -64,48 +65,36 @@ export async function getPaginatedAndFilterableSettingUsers({
 
     const [userMembers, totalItems] = await Promise.all([
       /** Get Users */
-      db.userOrganization.findMany({
+      findMany(db, "UserOrganization", {
         where: userOrganizationWhere,
         skip,
         take,
-        select: {
-          user: {
-            include: {
-              teamMembers: {
-                where: { organizationId },
-                include: {
-                  _count: {
-                    select: { custodies: true },
-                  },
-                },
-              },
-            },
-          },
-          roles: true,
-        },
+        select:
+          "*, user:User(*, teamMembers:TeamMember(*, custodyCount:Custody(count))), roles",
       }),
 
-      db.userOrganization.count({ where: userOrganizationWhere }),
+      count(db, "UserOrganization", userOrganizationWhere),
     ]);
 
     /**
      * Create a structure for the users org members and merge it with invites
      */
-    const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
-      userMembers.map((um) => ({
-        id: um.user.id,
-        name: `${um.user.firstName ? um.user.firstName : ""} ${
-          um.user.lastName ? um.user.lastName : ""
-        }`,
-        img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
-        email: um.user.email,
-        status: "ACCEPTED",
-        role: organizationRolesMap[um.roles[0]],
-        roleEnum: um.roles[0],
-        userId: um.user.id,
-        sso: um.user.sso,
-        custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
-      }));
+    const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] = (
+      userMembers as any[]
+    ).map((um) => ({
+      id: um.user.id,
+      name: `${um.user.firstName ? um.user.firstName : ""} ${
+        um.user.lastName ? um.user.lastName : ""
+      }`,
+      img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
+      email: um.user.email,
+      status: "ACCEPTED",
+      role: organizationRolesMap[um.roles[0]],
+      roleEnum: um.roles[0],
+      userId: um.user.id,
+      sso: um.user.sso,
+      custodies: um?.user?.teamMembers?.[0]?.custodyCount?.[0]?.count || 0,
+    }));
 
     const totalPages = Math.ceil(totalItems / perPage);
 
@@ -150,34 +139,30 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
      * 1. Don't have any invites(userId:null)
      * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
      */
-    const where: Prisma.TeamMemberWhereInput = {
+    const where: Record<string, unknown> = {
       deletedAt: null,
       organizationId,
       userId: null,
-      receivedInvites: {
-        none: { status: InviteStatuses.PENDING },
-      },
     };
 
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { user: { firstName: { contains: search, mode: "insensitive" } } },
-        { user: { lastName: { contains: search, mode: "insensitive" } } },
-      ];
+      where.OR = [{ name: { contains: search, mode: "insensitive" } }];
     }
 
     const [teamMembers, totalTeamMembers] = await Promise.all([
-      db.teamMember.findMany({
+      findMany(db, "TeamMember", {
         where,
         take,
         skip,
-        include: {
-          _count: { select: { custodies: true } },
-        },
+        select: "*, custodyCount:Custody(count)",
       }),
-      db.teamMember.count({ where }),
+      count(db, "TeamMember", where),
     ]);
+
+    // Filter out team members that have pending invites
+    const filteredTeamMembers = await filterOutPendingInvites(
+      teamMembers as any[]
+    );
 
     const totalPages = Math.ceil(totalTeamMembers / perPage);
 
@@ -187,7 +172,7 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
       totalPages,
       search,
       totalTeamMembers,
-      teamMembers,
+      teamMembers: filteredTeamMembers,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -197,4 +182,29 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
       label,
     });
   }
+}
+
+/**
+ * Filters out team members that have pending invites.
+ * This replaces the Prisma `receivedInvites: { none: { status: PENDING } }` filter.
+ */
+async function filterOutPendingInvites(teamMembers: any[]): Promise<any[]> {
+  if (teamMembers.length === 0) return teamMembers;
+
+  const teamMemberIds = teamMembers.map((tm) => tm.id);
+
+  // Find team members that have pending invites
+  const pendingInvites = await findMany(db, "Invite", {
+    where: {
+      teamMemberId: { in: teamMemberIds },
+      status: InviteStatuses.PENDING,
+    },
+  });
+
+  const pendingTeamMemberIds = new Set(
+    (pendingInvites as any[]).map((inv) => inv.teamMemberId)
+  );
+
+  // Return only team members without pending invites
+  return teamMembers.filter((tm) => !pendingTeamMemberIds.has(tm.id));
 }

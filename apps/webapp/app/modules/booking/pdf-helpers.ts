@@ -3,9 +3,12 @@ import type {
   Location,
   Category,
   Organization,
-  Prisma,
+  Booking,
   Kit,
   OrganizationRoles,
+  TeamMember,
+  User,
+  Tag,
 } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -23,13 +26,11 @@ export interface SortParams {
 }
 
 export interface PdfDbResult {
-  booking: Prisma.BookingGetPayload<{
-    include: {
-      custodianTeamMember: true;
-      custodianUser: true;
-      tags: typeof TAG_WITH_COLOR_SELECT;
-    };
-  }>;
+  booking: Booking & {
+    custodianTeamMember: TeamMember | null;
+    custodianUser: User | null;
+    tags: Pick<Tag, "id" | "name" | "color">[];
+  };
   assets: (Asset & {
     category: Pick<Category, "name"> | null;
     location: Pick<Location, "name"> | null;

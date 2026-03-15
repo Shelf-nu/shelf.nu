@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Prisma } from "@shelf/database";
+import type { Kit, Location } from "@shelf/database";
 import { KitStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { MapPin } from "lucide-react";
@@ -413,9 +413,14 @@ export default function ManageLocationKits() {
 const RowComponent = ({
   item,
 }: {
-  item: Prisma.KitGetPayload<{
-    include: { category: true; location: typeof LOCATION_WITH_HIERARCHY };
-  }>;
+  item: Kit & {
+    category: { id: string; name: string; color: string } | null;
+    location:
+      | (Location & { _count?: { children: number }; parent?: Location | null })
+      | null;
+    image: string | null;
+    imageExpiration: string | null;
+  };
 }) => {
   const { category } = item;
 

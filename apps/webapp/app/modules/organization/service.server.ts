@@ -4,10 +4,22 @@ import {
   OrganizationType,
   Roles,
 } from "@shelf/database";
-import type { Organization, Prisma, TierId, User } from "@shelf/database";
+import type { Organization, TierId, User } from "@shelf/database";
 import type Stripe from "stripe";
 
 import { db } from "~/database/db.server";
+import {
+  create,
+  createMany,
+  findFirst,
+  findFirstOrThrow,
+  findMany,
+  findUnique,
+  findUniqueOrThrow,
+  update,
+  updateMany,
+} from "~/database/query-helpers.server";
+import { rpc } from "~/database/transaction.server";
 import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
@@ -29,15 +41,38 @@ import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
 
-export async function getOrganizationById<T extends Prisma.OrganizationInclude>(
+export type OrganizationWithIncludes = Organization & {
+  [key: string]: unknown;
+};
+
+export async function getOrganizationById(
   id: Organization["id"],
-  extraIncludes?: T
+  extraIncludes?: Record<string, unknown>
 ) {
   try {
-    return (await db.organization.findUniqueOrThrow({
+    // Build a select string based on extraIncludes
+    let selectStr = "*";
+    if (extraIncludes) {
+      const joinParts: string[] = [];
+      for (const [relation] of Object.entries(extraIncludes)) {
+        // Map known relation names to their Supabase join syntax
+        if (relation === "customFields") {
+          joinParts.push("customFields:CustomField(*)");
+        } else if (relation === "ssoDetails") {
+          joinParts.push("ssoDetails:SsoDetails(*)");
+        } else {
+          joinParts.push(`${relation}(*)`);
+        }
+      }
+      if (joinParts.length > 0) {
+        selectStr = `*, ${joinParts.join(", ")}`;
+      }
+    }
+
+    return await findUniqueOrThrow(db, "Organization", {
       where: { id },
-      include: extraIncludes,
-    })) as Prisma.OrganizationGetPayload<{ include: T }>;
+      select: selectStr,
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -56,21 +91,12 @@ export const getOrganizationByUserId = async ({
   orgType: OrganizationType;
 }) => {
   try {
-    return await db.organization.findFirstOrThrow({
+    return await findFirstOrThrow(db, "Organization", {
       where: {
-        owner: {
-          is: {
-            id: userId,
-          },
-        },
+        userId,
         type: orgType,
       },
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        currency: true,
-      },
+      select: "id, name, type, currency",
     });
   } catch (cause) {
     throw new ShelfError({
@@ -102,29 +128,20 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
       });
     }
 
-    // Query for organizations where the domain field contains the email domain
-    const organizations = await db.organization.findMany({
-      where: {
-        ssoDetails: {
-          isNot: null,
-        },
-        AND: [
-          {
-            ssoDetails: {
-              domain: {
-                contains: emailDomain,
-              },
-            },
-          },
-        ],
-      },
-      include: {
-        ssoDetails: true,
-      },
+    // Query for organizations that have ssoDetails with a domain containing the email domain
+    // First get all organizations with ssoDetails, then filter
+    const organizations = await findMany(db, "Organization", {
+      select: "*, ssoDetails:SsoDetails(*)",
+    });
+
+    // Filter organizations that have ssoDetails and domain contains emailDomain
+    const orgsWithMatchingDomain = (organizations as any[]).filter((org) => {
+      if (!org.ssoDetails || !org.ssoDetails.domain) return false;
+      return (org.ssoDetails.domain as string).includes(emailDomain);
     });
 
     // Filter to ensure exact domain matches
-    return organizations.filter((org) =>
+    return orgsWithMatchingDomain.filter((org) =>
       org.ssoDetails?.domain
         ? emailMatchesDomains(emailDomain, org.ssoDetails.domain)
         : false
@@ -149,94 +166,74 @@ export async function createOrganization({
   image: File | null;
 }) {
   try {
-    const owner = await db.user.findFirstOrThrow({
+    const owner = await findFirstOrThrow(db, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     });
 
-    const data = {
+    // Create the organization
+    const org = await create(db, "Organization", {
       name,
       currency,
       type: OrganizationType.TEAM,
+      userId,
       hasSequentialIdsMigrated: true, // New organizations don't need migration
-      categories: {
-        create: defaultUserCategories.map((c) => ({ ...c, userId })),
-      },
-      userOrganizations: {
-        create: {
-          userId,
-          roles: [OrganizationRoles.OWNER],
-        },
-      },
-      owner: {
-        connect: {
-          id: userId,
-        },
-      },
-      /**
-       * Creating a teamMember when a new organization/workspace is created
-       * so that the owner appear in the list by default
-       */
-      members: {
-        create: {
-          name: `${owner.firstName} ${owner.lastName} (Owner)`,
-          user: { connect: { id: owner.id } },
-        },
-      },
+    });
 
-      assetIndexSettings: {
-        create: {
-          mode: AssetIndexMode.ADVANCED,
-          columns: defaultFields,
-          user: {
-            connect: {
-              id: userId,
-            },
-          },
-        },
-      },
+    // Create related records in parallel where possible
+    const categoryData = defaultUserCategories.map((c) => ({
+      ...c,
+      userId,
+      organizationId: org.id,
+    }));
 
-      workingHours: {
-        create: {
-          enabled: false,
-          weeklySchedule: getDefaultWeeklySchedule(),
-        },
-      },
+    await Promise.all([
+      // Create categories
+      createMany(db, "Category", categoryData),
 
-      bookingSettings: {
-        create: {
-          bufferStartTime: 0,
-        },
-      },
-    } satisfies Prisma.OrganizationCreateInput;
+      // Create user organization
+      create(db, "UserOrganization", {
+        userId,
+        organizationId: org.id,
+        roles: [OrganizationRoles.OWNER],
+      }),
 
-    const org = await db.organization.create({ data });
+      // Create team member for the owner
+      create(db, "TeamMember", {
+        name: `${owner.firstName} ${owner.lastName} (Owner)`,
+        organizationId: org.id,
+        userId: owner.id,
+      }),
+
+      // Create asset index settings
+      create(db, "AssetIndexSettings", {
+        mode: AssetIndexMode.ADVANCED,
+        columns: defaultFields as any,
+        userId,
+        organizationId: org.id,
+      }),
+
+      // Create working hours
+      create(db, "WorkingHours", {
+        organizationId: org.id,
+        enabled: false,
+        weeklySchedule: getDefaultWeeklySchedule(),
+      }),
+
+      // Create booking settings
+      create(db, "BookingSettings", {
+        organizationId: org.id,
+        bufferStartTime: 0,
+      }),
+    ]);
 
     if (image?.size && image?.size > 0) {
-      await db.image.create({
-        data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
-          ownerOrg: {
-            connect: {
-              id: org.id,
-            },
-          },
-          organization: {
-            connect: {
-              id: org.id,
-            },
-          },
-          user: {
-            connect: {
-              id: userId,
-            },
-          },
-        },
+      await create(db, "Image", {
+        blob: Buffer.from(await image.arrayBuffer()) as any,
+        contentType: image.type,
+        ownerOrgId: org.id,
+        organizationId: org.id,
+        userId,
       });
     }
 
@@ -278,7 +275,7 @@ export async function updateOrganization({
   customEmailFooter?: string | null;
 }) {
   try {
-    const data = {
+    const data: Record<string, unknown> = {
       name,
       ...(currency && { currency }),
       ...(qrIdDisplayPreference && { qrIdDisplayPreference }),
@@ -289,12 +286,15 @@ export async function updateOrganization({
         showShelfBranding,
       }),
       ...(customEmailFooter !== undefined && { customEmailFooter }),
-      ...(ssoDetails && {
-        ssoDetails: {
-          update: ssoDetails,
-        },
-      }),
     };
+
+    // Handle ssoDetails update separately
+    if (ssoDetails) {
+      await update(db, "SsoDetails", {
+        where: { organizationId: id },
+        data: ssoDetails,
+      });
+    }
 
     if (image?.size && image?.size > 0) {
       if (image.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
@@ -311,33 +311,33 @@ export async function updateOrganization({
       }
 
       const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
+        blob: Buffer.from(await image.arrayBuffer()) as any,
         contentType: image.type,
-        ownerOrg: {
-          connect: {
-            id: id,
-          },
-        },
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
+        ownerOrgId: id,
+        userId,
       };
 
-      Object.assign(data, {
-        image: {
-          upsert: {
-            create: imageData,
-            update: imageData,
-          },
-        },
+      // Check if image exists for this org, then upsert
+      const existingImage = await findFirst(db, "Image", {
+        where: { ownerOrgId: id },
       });
+
+      if (existingImage) {
+        await update(db, "Image", {
+          where: { id: existingImage.id },
+          data: imageData,
+        });
+      } else {
+        await create(db, "Image", {
+          ...imageData,
+          organizationId: id,
+        });
+      }
     }
 
-    return await db.organization.update({
+    return await update(db, "Organization", {
       where: { id },
-      data: data,
+      data: data as any,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -351,54 +351,19 @@ export async function updateOrganization({
   }
 }
 
-const ORGANIZATION_SELECT_FIELDS = {
-  id: true,
-  type: true,
-  name: true,
-  imageId: true,
-  userId: true,
-  updatedAt: true,
-  currency: true,
-  enabledSso: true,
-  owner: {
-    select: {
-      id: true,
-      email: true,
-    },
-  },
-  ssoDetails: true,
-  workspaceDisabled: true,
-  selfServiceCanSeeCustody: true,
-  selfServiceCanSeeBookings: true,
-  baseUserCanSeeCustody: true,
-  baseUserCanSeeBookings: true,
-  barcodesEnabled: true,
-  auditsEnabled: true,
-  usedAuditTrial: true,
-  hasSequentialIdsMigrated: true,
-  qrIdDisplayPreference: true,
-  showShelfBranding: true,
-  customEmailFooter: true,
-};
+const ORGANIZATION_SELECT_FIELDS =
+  "id, type, name, imageId, userId, updatedAt, currency, enabledSso, ssoDetails:SsoDetails(*), workspaceDisabled, selfServiceCanSeeCustody, selfServiceCanSeeBookings, baseUserCanSeeCustody, baseUserCanSeeBookings, barcodesEnabled, auditsEnabled, usedAuditTrial, hasSequentialIdsMigrated, qrIdDisplayPreference, showShelfBranding, customEmailFooter, owner:User!userId(id, email)";
 
-export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
-  select: typeof ORGANIZATION_SELECT_FIELDS;
-}>;
+export type OrganizationFromUser = Organization & {
+  owner: { id: string; email: string };
+  ssoDetails: unknown;
+};
 
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {
-    return await db.userOrganization.findMany({
+    return await findMany(db, "UserOrganization", {
       where: { userId },
-      select: {
-        organizationId: true,
-        roles: true,
-        organization: {
-          select: ORGANIZATION_SELECT_FIELDS,
-        },
-        user: {
-          select: { lastSelectedOrganizationId: true },
-        },
-      },
+      select: `organizationId, roles, organization:Organization(${ORGANIZATION_SELECT_FIELDS}), user:User(lastSelectedOrganizationId)`,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -417,23 +382,20 @@ export async function getOrganizationAdminsEmails({
   organizationId: string;
 }) {
   try {
-    const admins = await db.userOrganization.findMany({
-      where: {
-        organizationId,
-        roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-        },
-      },
-      select: {
-        user: {
-          select: {
-            email: true,
-          },
-        },
-      },
+    // Supabase PostgREST doesn't support hasSome for array columns directly.
+    // We fetch all user orgs for this org and filter in JS.
+    const userOrgs = await findMany(db, "UserOrganization", {
+      where: { organizationId },
+      select: "roles, user:User(email)",
     });
 
-    return admins.map((a) => a.user.email);
+    const admins = (userOrgs as any[]).filter(
+      (uo) =>
+        uo.roles?.includes(OrganizationRoles.OWNER) ||
+        uo.roles?.includes(OrganizationRoles.ADMIN)
+    );
+
+    return admins.map((a: any) => a.user.email);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -453,7 +415,7 @@ export async function toggleOrganizationSso({
   enabledSso: boolean;
 }) {
   try {
-    return await db.organization.update({
+    return await update(db, "Organization", {
       where: { id: organizationId, type: OrganizationType.TEAM },
       data: {
         enabledSso,
@@ -478,7 +440,7 @@ export async function toggleWorkspaceDisabled({
   workspaceDisabled: boolean;
 }) {
   try {
-    return await db.organization.update({
+    return await update(db, "Organization", {
       where: { id: organizationId, type: OrganizationType.TEAM },
       data: {
         workspaceDisabled,
@@ -503,11 +465,11 @@ export async function toggleBarcodeEnabled({
   barcodesEnabled: boolean;
 }) {
   try {
-    return await db.organization.update({
+    return await update(db, "Organization", {
       where: { id: organizationId },
       data: {
         barcodesEnabled,
-        barcodesEnabledAt: barcodesEnabled ? new Date() : null,
+        barcodesEnabledAt: barcodesEnabled ? new Date().toISOString() : null,
       },
     });
   } catch (cause) {
@@ -529,11 +491,11 @@ export async function toggleAuditEnabled({
   auditsEnabled: boolean;
 }) {
   try {
-    return await db.organization.update({
+    return await update(db, "Organization", {
       where: { id: organizationId },
       data: {
         auditsEnabled,
-        auditsEnabledAt: auditsEnabled ? new Date() : null,
+        auditsEnabledAt: auditsEnabled ? new Date().toISOString() : null,
       },
     });
   } catch (cause) {
@@ -585,14 +547,10 @@ export function emailMatchesDomains(
  * - baseUserCanSeeBookings
  */
 export function getOrganizationPermissionColumns(id: string) {
-  return db.organization.findUnique({
+  return findUnique(db, "Organization", {
     where: { id },
-    select: {
-      selfServiceCanSeeCustody: true,
-      selfServiceCanSeeBookings: true,
-      baseUserCanSeeCustody: true,
-      baseUserCanSeeBookings: true,
-    },
+    select:
+      "selfServiceCanSeeCustody, selfServiceCanSeeBookings, baseUserCanSeeCustody, baseUserCanSeeBookings",
   });
 }
 
@@ -617,7 +575,7 @@ export function updateOrganizationPermissions({
     | "baseUserCanSeeBookings"
   >;
 }) {
-  return db.organization.update({
+  return update(db, "Organization", {
     where: { id },
     data: {
       ...configuration,
@@ -632,16 +590,16 @@ export async function getOrganizationAdmins({
 }) {
   try {
     /** Get all the admins in current organization */
-    const admins = await db.userOrganization.findMany({
-      where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
-      select: {
-        user: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
-      },
+    const userOrgs = await findMany(db, "UserOrganization", {
+      where: { organizationId },
+      select: "roles, user:User(id, firstName, lastName, email)",
     });
 
-    return admins.map((a) => a.user);
+    const admins = (userOrgs as any[]).filter((uo) =>
+      uo.roles?.includes(OrganizationRoles.ADMIN)
+    );
+
+    return admins.map((a: any) => a.user);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -672,21 +630,22 @@ export async function transferOwnership({
       });
     }
 
-    const user = await db.user
-      .findUniqueOrThrow({
+    let user: any;
+    try {
+      user = await findUniqueOrThrow(db, "User", {
         where: { id: userId },
-        select: { id: true, roles: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Something went wrong while fetching current user.",
-          label,
-        });
+        select: "id, roles:Role(name)",
       });
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message: "Something went wrong while fetching current user.",
+        label,
+      });
+    }
 
-    const isCurrentUserShelfAdmin = user.roles.some(
-      (role) => role.name === Roles.ADMIN
+    const isCurrentUserShelfAdmin = (user.roles as any[]).some(
+      (role: any) => role.name === Roles.ADMIN
     );
 
     /**
@@ -695,33 +654,22 @@ export async function transferOwnership({
      * 2. Update the role of both users in the current organization
      * 3. Optionally transfer the subscription
      */
-    const userOrganization = await db.userOrganization.findMany({
+    const userOrganization = await findMany(db, "UserOrganization", {
       where: {
         organizationId: currentOrganization.id,
-        OR: [
-          { userId: newOwnerId },
-          { roles: { has: OrganizationRoles.OWNER } },
-        ],
       },
-      select: {
-        id: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            roles: true,
-            customerId: true,
-            tierId: true,
-            usedFreeTrial: true,
-          },
-        },
-        roles: true,
-      },
+      select:
+        "id, roles, user:User(id, firstName, lastName, email, customerId, tierId, usedFreeTrial, roles:Role(name))",
     });
 
-    const currentOwnerUserOrg = userOrganization.find((userOrg) =>
+    // Filter to get the new owner and the current owner
+    const relevantUserOrgs = (userOrganization as any[]).filter(
+      (uo) =>
+        uo.user?.id === newOwnerId ||
+        uo.roles?.includes(OrganizationRoles.OWNER)
+    );
+
+    const currentOwnerUserOrg = relevantUserOrgs.find((userOrg: any) =>
       userOrg.roles.includes(OrganizationRoles.OWNER)
     );
     /** Validate if the current user is a member of the organization */
@@ -748,8 +696,8 @@ export async function transferOwnership({
       });
     }
 
-    const newOwnerUserOrg = userOrganization.find(
-      (userOrg) => userOrg.user.id === newOwnerId
+    const newOwnerUserOrg = relevantUserOrgs.find(
+      (userOrg: any) => userOrg.user.id === newOwnerId
     );
     if (!newOwnerUserOrg) {
       throw new ShelfError({
@@ -788,26 +736,12 @@ export async function transferOwnership({
     let subscriptionTransferred = false;
     const currentOwnerTierId: TierId = currentOwnerUserOrg.user.tierId;
 
-    await db.$transaction(async (tx) => {
-      /** Update the owner of the organization */
-      await tx.organization.update({
-        where: { id: currentOrganization.id },
-        data: {
-          owner: { connect: { id: newOwnerUserOrg.user.id } },
-        },
-      });
-
-      /** Update the role of current owner to ADMIN */
-      await tx.userOrganization.update({
-        where: { id: currentOwnerUserOrg.id },
-        data: { roles: { set: [OrganizationRoles.ADMIN] } },
-      });
-
-      /** Update the role of new owner to OWNER */
-      await tx.userOrganization.update({
-        where: { id: newOwnerUserOrg.id },
-        data: { roles: { set: [OrganizationRoles.OWNER] } },
-      });
+    // Use RPC for atomic ownership transfer
+    await rpc(db, "transfer_org_ownership", {
+      p_organization_id: currentOrganization.id,
+      p_new_owner_user_id: newOwnerUserOrg.user.id,
+      p_current_owner_user_org_id: currentOwnerUserOrg.id,
+      p_new_owner_user_org_id: newOwnerUserOrg.id,
     });
 
     // Handle subscription transfer AFTER the ownership transfer succeeds
@@ -862,10 +796,9 @@ export async function transferOwnership({
             // Transfer usedFreeTrial flag if original owner used it
             // This prevents the new owner from starting another trial
             if (currentOwnerUserOrg.user.usedFreeTrial) {
-              await db.user.update({
+              await update(db, "User", {
                 where: { id: newOwnerId },
                 data: { usedFreeTrial: true },
-                select: { id: true },
               });
             }
 
@@ -874,10 +807,9 @@ export async function transferOwnership({
             const hasPaymentMethod =
               await customerHasPaymentMethod(newOwnerCustomerId);
             if (!hasPaymentMethod) {
-              await db.user.update({
+              await update(db, "User", {
                 where: { id: newOwnerId },
                 data: { warnForNoPaymentMethod: true },
-                select: { id: true },
               });
             }
           }
@@ -973,7 +905,7 @@ ${
  */
 export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
   try {
-    return await db.organization.updateMany({
+    return await updateMany(db, "Organization", {
       where: {
         userId,
         type: OrganizationType.PERSONAL,
