@@ -34,8 +34,7 @@ import {
   deleteMany,
   createMany,
 } from "~/database/query-helpers.server";
-import { sql, raw, queryRaw } from "~/database/sql.server";
-import { sequential } from "~/database/transaction.server";
+import { sql, queryRaw, SqlFragment } from "~/database/sql.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -4061,16 +4060,11 @@ export async function bulkCancelBookings({
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
-    const [bookings, user] = await Promise.all([
-      db.booking.findMany({
+    const [rawBookings, user] = await Promise.all([
+      findMany(db, "Booking", {
         where,
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: { include: { owner: { select: { email: true } } } },
-          _count: { select: { assets: true } },
-          assets: { select: { id: true, kitId: true } },
-        },
+        select:
+          "*, custodianTeamMember:TeamMember(*), custodianUser:User(*), organization:Organization(*, owner:User(email))",
       }),
       getUserByID(userId, {
         select: {
@@ -4080,6 +4074,17 @@ export async function bulkCancelBookings({
         } as const,
       }),
     ]);
+
+    // Hydrate assets and _count for each booking via join table
+    const bookings = await Promise.all(
+      (rawBookings as any[]).map(async (b: any) => {
+        const assets = await queryRaw<{ id: string; kitId: string | null }>(
+          db,
+          sql`SELECT a."id", a."kitId" FROM "Asset" a INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id" WHERE ab."B" = ${b.id}`
+        );
+        return { ...b, assets, _count: { assets: assets.length } };
+      })
+    );
 
     /** Bookings with any of these statuses cannot be cancelled */
     const unavailableBookingStatus: BookingStatus[] = [
@@ -4122,65 +4127,68 @@ export async function bulkCancelBookings({
       (booking) => !!booking.activeSchedulerReference
     );
 
-    await db.$transaction(async (tx) => {
-      /** Updating status of bookings to CANCELLED */
-      await tx.booking.updateMany({
-        where: { id: { in: bookings.map((b) => b.id) } },
-        data: { status: BookingStatus.CANCELLED },
+    // Sequential operations replacing db.$transaction
+    /** Updating status of bookings to CANCELLED */
+    await updateMany(db, "Booking", {
+      where: { id: { in: bookings.map((b: any) => b.id) } },
+      data: { status: BookingStatus.CANCELLED },
+    });
+
+    /** Updating status of assets and kits  */
+    if (ongoingOrOverdueBookings.length > 0) {
+      const allAssets = ongoingOrOverdueBookings.flatMap((b: any) => b.assets);
+      const allKitIds = allAssets
+        .filter((a: any) => !!a.kitId)
+        .map((a: any) => a.kitId as string);
+
+      const uniqueKitIds = new Set(allKitIds);
+
+      /** Making assets available */
+      await updateMany(db, "Asset", {
+        where: { id: { in: allAssets.map((a: any) => a.id) } },
+        data: { status: AssetStatus.AVAILABLE },
       });
 
-      /** Updating status of assets and kits  */
-      if (ongoingOrOverdueBookings.length > 0) {
-        const allAssets = ongoingOrOverdueBookings.flatMap((b) => b.assets);
-        const allKitIds = allAssets
-          .filter((a) => !!a.kitId)
-          .map((a) => a.kitId as string);
-
-        const uniqueKitIds = new Set(allKitIds);
-
-        /** Making assets available */
-        await tx.asset.updateMany({
-          where: { id: { in: allAssets.map((a) => a.id) } },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-
-        /** Making kits available */
-        await tx.kit.updateMany({
+      /** Making kits available */
+      if (uniqueKitIds.size > 0) {
+        await updateMany(db, "Kit", {
           where: { id: { in: [...uniqueKitIds] } },
           data: { status: KitStatus.AVAILABLE },
         });
       }
+    }
 
-      /** Making notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
-      const notesData = bookings
-        .map((b) =>
-          b.assets.map((asset) => ({
-            assetId: asset.id,
-            content: `${actor} cancelled booking.`,
-            userId,
-            type: "UPDATE" as const,
-          }))
-        )
-        .flat() as any[];
-
-      await tx.note.createMany({ data: notesData });
-
-      /** Create booking status transition notes for each booking */
-      for (const booking of bookings) {
-        await createStatusTransitionNote({
-          bookingId: booking.id,
-          fromStatus: booking.status,
-          toStatus: BookingStatus.CANCELLED,
-          userId,
-          custodianUserId: booking.custodianUserId || undefined,
-        });
-      }
+    /** Making notes for all the assets */
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
     });
+    const notesData = bookings
+      .map((b: any) =>
+        b.assets.map((asset: any) => ({
+          assetId: asset.id,
+          content: `${actor} cancelled booking.`,
+          userId,
+          type: "UPDATE" as const,
+        }))
+      )
+      .flat() as any[];
+
+    if (notesData.length > 0) {
+      await createMany(db, "Note", notesData);
+    }
+
+    /** Create booking status transition notes for each booking */
+    for (const booking of bookings) {
+      await createStatusTransitionNote({
+        bookingId: booking.id,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.CANCELLED,
+        userId,
+        custodianUserId: booking.custodianUserId || undefined,
+      });
+    }
 
     /** Cancelling scheduler */
     await Promise.all(
@@ -4252,18 +4260,29 @@ async function createNotesForScannedAssetsAndKits({
   userId: string;
 }) {
   // Fetch assets and kits in parallel for better performance
-  const [assets, kits] = await Promise.all([
-    db.asset.findMany({
+  const [assets, rawKits] = await Promise.all([
+    findMany(db, "Asset", {
       where: { id: { in: assetIds }, organizationId },
-      select: { id: true, title: true },
+      select: "id, title",
     }),
     kitIds.length > 0
-      ? db.kit.findMany({
+      ? findMany(db, "Kit", {
           where: { id: { in: kitIds }, organizationId },
-          select: { id: true, name: true, assets: { select: { id: true } } },
+          select: "id, name",
         })
       : Promise.resolve([]),
   ]);
+
+  // Hydrate kit assets via join — kits need their assets for mapping
+  const kits = await Promise.all(
+    (rawKits as any[]).map(async (kit: any) => {
+      const kitAssets = await findMany(db, "Asset", {
+        where: { kitId: kit.id, organizationId },
+        select: "id",
+      });
+      return { ...kit, assets: kitAssets };
+    })
+  );
 
   // Create a map of asset ID to kit name for assets that came from kits
   const assetIdToKitName = new Map<string, string>();
@@ -4415,44 +4434,50 @@ export async function addScannedAssetsToBooking({
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets.
      */
-    const updatedBooking = await db.$transaction(async (tx) => {
-      const booking = await tx.booking.update({
-        where: { id: bookingId, organizationId },
-        data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          status: true,
-        },
-      });
+    // Sequential operations replacing db.$transaction
 
-      /** When booking is active, newly added items must be flagged checked out */
-      const isActiveBooking =
-        booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE;
+    // Connect assets to booking via join table
+    if (assetIds.length > 0) {
+      const insertValues = assetIds
+        .map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`)
+        .join(", ");
+      const insertParams = assetIds.flatMap((id) => [id, bookingId]);
+      await queryRaw(
+        db,
+        new SqlFragment(
+          `INSERT INTO "_AssetToBooking" ("A", "B") VALUES ${insertValues} ON CONFLICT DO NOTHING`,
+          insertParams
+        )
+      );
+    }
 
-      if (isActiveBooking) {
-        if (assetIds.length > 0) {
-          await tx.asset.updateMany({
-            where: { id: { in: assetIds }, organizationId },
-            data: { status: AssetStatus.CHECKED_OUT },
-          });
-        }
+    const booking = await findUniqueOrThrow(db, "Booking", {
+      where: { id: bookingId, organizationId },
+      select: "id, name, status",
+    });
 
-        if (kitIds.length > 0) {
-          await tx.kit.updateMany({
-            where: { id: { in: kitIds }, organizationId },
-            data: { status: KitStatus.CHECKED_OUT },
-          });
-        }
+    /** When booking is active, newly added items must be flagged checked out */
+    const isActiveBooking =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
+
+    if (isActiveBooking) {
+      if (assetIds.length > 0) {
+        await updateMany(db, "Asset", {
+          where: { id: { in: assetIds }, organizationId },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
       }
 
-      return booking;
-    });
+      if (kitIds.length > 0) {
+        await updateMany(db, "Kit", {
+          where: { id: { in: kitIds }, organizationId },
+          data: { status: KitStatus.CHECKED_OUT },
+        });
+      }
+    }
+
+    const updatedBooking = booking;
 
     /** Step 2: Create activity notes */
     await createNotesForScannedAssetsAndKits({
@@ -4481,14 +4506,17 @@ export async function addScannedAssetsToBooking({
 
 export async function getExistingBookingDetails(bookingId: string) {
   try {
-    const booking = await db.booking.findUniqueOrThrow({
+    const rawBooking = await findUniqueOrThrow(db, "Booking", {
       where: { id: bookingId },
-      select: {
-        id: true,
-        status: true,
-        assets: { select: { id: true, title: true } },
-      },
+      select: "id, status",
     });
+
+    // Hydrate assets via join table
+    const assets = await queryRaw<{ id: string; title: string }>(
+      db,
+      sql`SELECT a."id", a."title" FROM "Asset" a INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id" WHERE ab."B" = ${bookingId}`
+    );
+    const booking = { ...rawBooking, assets } as any;
 
     if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
       throw new ShelfError({
@@ -4515,9 +4543,9 @@ export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][]
 ): Promise<string[]> {
   try {
-    const selectedAssets = await db.asset.findMany({
+    const selectedAssets = await findMany(db, "Asset", {
       where: { id: { in: assetIds } },
-      select: { status: true, id: true, kitId: true },
+      select: "status, id, kitId",
     });
 
     if (selectedAssets.some((asset) => asset.kitId)) {
@@ -4664,37 +4692,61 @@ export async function duplicateBooking({
     });
     const hints = getHints(request);
 
-    const newBooking = await db.booking.create({
-      data: {
-        name: bookingToDuplicate.name + " (Copy)",
-        description: bookingToDuplicate.description,
-        from: DateTime.fromFormat(
-          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
-            DATE_TIME_FORMAT
-          ),
-          DATE_TIME_FORMAT,
-          { zone: hints.timeZone }
-        ).toJSDate(),
-        to: DateTime.fromFormat(
-          DateTime.fromJSDate(addDays(new Date(), 1), {
-            zone: hints.timeZone,
-          }).toFormat(DATE_TIME_FORMAT),
-          DATE_TIME_FORMAT,
-          { zone: hints.timeZone }
-        ).toJSDate(),
-        organizationId,
-        creatorId: userId,
-        status: BookingStatus.DRAFT,
-        custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
-        custodianUserId: bookingToDuplicate.custodianUserId,
-        assets: {
-          connect: bookingToDuplicate.assets.map((asset) => ({ id: asset.id })),
-        },
-        tags: {
-          connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
-        },
-      },
-    });
+    const newBooking = await create(db, "Booking", {
+      name: bookingToDuplicate.name + " (Copy)",
+      description: bookingToDuplicate.description,
+      from: DateTime.fromFormat(
+        DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
+          DATE_TIME_FORMAT
+        ),
+        DATE_TIME_FORMAT,
+        { zone: hints.timeZone }
+      ).toJSDate(),
+      to: DateTime.fromFormat(
+        DateTime.fromJSDate(addDays(new Date(), 1), {
+          zone: hints.timeZone,
+        }).toFormat(DATE_TIME_FORMAT),
+        DATE_TIME_FORMAT,
+        { zone: hints.timeZone }
+      ).toJSDate(),
+      organizationId,
+      creatorId: userId,
+      status: BookingStatus.DRAFT,
+      custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
+      custodianUserId: bookingToDuplicate.custodianUserId,
+    } as any);
+
+    // Connect assets via join table
+    const assetIds = bookingToDuplicate.assets.map((asset: any) => asset.id);
+    if (assetIds.length > 0) {
+      const assetValues = assetIds
+        .map((_: any, i: number) => `($${i * 2 + 1}, $${i * 2 + 2})`)
+        .join(", ");
+      const assetParams = assetIds.flatMap((id: string) => [id, newBooking.id]);
+      await queryRaw(
+        db,
+        new SqlFragment(
+          `INSERT INTO "_AssetToBooking" ("A", "B") VALUES ${assetValues} ON CONFLICT DO NOTHING`,
+          assetParams
+        )
+      );
+    }
+
+    // Connect tags via join table
+    const tagIds = bookingToDuplicate.tags.map((tag: any) => tag.id);
+    if (tagIds.length > 0) {
+      const tagValues = tagIds
+        .map((_: any, i: number) => `($${i * 2 + 1}, $${i * 2 + 2})`)
+        .join(", ");
+      const tagParams = tagIds.flatMap((id: string) => [id, newBooking.id]);
+      await queryRaw(
+        db,
+        new SqlFragment(
+          `INSERT INTO "_BookingToTag" ("A", "B") VALUES ${tagValues} ON CONFLICT DO NOTHING`,
+          tagParams
+        )
+      );
+    }
 
     return newBooking;
   } catch (cause) {
@@ -4716,29 +4768,33 @@ export async function duplicateBooking({
  * Check if a booking has any partial check-ins
  */
 export async function hasPartialCheckins(bookingId: string): Promise<boolean> {
-  const count = await db.partialBookingCheckin.count({
-    where: { bookingId },
-  });
-  return count > 0;
+  const c = await count(db, "PartialBookingCheckin", { bookingId });
+  return c > 0;
 }
 
 /**
  * Get partial check-in history for a booking
  */
-export function getPartialCheckinHistory(bookingId: string) {
-  return db.partialBookingCheckin.findMany({
+export async function getPartialCheckinHistory(bookingId: string) {
+  const checkins = await findMany(db, "PartialBookingCheckin", {
     where: { bookingId },
-    include: {
-      checkedInBy: {
-        select: {
-          firstName: true,
-          lastName: true,
-          email: true,
-        },
-      },
-    },
     orderBy: { checkinTimestamp: "desc" },
   });
+
+  // Hydrate checkedInBy user data
+  const hydratedCheckins = await Promise.all(
+    (checkins as any[]).map(async (checkin: any) => {
+      const checkedInBy = checkin.checkedInByUserId
+        ? await findFirst(db, "User", {
+            where: { id: checkin.checkedInByUserId },
+            select: "firstName, lastName, email",
+          })
+        : null;
+      return { ...checkin, checkedInBy };
+    })
+  );
+
+  return hydratedCheckins;
 }
 
 /**
@@ -4747,11 +4803,11 @@ export function getPartialCheckinHistory(bookingId: string) {
 export async function getTotalPartialCheckinCount(
   bookingId: string
 ): Promise<number> {
-  const result = await db.partialBookingCheckin.aggregate({
-    where: { bookingId },
-    _sum: { checkinCount: true },
-  });
-  return result._sum.checkinCount || 0;
+  const result = await queryRaw<{ total: number }>(
+    db,
+    sql`SELECT COALESCE(SUM("checkinCount"), 0)::int AS "total" FROM "PartialBookingCheckin" WHERE "bookingId" = ${bookingId}`
+  );
+  return result[0]?.total || 0;
 }
 
 /**
@@ -4760,13 +4816,15 @@ export async function getTotalPartialCheckinCount(
 export async function getPartiallyCheckedInAssetIds(
   bookingId: string
 ): Promise<string[]> {
-  const partialCheckins = await db.partialBookingCheckin.findMany({
+  const partialCheckins = await findMany(db, "PartialBookingCheckin", {
     where: { bookingId },
-    select: { assetIds: true },
+    select: "assetIds",
   });
 
   // Flatten all asset ID arrays and get unique values
-  const allAssetIds = partialCheckins.flatMap((pc) => pc.assetIds);
+  const allAssetIds = (partialCheckins as any[]).flatMap(
+    (pc: any) => pc.assetIds
+  );
   return [...new Set(allAssetIds)];
 }
 
@@ -4775,20 +4833,31 @@ export async function getPartiallyCheckedInAssetIds(
  * Returns both the asset IDs and the detailed check-in data in one query
  */
 export async function getDetailedPartialCheckinData(bookingId: string) {
-  const partialCheckins = await db.partialBookingCheckin.findMany({
+  const rawCheckins = await findMany(db, "PartialBookingCheckin", {
     where: { bookingId },
-    include: {
-      checkedInBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          profilePicture: true,
-        },
-      },
-    },
     orderBy: { checkinTimestamp: "asc" },
   });
+
+  // Hydrate checkedInBy user data
+  const partialCheckins = await Promise.all(
+    (rawCheckins as any[]).map(async (checkin: any) => {
+      const checkedInBy = checkin.checkedInByUserId
+        ? await findFirst(db, "User", {
+            where: { id: checkin.checkedInByUserId },
+            select: "id, firstName, lastName, profilePicture",
+          })
+        : null;
+      return {
+        ...checkin,
+        checkedInBy: checkedInBy || {
+          id: "",
+          firstName: null,
+          lastName: null,
+          profilePicture: null,
+        },
+      };
+    })
+  );
 
   // Create a record of asset ID to its check-in details
   const assetCheckinRecord: Record<
@@ -4911,14 +4980,23 @@ export async function getOngoingBookingForAsset({
   organizationId: Asset["organizationId"];
 }) {
   try {
-    const booking = await db.booking.findFirst({
-      where: {
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-        organizationId,
-        assets: { some: { id: assetId } },
-        partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
-      },
-    });
+    // Use raw SQL for relation-based filters (assets some, partialCheckins none)
+    const results = await queryRaw<any>(
+      db,
+      sql`SELECT b.* FROM "Booking" b
+        WHERE b."status" IN ('ONGOING', 'OVERDUE')
+          AND b."organizationId" = ${organizationId}
+          AND EXISTS (
+            SELECT 1 FROM "_AssetToBooking" ab
+            WHERE ab."B" = b."id" AND ab."A" = ${assetId}
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "PartialBookingCheckin" pc
+            WHERE pc."bookingId" = b."id" AND ${assetId} = ANY(pc."assetIds")
+          )
+        LIMIT 1`
+    );
+    const booking = results[0] || null;
 
     return booking;
   } catch (cause) {
