@@ -1,29 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-// Mock the dependencies
+
+// why: We need to mock storage operations to avoid actually uploading files during tests
 vi.mock("~/utils/storage.server", () => ({
-  // why: We need to mock storage operations to avoid actually uploading files during tests
   parseFileFormData: vi.fn(),
   removePublicFile: vi.fn(),
   getFileUploadPath: vi.fn(
-    (params) =>
+    (params: any) =>
       `${params.organizationId}/${params.type}/${params.typeId}/test.jpg`
   ),
 }));
 
-vi.mock("~/database/db.server", () => ({
-  // why: We need to mock database queries to avoid hitting the real database during tests
-  db: {
-    auditImage: {
-      count: vi.fn(),
-      create: vi.fn(),
-      findFirst: vi.fn(),
-      findMany: vi.fn(),
-      delete: vi.fn(),
+// why: Stub the db export so imports resolve; actual queries go through query helpers
+vi.mock("~/database/db.server", () => ({ db: {} }));
+
+// why: Auto-mock query helpers so we can control return values per test
+vi.mock("~/database/query-helpers.server");
+
+// why: Mock Supabase client to avoid real storage calls
+vi.mock("~/integrations/supabase/client", () => ({
+  getSupabaseAdmin: vi.fn(() => ({
+    storage: {
+      from: vi.fn(() => ({
+        getPublicUrl: vi.fn((path: string) => ({
+          data: { publicUrl: path },
+        })),
+      })),
     },
-  },
+  })),
 }));
 
-import { db } from "~/database/db.server";
+import {
+  create,
+  findFirst,
+  findMany,
+  remove as removeRecord,
+  count,
+} from "~/database/query-helpers.server";
 import { parseFileFormData, removePublicFile } from "~/utils/storage.server";
 
 import {
@@ -49,14 +61,14 @@ describe("audit image service", () => {
       mockReturnFormData.append(
         "image",
         JSON.stringify({
-          path: "org-1/audits/audit-1/image-123.jpg",
+          originalPath: "org-1/audits/audit-1/image-123.jpg",
           thumbnailPath: "org-1/audits/audit-1/image-123-thumbnail.jpg",
         })
       );
       vi.mocked(parseFileFormData).mockResolvedValue(mockReturnFormData);
 
-      vi.mocked(db.auditImage.count).mockResolvedValue(0);
-      vi.mocked(db.auditImage.create).mockResolvedValue({
+      vi.mocked(count).mockResolvedValue(0);
+      vi.mocked(create).mockResolvedValue({
         id: "img-1",
         auditSessionId: "audit-1",
         auditAssetId: null,
@@ -67,7 +79,7 @@ describe("audit image service", () => {
         uploadedById: "user-1",
         createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      } as any);
 
       const result = await uploadAuditImage({
         request: {
@@ -88,7 +100,7 @@ describe("audit image service", () => {
         })
       );
 
-      expect(db.auditImage.create).toHaveBeenCalled();
+      expect(vi.mocked(create)).toHaveBeenCalled();
       expect(result).toEqual(
         expect.objectContaining({
           id: "img-1",
@@ -104,7 +116,7 @@ describe("audit image service", () => {
       const mockReturnFormData = new FormData();
       vi.mocked(parseFileFormData).mockResolvedValue(mockReturnFormData);
 
-      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(count).mockResolvedValue(0);
 
       await expect(
         uploadAuditImage({
@@ -120,9 +132,8 @@ describe("audit image service", () => {
     });
 
     it("validates limit for asset-specific images (3 max)", async () => {
-      // Mock audit image model exists
       vi.mocked(parseFileFormData).mockResolvedValue(new FormData());
-      vi.mocked(db.auditImage.count).mockResolvedValue(3);
+      vi.mocked(count).mockResolvedValue(3);
 
       await expect(
         uploadAuditImage({
@@ -138,9 +149,8 @@ describe("audit image service", () => {
     });
 
     it("validates limit for general audit images (5 max)", async () => {
-      // Mock audit image model exists
       vi.mocked(parseFileFormData).mockResolvedValue(new FormData());
-      vi.mocked(db.auditImage.count).mockResolvedValue(5);
+      vi.mocked(count).mockResolvedValue(5);
 
       await expect(
         uploadAuditImage({
@@ -158,7 +168,7 @@ describe("audit image service", () => {
 
   describe("deleteAuditImage", () => {
     it("successfully deletes image from storage and database", async () => {
-      vi.mocked(db.auditImage.findFirst).mockResolvedValue({
+      vi.mocked(findFirst).mockResolvedValue({
         id: "img-1",
         auditSessionId: "audit-1",
         auditAssetId: null,
@@ -169,9 +179,9 @@ describe("audit image service", () => {
         uploadedById: "user-1",
         createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      } as any);
 
-      vi.mocked(db.auditImage.delete).mockResolvedValue({} as any);
+      vi.mocked(removeRecord).mockResolvedValue(undefined as any);
       vi.mocked(removePublicFile).mockResolvedValue(undefined);
 
       await deleteAuditImage({
@@ -179,9 +189,13 @@ describe("audit image service", () => {
         organizationId: "org-1",
       });
 
-      expect(db.auditImage.findFirst).toHaveBeenCalledWith({
-        where: { id: "img-1", organizationId: "org-1" },
-      });
+      expect(vi.mocked(findFirst)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
+        {
+          where: { id: "img-1", organizationId: "org-1" },
+        }
+      );
 
       expect(removePublicFile).toHaveBeenCalledWith({
         publicUrl: "org-1/audits/audit-1/image-123.jpg",
@@ -191,13 +205,15 @@ describe("audit image service", () => {
         publicUrl: "org-1/audits/audit-1/image-123-thumbnail.jpg",
       });
 
-      expect(db.auditImage.delete).toHaveBeenCalledWith({
-        where: { id: "img-1" },
-      });
+      expect(vi.mocked(removeRecord)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
+        { id: "img-1" }
+      );
     });
 
     it("throws error when image not found", async () => {
-      vi.mocked(db.auditImage.findFirst).mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null as any);
 
       await expect(
         deleteAuditImage({
@@ -206,13 +222,13 @@ describe("audit image service", () => {
         })
       ).rejects.toThrow();
 
-      expect(db.auditImage.delete).not.toHaveBeenCalled();
+      expect(vi.mocked(removeRecord)).not.toHaveBeenCalled();
     });
   });
 
   describe("getAuditImages", () => {
     it("fetches all images for an audit", async () => {
-      vi.mocked(db.auditImage.findMany).mockResolvedValue([
+      const mockImages = [
         {
           id: "img-1",
           auditSessionId: "audit-1",
@@ -237,46 +253,47 @@ describe("audit image service", () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         },
-      ] as any);
+      ];
+
+      vi.mocked(findMany).mockImplementation((_db, table, _opts?) => {
+        if (table === "AuditImage") {
+          return Promise.resolve(mockImages as any);
+        }
+        if (table === "User") {
+          return Promise.resolve([
+            {
+              id: "user-1",
+              firstName: "Test",
+              lastName: "User",
+              profilePicture: null,
+            },
+          ] as any);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await getAuditImages({
         auditSessionId: "audit-1",
         organizationId: "org-1",
       });
 
-      expect(db.auditImage.findMany).toHaveBeenCalledWith({
-        where: {
-          auditSessionId: "audit-1",
-          organizationId: "org-1",
-        },
-        include: {
-          uploadedBy: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              profilePicture: true,
-            },
+      expect(vi.mocked(findMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
+        {
+          where: {
+            auditSessionId: "audit-1",
+            organizationId: "org-1",
           },
-          auditAsset: {
-            include: {
-              asset: {
-                select: {
-                  id: true,
-                  title: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      });
+          orderBy: { createdAt: "desc" },
+        }
+      );
 
       expect(result).toHaveLength(2);
     });
 
     it("filters images by auditAssetId when provided", async () => {
-      vi.mocked(db.auditImage.findMany).mockResolvedValue([]);
+      vi.mocked(findMany).mockResolvedValue([]);
 
       await getAuditImages({
         auditSessionId: "audit-1",
@@ -284,7 +301,9 @@ describe("audit image service", () => {
         auditAssetId: "asset-1",
       });
 
-      expect(db.auditImage.findMany).toHaveBeenCalledWith(
+      expect(vi.mocked(findMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
         expect.objectContaining({
           where: expect.objectContaining({
             auditAssetId: "asset-1",
@@ -296,25 +315,27 @@ describe("audit image service", () => {
 
   describe("getAuditImageCount", () => {
     it("counts all images for an audit", async () => {
-      vi.mocked(db.auditImage.count).mockResolvedValue(3);
+      vi.mocked(count).mockResolvedValue(3);
 
       const result = await getAuditImageCount({
         auditSessionId: "audit-1",
         organizationId: "org-1",
       });
 
-      expect(db.auditImage.count).toHaveBeenCalledWith({
-        where: {
+      expect(vi.mocked(count)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
+        {
           auditSessionId: "audit-1",
           organizationId: "org-1",
-        },
-      });
+        }
+      );
 
       expect(result).toBe(3);
     });
 
     it("counts images for specific asset", async () => {
-      vi.mocked(db.auditImage.count).mockResolvedValue(2);
+      vi.mocked(count).mockResolvedValue(2);
 
       const result = await getAuditImageCount({
         auditSessionId: "audit-1",
@@ -322,13 +343,15 @@ describe("audit image service", () => {
         auditAssetId: "asset-1",
       });
 
-      expect(db.auditImage.count).toHaveBeenCalledWith({
-        where: {
+      expect(vi.mocked(count)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
+        {
           auditSessionId: "audit-1",
           organizationId: "org-1",
           auditAssetId: "asset-1",
-        },
-      });
+        }
+      );
 
       expect(result).toBe(2);
     });

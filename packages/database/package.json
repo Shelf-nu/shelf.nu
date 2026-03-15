@@ -17,6 +17,7 @@
     "build": "echo 'No build step needed — types are source TypeScript'",
     "db:migrate": "supabase db push",
     "db:reset": "supabase db reset",
+    "db:gen-types": "supabase gen types typescript --local > src/types.generated.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

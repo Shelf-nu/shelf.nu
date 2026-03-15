@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { db } from "~/database/db.server";
+import {
+  create,
+  deleteMany,
+  findFirst,
+  findMany,
+} from "~/database/query-helpers.server";
+
 import {
   createLocationNote,
   createSystemLocationNote,
@@ -9,17 +17,11 @@ import {
 
 // why: testing location note service logic without touching the real database
 vi.mock("~/database/db.server", () => ({
-  db: {
-    locationNote: {
-      create: vi.fn(),
-      findMany: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    location: {
-      findFirst: vi.fn(),
-    },
-  },
+  db: {},
 }));
+
+// why: We need to mock database query helpers to avoid hitting the real database during tests
+vi.mock("~/database/query-helpers.server");
 
 // why: testing error handling behavior without depending on ShelfError implementation
 vi.mock("~/utils/error", () => ({
@@ -30,13 +32,6 @@ vi.mock("~/utils/error", () => ({
     }
   },
 }));
-
-const mockDb = await import("~/database/db.server");
-
-const locationNoteCreateMock = vi.mocked(mockDb.db.locationNote.create);
-const locationNoteFindManyMock = vi.mocked(mockDb.db.locationNote.findMany);
-const locationNoteDeleteManyMock = vi.mocked(mockDb.db.locationNote.deleteMany);
-const locationFindFirstMock = vi.mocked(mockDb.db.location.findFirst);
 
 describe("location note service", () => {
   beforeEach(() => {
@@ -55,7 +50,7 @@ describe("location note service", () => {
         updatedAt: new Date(),
       } as const;
 
-      locationNoteCreateMock.mockResolvedValue(note);
+      vi.mocked(create).mockResolvedValue(note);
 
       const result = await createLocationNote({
         content: "Manual note",
@@ -64,13 +59,11 @@ describe("location note service", () => {
         type: "COMMENT",
       });
 
-      expect(locationNoteCreateMock).toHaveBeenCalledWith({
-        data: {
-          content: "Manual note",
-          type: "COMMENT",
-          location: { connect: { id: "loc-1" } },
-          user: { connect: { id: "user-1" } },
-        },
+      expect(create).toHaveBeenCalledWith(db, "LocationNote", {
+        content: "Manual note",
+        type: "COMMENT",
+        locationId: "loc-1",
+        userId: "user-1",
       });
       expect(result).toEqual(note);
     });
@@ -86,7 +79,7 @@ describe("location note service", () => {
         updatedAt: new Date(),
       } as const;
 
-      locationNoteCreateMock.mockResolvedValue(note);
+      vi.mocked(create).mockResolvedValue(note);
 
       const result = await createLocationNote({
         content: "System note",
@@ -94,12 +87,10 @@ describe("location note service", () => {
         type: "UPDATE",
       });
 
-      expect(locationNoteCreateMock).toHaveBeenCalledWith({
-        data: {
-          content: "System note",
-          type: "UPDATE",
-          location: { connect: { id: "loc-1" } },
-        },
+      expect(create).toHaveBeenCalledWith(db, "LocationNote", {
+        content: "System note",
+        type: "UPDATE",
+        locationId: "loc-1",
       });
       expect(result).toEqual(note);
     });
@@ -117,19 +108,17 @@ describe("location note service", () => {
         updatedAt: new Date(),
       } as const;
 
-      locationNoteCreateMock.mockResolvedValue(note);
+      vi.mocked(create).mockResolvedValue(note);
 
       const result = await createSystemLocationNote({
         content: "Profile updated",
         locationId: "loc-1",
       });
 
-      expect(locationNoteCreateMock).toHaveBeenCalledWith({
-        data: {
-          content: "Profile updated",
-          type: "UPDATE",
-          location: { connect: { id: "loc-1" } },
-        },
+      expect(create).toHaveBeenCalledWith(db, "LocationNote", {
+        content: "Profile updated",
+        type: "UPDATE",
+        locationId: "loc-1",
       });
       expect(result).toEqual(note);
     });
@@ -150,37 +139,30 @@ describe("location note service", () => {
         },
       ];
 
-      locationFindFirstMock.mockResolvedValue({ id: "loc-1" } as any);
-      locationNoteFindManyMock.mockResolvedValue(notes);
+      vi.mocked(findFirst).mockResolvedValue({ id: "loc-1" } as any);
+      vi.mocked(findMany).mockResolvedValue(notes);
 
       const result = await getLocationNotes({
         locationId: "loc-1",
         organizationId: "org-1",
       });
 
-      expect(locationFindFirstMock).toHaveBeenCalledWith({
+      expect(findFirst).toHaveBeenCalledWith(db, "Location", {
         where: { id: "loc-1", organizationId: "org-1" },
-        select: { id: true },
+        select: "id",
       });
 
-      expect(locationNoteFindManyMock).toHaveBeenCalledWith({
+      expect(findMany).toHaveBeenCalledWith(db, "LocationNote", {
         where: { locationId: "loc-1" },
         orderBy: { createdAt: "desc" },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
+        select: "*, user:User(firstName, lastName)",
       });
 
       expect(result).toEqual(notes);
     });
 
     it("throws when location does not belong to organization", async () => {
-      locationFindFirstMock.mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null);
 
       await expect(
         getLocationNotes({ locationId: "loc-2", organizationId: "org-9" })
@@ -190,15 +172,16 @@ describe("location note service", () => {
 
   describe("deleteLocationNote", () => {
     it("only deletes notes authored by the user", async () => {
-      locationNoteDeleteManyMock.mockResolvedValue({ count: 1 });
+      vi.mocked(deleteMany).mockResolvedValue({ count: 1 });
 
       const result = await deleteLocationNote({
         id: "lnote-1",
         userId: "user-1",
       });
 
-      expect(locationNoteDeleteManyMock).toHaveBeenCalledWith({
-        where: { id: "lnote-1", userId: "user-1" },
+      expect(deleteMany).toHaveBeenCalledWith(db, "LocationNote", {
+        id: "lnote-1",
+        userId: "user-1",
       });
       expect(result).toEqual({ count: 1 });
     });

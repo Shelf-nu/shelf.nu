@@ -10,6 +10,7 @@ export default defineConfig({
   plugins: [react(), tsconfigPaths()],
   test: {
     globals: true,
+    include: ["**/*.{test,spec}.?(c|m)[jt]s?(x)", "**/*.test.server.ts"],
     environment: "happy-dom",
     setupFiles: ["./test/setup-test-env.ts"],
     includeSource: ["app/**/*.{js,ts}"],

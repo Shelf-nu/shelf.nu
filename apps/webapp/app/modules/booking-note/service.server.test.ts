@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+
+import { db } from "~/database/db.server";
+import { create, findFirst, findMany } from "~/database/query-helpers.server";
+
 import {
   createBookingNote,
   createSystemBookingNote,
@@ -7,17 +11,11 @@ import {
 
 // why: testing booking note service logic without executing actual database operations
 vi.mock("~/database/db.server", () => ({
-  db: {
-    bookingNote: {
-      create: vi.fn(),
-      findMany: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    booking: {
-      findFirst: vi.fn(),
-    },
-  },
+  db: {},
 }));
+
+// why: We need to mock database query helpers to avoid hitting the real database during tests
+vi.mock("~/database/query-helpers.server");
 
 // why: testing error handling behavior without actual ShelfError implementation
 vi.mock("~/utils/error", () => ({
@@ -28,8 +26,6 @@ vi.mock("~/utils/error", () => ({
     }
   },
 }));
-
-const mockDb = await import("~/database/db.server");
 
 describe("BookingNote Service", () => {
   beforeEach(() => {
@@ -48,8 +44,7 @@ describe("BookingNote Service", () => {
         updatedAt: new Date(),
       };
 
-      //@ts-expect-error missing vitest type
-      mockDb.db.bookingNote.create.mockResolvedValue(mockNote);
+      vi.mocked(create).mockResolvedValue(mockNote);
 
       const result = await createBookingNote({
         content: "Test note",
@@ -58,21 +53,11 @@ describe("BookingNote Service", () => {
         bookingId: "booking-1",
       });
 
-      expect(mockDb.db.bookingNote.create).toHaveBeenCalledWith({
-        data: {
-          content: "Test note",
-          type: "COMMENT",
-          booking: {
-            connect: {
-              id: "booking-1",
-            },
-          },
-          user: {
-            connect: {
-              id: "user-1",
-            },
-          },
-        },
+      expect(create).toHaveBeenCalledWith(db, "BookingNote", {
+        content: "Test note",
+        type: "COMMENT",
+        bookingId: "booking-1",
+        userId: "user-1",
       });
       expect(result).toEqual(mockNote);
     });
@@ -88,8 +73,7 @@ describe("BookingNote Service", () => {
         updatedAt: new Date(),
       };
 
-      //@ts-expect-error missing vitest type
-      mockDb.db.bookingNote.create.mockResolvedValue(mockNote);
+      vi.mocked(create).mockResolvedValue(mockNote);
 
       const result = await createBookingNote({
         content: "System note",
@@ -97,16 +81,10 @@ describe("BookingNote Service", () => {
         bookingId: "booking-1",
       });
 
-      expect(mockDb.db.bookingNote.create).toHaveBeenCalledWith({
-        data: {
-          content: "System note",
-          type: "UPDATE",
-          booking: {
-            connect: {
-              id: "booking-1",
-            },
-          },
-        },
+      expect(create).toHaveBeenCalledWith(db, "BookingNote", {
+        content: "System note",
+        type: "UPDATE",
+        bookingId: "booking-1",
       });
       expect(result).toEqual(mockNote);
     });
@@ -124,24 +102,17 @@ describe("BookingNote Service", () => {
         updatedAt: new Date(),
       };
 
-      //@ts-expect-error missing vitest type
-      mockDb.db.bookingNote.create.mockResolvedValue(mockNote);
+      vi.mocked(create).mockResolvedValue(mockNote);
 
       const result = await createSystemBookingNote({
         content: "System generated note",
         bookingId: "booking-1",
       });
 
-      expect(mockDb.db.bookingNote.create).toHaveBeenCalledWith({
-        data: {
-          content: "System generated note",
-          type: "UPDATE",
-          booking: {
-            connect: {
-              id: "booking-1",
-            },
-          },
-        },
+      expect(create).toHaveBeenCalledWith(db, "BookingNote", {
+        content: "System generated note",
+        type: "UPDATE",
+        bookingId: "booking-1",
       });
       expect(result).toEqual(mockNote);
     });
@@ -163,50 +134,37 @@ describe("BookingNote Service", () => {
         },
       ];
 
-      //@ts-expect-error missing vitest type
-      mockDb.db.booking.findFirst.mockResolvedValue(mockBooking);
-      //@ts-expect-error missing vitest type
-      mockDb.db.bookingNote.findMany.mockResolvedValue(mockNotes);
+      vi.mocked(findFirst).mockResolvedValue(mockBooking);
+      vi.mocked(findMany).mockResolvedValue(mockNotes);
 
       const result = await getBookingNotes({
         bookingId: "booking-1",
         organizationId: "org-1",
       });
 
-      expect(mockDb.db.booking.findFirst).toHaveBeenCalledWith({
+      expect(findFirst).toHaveBeenCalledWith(db, "Booking", {
         where: {
           id: "booking-1",
           organizationId: "org-1",
         },
-        select: {
-          id: true,
-        },
+        select: "id",
       });
 
-      expect(mockDb.db.bookingNote.findMany).toHaveBeenCalledWith({
+      expect(findMany).toHaveBeenCalledWith(db, "BookingNote", {
         where: {
           bookingId: "booking-1",
         },
         orderBy: {
           createdAt: "desc",
         },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
+        select: "*, user:User(id, firstName, lastName)",
       });
 
       expect(result).toEqual(mockNotes);
     });
 
     it("should throw error when booking does not exist", async () => {
-      //@ts-expect-error missing vitest type
-      mockDb.db.booking.findFirst.mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null);
 
       await expect(
         getBookingNotes({

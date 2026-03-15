@@ -1240,7 +1240,6 @@ export async function checkoutBooking({
       }).toJSDate();
     }
 
-    // Sequential operations replacing db.$transaction
     /* Updating the status of all assets inside booking */
     await updateMany(db, "Asset", {
       where: { id: { in: bookingFound.assets.map((a: any) => a.id) } },
@@ -1532,7 +1531,6 @@ export async function checkinBooking({
         })
       : [];
 
-    // Sequential operations replacing db.$transaction
     if (assetsToCheckin.length > 0) {
       await updateMany(db, "Asset", {
         where: { id: { in: assetsToCheckin } },
@@ -1880,7 +1878,6 @@ export async function partialCheckinBooking({
       }
     }
 
-    // Sequential operations replacing db.$transaction
     // Update the status of checked-in assets to AVAILABLE
     await updateMany(db, "Asset", {
       where: { id: { in: assetIds } },
@@ -2065,7 +2062,6 @@ export async function updateBookingAssets({
   userId?: User["id"];
 }) {
   try {
-    // Sequential operations replacing db.$transaction
     // Verify booking exists before inserting into the join table
     const b = (await findUniqueOrThrow(db, "Booking", {
       where: { id, organizationId },
@@ -2342,7 +2338,6 @@ export async function cancelBooking({
     const kitIds = getKitIdsByAssets(bookingFound.assets);
     const hasKits = kitIds.length > 0;
 
-    // Sequential operations replacing db.$transaction
     /** If booking is ONGOING or OVERDUE, we have to make the assets available */
     if (bookingFound.status !== BookingStatus.RESERVED) {
       await updateMany(db, "Asset", {
@@ -3871,7 +3866,6 @@ export async function bulkDeleteBookings({
       (booking: any) => !!booking.activeSchedulerReference
     );
 
-    // Sequential operations replacing db.$transaction
     /** Deleting all selected bookings */
     await deleteMany(db, "Booking", {
       id: { in: bookings.map((booking: any) => booking.id) },
@@ -4003,7 +3997,6 @@ export async function bulkArchiveBookings({
       });
     }
 
-    // Sequential operations replacing db.$transaction
     /** Updating status of bookings to ARCHIVED  */
     await updateMany(db, "Booking", {
       where: { id: { in: bookings.map((b: any) => b.id) } },
@@ -4127,7 +4120,6 @@ export async function bulkCancelBookings({
       (booking) => !!booking.activeSchedulerReference
     );
 
-    // Sequential operations replacing db.$transaction
     /** Updating status of bookings to CANCELLED */
     await updateMany(db, "Booking", {
       where: { id: { in: bookings.map((b: any) => b.id) } },
@@ -4434,7 +4426,6 @@ export async function addScannedAssetsToBooking({
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets.
      */
-    // Sequential operations replacing db.$transaction
 
     // Connect assets to booking via join table
     if (assetIds.length > 0) {

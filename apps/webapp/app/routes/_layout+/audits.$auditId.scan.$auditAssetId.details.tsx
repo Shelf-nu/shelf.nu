@@ -349,7 +349,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         uploadedImages.push(image);
       }
 
-      // Sequential operations replacing db.$transaction
       const imageIds = uploadedImages.map((img) => img.id);
       // Create note with custom content if provided, otherwise use default
       if (noteContent?.trim()) {
@@ -432,7 +431,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         uploadedImages.push(image);
       }
 
-      // Sequential operations replacing db.$transaction
       const existingNote = await findUnique(db, "AuditNote", {
         where: { id: noteId },
       });

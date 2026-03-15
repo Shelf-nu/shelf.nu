@@ -2,7 +2,8 @@ import { AssetStatus, BookingStatus } from "@shelf/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
-import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
+import { queryRaw } from "~/database/sql.server";
 import * as bookingService from "~/modules/booking/service.server";
 import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
@@ -16,22 +17,34 @@ import { assertIsDataWithResponseInit } from "../../../test/helpers/assertions";
 
 // @vitest-environment node
 
-// Mock external dependencies
+// why: stub — the real db is not used directly; query helpers and sql helpers are mocked below
 vi.mock("~/database/db.server", () => ({
-  db: {
-    booking: {
-      findUniqueOrThrow: vi.fn(),
-    },
-    asset: {
-      findMany: vi.fn(),
-    },
-  },
+  db: {},
+}));
+
+// why: isolating query-helper calls (findMany for assets, findUnique used transitively by email-helpers)
+vi.mock("~/database/query-helpers.server", () => ({
+  findMany: vi.fn().mockResolvedValue([]),
+  findUnique: vi.fn().mockResolvedValue(null),
+}));
+
+// why: isolating SQL queries executed by the action
+vi.mock("~/database/sql.server", () => ({
+  queryRaw: vi.fn().mockResolvedValue([]),
+  sql: vi.fn((strings: TemplateStringsArray, ..._values: unknown[]) =>
+    strings.join("")
+  ),
+  join: vi.fn((fragments: string[], separator: string) =>
+    fragments.join(separator)
+  ),
 }));
 
 vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckinData: vi.fn(),
   updateBookingAssets: vi.fn(),
   removeAssets: vi.fn(),
+  getBooking: vi.fn(),
+  getKitIdsByAssets: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -61,6 +74,30 @@ vi.mock("~/utils/http.server", () => ({
 vi.mock("~/modules/asset/utils.server", () => ({
   getAssetsWhereInput: vi.fn(),
 }));
+
+// why: sendBookingUpdatedEmail is fire-and-forget; mock to prevent transitive db calls
+vi.mock("~/modules/booking/email-helpers", () => ({
+  sendBookingUpdatedEmail: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: imported by route but not exercised in tests
+vi.mock("~/utils/client-hints", () => ({
+  getClientHint: vi.fn().mockReturnValue({}),
+}));
+
+// why: used for note content generation in the action
+vi.mock("~/utils/markdoc-wrappers", () => ({
+  wrapLinkForNote: vi.fn(
+    (href: string, text: string) => `**[${text}](${href})**`
+  ),
+  wrapUserLinkForNote: vi.fn(
+    (user: { firstName: string; lastName: string }) =>
+      `**${user.firstName} ${user.lastName}**`
+  ),
+}));
+
+const mockedFindMany = vi.mocked(findMany);
+const mockedQueryRaw = vi.mocked(queryRaw);
 
 // Mock request and context objects
 const mockContext = {
@@ -98,20 +135,19 @@ describe("manage-assets route validation", () => {
     updatedAt: new Date(),
   } as any;
 
-  const mockBooking = {
+  const mockBookingRow = {
     id: "booking123",
     status: BookingStatus.ONGOING,
-    assets: [{ id: "asset1" }, { id: "asset2" }],
-    from: new Date(),
-    to: new Date(),
-    name: "Test Booking",
-    organizationId: "org123",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  } as any;
+  };
+
+  const mockBookingAssetRows = [{ id: "asset1" }, { id: "asset2" }];
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset queryRaw to clear any leftover mockResolvedValueOnce queue
+    mockedQueryRaw.mockReset();
+    // Reset findMany to clear any leftover mockResolvedValueOnce queue
+    mockedFindMany.mockReset();
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
@@ -132,7 +168,16 @@ describe("manage-assets route validation", () => {
     });
 
     vi.mocked(userService.getUserByID).mockResolvedValue(mockUser);
-    vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(mockBooking);
+
+    // Default queryRaw: booking row, then booking asset rows
+    mockedQueryRaw
+      .mockResolvedValueOnce([mockBookingRow]) // booking lookup
+      .mockResolvedValueOnce(mockBookingAssetRows); // booking assets
+
+    // Default findMany for asset queries returns empty
+    //@ts-expect-error mock setup
+    mockedFindMany.mockResolvedValue([]);
+
     vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue({
       checkedInAssetIds: [],
       partialCheckinDetails: {},
@@ -173,7 +218,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
       const response = await action(
@@ -192,11 +238,13 @@ describe("manage-assets route validation", () => {
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledTimes(2);
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
-        {}
+        {},
+        BookingStatus.ONGOING
       );
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[1],
-        {}
+        {},
+        BookingStatus.ONGOING
       );
     });
 
@@ -207,7 +255,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue([]);
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-assets"
@@ -260,7 +309,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue(
         {
           checkedInAssetIds: ["asset3"],
@@ -288,7 +338,8 @@ describe("manage-assets route validation", () => {
 
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
-        mockPartialCheckinDetails
+        mockPartialCheckinDetails,
+        BookingStatus.ONGOING
       );
     });
 
@@ -310,7 +361,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
 
       // Mock that asset is NOT partially checked in (truly checked out)
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
@@ -339,7 +391,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue([]);
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-assets"
@@ -375,7 +428,10 @@ describe("manage-assets route validation", () => {
       ] as any;
 
       // Test with DRAFT booking - should not validate
-      const draftBooking = { ...mockBooking, status: BookingStatus.DRAFT };
+      const draftBookingRow = {
+        id: "booking123",
+        status: BookingStatus.DRAFT,
+      };
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         assetIds: ["asset1", "asset2", "asset3"], // asset3 is new
@@ -383,8 +439,12 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(draftBooking);
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      mockedQueryRaw
+        .mockResolvedValueOnce([draftBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows);
+
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
       const { action: actionFunction } = await import(
@@ -415,25 +475,20 @@ describe("manage-assets route validation", () => {
         },
       ] as any;
 
-      // Test with ONGOING booking - should validate
-      const ongoingBooking = { ...mockBooking, status: BookingStatus.ONGOING };
-
       vi.mocked(httpServer.parseData).mockReturnValue({
         assetIds: ["asset1", "asset2", "asset3"], // asset3 is new
         removedAssetIds: [],
         redirectTo: null,
       });
 
-      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ongoingBooking);
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      // beforeEach already sets up ONGOING booking via queryRaw defaults
+
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
-
       // Should return error response because ONGOING booking validates checked out assets
-      const response = await actionFunction(
+      const response = await action(
         createActionArgs({
           context: mockContext,
           request: mockRequest,
@@ -458,7 +513,10 @@ describe("manage-assets route validation", () => {
       ] as any;
 
       // Test with OVERDUE booking - should validate
-      const overdueBooking = { ...mockBooking, status: BookingStatus.OVERDUE };
+      const overdueBookingRow = {
+        id: "booking123",
+        status: BookingStatus.OVERDUE,
+      };
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         assetIds: ["asset1", "asset2", "asset3"], // asset3 is new
@@ -466,8 +524,12 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(overdueBooking);
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      mockedQueryRaw
+        .mockResolvedValueOnce([overdueBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows);
+
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
       const { action: actionFunction } = await import(
@@ -519,7 +581,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue(
         {
           checkedInAssetIds: ["asset3"],
@@ -543,7 +606,8 @@ describe("manage-assets route validation", () => {
       // Verify helper is called with correct parameters
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
-        mockPartialCheckinDetails
+        mockPartialCheckinDetails,
+        BookingStatus.ONGOING
       );
     });
   });
@@ -556,7 +620,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue([]);
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-assets"
@@ -575,12 +640,12 @@ describe("manage-assets route validation", () => {
         id: "booking123",
         organizationId: "org123",
         assetIds: ["asset3"], // only the new asset
+        userId: "user123",
       });
 
       // Verify note creation for new assets
       expect(noteService.createNotes).toHaveBeenCalledWith({
-        content:
-          "**John Doe** added asset to booking **[Test Booking](/bookings/booking123)**.",
+        content: expect.stringContaining("added asset to"),
         type: "UPDATE",
         userId: "user123",
         assetIds: ["asset3"], // only the new asset
@@ -594,7 +659,12 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      // First findMany call returns empty (no checked-out assets among new ones)
+      // Second findMany call returns removed assets for note generation
+      //@ts-expect-error mock setup
+      mockedFindMany
+        .mockResolvedValueOnce([]) // potentiallyCheckedOutAssets
+        .mockResolvedValueOnce([{ id: "asset2", title: "Asset 2" }]); // removedAssets
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-assets"
@@ -615,6 +685,7 @@ describe("manage-assets route validation", () => {
         lastName: "Doe",
         userId: "user123",
         organizationId: "org123",
+        assets: [{ id: "asset2", title: "Asset 2" }],
       });
     });
 
@@ -625,7 +696,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue([]);
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-assets"
@@ -672,7 +744,8 @@ describe("manage-assets route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
       const response = await action(

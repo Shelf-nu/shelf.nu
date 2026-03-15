@@ -1,5 +1,5 @@
 import { describe, expect, it, vitest, beforeEach } from "vitest";
-import { db } from "~/database/db.server";
+import { findFirst, findMany, update } from "~/database/query-helpers.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
@@ -9,17 +9,17 @@ import {
   uploadDuplicateAssetMainImage,
 } from "./service.server";
 
-// why: isolating asset service logic from actual database operations
+// why: stub — the real db is not used directly; query helpers are mocked below
 vitest.mock("~/database/db.server", () => ({
-  db: {
-    asset: {
-      findFirst: vitest.fn().mockResolvedValue(null),
-      update: vitest.fn().mockResolvedValue({}),
-    },
-    qr: {
-      update: vitest.fn().mockResolvedValue({}),
-    },
-  },
+  db: {},
+}));
+
+// why: isolating asset service logic from actual Supabase query-helper operations
+vitest.mock("~/database/query-helpers.server", () => ({
+  findFirst: vitest.fn().mockResolvedValue(null),
+  findMany: vitest.fn().mockResolvedValue([]),
+  update: vitest.fn().mockResolvedValue({}),
+  updateMany: vitest.fn().mockResolvedValue([]),
 }));
 
 // why: avoid real QR lookup during relink tests
@@ -57,6 +57,10 @@ vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
 }));
 
+const mockedFindFirst = vitest.mocked(findFirst);
+const mockedFindMany = vitest.mocked(findMany);
+const mockedUpdate = vitest.mocked(update);
+
 describe("relinkAssetQrCode (asset)", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -71,7 +75,7 @@ describe("relinkAssetQrCode (asset)", () => {
       kitId: "kit-1",
     });
     //@ts-expect-error mock setup
-    db.asset.findFirst.mockResolvedValue({ qrCodes: [] });
+    mockedFindFirst.mockResolvedValue({ id: "asset-1" });
 
     await expect(
       relinkAssetQrCode({
@@ -91,8 +95,10 @@ describe("relinkAssetQrCode (asset)", () => {
       assetId: null,
       kitId: null,
     });
-    //@ts-expect-error mock setup
-    db.asset.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr" }] });
+    //@ts-expect-error mock setup — findFirst for asset lookup
+    mockedFindFirst.mockResolvedValue({ id: "asset-1" });
+    //@ts-expect-error mock setup — findMany for existing QR codes
+    mockedFindMany.mockResolvedValue([{ id: "old-qr" }]);
 
     await relinkAssetQrCode({
       qrId: "qr-1",
@@ -101,19 +107,24 @@ describe("relinkAssetQrCode (asset)", () => {
       userId: "user-1",
     });
 
-    expect(db.qr.update).toHaveBeenCalledWith({
-      where: { id: "qr-1" },
-      data: { organizationId: "org-1", userId: "user-1" },
-    });
-    expect(db.asset.update).toHaveBeenCalledWith({
-      where: { id: "asset-1", organizationId: "org-1" },
-      data: {
-        qrCodes: {
-          set: [],
-          connect: { id: "qr-1" },
-        },
-      },
-    });
+    // First update call: update QR code's org and user
+    expect(mockedUpdate).toHaveBeenCalledWith(
+      expect.anything(), // db
+      "Qr",
+      {
+        where: { id: "qr-1" },
+        data: { organizationId: "org-1", userId: "user-1" },
+      }
+    );
+    // Last update call: connect new QR code to asset
+    expect(mockedUpdate).toHaveBeenCalledWith(
+      expect.anything(), // db
+      "Qr",
+      {
+        where: { id: "qr-1" },
+        data: { assetId: "asset-1" },
+      }
+    );
   });
 });
 

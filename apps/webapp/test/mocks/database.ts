@@ -1,51 +1,46 @@
 import { vi } from "vitest";
 
 /**
- * Reusable database mock patterns for testing services that interact with Prisma.
- * Use these helpers to create consistent database mocks across tests.
+ * Reusable database mock patterns for testing services that use
+ * Supabase query helpers (~/database/query-helpers.server).
+ *
+ * Services import query helpers like `create`, `findMany`, `update`, etc.
+ * and pass the `db` client as the first argument. Tests should mock the
+ * query-helpers module to intercept these calls.
  */
-
-// why: testing service logic without actual database queries
-export const createDbMock = <T extends Record<string, any>>(
-  modelMethods: T
-) => {
-  const mockedMethods = Object.entries(modelMethods).reduce(
-    (acc, [key, value]) => {
-      acc[key] = typeof value === "function" ? value : vi.fn();
-      return acc;
-    },
-    {} as Record<string, any>
-  );
-
-  return mockedMethods as { [K in keyof T]: ReturnType<typeof vi.fn> };
-};
 
 /**
- * Common Prisma method mocks
+ * Creates a complete set of mocked query helper functions.
+ * Use with `vitest.mock("~/database/query-helpers.server", ...)`.
+ *
+ * Example:
+ * ```ts
+ * import { createQueryHelperMocks } from "@mocks/database";
+ *
+ * const mocks = createQueryHelperMocks();
+ *
+ * vitest.mock("~/database/query-helpers.server", () => mocks);
+ * ```
  */
-export const createPrismaMethodMocks = () => ({
-  findUnique: vi.fn(),
-  findUniqueOrThrow: vi.fn(),
-  findMany: vi.fn(),
-  findFirst: vi.fn(),
-  create: vi.fn(),
-  createMany: vi.fn(),
-  update: vi.fn(),
-  updateMany: vi.fn(),
-  delete: vi.fn(),
-  deleteMany: vi.fn(),
-  count: vi.fn(),
-  aggregate: vi.fn(),
-  groupBy: vi.fn(),
-  upsert: vi.fn(),
+// why: testing service logic without executing actual database operations
+export const createQueryHelperMocks = () => ({
+  findMany: vi.fn().mockResolvedValue([]),
+  findFirst: vi.fn().mockResolvedValue(null),
+  findFirstOrThrow: vi.fn().mockResolvedValue({}),
+  findUnique: vi.fn().mockResolvedValue(null),
+  findUniqueOrThrow: vi.fn().mockResolvedValue({}),
+  create: vi.fn().mockResolvedValue({}),
+  createMany: vi.fn().mockResolvedValue([]),
+  update: vi.fn().mockResolvedValue({}),
+  updateMany: vi.fn().mockResolvedValue([]),
+  remove: vi.fn().mockResolvedValue([]),
+  deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  count: vi.fn().mockResolvedValue(0),
+  upsert: vi.fn().mockResolvedValue({}),
+  applyFilters: vi.fn((q: any) => q),
+  applyOrderBy: vi.fn((q: any) => q),
+  throwIfError: vi.fn((result: any) => result.data),
+  throwIfNotFound: vi.fn((result: any) => result.data),
 });
 
-/**
- * Mock Prisma transaction
- * why: testing transactional logic without database
- */
-export const createTransactionMock = () =>
-  vi.fn().mockImplementation((callback) => {
-    // Call the callback with a mock db instance
-    return callback({});
-  });
+export type QueryHelperMocks = ReturnType<typeof createQueryHelperMocks>;

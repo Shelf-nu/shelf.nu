@@ -2,7 +2,7 @@ import { BookingStatus, KitStatus } from "@shelf/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
-import { db } from "~/database/db.server";
+import { queryRaw } from "~/database/sql.server";
 import * as bookingService from "~/modules/booking/service.server";
 import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
@@ -16,21 +16,35 @@ import { assertIsDataWithResponseInit } from "../../../test/helpers/assertions";
 
 // @vitest-environment node
 
-// Mock external dependencies
+// why: stub — the real db is not used directly; sql helpers are mocked below
 vi.mock("~/database/db.server", () => ({
-  db: {
-    booking: {
-      findUniqueOrThrow: vi.fn(),
-    },
-    kit: {
-      findMany: vi.fn(),
-    },
-  },
+  db: {},
+}));
+
+// why: isolating SQL queries executed by the action
+vi.mock("~/database/sql.server", () => ({
+  queryRaw: vi.fn().mockResolvedValue([]),
+  sql: vi.fn((strings: TemplateStringsArray, ..._values: unknown[]) =>
+    strings.join("")
+  ),
+  join: vi.fn((fragments: string[], separator: string) =>
+    fragments.join(separator)
+  ),
+}));
+
+// why: not used in the action but imported transitively; findUnique needed by email-helpers
+vi.mock("~/database/query-helpers.server", () => ({
+  findMany: vi.fn().mockResolvedValue([]),
+  findUnique: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckinData: vi.fn(),
   updateBookingAssets: vi.fn(),
+  getKitIdsByAssets: vi.fn(),
+  getBooking: vi.fn(),
+  removeAssets: vi.fn(),
+  createKitBookingNote: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -55,6 +69,18 @@ vi.mock("~/utils/http.server", () => ({
   json: vi.fn((data) => data),
   error: vi.fn((reason) => reason),
 }));
+
+// why: sendBookingUpdatedEmail is fire-and-forget; mock to prevent transitive db calls
+vi.mock("~/modules/booking/email-helpers", () => ({
+  sendBookingUpdatedEmail: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: imported by route but not exercised in tests
+vi.mock("~/utils/client-hints", () => ({
+  getClientHint: vi.fn().mockReturnValue({}),
+}));
+
+const mockedQueryRaw = vi.mocked(queryRaw);
 
 // Mock request and context objects
 const mockContext = {
@@ -92,20 +118,17 @@ describe("manage-kits route validation", () => {
     updatedAt: new Date(),
   } as any;
 
-  const mockBooking = {
+  const mockBookingRow = {
     id: "booking123",
     status: BookingStatus.ONGOING,
-    assets: [{ id: "asset1" }, { id: "asset2" }],
-    from: new Date(),
-    to: new Date(),
-    name: "Test Booking",
-    organizationId: "org123",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  } as any;
+  };
+
+  const mockBookingAssetRows = [{ id: "asset1" }, { id: "asset2" }];
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset queryRaw to clear any leftover mockResolvedValueOnce queue
+    mockedQueryRaw.mockReset();
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
@@ -126,7 +149,7 @@ describe("manage-kits route validation", () => {
     });
 
     vi.mocked(userService.getUserByID).mockResolvedValue(mockUser);
-    vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(mockBooking);
+
     vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue({
       checkedInAssetIds: [],
       partialCheckinDetails: {},
@@ -141,26 +164,17 @@ describe("manage-kits route validation", () => {
 
   describe("validation scope - only newly added kits", () => {
     it("should only validate kits that add NEW assets to the booking", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset3" }], // asset1 exists, asset3 is new
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: "kit2",
-          name: "Kit 2",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset2" }], // all existing assets
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.CHECKED_OUT },
+        { id: "kit2", name: "Kit 2", status: KitStatus.CHECKED_OUT },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset1", status: "AVAILABLE" },
+        { kitId: "kit1", id: "asset3", status: "AVAILABLE" },
+        { kitId: "kit2", id: "asset1", status: "AVAILABLE" },
+        { kitId: "kit2", id: "asset2", status: "AVAILABLE" },
+      ];
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         kitIds: ["kit1", "kit2"],
@@ -168,7 +182,12 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([mockBookingRow]) // booking lookup
+        .mockResolvedValueOnce(mockBookingAssetRows) // booking assets
+        .mockResolvedValueOnce(mockKitRows) // kit rows
+        .mockResolvedValueOnce(mockKitAssetRows); // kit asset rows
+
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
 
       const response = await action(
@@ -186,24 +205,22 @@ describe("manage-kits route validation", () => {
       // Should only validate kit1 (adds new asset3), not kit2 (only existing assets)
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledTimes(1);
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
-        mockKits[0],
+        expect.objectContaining({ id: "kit1" }),
         {},
-        new Set(["asset1", "asset2"])
+        new Set(["asset1", "asset2"]),
+        BookingStatus.ONGOING
       );
     });
 
     it("should not validate kits that only contain existing booking assets", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset2" }], // all existing
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.CHECKED_OUT },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset1", status: "AVAILABLE" },
+        { kitId: "kit1", id: "asset2", status: "AVAILABLE" },
+      ];
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         kitIds: ["kit1"],
@@ -211,7 +228,11 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([mockBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows)
+        .mockResolvedValueOnce(mockKitRows)
+        .mockResolvedValueOnce(mockKitAssetRows);
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-kits"
@@ -235,17 +256,13 @@ describe("manage-kits route validation", () => {
 
   describe("context-aware validation", () => {
     it("should allow kits that are partially checked in within booking context", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.CHECKED_OUT },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset3", status: "AVAILABLE" },
+      ];
 
       const mockPartialCheckinDetails = {
         asset3: {
@@ -265,7 +282,12 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([mockBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows)
+        .mockResolvedValueOnce(mockKitRows)
+        .mockResolvedValueOnce(mockKitAssetRows);
+
       vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue(
         {
           checkedInAssetIds: ["asset3"],
@@ -292,24 +314,21 @@ describe("manage-kits route validation", () => {
       ).resolves.not.toThrow();
 
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
-        mockKits[0],
+        expect.objectContaining({ id: "kit1" }),
         mockPartialCheckinDetails,
-        new Set(["asset1", "asset2"])
+        new Set(["asset1", "asset2"]),
+        BookingStatus.ONGOING
       );
     });
 
     it("should block kits that are truly checked out (not partially checked in)", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.CHECKED_OUT },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset3", status: "AVAILABLE" },
+      ];
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         kitIds: ["kit1"],
@@ -317,7 +336,11 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([mockBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows)
+        .mockResolvedValueOnce(mockKitRows)
+        .mockResolvedValueOnce(mockKitAssetRows);
 
       // Mock that kit is NOT partially checked in (truly checked out)
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
@@ -340,17 +363,13 @@ describe("manage-kits route validation", () => {
     });
 
     it("should allow available kits regardless of partial check-in status", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.AVAILABLE,
-          assets: [{ id: "asset3" }], // new asset
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.AVAILABLE },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset3", status: "AVAILABLE" },
+      ];
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         kitIds: ["kit1"],
@@ -358,7 +377,11 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([mockBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows)
+        .mockResolvedValueOnce(mockKitRows)
+        .mockResolvedValueOnce(mockKitAssetRows);
 
       const { action: actionFunction } = await import(
         "./bookings.$bookingId.overview.manage-kits"
@@ -382,20 +405,16 @@ describe("manage-kits route validation", () => {
 
   describe("booking status validation", () => {
     it("should only validate for ONGOING and OVERDUE bookings", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.CHECKED_OUT },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset3", status: "AVAILABLE" },
+      ];
 
       // Test with DRAFT booking - should not validate
-      const draftBooking = { ...mockBooking, status: BookingStatus.DRAFT };
+      const draftBookingRow = { id: "booking123", status: BookingStatus.DRAFT };
 
       vi.mocked(httpServer.parseData).mockReturnValue({
         kitIds: ["kit1"],
@@ -403,8 +422,12 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(draftBooking);
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([draftBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows)
+        .mockResolvedValueOnce(mockKitRows)
+        .mockResolvedValueOnce(mockKitAssetRows);
+
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
 
       // Should succeed because DRAFT bookings allow checked out kits
@@ -422,17 +445,13 @@ describe("manage-kits route validation", () => {
 
   describe("integration with centralized helpers", () => {
     it("should pass correct parameters to isKitPartiallyCheckedIn helper", async () => {
-      const mockKits = [
-        {
-          id: "kit1",
-          name: "Kit 1",
-          status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
-          organizationId: "org123",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ] as any;
+      const mockKitRows = [
+        { id: "kit1", name: "Kit 1", status: KitStatus.CHECKED_OUT },
+      ];
+
+      const mockKitAssetRows = [
+        { kitId: "kit1", id: "asset3", status: "AVAILABLE" },
+      ];
 
       const mockPartialCheckinDetails = {
         asset3: {
@@ -452,7 +471,12 @@ describe("manage-kits route validation", () => {
         redirectTo: null,
       });
 
-      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      mockedQueryRaw
+        .mockResolvedValueOnce([mockBookingRow])
+        .mockResolvedValueOnce(mockBookingAssetRows)
+        .mockResolvedValueOnce(mockKitRows)
+        .mockResolvedValueOnce(mockKitAssetRows);
+
       vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue(
         {
           checkedInAssetIds: ["asset3"],
@@ -471,9 +495,10 @@ describe("manage-kits route validation", () => {
 
       // Verify helper is called with correct parameters
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
-        mockKits[0],
+        expect.objectContaining({ id: "kit1" }),
         mockPartialCheckinDetails,
-        new Set(["asset1", "asset2"]) // existing booking asset IDs
+        new Set(["asset1", "asset2"]), // existing booking asset IDs
+        BookingStatus.ONGOING
       );
     });
   });

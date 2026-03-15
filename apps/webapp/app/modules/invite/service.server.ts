@@ -748,7 +748,6 @@ export async function bulkInviteUsers({
       });
     };
 
-    // Convert $transaction to sequential operations
     // Bulk create all required team members
     const createdTeamMembers = await createMany(
       db,

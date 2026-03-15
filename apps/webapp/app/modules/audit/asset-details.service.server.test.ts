@@ -1,24 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the database
-vi.mock("~/database/db.server", () => ({
-  // why: We need to mock database operations to avoid hitting the real database during tests
-  db: {
-    auditNote: {
-      create: vi.fn(),
-      findFirst: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-      findMany: vi.fn(),
-      count: vi.fn(),
-    },
-    auditImage: {
-      count: vi.fn(),
-    },
-  },
-}));
+// why: Stub the db export so imports resolve; actual queries go through query helpers
+vi.mock("~/database/db.server", () => ({ db: {} }));
 
-import { db } from "~/database/db.server";
+// why: Auto-mock query helpers so we can control return values per test
+vi.mock("~/database/query-helpers.server");
+
+import {
+  create,
+  findFirst,
+  findMany,
+  update,
+  remove as removeRecord,
+  count,
+} from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 import {
@@ -45,16 +40,18 @@ describe("audit asset details service", () => {
         auditAssetId: "audit-asset-1",
         createdAt: new Date(),
         updatedAt: new Date(),
-        user: {
-          id: "user-1",
-          firstName: "John",
-          lastName: "Doe",
-          email: "john@example.com",
-          profilePicture: null,
-        },
       };
 
-      vi.mocked(db.auditNote.create).mockResolvedValue(mockNote as any);
+      const mockUser = {
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+        email: "john@example.com",
+        profilePicture: null,
+      };
+
+      vi.mocked(create).mockResolvedValue(mockNote as any);
+      vi.mocked(findFirst).mockResolvedValue(mockUser as any);
 
       const result = await createAuditAssetNote({
         content: "This asset needs maintenance",
@@ -63,33 +60,33 @@ describe("audit asset details service", () => {
         auditAssetId: "audit-asset-1",
       });
 
-      expect(db.auditNote.create).toHaveBeenCalledWith({
-        data: {
+      expect(vi.mocked(create)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        {
           content: "This asset needs maintenance",
           type: "COMMENT",
           userId: "user-1",
           auditSessionId: "audit-1",
           auditAssetId: "audit-asset-1",
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              profilePicture: true,
-            },
-          },
-        },
-      });
+        }
+      );
 
-      expect(result).toEqual(mockNote);
+      expect(vi.mocked(findFirst)).toHaveBeenCalledWith(
+        expect.anything(),
+        "User",
+        {
+          where: { id: "user-1" },
+          select: "id, firstName, lastName, email, profilePicture",
+        }
+      );
+
+      expect(result).toEqual({ ...mockNote, user: mockUser });
       expect(result.user?.firstName).toBe("John");
     });
 
     it("throws ShelfError when database operation fails", async () => {
-      vi.mocked(db.auditNote.create).mockRejectedValue(
+      vi.mocked(create).mockRejectedValue(
         new Error("Database connection failed")
       );
 
@@ -129,17 +126,22 @@ describe("audit asset details service", () => {
       const updatedNote = {
         ...existingNote,
         content: "Updated content",
-        user: {
-          id: "user-1",
-          firstName: "John",
-          lastName: "Doe",
-          email: "john@example.com",
-          profilePicture: null,
-        },
       };
 
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
-      vi.mocked(db.auditNote.update).mockResolvedValue(updatedNote as any);
+      const mockUser = {
+        id: "user-1",
+        firstName: "John",
+        lastName: "Doe",
+        email: "john@example.com",
+        profilePicture: null,
+      };
+
+      // First findFirst: check note exists and user owns it
+      // Second findFirst: fetch the user for the response
+      vi.mocked(findFirst)
+        .mockResolvedValueOnce(existingNote as any)
+        .mockResolvedValueOnce(mockUser as any);
+      vi.mocked(update).mockResolvedValue(updatedNote as any);
 
       const result = await updateAuditAssetNote({
         noteId: "note-1",
@@ -147,35 +149,32 @@ describe("audit asset details service", () => {
         userId: "user-1",
       });
 
-      expect(db.auditNote.findFirst).toHaveBeenCalledWith({
-        where: {
-          id: "note-1",
-          userId: "user-1",
-          auditAssetId: { not: null },
-        },
-      });
-
-      expect(db.auditNote.update).toHaveBeenCalledWith({
-        where: { id: "note-1" },
-        data: { content: "Updated content" },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              profilePicture: true,
-            },
+      expect(vi.mocked(findFirst)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        {
+          where: {
+            id: "note-1",
+            userId: "user-1",
+            auditAssetId: { not: null },
           },
-        },
-      });
+        }
+      );
+
+      expect(vi.mocked(update)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        {
+          where: { id: "note-1" },
+          data: { content: "Updated content" },
+        }
+      );
 
       expect(result.content).toBe("Updated content");
     });
 
     it("throws 404 error when note is not found", async () => {
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null as any);
 
       await expect(
         updateAuditAssetNote({
@@ -185,12 +184,12 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.update).not.toHaveBeenCalled();
+      expect(vi.mocked(update)).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when user doesn't own the note", async () => {
       // findFirst returns null because userId doesn't match
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null as any);
 
       await expect(
         updateAuditAssetNote({
@@ -200,12 +199,12 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.update).not.toHaveBeenCalled();
+      expect(vi.mocked(update)).not.toHaveBeenCalled();
     });
 
     it("only allows updating asset-specific notes (auditAssetId not null)", async () => {
       // Verify the where clause includes auditAssetId: { not: null }
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null as any);
 
       await expect(
         updateAuditAssetNote({
@@ -215,7 +214,9 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow();
 
-      expect(db.auditNote.findFirst).toHaveBeenCalledWith(
+      expect(vi.mocked(findFirst)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
         expect.objectContaining({
           where: expect.objectContaining({
             auditAssetId: { not: null },
@@ -238,31 +239,37 @@ describe("audit asset details service", () => {
         updatedAt: new Date(),
       };
 
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
-      vi.mocked(db.auditNote.delete).mockResolvedValue(existingNote as any);
+      vi.mocked(findFirst).mockResolvedValue(existingNote as any);
+      vi.mocked(removeRecord).mockResolvedValue([existingNote] as any);
 
       const result = await deleteAuditAssetNote({
         noteId: "note-1",
         userId: "user-1",
       });
 
-      expect(db.auditNote.findFirst).toHaveBeenCalledWith({
-        where: {
-          id: "note-1",
-          userId: "user-1",
-          auditAssetId: { not: null },
-        },
-      });
+      expect(vi.mocked(findFirst)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        {
+          where: {
+            id: "note-1",
+            userId: "user-1",
+            auditAssetId: { not: null },
+          },
+        }
+      );
 
-      expect(db.auditNote.delete).toHaveBeenCalledWith({
-        where: { id: "note-1" },
-      });
+      expect(vi.mocked(removeRecord)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        { id: "note-1" }
+      );
 
       expect(result).toEqual(existingNote);
     });
 
     it("throws 404 error when note is not found", async () => {
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null as any);
 
       await expect(
         deleteAuditAssetNote({
@@ -271,11 +278,11 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(vi.mocked(removeRecord)).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when user doesn't own the note", async () => {
-      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+      vi.mocked(findFirst).mockResolvedValue(null as any);
 
       await expect(
         deleteAuditAssetNote({
@@ -284,7 +291,7 @@ describe("audit asset details service", () => {
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(vi.mocked(removeRecord)).not.toHaveBeenCalled();
     });
   });
 
@@ -300,13 +307,6 @@ describe("audit asset details service", () => {
           auditAssetId: "audit-asset-1",
           createdAt: new Date("2024-01-02"),
           updatedAt: new Date("2024-01-02"),
-          user: {
-            id: "user-1",
-            firstName: "John",
-            lastName: "Doe",
-            email: "john@example.com",
-            profilePicture: null,
-          },
         },
         {
           id: "note-1",
@@ -317,43 +317,54 @@ describe("audit asset details service", () => {
           auditAssetId: "audit-asset-1",
           createdAt: new Date("2024-01-01"),
           updatedAt: new Date("2024-01-01"),
-          user: {
-            id: "user-2",
-            firstName: "Jane",
-            lastName: "Smith",
-            email: "jane@example.com",
-            profilePicture: null,
-          },
         },
       ];
 
-      vi.mocked(db.auditNote.findMany).mockResolvedValue(mockNotes as any);
+      const mockUsers = [
+        {
+          id: "user-1",
+          firstName: "John",
+          lastName: "Doe",
+          email: "john@example.com",
+          profilePicture: null,
+        },
+        {
+          id: "user-2",
+          firstName: "Jane",
+          lastName: "Smith",
+          email: "jane@example.com",
+          profilePicture: null,
+        },
+      ];
+
+      vi.mocked(findMany).mockImplementation((_db, table, _opts?) => {
+        if (table === "AuditNote") {
+          return Promise.resolve(mockNotes as any);
+        }
+        if (table === "User") {
+          return Promise.resolve(mockUsers as any);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await getAuditAssetNotes({
         auditSessionId: "audit-1",
         auditAssetId: "audit-asset-1",
       });
 
-      expect(db.auditNote.findMany).toHaveBeenCalledWith({
-        where: {
-          auditSessionId: "audit-1",
-          auditAssetId: "audit-asset-1",
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              profilePicture: true,
-            },
+      expect(vi.mocked(findMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        {
+          where: {
+            auditSessionId: "audit-1",
+            auditAssetId: "audit-asset-1",
           },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
+          orderBy: {
+            createdAt: "desc",
+          },
+        }
+      );
 
       expect(result).toHaveLength(2);
       expect(result[0].content).toBe("Most recent note");
@@ -361,7 +372,7 @@ describe("audit asset details service", () => {
     });
 
     it("returns empty array when no notes exist", async () => {
-      vi.mocked(db.auditNote.findMany).mockResolvedValue([]);
+      vi.mocked(findMany).mockResolvedValue([]);
 
       const result = await getAuditAssetNotes({
         auditSessionId: "audit-1",
@@ -372,9 +383,7 @@ describe("audit asset details service", () => {
     });
 
     it("throws ShelfError when database operation fails", async () => {
-      vi.mocked(db.auditNote.findMany).mockRejectedValue(
-        new Error("Database timeout")
-      );
+      vi.mocked(findMany).mockRejectedValue(new Error("Database timeout"));
 
       await expect(
         getAuditAssetNotes({
@@ -394,27 +403,34 @@ describe("audit asset details service", () => {
 
   describe("getAuditAssetDetailsCounts", () => {
     it("returns counts of notes and images for an audit asset", async () => {
-      vi.mocked(db.auditNote.count).mockResolvedValue(3);
-      vi.mocked(db.auditImage.count).mockResolvedValue(2);
+      vi.mocked(count).mockImplementation((_db, table, _where?) => {
+        if (table === "AuditNote") return Promise.resolve(3);
+        if (table === "AuditImage") return Promise.resolve(2);
+        return Promise.resolve(0);
+      });
 
       const result = await getAuditAssetDetailsCounts({
         auditSessionId: "audit-1",
         auditAssetId: "audit-asset-1",
       });
 
-      expect(db.auditNote.count).toHaveBeenCalledWith({
-        where: {
+      expect(vi.mocked(count)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditNote",
+        {
           auditSessionId: "audit-1",
           auditAssetId: "audit-asset-1",
-        },
-      });
+        }
+      );
 
-      expect(db.auditImage.count).toHaveBeenCalledWith({
-        where: {
+      expect(vi.mocked(count)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditImage",
+        {
           auditSessionId: "audit-1",
           auditAssetId: "audit-asset-1",
-        },
-      });
+        }
+      );
 
       expect(result).toEqual({
         notesCount: 3,
@@ -423,8 +439,7 @@ describe("audit asset details service", () => {
     });
 
     it("returns zero counts when no notes or images exist", async () => {
-      vi.mocked(db.auditNote.count).mockResolvedValue(0);
-      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(count).mockResolvedValue(0);
 
       const result = await getAuditAssetDetailsCounts({
         auditSessionId: "audit-1",
@@ -439,16 +454,10 @@ describe("audit asset details service", () => {
 
     it("executes both count queries in parallel", async () => {
       // Mock both counts to resolve after a delay to verify parallel execution
-      vi.mocked(db.auditNote.count).mockImplementation(
-        () =>
+      vi.mocked(count).mockImplementation(
+        (_db, _table, _where?) =>
           new Promise((resolve) => {
             setTimeout(() => resolve(5), 10);
-          })
-      );
-      vi.mocked(db.auditImage.count).mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            setTimeout(() => resolve(3), 10);
           })
       );
 
@@ -465,9 +474,7 @@ describe("audit asset details service", () => {
     });
 
     it("throws ShelfError when database operation fails", async () => {
-      vi.mocked(db.auditNote.count).mockRejectedValue(
-        new Error("Database error")
-      );
+      vi.mocked(count).mockRejectedValue(new Error("Database error"));
 
       await expect(
         getAuditAssetDetailsCounts({

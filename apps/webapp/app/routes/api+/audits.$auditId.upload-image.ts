@@ -86,14 +86,12 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
     if (auditAssetId && result?.id) {
       // Mirror the details flow by creating an automatic activity note.
-      await db.$transaction(async (tx) => {
-        await createAuditAssetImagesAddedNote({
-          auditSessionId: auditId,
-          auditAssetId,
-          userId,
-          imageIds: [result.id],
-          tx,
-        });
+      await createAuditAssetImagesAddedNote({
+        auditSessionId: auditId,
+        auditAssetId,
+        userId,
+        imageIds: [result.id],
+        tx: db,
       });
     }
 

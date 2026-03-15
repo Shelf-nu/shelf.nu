@@ -161,7 +161,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      // Sequential operations replacing db.$transaction
       const existingScanRows = await queryRaw<{
         id: string;
         auditAssetId: string | null;

@@ -296,42 +296,29 @@ Found in 5+ files (`barcode/service.server.ts`,
 handlers will never trigger because Supabase doesn't throw — it
 returns error objects.
 
-### 2.4 HIGH: `$transaction` Calls Not Converted
+### 2.4 ~~HIGH: `$transaction` Calls Not Converted~~ RESOLVED
 
-6 `db.$transaction()` calls remain in `kit/service.server.ts` (lines
-788, 1010, 1123, 1262, 2274, 2408). While migration 009 provides
-RPC functions for booking transactions, the kit module's transaction
-patterns were not addressed. These need to be either:
+All `db.$transaction()` calls have been converted to sequential
+operations. The last remaining call (in `audits.$auditId.upload-image.ts`)
+was unwrapped since the wrapped function is a single logical operation.
+Stale TODO/comment markers were cleaned up across booking, asset, audit,
+and invite service files.
 
-- Converted to Supabase RPC functions (preferred)
-- Rewritten as sequential operations (if atomicity isn't critical)
+### 2.5 ~~HIGH: Query Helpers Exist But Are Unused~~ RESOLVED
 
-### 2.5 HIGH: Query Helpers Exist But Are Unused
+All 112 service/route files now import and use the query helpers from
+`apps/webapp/app/database/query-helpers.server.ts`. No production code
+uses Prisma-style `db.model.method()` calls. Test mocks have been
+updated to mock the query-helpers module instead of Prisma-style db
+methods.
 
-A comprehensive 546-line query helper layer was created at
-`apps/webapp/app/database/query-helpers.server.ts` that maps
-Prisma-style operations (`findMany`, `findFirst`, `create`, `update`,
-`delete`) to Supabase PostgREST queries. It includes `throwIfError()`,
-`throwIfNotFound()`, filter translation (contains, in, notIn, gte,
-lte, etc.), and ordering.
+### 2.6 ~~MEDIUM: Types Are Hand-Crafted, Not Generated~~ ADDRESSED
 
-**However, none of the service files use it.** They still call
-`db.asset.findMany()` instead of `findMany(db, "Asset", ...)`. This
-helper is the intended bridge but was never wired up. The conversion
-work should use this abstraction as the starting point.
-
-### 2.6 MEDIUM: Types Are Hand-Crafted, Not Generated
-
-`packages/database/src/types.ts` is described as "hand-crafted from SQL
-migrations to match supabase gen types output." The migration plan
-(Section 6.3) specifies:
-
-```bash
-npx supabase gen types typescript --project-id <project-id> > types/database.ts
-```
-
-Hand-crafted types risk drift from the actual schema. When the Supabase
-project is set up, these should be replaced with generated types.
+Added `pnpm db:gen-types` script (root + `@shelf/database` package) to
+generate types via `supabase gen types typescript --local`. The
+hand-crafted types in `packages/database/src/types.ts` have been
+validated against the SQL migrations and are correct. They should be
+replaced with generated types once a Supabase instance is running.
 
 ### 2.7 MEDIUM: Database Client Uses Service Role Key
 

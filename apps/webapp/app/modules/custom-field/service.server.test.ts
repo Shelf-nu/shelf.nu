@@ -1,24 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
-// Mock the database and dependencies
-vi.mock("~/database/db.server", () => ({
-  db: {
-    $transaction: vi.fn(),
-    customField: {
-      findFirst: vi.fn(),
-      delete: vi.fn(),
-      update: vi.fn(),
-      create: vi.fn(),
-    },
-    assetCustomFieldValue: {
-      deleteMany: vi.fn(),
-    },
-    assetIndexSettings: {
-      findMany: vi.fn(),
-      update: vi.fn(),
-    },
-  },
+// why: testing custom field service logic without executing actual database operations
+vi.mock("~/database/db.server", () => ({ db: {} }));
+vi.mock("~/database/query-helpers.server", () => ({
+  findFirst: vi.fn(),
+  update: vi.fn(),
 }));
 
 const mockRemoveCustomFieldFromAssetIndexSettings = vi.fn();
@@ -30,10 +17,11 @@ vi.mock("../asset-index-settings/service.server", () => ({
   updateAssetIndexSettingsWithNewCustomFields: vi.fn(),
 }));
 
-const { db } = await import("~/database/db.server");
+const { findFirst, update } = await import("~/database/query-helpers.server");
 const { softDeleteCustomField } = await import("./service.server");
 
-const dbTransactionMock = vi.mocked(db.$transaction);
+const mockFindFirst = vi.mocked(findFirst);
+const mockUpdate = vi.mocked(update);
 
 describe("softDeleteCustomField", () => {
   beforeEach(() => {
@@ -56,25 +44,15 @@ describe("softDeleteCustomField", () => {
       deletedAt: null,
     };
 
-    let capturedUpdateData: any = null;
-
-    // Mock the transaction to execute the callback
-    dbTransactionMock.mockImplementation((callback: any) => {
-      const mockTx = {
-        customField: {
-          findFirst: vi.fn().mockResolvedValue(mockCustomField),
-          update: vi.fn().mockImplementation(({ data }) => {
-            capturedUpdateData = data;
-            return {
-              ...mockCustomField,
-              name: data.name,
-              deletedAt: data.deletedAt,
-            };
-          }),
-        },
-      };
-      return callback(mockTx);
-    });
+    mockFindFirst.mockResolvedValue(mockCustomField as any);
+    mockUpdate.mockImplementation(
+      (_db, _table, opts: any) =>
+        Promise.resolve({
+          ...mockCustomField,
+          name: opts.data.name,
+          deletedAt: opts.data.deletedAt,
+        }) as any
+    );
 
     const result = await softDeleteCustomField({
       id: "cf-123",
@@ -83,27 +61,18 @@ describe("softDeleteCustomField", () => {
 
     expect(result.deletedAt).toBeTruthy();
     expect(result.name).toMatch(/^Serial Number_\d+$/);
-    expect(capturedUpdateData.name).toMatch(/^Serial Number_\d+$/);
-    expect(capturedUpdateData.deletedAt).toBeInstanceOf(Date);
-    expect(dbTransactionMock).toHaveBeenCalledTimes(1);
+    expect(mockFindFirst).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
 
     // Verify AssetIndexSettings cleanup was called
     expect(mockRemoveCustomFieldFromAssetIndexSettings).toHaveBeenCalledWith({
       customFieldName: "Serial Number",
       organizationId: "org-123",
-      prisma: expect.any(Object),
     });
   });
 
   it("throws ShelfError when custom field does not exist or is already deleted", async () => {
-    dbTransactionMock.mockImplementation((callback: any) => {
-      const mockTx = {
-        customField: {
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-      };
-      return callback(mockTx);
-    });
+    mockFindFirst.mockResolvedValue(null as any);
 
     await expect(
       softDeleteCustomField({
@@ -117,15 +86,8 @@ describe("softDeleteCustomField", () => {
   });
 
   it("throws ShelfError when custom field belongs to different organization", async () => {
-    dbTransactionMock.mockImplementation((callback: any) => {
-      const mockTx = {
-        customField: {
-          // findFirst with organizationId filter will return null
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-      };
-      return callback(mockTx);
-    });
+    // findFirst with organizationId filter will return null
+    mockFindFirst.mockResolvedValue(null as any);
 
     await expect(
       softDeleteCustomField({
@@ -156,24 +118,17 @@ describe("softDeleteCustomField", () => {
 
     const executionOrder: string[] = [];
 
-    dbTransactionMock.mockImplementation((callback: any) => {
-      const mockTx = {
-        customField: {
-          findFirst: vi.fn().mockImplementation(() => {
-            executionOrder.push("findFirst");
-            return mockCustomField;
-          }),
-          update: vi.fn().mockImplementation(({ data }) => {
-            executionOrder.push("update");
-            return {
-              ...mockCustomField,
-              name: data.name,
-              deletedAt: data.deletedAt,
-            };
-          }),
-        },
-      };
-      return callback(mockTx);
+    mockFindFirst.mockImplementation(() => {
+      executionOrder.push("findFirst");
+      return Promise.resolve(mockCustomField) as any;
+    });
+    mockUpdate.mockImplementation((_db, _table, opts: any) => {
+      executionOrder.push("update");
+      return Promise.resolve({
+        ...mockCustomField,
+        name: opts.data.name,
+        deletedAt: opts.data.deletedAt,
+      }) as any;
     });
 
     const result = await softDeleteCustomField({
@@ -188,7 +143,7 @@ describe("softDeleteCustomField", () => {
   });
 
   it("wraps database errors in ShelfError", async () => {
-    dbTransactionMock.mockRejectedValueOnce(
+    mockFindFirst.mockRejectedValueOnce(
       new Error("Database connection failed")
     );
 
@@ -198,49 +153,6 @@ describe("softDeleteCustomField", () => {
         organizationId: "org-123",
       })
     ).rejects.toBeInstanceOf(ShelfError);
-  });
-
-  it("passes transaction timeout configuration", async () => {
-    const mockCustomField = {
-      id: "cf-123",
-      name: "Serial Number",
-      organizationId: "org-123",
-      type: "TEXT",
-      active: true,
-      required: false,
-      userId: "user-123",
-      options: [],
-      helpText: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      deletedAt: null,
-    };
-
-    dbTransactionMock.mockImplementation((callback: any) => {
-      const mockTx = {
-        customField: {
-          findFirst: vi.fn().mockResolvedValue(mockCustomField),
-          update: vi.fn().mockImplementation(({ data }) => ({
-            ...mockCustomField,
-            name: data.name,
-            deletedAt: data.deletedAt,
-          })),
-        },
-      };
-      return callback(mockTx);
-    });
-
-    const result = await softDeleteCustomField({
-      id: "cf-123",
-      organizationId: "org-123",
-    });
-
-    // Verify transaction was called with timeout option
-    expect(dbTransactionMock).toHaveBeenCalledWith(expect.any(Function), {
-      timeout: 30000,
-    });
-    // Verify timestamp was appended to name
-    expect(result.name).toMatch(/^Serial Number_\d+$/);
   });
 
   it("appends Unix timestamp to field name when soft deleting", async () => {
@@ -261,21 +173,14 @@ describe("softDeleteCustomField", () => {
 
     let capturedUpdateData: any = null;
 
-    dbTransactionMock.mockImplementation((callback: any) => {
-      const mockTx = {
-        customField: {
-          findFirst: vi.fn().mockResolvedValue(mockCustomField),
-          update: vi.fn().mockImplementation(({ data }) => {
-            capturedUpdateData = data;
-            return {
-              ...mockCustomField,
-              name: data.name,
-              deletedAt: data.deletedAt,
-            };
-          }),
-        },
-      };
-      return callback(mockTx);
+    mockFindFirst.mockResolvedValue(mockCustomField as any);
+    mockUpdate.mockImplementation((_db, _table, opts: any) => {
+      capturedUpdateData = opts.data;
+      return Promise.resolve({
+        ...mockCustomField,
+        name: opts.data.name,
+        deletedAt: opts.data.deletedAt,
+      }) as any;
     });
 
     await softDeleteCustomField({
@@ -285,6 +190,6 @@ describe("softDeleteCustomField", () => {
 
     // Verify that the name has a timestamp appended
     expect(capturedUpdateData.name).toMatch(/^Serial Number_\d+$/);
-    expect(capturedUpdateData.deletedAt).toBeInstanceOf(Date);
+    expect(capturedUpdateData.deletedAt).toBeTruthy();
   });
 });

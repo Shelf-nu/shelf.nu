@@ -2,17 +2,14 @@ import { TagUseFor } from "@shelf/database";
 import { describe, vitest } from "vitest";
 import { USER_ID, ORGANIZATION_ID } from "@factories";
 import { db } from "~/database/db.server";
+import { create, update } from "~/database/query-helpers.server";
 import { createTag, updateTag } from "~/modules/tag/service.server";
 
 // why: avoid database dependency and test tag service business logic in isolation
-vitest.mock("~/database/db.server", () => ({
-  db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
-    tag: {
-      create: vitest.fn().mockResolvedValue({}),
-      update: vitest.fn().mockResolvedValue({}),
-    },
-  },
+vitest.mock("~/database/db.server", () => ({ db: {} }));
+vitest.mock("~/database/query-helpers.server", () => ({
+  create: vitest.fn().mockResolvedValue({}),
+  update: vitest.fn().mockResolvedValue({}),
 }));
 
 describe("tag service", () => {
@@ -123,23 +120,13 @@ function expectTagToBeCreated({
   color: string;
   useFor: TagUseFor[];
 }): void {
-  expect(db.tag.create).toHaveBeenCalledWith({
-    data: {
-      name,
-      description,
-      color,
-      useFor,
-      user: {
-        connect: {
-          id: USER_ID,
-        },
-      },
-      organization: {
-        connect: {
-          id: ORGANIZATION_ID,
-        },
-      },
-    },
+  expect(create).toHaveBeenCalledWith(db, "Tag", {
+    name,
+    description,
+    color,
+    useFor,
+    userId: USER_ID,
+    organizationId: ORGANIZATION_ID,
   });
 }
 
@@ -158,18 +145,13 @@ function expectTagToBeUpdated({
   color: string;
   useFor?: TagUseFor[];
 }): void {
-  expect(db.tag.update).toHaveBeenCalledWith({
-    where: {
-      id,
-      organizationId,
-    },
+  expect(update).toHaveBeenCalledWith(db, "Tag", {
+    where: { id, organizationId },
     data: {
       name,
       description,
       color,
-      useFor: {
-        set: useFor,
-      },
+      useFor,
     },
   });
 }

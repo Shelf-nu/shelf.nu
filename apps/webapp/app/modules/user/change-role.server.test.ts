@@ -2,42 +2,41 @@
 import { OrganizationRoles } from "@shelf/database";
 import { describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
+import { findFirst, update } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 import { changeUserRole } from "./service.server";
 
-// why: testing role change validation logic without actual database operations
+// why: stub db object so service.server.ts can pass it to query helpers
 vi.mock("~/database/db.server", () => ({
-  db: {
-    userOrganization: {
-      findFirst: vi.fn(),
-      update: vi.fn(),
-    },
-  },
+  db: {},
 }));
+
+// why: auto-mock query helpers so we can control return values per test
+vi.mock("~/database/query-helpers.server");
 
 const ORG_ID = "org-1";
 const USER_ID = "user-1";
 
 function mockUserOrg(roles: OrganizationRoles[]) {
-  vi.mocked(db.userOrganization.findFirst).mockResolvedValue({
+  vi.mocked(findFirst).mockResolvedValue({
     id: "uo-1",
     userId: USER_ID,
     organizationId: ORG_ID,
     roles,
     createdAt: new Date(),
     updatedAt: new Date(),
-  });
+  } as any);
 }
 
 function mockUpdateSuccess(newRole: OrganizationRoles) {
-  vi.mocked(db.userOrganization.update).mockResolvedValue({
+  vi.mocked(update).mockResolvedValue({
     id: "uo-1",
     userId: USER_ID,
     organizationId: ORG_ID,
     roles: [newRole],
     createdAt: new Date(),
     updatedAt: new Date(),
-  });
+  } as any);
 }
 
 describe("changeUserRole", () => {
@@ -62,7 +61,7 @@ describe("changeUserRole", () => {
   });
 
   it("rejects when user is not a member", async () => {
-    vi.mocked(db.userOrganization.findFirst).mockResolvedValue(null);
+    vi.mocked(findFirst).mockResolvedValue(null as any);
 
     await expect(
       changeUserRole({
@@ -125,15 +124,13 @@ describe("changeUserRole", () => {
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.BASE);
-    expect(db.userOrganization.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "UserOrganization", {
       where: {
-        userId_organizationId: {
-          userId: USER_ID,
-          organizationId: ORG_ID,
-        },
+        userId: USER_ID,
+        organizationId: ORG_ID,
       },
       data: {
-        roles: { set: [OrganizationRoles.ADMIN] },
+        roles: [OrganizationRoles.ADMIN],
       },
     });
   });

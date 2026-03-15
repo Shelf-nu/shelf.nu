@@ -23,7 +23,8 @@
     "docs:build": "turbo run build --filter=@shelf/docs",
     "docs:preview": "pnpm --filter @shelf/docs preview",
     "db:migrate": "pnpm --filter @shelf/database run db:migrate",
-    "db:reset": "pnpm --filter @shelf/database run db:reset"
+    "db:reset": "pnpm --filter @shelf/database run db:reset",
+    "db:gen-types": "pnpm --filter @shelf/database run db:gen-types"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.4.3",

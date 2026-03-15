@@ -3067,10 +3067,6 @@ export async function bulkCheckOutAssets({
       });
     }
 
-    /**
-     * TODO: convert Prisma $transaction to Supabase RPC or sequential queries
-     * For now, run sequentially without transaction wrapper
-     */
     /** Creating custodies over assets */
     await createMany(
       db,
@@ -3178,10 +3174,6 @@ export async function bulkCheckInAssets({
       });
     }
 
-    /**
-     * TODO: convert Prisma $transaction to Supabase RPC or sequential queries
-     * For now, run sequentially without transaction wrapper
-     */
     /** Deleting custodies over assets */
     const custodyIds = assets.map((asset) => {
       if (!asset.custody) {
@@ -3306,7 +3298,6 @@ export async function bulkUpdateAssetLocation({
       (a) => a.location?.id !== newLocation?.id
     );
 
-    // TODO: convert Prisma $transaction to Supabase RPC or sequential queries
     if (assetsToUpdate.length > 0) {
       /** Updating location of assets to newLocation */
       await updateMany(db, "Asset", {

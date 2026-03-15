@@ -1,6 +1,13 @@
 // =============================================================================
 // Supabase Database Types
-// Hand-crafted from SQL migrations (001-008) to match supabase gen types output
+//
+// These types were hand-crafted from SQL migrations (001-008) to match the
+// output of `supabase gen types typescript`. Once a local or remote Supabase
+// instance is running, regenerate with:
+//
+//   pnpm db:gen-types
+//
+// Then replace this file's Database interface with the generated output.
 // =============================================================================
 
 import type {

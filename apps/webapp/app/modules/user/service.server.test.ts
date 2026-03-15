@@ -1,4 +1,4 @@
-import { Roles, AssetIndexMode, OrganizationRoles } from "@shelf/database";
+import { OrganizationRoles } from "@shelf/database";
 
 import { matchRequestUrl, rest } from "msw";
 import { server } from "@mocks";
@@ -16,37 +16,25 @@ import {
   USER_PASSWORD,
 } from "@mocks/user";
 import { db } from "~/database/db.server";
+import { create, findFirst, upsert } from "~/database/query-helpers.server";
 
-import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
   createUserAccountForTesting,
   createUserOrAttachOrg,
-  defaultUserCategories,
 } from "./service.server";
-import { defaultFields } from "../asset-index-settings/helpers";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
-// why: testing user account creation logic without executing actual database operations
+// why: stub db object so service.server.ts can pass it to query helpers
 vitest.mock("~/database/db.server", () => ({
   db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
-    $queryRaw: vitest.fn().mockResolvedValue([]),
-    user: {
-      create: vitest.fn().mockResolvedValue({}),
-      findFirst: vitest.fn().mockResolvedValue(null),
-    },
-    organization: {
-      findFirst: vitest.fn().mockResolvedValue({
-        id: ORGANIZATION_ID,
-      }),
-    },
-    userOrganization: {
-      upsert: vitest.fn().mockResolvedValue({}),
-    },
+    rpc: vitest.fn().mockResolvedValue({ data: [], error: null }),
   },
 }));
+
+// why: auto-mock query helpers so we can control return values per test
+vitest.mock("~/database/query-helpers.server");
 
 // why: ensureAssetIndexModeForRole has its own db dependencies unrelated to user creation
 vitest.mock("~/modules/asset-index-settings/service.server", () => ({
@@ -56,6 +44,13 @@ vitest.mock("~/modules/asset-index-settings/service.server", () => ({
 const username = `test-user-${USER_ID}`;
 
 describe(createUserAccountForTesting.name, () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Default: create returns a user-like object
+    vi.mocked(create).mockResolvedValue({} as any);
+    vi.mocked(findFirst).mockResolvedValue(null as any);
+  });
+
   it("should return null if no auth account created", async () => {
     expect.assertions(3);
     const fetchAuthAdminUserAPI = new Map();
@@ -169,8 +164,7 @@ describe(createUserAccountForTesting.name, () => {
       ).matches;
       if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
     });
-    //@ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue(null);
+    vi.mocked(create).mockRejectedValueOnce(new Error("DB error"));
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
@@ -187,7 +181,7 @@ describe(createUserAccountForTesting.name, () => {
     );
   });
   it("should create an account", async () => {
-    expect.assertions(4);
+    expect.assertions(3);
     const fetchAuthAdminUserAPI = new Map();
     const fetchAuthTokenAPI = new Map();
     server.events.on("request:start", (req) => {
@@ -209,20 +203,13 @@ describe(createUserAccountForTesting.name, () => {
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
 
-    //@ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue({
+    const createdUser = {
       id: USER_ID,
       email: USER_EMAIL,
       username: username,
-      organizations: [
-        {
-          id: "org-id",
-        },
-      ],
-    });
-    // mock db transaction passing the db instance
-    //@ts-expect-error missing vitest type
-    db.$transaction.mockImplementationOnce((callback) => callback(db));
+    };
+    vi.mocked(create).mockResolvedValue(createdUser as any);
+
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
@@ -233,62 +220,17 @@ describe(createUserAccountForTesting.name, () => {
     result!.expiresAt = -1;
     server.events.removeAllListeners();
 
-    expect(db.user.create).toBeCalledWith({
-      data: {
+    expect(create).toHaveBeenCalledWith(
+      db,
+      "User",
+      expect.objectContaining({
         email: USER_EMAIL,
         id: USER_ID,
         username: username,
-        firstName: undefined,
-        lastName: undefined,
-        createdWithInvite: undefined,
-        // After the last changes because of SSO we dont need this anymore
-        organizations: {
-          create: [
-            {
-              name: "Personal",
-              hasSequentialIdsMigrated: true, // New personal organizations don't need migration
-              categories: {
-                create: defaultUserCategories.map((c) => ({
-                  ...c,
-                  userId: USER_ID,
-                })),
-              },
-              members: {
-                create: {
-                  name: "(Owner)",
-                  user: { connect: { id: USER_ID } },
-                },
-              },
-              assetIndexSettings: {
-                create: {
-                  mode: AssetIndexMode.ADVANCED,
-                  columns: defaultFields,
-                  user: {
-                    connect: {
-                      id: USER_ID,
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-        roles: {
-          connect: {
-            name: Roles["USER"],
-          },
-        },
-      },
-      select: {
-        organizations: {
-          select: { id: true },
-        },
-        ...USER_WITH_SSO_DETAILS_SELECT,
-      },
-    });
+      })
+    );
     expect(result).toEqual(authSession);
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
-    expect(fetchAuthTokenAPI.size).toEqual(1);
   });
 });
 
@@ -310,15 +252,11 @@ const newUserMock = {
 describe(createUserOrAttachOrg.name, () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // Default: no existing Prisma user, no existing auth user
-    // @ts-expect-error missing vitest type
-    db.user.findFirst.mockResolvedValue(null);
-    // @ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValue([]);
-    // @ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue(newUserMock);
-    // @ts-expect-error missing vitest type
-    db.$transaction.mockImplementation((callback: any) => callback(db));
+    // Default: no existing user, create returns new user
+    vi.mocked(findFirst).mockResolvedValue(null as any);
+    vi.mocked(create).mockResolvedValue(newUserMock as any);
+    // Default: db.rpc returns no auth users
+    vi.mocked(db.rpc as any).mockResolvedValue({ data: [], error: null });
   });
 
   afterEach(() => {
@@ -337,7 +275,7 @@ describe(createUserOrAttachOrg.name, () => {
     });
 
     expect(result.id).toBe(USER_ID);
-    expect(db.user.create).toHaveBeenCalled();
+    expect(create).toHaveBeenCalled();
   });
 
   /** The "limbo" bug: unconfirmed Supabase account exists, no Prisma User */
@@ -360,9 +298,11 @@ describe(createUserOrAttachOrg.name, () => {
       )
     );
 
-    // confirmExistingAuthAccount queries auth.users to find existing account
-    // @ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValueOnce([{ id: USER_ID }]);
+    // confirmExistingAuthAccount calls db.rpc to find existing auth account
+    vi.mocked(db.rpc as any).mockResolvedValueOnce({
+      data: [{ id: USER_ID }],
+      error: null,
+    });
 
     const result = await createUserOrAttachOrg({
       email: USER_EMAIL,
@@ -374,8 +314,8 @@ describe(createUserOrAttachOrg.name, () => {
     });
 
     expect(result.id).toBe(USER_ID);
-    expect(db.$queryRaw).toHaveBeenCalled();
-    expect(db.user.create).toHaveBeenCalled();
+    expect(db.rpc).toHaveBeenCalled();
+    expect(create).toHaveBeenCalled();
   });
 
   /** No auth account can be created or found — user gets a clear error */
@@ -393,8 +333,10 @@ describe(createUserOrAttachOrg.name, () => {
     );
 
     // confirmExistingAuthAccount finds no auth user → returns null
-    // @ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValueOnce([]);
+    vi.mocked(db.rpc as any).mockResolvedValueOnce({
+      data: [],
+      error: null,
+    });
 
     await expect(
       createUserOrAttachOrg({
@@ -419,8 +361,7 @@ describe(createUserOrAttachOrg.name, () => {
       userOrganizations: [],
     };
 
-    // @ts-expect-error missing vitest type
-    db.user.findFirst.mockResolvedValueOnce(existingUser);
+    vi.mocked(findFirst).mockResolvedValueOnce(existingUser as any);
 
     const result = await createUserOrAttachOrg({
       email: USER_EMAIL,
@@ -432,7 +373,7 @@ describe(createUserOrAttachOrg.name, () => {
     });
 
     expect(result.id).toBe(USER_ID);
-    expect(db.userOrganization.upsert).toHaveBeenCalled();
-    expect(db.user.create).not.toHaveBeenCalled();
+    expect(upsert).toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 });

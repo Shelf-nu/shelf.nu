@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { db } from "~/database/db.server";
+import {
+  findMany,
+  findUnique,
+  create,
+  createMany,
+  deleteMany,
+  remove as removeRecord,
+} from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { ShelfError } from "~/utils/error";
 import {
   createAuditSession,
@@ -19,65 +27,20 @@ vi.mock("./helpers.server", () => ({
   createAssetsRemovedFromAuditNote: vi.fn(),
 }));
 
-vi.mock("~/database/db.server", () => {
-  const mockDb = {
-    auditSession: {
-      create: vi.fn(),
-      findUnique: vi.fn(),
-      findFirst: vi.fn(),
-      findMany: vi.fn(),
-      update: vi.fn(),
-    },
-    auditNote: {
-      create: vi.fn(),
-    },
-    user: {
-      findUnique: vi.fn(),
-    },
-    auditAsset: {
-      createMany: vi.fn(),
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-      delete: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    auditAssignment: {
-      createMany: vi.fn(),
-    },
-    asset: {
-      findMany: vi.fn(),
-    },
-    $transaction: vi.fn(),
-  };
+// why: Mock note service to avoid database dependencies
+vi.mock("~/modules/note/service.server", () => ({
+  createAssetNotesForAuditAddition: vi.fn(),
+  createAssetNotesForAuditRemoval: vi.fn(),
+}));
 
-  mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
+// why: Stub the db export so imports resolve; actual queries go through query helpers
+vi.mock("~/database/db.server", () => ({ db: {} }));
 
-  return { db: mockDb };
-});
+// why: Auto-mock query helpers so we can control return values per test
+vi.mock("~/database/query-helpers.server");
 
-const mockDb = db as unknown as {
-  auditSession: {
-    create: ReturnType<typeof vi.fn>;
-    findUnique: ReturnType<typeof vi.fn>;
-    findFirst: ReturnType<typeof vi.fn>;
-    findMany: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
-  };
-  auditAsset: {
-    createMany: ReturnType<typeof vi.fn>;
-    findMany: ReturnType<typeof vi.fn>;
-    findUnique: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-    deleteMany: ReturnType<typeof vi.fn>;
-  };
-  auditAssignment: {
-    createMany: ReturnType<typeof vi.fn>;
-  };
-  asset: {
-    findMany: ReturnType<typeof vi.fn>;
-  };
-  $transaction: ReturnType<typeof vi.fn>;
-};
+// why: Auto-mock sql helpers used for raw queries (increment/decrement counts)
+vi.mock("~/database/sql.server");
 
 describe("audit service", () => {
   const defaultInput = {
@@ -95,11 +58,47 @@ describe("audit service", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.asset.findMany.mockResolvedValue([
-      { id: "asset-1", title: "Camera A" },
-      { id: "asset-2", title: "Camera B" },
-    ]);
-    mockDb.auditSession.create.mockResolvedValue({
+
+    // Default: findMany for Asset table returns matched assets
+    vi.mocked(findMany).mockImplementation((_db, table, _opts?) => {
+      if (table === "Asset") {
+        return Promise.resolve([
+          { id: "asset-1", title: "Camera A" },
+          { id: "asset-2", title: "Camera B" },
+        ]);
+      }
+      if (table === "AuditAssignment") {
+        return Promise.resolve([
+          {
+            id: "assignment-1",
+            auditSessionId: "audit-1",
+            userId: "user-2",
+            role: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ]);
+      }
+      if (table === "AuditAsset") {
+        return Promise.resolve([
+          {
+            id: "audit-asset-1",
+            assetId: "asset-1",
+            auditSessionId: "audit-1",
+            expected: true,
+          },
+          {
+            id: "audit-asset-2",
+            assetId: "asset-2",
+            auditSessionId: "audit-1",
+            expected: true,
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    vi.mocked(create).mockResolvedValue({
       id: "audit-1",
       name: defaultInput.name,
       description: defaultInput.description,
@@ -117,8 +116,9 @@ describe("audit service", () => {
       targetId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
-    mockDb.auditSession.findUnique.mockResolvedValue({
+    } as any);
+
+    vi.mocked(findUnique).mockResolvedValue({
       id: "audit-1",
       name: defaultInput.name,
       description: defaultInput.description,
@@ -147,38 +147,36 @@ describe("audit service", () => {
         },
       ],
       assets: [],
-    });
-    mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
-    mockDb.auditAssignment.createMany.mockResolvedValue({ count: 1 });
-    mockDb.auditAsset.findMany.mockResolvedValue([
-      {
-        id: "audit-asset-1",
-        assetId: "asset-1",
-        auditSessionId: "audit-1",
-        expected: true,
-      },
-      {
-        id: "audit-asset-2",
-        assetId: "asset-2",
-        auditSessionId: "audit-1",
-        expected: true,
-      },
-    ]);
+    } as any);
+
+    vi.mocked(createMany).mockResolvedValue(undefined as any);
+    vi.mocked(deleteMany).mockResolvedValue(undefined as any);
+    vi.mocked(removeRecord).mockResolvedValue(undefined as any);
+    vi.mocked(queryRaw).mockResolvedValue(undefined as any);
+    vi.mocked(sql).mockImplementation(
+      (strings: any, ...values: any[]) => ({ strings, values }) as any
+    );
   });
 
   it("creates an audit session with expected assets and assignments", async () => {
     const result = await createAuditSession(defaultInput);
 
-    expect(mockDb.asset.findMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["asset-1", "asset-2"] },
-        organizationId: "org-1",
-      },
-      select: { id: true, title: true },
-    });
+    expect(vi.mocked(findMany)).toHaveBeenCalledWith(
+      expect.anything(), // db
+      "Asset",
+      {
+        where: {
+          id: { in: ["asset-1", "asset-2"] },
+          organizationId: "org-1",
+        },
+        select: "id, title",
+      }
+    );
 
-    expect(mockDb.auditSession.create).toHaveBeenCalledWith({
-      data: {
+    expect(vi.mocked(create)).toHaveBeenCalledWith(
+      expect.anything(),
+      "AuditSession",
+      expect.objectContaining({
         name: defaultInput.name,
         description: defaultInput.description,
         organizationId: defaultInput.organizationId,
@@ -186,19 +184,23 @@ describe("audit service", () => {
         expectedAssetCount: 2,
         missingAssetCount: 2,
         scopeMeta: defaultInput.scopeMeta,
-      },
-    });
+      })
+    );
 
-    expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
-      data: [
+    expect(vi.mocked(createMany)).toHaveBeenCalledWith(
+      expect.anything(),
+      "AuditAsset",
+      [
         { auditSessionId: "audit-1", assetId: "asset-1", expected: true },
         { auditSessionId: "audit-1", assetId: "asset-2", expected: true },
-      ],
-    });
+      ]
+    );
 
-    expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
-      data: [{ auditSessionId: "audit-1", userId: "user-2", role: undefined }],
-    });
+    expect(vi.mocked(createMany)).toHaveBeenCalledWith(
+      expect.anything(),
+      "AuditAssignment",
+      [{ auditSessionId: "audit-1", userId: "user-2" }]
+    );
 
     expect(result.expectedAssets).toEqual([
       { id: "asset-1", name: "Camera A", auditAssetId: "audit-asset-1" },
@@ -214,44 +216,143 @@ describe("audit service", () => {
   });
 
   it("throws when assets are missing", async () => {
-    mockDb.asset.findMany.mockResolvedValue([
-      { id: "asset-1", title: "Camera A" },
-    ]);
+    vi.mocked(findMany).mockImplementation((_db, table, _opts?) => {
+      if (table === "Asset") {
+        return Promise.resolve([{ id: "asset-1", title: "Camera A" }]);
+      }
+      return Promise.resolve([]);
+    });
     await expect(createAuditSession(defaultInput)).rejects.toBeInstanceOf(
       ShelfError
     );
   });
 
   it("deduplicates asset and assignee ids", async () => {
-    mockDb.asset.findMany.mockResolvedValue([
-      { id: "asset-1", title: "Camera A" },
-    ]);
+    vi.mocked(findMany).mockImplementation((_db, table, _opts?) => {
+      if (table === "Asset") {
+        return Promise.resolve([{ id: "asset-1", title: "Camera A" }]);
+      }
+      if (table === "AuditAssignment") {
+        return Promise.resolve([
+          {
+            id: "assignment-1",
+            auditSessionId: "audit-1",
+            userId: "user-2",
+            role: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ]);
+      }
+      if (table === "AuditAsset") {
+        return Promise.resolve([
+          {
+            id: "audit-asset-1",
+            assetId: "asset-1",
+            auditSessionId: "audit-1",
+            expected: true,
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
 
     await createAuditSession({
       ...defaultInput,
       assetIds: ["asset-1", "asset-1"],
     });
 
-    expect(mockDb.asset.findMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: ["asset-1"] },
-        organizationId: "org-1",
-      },
-      select: { id: true, title: true },
-    });
+    expect(vi.mocked(findMany)).toHaveBeenCalledWith(
+      expect.anything(),
+      "Asset",
+      {
+        where: {
+          id: { in: ["asset-1"] },
+          organizationId: "org-1",
+        },
+        select: "id, title",
+      }
+    );
 
-    expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
-      data: [{ auditSessionId: "audit-1", assetId: "asset-1", expected: true }],
-    });
+    expect(vi.mocked(createMany)).toHaveBeenCalledWith(
+      expect.anything(),
+      "AuditAsset",
+      [{ auditSessionId: "audit-1", assetId: "asset-1", expected: true }]
+    );
 
-    expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
-      data: [{ auditSessionId: "audit-1", userId: "user-2", role: undefined }],
-    });
+    expect(vi.mocked(createMany)).toHaveBeenCalledWith(
+      expect.anything(),
+      "AuditAssignment",
+      [{ auditSessionId: "audit-1", userId: "user-2" }]
+    );
   });
 
   describe("getPendingAuditsForOrganization", () => {
     it("returns pending audits for organization", async () => {
       const mockAudits = [
+        {
+          id: "audit-1",
+          name: "Warehouse Audit Q1",
+          createdAt: new Date("2025-01-15"),
+          expectedAssetCount: 50,
+          createdById: "user-john",
+        },
+        {
+          id: "audit-2",
+          name: "Office Audit",
+          createdAt: new Date("2025-01-20"),
+          expectedAssetCount: 25,
+          createdById: "user-bob",
+        },
+      ];
+
+      vi.mocked(findMany).mockImplementation((_db, table, _opts?) => {
+        if (table === "AuditSession") {
+          return Promise.resolve(mockAudits as any);
+        }
+        if (table === "User") {
+          return Promise.resolve([
+            {
+              id: "user-john",
+              firstName: "John",
+              lastName: "Doe",
+            },
+            {
+              id: "user-bob",
+              firstName: "Bob",
+              lastName: "Wilson",
+            },
+          ] as any);
+        }
+        return Promise.resolve([]);
+      });
+
+      vi.mocked(queryRaw).mockResolvedValue([
+        {
+          auditSessionId: "audit-1",
+          firstName: "Jane",
+          lastName: "Smith",
+        },
+      ] as any);
+
+      const result = await getPendingAuditsForOrganization({
+        organizationId: "org-1",
+      });
+
+      expect(vi.mocked(findMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditSession",
+        {
+          where: {
+            organizationId: "org-1",
+            status: "PENDING",
+          },
+          select: "id, name, createdAt, expectedAssetCount, createdById",
+          orderBy: { createdAt: "desc" },
+        }
+      );
+
+      expect(result).toEqual([
         {
           id: "audit-1",
           name: "Warehouse Audit Q1",
@@ -268,60 +369,26 @@ describe("audit service", () => {
           createdBy: { firstName: "Bob", lastName: "Wilson" },
           assignments: [],
         },
-      ];
-
-      mockDb.auditSession.findMany.mockResolvedValue(mockAudits);
-
-      const result = await getPendingAuditsForOrganization({
-        organizationId: "org-1",
-      });
-
-      expect(mockDb.auditSession.findMany).toHaveBeenCalledWith({
-        where: {
-          organizationId: "org-1",
-          status: "PENDING",
-        },
-        select: {
-          id: true,
-          name: true,
-          createdAt: true,
-          expectedAssetCount: true,
-          createdBy: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
-          assignments: {
-            select: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      });
-
-      expect(result).toEqual(mockAudits);
+      ]);
     });
   });
 
   describe("addAssetsToAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      vi.mocked(sql).mockImplementation(
+        (strings: any, ...values: any[]) => ({ strings, values }) as any
+      );
+      vi.mocked(queryRaw).mockResolvedValue(undefined as any);
     });
 
     it("adds new assets to pending audit", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         id: "audit-1",
         name: "Test Audit",
         status: "PENDING",
-      });
-      mockDb.auditAsset.findMany.mockResolvedValue([]);
+      } as any);
+      vi.mocked(findMany).mockResolvedValue([]);
 
       const result = await addAssetsToAudit({
         auditId: "audit-1",
@@ -330,13 +397,19 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditSession.findUnique).toHaveBeenCalledWith({
-        where: { id: "audit-1", organizationId: "org-1" },
-        select: { id: true, name: true, status: true },
-      });
+      expect(vi.mocked(findUnique)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditSession",
+        {
+          where: { id: "audit-1", organizationId: "org-1" },
+          select: "id, name, status",
+        }
+      );
 
-      expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
-        data: [
+      expect(vi.mocked(createMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditAsset",
+        [
           {
             auditSessionId: "audit-1",
             assetId: "asset-1",
@@ -349,16 +422,10 @@ describe("audit service", () => {
             expected: true,
             status: "PENDING",
           },
-        ],
-      });
+        ]
+      );
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: "audit-1" },
-        data: {
-          expectedAssetCount: { increment: 2 },
-          missingAssetCount: { increment: 2 },
-        },
-      });
+      expect(vi.mocked(queryRaw)).toHaveBeenCalled();
 
       expect(result).toEqual({
         addedCount: 2,
@@ -367,12 +434,12 @@ describe("audit service", () => {
     });
 
     it("filters out duplicate assets", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         id: "audit-1",
         name: "Test Audit",
         status: "PENDING",
-      });
-      mockDb.auditAsset.findMany.mockResolvedValue([{ assetId: "asset-1" }]);
+      } as any);
+      vi.mocked(findMany).mockResolvedValue([{ assetId: "asset-1" }] as any);
 
       const result = await addAssetsToAudit({
         auditId: "audit-1",
@@ -381,8 +448,10 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditAsset.createMany).toHaveBeenCalledWith({
-        data: [
+      expect(vi.mocked(createMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditAsset",
+        [
           {
             auditSessionId: "audit-1",
             assetId: "asset-2",
@@ -395,8 +464,8 @@ describe("audit service", () => {
             expected: true,
             status: "PENDING",
           },
-        ],
-      });
+        ]
+      );
 
       expect(result).toEqual({
         addedCount: 2,
@@ -405,7 +474,7 @@ describe("audit service", () => {
     });
 
     it("throws error when audit not found", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue(null);
+      vi.mocked(findUnique).mockResolvedValue(null as any);
 
       await expect(
         addAssetsToAudit({
@@ -418,11 +487,11 @@ describe("audit service", () => {
     });
 
     it("throws error when audit is not PENDING", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         id: "audit-1",
         name: "Test Audit",
         status: "COMPLETED",
-      });
+      } as any);
 
       await expect(
         addAssetsToAudit({
@@ -438,18 +507,26 @@ describe("audit service", () => {
   describe("removeAssetFromAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      vi.mocked(sql).mockImplementation(
+        (strings: any, ...values: any[]) => ({ strings, values }) as any
+      );
+      vi.mocked(queryRaw).mockResolvedValue(undefined as any);
+      vi.mocked(removeRecord).mockResolvedValue(undefined as any);
     });
 
     it("removes expected asset from pending audit", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
-        id: "audit-1",
-        name: "Test Audit",
-        status: "PENDING",
-      });
-      mockDb.auditAsset.findUnique.mockResolvedValue({
-        assetId: "asset-1",
-        expected: true,
-      });
+      // First findUnique call: AuditSession
+      // Second findUnique call: AuditAsset
+      vi.mocked(findUnique)
+        .mockResolvedValueOnce({
+          id: "audit-1",
+          name: "Test Audit",
+          status: "PENDING",
+        } as any)
+        .mockResolvedValueOnce({
+          assetId: "asset-1",
+          expected: true,
+        } as any);
 
       await removeAssetFromAudit({
         auditId: "audit-1",
@@ -458,34 +535,35 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditSession.findUnique).toHaveBeenCalledWith({
-        where: { id: "audit-1", organizationId: "org-1" },
-        select: { id: true, name: true, status: true },
-      });
+      expect(vi.mocked(findUnique)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditSession",
+        {
+          where: { id: "audit-1", organizationId: "org-1" },
+          select: "id, name, status",
+        }
+      );
 
-      expect(mockDb.auditAsset.delete).toHaveBeenCalledWith({
-        where: { id: "audit-asset-1" },
-      });
+      expect(vi.mocked(removeRecord)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditAsset",
+        { id: "audit-asset-1" }
+      );
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: "audit-1" },
-        data: {
-          expectedAssetCount: { decrement: 1 },
-          missingAssetCount: { decrement: 1 },
-        },
-      });
+      expect(vi.mocked(queryRaw)).toHaveBeenCalled();
     });
 
     it("removes unexpected asset without decrementing counts", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
-        id: "audit-1",
-        name: "Test Audit",
-        status: "PENDING",
-      });
-      mockDb.auditAsset.findUnique.mockResolvedValue({
-        assetId: "asset-1",
-        expected: false,
-      });
+      vi.mocked(findUnique)
+        .mockResolvedValueOnce({
+          id: "audit-1",
+          name: "Test Audit",
+          status: "PENDING",
+        } as any)
+        .mockResolvedValueOnce({
+          assetId: "asset-1",
+          expected: false,
+        } as any);
 
       await removeAssetFromAudit({
         auditId: "audit-1",
@@ -494,12 +572,13 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditAsset.delete).toHaveBeenCalled();
-      expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+      expect(vi.mocked(removeRecord)).toHaveBeenCalled();
+      // queryRaw should NOT be called for unexpected assets (no count decrement)
+      expect(vi.mocked(queryRaw)).not.toHaveBeenCalled();
     });
 
     it("throws error when audit not found", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue(null);
+      vi.mocked(findUnique).mockResolvedValue(null as any);
 
       await expect(
         removeAssetFromAudit({
@@ -512,9 +591,9 @@ describe("audit service", () => {
     });
 
     it("throws error when audit is not PENDING", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         status: "ACTIVE",
-      });
+      } as any);
 
       await expect(
         removeAssetFromAudit({
@@ -527,10 +606,11 @@ describe("audit service", () => {
     });
 
     it("throws error when audit asset not found", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
-        status: "PENDING",
-      });
-      mockDb.auditAsset.findUnique.mockResolvedValue(null);
+      vi.mocked(findUnique)
+        .mockResolvedValueOnce({
+          status: "PENDING",
+        } as any)
+        .mockResolvedValueOnce(null as any);
 
       await expect(
         removeAssetFromAudit({
@@ -546,19 +626,24 @@ describe("audit service", () => {
   describe("removeAssetsFromAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      vi.mocked(sql).mockImplementation(
+        (strings: any, ...values: any[]) => ({ strings, values }) as any
+      );
+      vi.mocked(queryRaw).mockResolvedValue(undefined as any);
+      vi.mocked(deleteMany).mockResolvedValue(undefined as any);
     });
 
     it("removes multiple assets from pending audit", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         id: "audit-1",
         name: "Test Audit",
         status: "PENDING",
-      });
-      mockDb.auditAsset.findMany.mockResolvedValue([
+      } as any);
+      vi.mocked(findMany).mockResolvedValue([
         { id: "audit-asset-1", assetId: "asset-1", expected: true },
         { id: "audit-asset-2", assetId: "asset-2", expected: true },
         { id: "audit-asset-3", assetId: "asset-3", expected: false },
-      ]);
+      ] as any);
 
       const result = await removeAssetsFromAudit({
         auditId: "audit-1",
@@ -567,30 +652,24 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditAsset.deleteMany).toHaveBeenCalledWith({
-        where: {
-          id: { in: ["audit-asset-1", "audit-asset-2", "audit-asset-3"] },
-        },
-      });
+      expect(vi.mocked(deleteMany)).toHaveBeenCalledWith(
+        expect.anything(),
+        "AuditAsset",
+        { id: { in: ["audit-asset-1", "audit-asset-2", "audit-asset-3"] } }
+      );
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: "audit-1" },
-        data: {
-          expectedAssetCount: { decrement: 2 },
-          missingAssetCount: { decrement: 2 },
-        },
-      });
+      expect(vi.mocked(queryRaw)).toHaveBeenCalled();
 
       expect(result).toEqual({ removedCount: 3 });
     });
 
     it("returns zero when no assets found", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         id: "audit-1",
         name: "Test Audit",
         status: "PENDING",
-      });
-      mockDb.auditAsset.findMany.mockResolvedValue([]);
+      } as any);
+      vi.mocked(findMany).mockResolvedValue([]);
 
       const result = await removeAssetsFromAudit({
         auditId: "audit-1",
@@ -599,12 +678,12 @@ describe("audit service", () => {
         userId: "user-1",
       });
 
-      expect(mockDb.auditAsset.deleteMany).not.toHaveBeenCalled();
+      expect(vi.mocked(deleteMany)).not.toHaveBeenCalled();
       expect(result).toEqual({ removedCount: 0 });
     });
 
     it("throws error when audit not found", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue(null);
+      vi.mocked(findUnique).mockResolvedValue(null as any);
 
       await expect(
         removeAssetsFromAudit({
@@ -617,11 +696,11 @@ describe("audit service", () => {
     });
 
     it("throws error when audit is not PENDING", async () => {
-      mockDb.auditSession.findUnique.mockResolvedValue({
+      vi.mocked(findUnique).mockResolvedValue({
         id: "audit-1",
         name: "Test Audit",
         status: "COMPLETED",
-      });
+      } as any);
 
       await expect(
         removeAssetsFromAudit({

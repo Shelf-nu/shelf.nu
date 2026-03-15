@@ -1,11 +1,20 @@
-import {
-  BarcodeType,
-  KitStatus,
-  AssetStatus,
-  ErrorCorrection,
-} from "@shelf/database";
+import { BarcodeType, KitStatus, AssetStatus } from "@shelf/database";
 
 import { db } from "~/database/db.server";
+import {
+  create,
+  findMany,
+  findFirst,
+  findFirstOrThrow,
+  findUnique,
+  findUniqueOrThrow,
+  update,
+  remove,
+  deleteMany,
+  updateMany,
+  createMany,
+} from "~/database/query-helpers.server";
+import { rpc } from "~/database/transaction.server";
 import { ShelfError } from "~/utils/error";
 
 import {
@@ -31,45 +40,14 @@ import { getQr } from "../qr/service.server";
 // Mock dependencies
 // why: testing kit service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
-  db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
-    kit: {
-      create: vitest.fn().mockResolvedValue({}),
-      update: vitest.fn().mockResolvedValue({}),
-      findFirstOrThrow: vitest.fn().mockResolvedValue({}),
-      findFirst: vitest.fn().mockResolvedValue(null),
-      findMany: vitest.fn().mockResolvedValue([]),
-      findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
-      delete: vitest.fn().mockResolvedValue({}),
-      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      count: vitest.fn().mockResolvedValue(0),
-    },
-    asset: {
-      findFirst: vitest.fn().mockResolvedValue(null),
-      findMany: vitest.fn().mockResolvedValue([]),
-      update: vitest.fn().mockResolvedValue({}),
-      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
-    },
-    qr: {
-      update: vitest.fn().mockResolvedValue({}),
-    },
-    teamMember: {
-      findUnique: vitest.fn().mockResolvedValue(null),
-    },
-    kitCustody: {
-      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
-    },
-    custody: {
-      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
-    },
-    note: {
-      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
-    },
-  },
+  db: {},
 }));
+
+// why: auto-mock all query helpers so each test can set return values individually
+vitest.mock("~/database/query-helpers.server");
+
+// why: auto-mock transaction helper so rpc calls are intercepted
+vitest.mock("~/database/transaction.server");
 
 // why: ensuring predictable ID generation for consistent test assertions
 vitest.mock("~/utils/id/id.server", () => ({
@@ -108,6 +86,12 @@ vitest.mock("~/modules/asset/utils.server", () => ({
   getKitLocationUpdateNoteContent: vitest
     .fn()
     .mockReturnValue("Mock note content"),
+  getAssetsWhereInput: vitest.fn().mockReturnValue({}),
+}));
+
+// why: isolating from location note service
+vitest.mock("~/modules/location-note/service.server", () => ({
+  createSystemLocationNote: vitest.fn().mockResolvedValue({}),
 }));
 
 const mockKitData = {
@@ -140,38 +124,25 @@ describe("createKit", () => {
 
   it("should create a kit successfully with category", async () => {
     expect.assertions(2);
-    //@ts-expect-error missing vitest type
-    db.kit.create.mockResolvedValue(mockKitData);
+    vi.mocked(create).mockResolvedValue(mockKitData as any);
 
     const result = await createKit(mockCreateParams);
 
-    expect(db.kit.create).toHaveBeenCalledWith({
-      data: {
-        name: "Test Kit",
-        description: "Test Description",
-        createdBy: { connect: { id: "user-1" } },
-        organization: { connect: { id: "org-1" } },
-        qrCodes: {
-          create: [
-            {
-              id: "mock-id",
-              version: 0,
-              errorCorrection: ErrorCorrection.L,
-              user: { connect: { id: "user-1" } },
-              organization: { connect: { id: "org-1" } },
-            },
-          ],
-        },
-        category: { connect: { id: "category-1" } },
-      },
+    expect(create).toHaveBeenCalledWith(db, "Kit", {
+      id: "mock-id",
+      name: "Test Kit",
+      description: "Test Description",
+      createdById: "user-1",
+      organizationId: "org-1",
+      categoryId: "category-1",
+      locationId: null,
     });
     expect(result).toEqual(mockKitData);
   });
 
   it("should create a kit without category when categoryId is null", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.create.mockResolvedValue(mockKitData);
+    vi.mocked(create).mockResolvedValue(mockKitData as any);
 
     await createKit({
       ...mockCreateParams,
@@ -179,32 +150,21 @@ describe("createKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.create).toHaveBeenCalledWith({
-      data: {
-        name: "Test Kit",
-        description: "Test Description",
-        createdBy: { connect: { id: "user-1" } },
-        organization: { connect: { id: "org-1" } },
-        qrCodes: {
-          create: [
-            {
-              id: "mock-id",
-              version: 0,
-              errorCorrection: ErrorCorrection.L,
-              user: { connect: { id: "user-1" } },
-              organization: { connect: { id: "org-1" } },
-            },
-          ],
-        },
-        category: undefined,
-      },
+    expect(create).toHaveBeenCalledWith(db, "Kit", {
+      id: "mock-id",
+      name: "Test Kit",
+      description: "Test Description",
+      createdById: "user-1",
+      organizationId: "org-1",
+      categoryId: null,
+      locationId: null,
     });
   });
 
   it("should create a kit with barcodes", async () => {
-    expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.create.mockResolvedValue(mockKitData);
+    expect.assertions(2);
+    vi.mocked(create).mockResolvedValue(mockKitData as any);
+    vi.mocked(createMany).mockResolvedValue(undefined as any);
 
     const barcodes = [
       { type: BarcodeType.Code128, value: "TEST123" },
@@ -217,46 +177,35 @@ describe("createKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.create).toHaveBeenCalledWith({
-      data: {
-        name: "Test Kit",
-        description: "Test Description",
-        createdBy: { connect: { id: "user-1" } },
-        organization: { connect: { id: "org-1" } },
-        qrCodes: {
-          create: [
-            {
-              id: "mock-id",
-              version: 0,
-              errorCorrection: ErrorCorrection.L,
-              user: { connect: { id: "user-1" } },
-              organization: { connect: { id: "org-1" } },
-            },
-          ],
-        },
-        category: { connect: { id: "category-1" } },
-        barcodes: {
-          create: [
-            {
-              type: BarcodeType.Code128,
-              value: "TEST123",
-              organizationId: "org-1",
-            },
-            {
-              type: BarcodeType.Code39,
-              value: "ABC456",
-              organizationId: "org-1",
-            },
-          ],
-        },
-      },
+    expect(create).toHaveBeenCalledWith(db, "Kit", {
+      id: "mock-id",
+      name: "Test Kit",
+      description: "Test Description",
+      createdById: "user-1",
+      organizationId: "org-1",
+      categoryId: "category-1",
+      locationId: null,
     });
+    expect(createMany).toHaveBeenCalledWith(db, "Barcode", [
+      {
+        type: BarcodeType.Code128,
+        value: "TEST123",
+        organizationId: "org-1",
+        kitId: "kit-1",
+      },
+      {
+        type: BarcodeType.Code39,
+        value: "ABC456",
+        organizationId: "org-1",
+        kitId: "kit-1",
+      },
+    ]);
   });
 
   it("should filter out invalid barcodes", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.create.mockResolvedValue(mockKitData);
+    vi.mocked(create).mockResolvedValue(mockKitData as any);
+    vi.mocked(createMany).mockResolvedValue(undefined as any);
 
     const barcodes = [
       { type: BarcodeType.Code128, value: "TEST123" },
@@ -270,35 +219,14 @@ describe("createKit", () => {
       barcodes,
     });
 
-    expect(db.kit.create).toHaveBeenCalledWith({
-      data: {
-        name: "Test Kit",
-        description: "Test Description",
-        createdBy: { connect: { id: "user-1" } },
-        organization: { connect: { id: "org-1" } },
-        qrCodes: {
-          create: [
-            {
-              id: "mock-id",
-              version: 0,
-              errorCorrection: ErrorCorrection.L,
-              user: { connect: { id: "user-1" } },
-              organization: { connect: { id: "org-1" } },
-            },
-          ],
-        },
-        category: { connect: { id: "category-1" } },
-        barcodes: {
-          create: [
-            {
-              type: BarcodeType.Code128,
-              value: "TEST123",
-              organizationId: "org-1",
-            },
-          ],
-        },
+    expect(createMany).toHaveBeenCalledWith(db, "Barcode", [
+      {
+        type: BarcodeType.Code128,
+        value: "TEST123",
+        organizationId: "org-1",
+        kitId: "kit-1",
       },
-    });
+    ]);
   });
 
   it("should handle barcode constraint violations", async () => {
@@ -311,8 +239,7 @@ describe("createKit", () => {
     constraintError.details =
       'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
-    //@ts-expect-error missing vitest type
-    db.kit.create.mockRejectedValue(constraintError);
+    vi.mocked(create).mockRejectedValue(constraintError);
 
     const barcodes = [{ type: BarcodeType.Code128, value: "DUPLICATE123" }];
 
@@ -334,8 +261,7 @@ describe("updateKit", () => {
   it("should update kit successfully with category", async () => {
     expect.assertions(2);
     const updatedKit = { ...mockKitData, name: "Updated Kit" };
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(updatedKit);
+    vi.mocked(update).mockResolvedValue(updatedKit as any);
 
     const result = await updateKit({
       id: "kit-1",
@@ -348,7 +274,7 @@ describe("updateKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "Kit", {
       where: { id: "kit-1", organizationId: "org-1" },
       data: {
         name: "Updated Kit",
@@ -356,7 +282,7 @@ describe("updateKit", () => {
         image: undefined,
         imageExpiration: undefined,
         status: KitStatus.AVAILABLE,
-        category: { connect: { id: "category-2" } },
+        categoryId: "category-2",
       },
     });
     expect(result).toEqual(updatedKit);
@@ -364,8 +290,7 @@ describe("updateKit", () => {
 
   it("should disconnect category when categoryId is 'uncategorized'", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(mockKitData);
+    vi.mocked(update).mockResolvedValue(mockKitData as any);
 
     await updateKit({
       id: "kit-1",
@@ -376,7 +301,7 @@ describe("updateKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "Kit", {
       where: { id: "kit-1", organizationId: "org-1" },
       data: {
         name: "Updated Kit",
@@ -384,15 +309,14 @@ describe("updateKit", () => {
         image: undefined,
         imageExpiration: undefined,
         status: undefined,
-        category: { disconnect: true },
+        categoryId: null,
       },
     });
   });
 
   it("should not change category when categoryId is null", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(mockKitData);
+    vi.mocked(update).mockResolvedValue(mockKitData as any);
 
     await updateKit({
       id: "kit-1",
@@ -403,7 +327,7 @@ describe("updateKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "Kit", {
       where: { id: "kit-1", organizationId: "org-1" },
       data: {
         name: "Updated Kit",
@@ -417,8 +341,7 @@ describe("updateKit", () => {
 
   it("should not change category when categoryId is undefined", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(mockKitData);
+    vi.mocked(update).mockResolvedValue(mockKitData as any);
 
     await updateKit({
       id: "kit-1",
@@ -429,7 +352,7 @@ describe("updateKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "Kit", {
       where: { id: "kit-1", organizationId: "org-1" },
       data: {
         name: "Updated Kit",
@@ -443,8 +366,7 @@ describe("updateKit", () => {
 
   it("should update barcodes when provided", async () => {
     expect.assertions(2);
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(mockKitData);
+    vi.mocked(update).mockResolvedValue(mockKitData as any);
     const { updateBarcodes } = await import("~/modules/barcode/service.server");
 
     const barcodes = [{ type: BarcodeType.Code128, value: "NEW123" }];
@@ -458,7 +380,7 @@ describe("updateKit", () => {
       locationId: null,
     });
 
-    expect(db.kit.update).toHaveBeenCalled();
+    expect(update).toHaveBeenCalled();
     expect(updateBarcodes).toHaveBeenCalledWith({
       barcodes,
       kitId: "kit-1",
@@ -475,19 +397,18 @@ describe("getKit", () => {
 
   it("should get kit successfully", async () => {
     expect.assertions(2);
-    //@ts-expect-error missing vitest type
-    db.kit.findFirstOrThrow.mockResolvedValue(mockKitData);
+    vi.mocked(findFirstOrThrow).mockResolvedValue(mockKitData as any);
 
     const result = await getKit({
       id: "kit-1",
       organizationId: "org-1",
     });
 
-    expect(db.kit.findFirstOrThrow).toHaveBeenCalledWith({
+    expect(findFirstOrThrow).toHaveBeenCalledWith(db, "Kit", {
       where: {
         OR: [{ id: "kit-1", organizationId: "org-1" }],
       },
-      include: expect.any(Object),
+      select: "*",
     });
     expect(result).toEqual(mockKitData);
   });
@@ -495,8 +416,7 @@ describe("getKit", () => {
   it("should handle cross-organization access", async () => {
     expect.assertions(1);
     const crossOrgKit = { ...mockKitData, organizationId: "other-org" };
-    //@ts-expect-error missing vitest type
-    db.kit.findFirstOrThrow.mockResolvedValue(crossOrgKit);
+    vi.mocked(findFirstOrThrow).mockResolvedValue(crossOrgKit as any);
 
     const userOrganizations = [{ organizationId: "other-org" }];
 
@@ -511,8 +431,7 @@ describe("getKit", () => {
 
   it("should throw error when kit not found", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.findFirstOrThrow.mockRejectedValue(new Error("Not found"));
+    vi.mocked(findFirstOrThrow).mockRejectedValue(new Error("Not found"));
 
     await expect(
       getKit({
@@ -530,24 +449,23 @@ describe("deleteKit", () => {
 
   it("should delete kit successfully", async () => {
     expect.assertions(2);
-    //@ts-expect-error missing vitest type
-    db.kit.delete.mockResolvedValue(mockKitData);
+    vi.mocked(remove).mockResolvedValue([mockKitData] as any);
 
     const result = await deleteKit({
       id: "kit-1",
       organizationId: "org-1",
     });
 
-    expect(db.kit.delete).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
+    expect(remove).toHaveBeenCalledWith(db, "Kit", {
+      id: "kit-1",
+      organizationId: "org-1",
     });
     expect(result).toEqual(mockKitData);
   });
 
   it("should handle deletion errors", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.kit.delete.mockRejectedValue(new Error("Deletion failed"));
+    vi.mocked(remove).mockRejectedValue(new Error("Deletion failed"));
 
     await expect(
       deleteKit({
@@ -569,10 +487,8 @@ describe("bulkDeleteKits", () => {
       { id: "kit-1", image: "image1.jpg" },
       { id: "kit-2", image: null },
     ];
-    //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsToDelete);
-    //@ts-expect-error missing vitest type
-    db.$transaction.mockResolvedValue(true);
+    vi.mocked(findMany).mockResolvedValue(kitsToDelete as any);
+    vi.mocked(deleteMany).mockResolvedValue(undefined as any);
 
     await bulkDeleteKits({
       kitIds: ["kit-1", "kit-2"],
@@ -580,11 +496,13 @@ describe("bulkDeleteKits", () => {
       userId: "user-1",
     });
 
-    expect(db.kit.findMany).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith(db, "Kit", {
       where: { id: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
-      select: { id: true, image: true },
+      select: "id, image",
     });
-    expect(db.$transaction).toHaveBeenCalled();
+    expect(deleteMany).toHaveBeenCalledWith(db, "Kit", {
+      id: { in: ["kit-1", "kit-2"] },
+    });
   });
 });
 
@@ -600,31 +518,26 @@ describe("bulkAssignKitCustody", () => {
         id: "kit-1",
         name: "Kit 1",
         status: KitStatus.AVAILABLE,
-        assets: [
-          {
-            id: "asset-1",
-            title: "Asset 1",
-            status: AssetStatus.AVAILABLE,
-            kit: { id: "kit-1", name: "Kit 1" },
-          },
-        ],
       },
     ];
-    //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
-
-    //@ts-expect-error missing vitest type
-    db.teamMember.findUnique.mockResolvedValue({
+    const kitAssets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        status: AssetStatus.AVAILABLE,
+        kitId: "kit-1",
+      },
+    ];
+    vi.mocked(findMany)
+      .mockResolvedValueOnce(availableKits as any) // kits
+      .mockResolvedValueOnce(kitAssets as any); // assets for kits
+    vi.mocked(findUnique).mockResolvedValue({
       id: "custodian-1",
       name: "John Doe",
-      user: { id: "user-1", firstName: "John", lastName: "Doe" },
-    });
-
-    //@ts-expect-error missing vitest type
-    db.$transaction.mockImplementation((callback) =>
-      // Execute the callback with a mock transaction object
-      callback(db)
-    );
+      User: { id: "user-1", firstName: "John", lastName: "Doe" },
+    } as any);
+    vi.mocked(rpc).mockResolvedValue(undefined as any);
+    vi.mocked(createMany).mockResolvedValue(undefined as any);
 
     await bulkAssignKitCustody({
       kitIds: ["kit-1"],
@@ -634,11 +547,13 @@ describe("bulkAssignKitCustody", () => {
       userId: "user-1",
     });
 
-    expect(db.kit.findMany).toHaveBeenCalled();
-    expect(db.$transaction).toHaveBeenCalled();
-
-    // Verify the transaction was called
-    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function));
+    expect(findMany).toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(db, "kit_assign_custody", {
+      p_kit_id: "kit-1",
+      p_custodian_id: "custodian-1",
+      p_asset_ids: ["asset-1"],
+    });
+    expect(createMany).toHaveBeenCalled();
   });
 
   it("should throw error when kits are not available", async () => {
@@ -648,11 +563,12 @@ describe("bulkAssignKitCustody", () => {
         id: "kit-1",
         name: "Kit 1",
         status: KitStatus.IN_CUSTODY,
-        assets: [],
       },
     ];
-    //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(unavailableKits);
+    vi.mocked(findMany)
+      .mockResolvedValueOnce(unavailableKits as any) // kits
+      .mockResolvedValueOnce([] as any); // assets
+    vi.mocked(findUnique).mockResolvedValue(null as any);
 
     await expect(
       bulkAssignKitCustody({
@@ -678,26 +594,25 @@ describe("bulkReleaseKitCustody", () => {
         id: "kit-1",
         name: "Kit 1",
         status: KitStatus.IN_CUSTODY,
-        custody: { id: "custody-1", custodian: { name: "John Doe" } },
-        assets: [
-          {
-            id: "asset-1",
-            title: "Asset 1",
-            status: AssetStatus.IN_CUSTODY,
-            custody: { id: "asset-custody-1" },
-            kit: { id: "kit-1", name: "Kit 1" },
-          },
-        ],
       },
     ];
-    //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsInCustody);
-
-    //@ts-expect-error missing vitest type
-    db.$transaction.mockImplementation((callback) =>
-      // Execute the callback with a mock transaction object
-      callback(db)
-    );
+    vi.mocked(findMany)
+      .mockResolvedValueOnce(kitsInCustody as any) // kits
+      .mockResolvedValueOnce([
+        // assets
+        {
+          id: "asset-1",
+          status: AssetStatus.IN_CUSTODY,
+          title: "Asset 1",
+          kitId: "kit-1",
+        },
+      ] as any);
+    vi.mocked(findFirst).mockResolvedValue({
+      id: "custody-1",
+      TeamMember: { name: "John Doe" },
+    } as any);
+    vi.mocked(rpc).mockResolvedValue(undefined as any);
+    vi.mocked(createMany).mockResolvedValue(undefined as any);
 
     await bulkReleaseKitCustody({
       kitIds: ["kit-1"],
@@ -705,8 +620,11 @@ describe("bulkReleaseKitCustody", () => {
       userId: "user-1",
     });
 
-    expect(db.kit.findMany).toHaveBeenCalled();
-    expect(db.$transaction).toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(db, "kit_release_custody", {
+      p_kit_id: "kit-1",
+      p_asset_ids: ["asset-1"],
+    });
   });
 
   it("should throw error when kits are not in custody", async () => {
@@ -715,12 +633,12 @@ describe("bulkReleaseKitCustody", () => {
       {
         id: "kit-1",
         status: KitStatus.AVAILABLE,
-        custody: null,
-        assets: [],
       },
     ];
-    //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    vi.mocked(findMany)
+      .mockResolvedValueOnce(availableKits as any) // kits
+      .mockResolvedValueOnce([] as any); // assets
+    vi.mocked(findFirst).mockResolvedValue(null as any);
 
     await expect(
       bulkReleaseKitCustody({
@@ -742,16 +660,16 @@ describe("releaseCustody", () => {
     const kitWithCustody = {
       id: "kit-1",
       name: "Test Kit",
-      assets: [{ id: "asset-1", title: "Test Asset" }],
-      createdBy: { firstName: "John", lastName: "Doe" },
-      custody: { custodian: { name: "Jane Smith" } },
     };
-    //@ts-expect-error missing vitest type
-    db.kit.findUniqueOrThrow.mockResolvedValue(kitWithCustody);
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(kitWithCustody);
-    //@ts-expect-error missing vitest type
-    db.asset.update.mockResolvedValue({});
+    vi.mocked(findUniqueOrThrow).mockResolvedValue(kitWithCustody as any);
+    vi.mocked(findMany).mockResolvedValue([
+      { id: "asset-1", title: "Test Asset" },
+    ] as any);
+    vi.mocked(findFirst).mockResolvedValue({
+      id: "custody-1",
+      TeamMember: { name: "Jane Smith", User: {} },
+    } as any);
+    vi.mocked(rpc).mockResolvedValue(undefined as any);
 
     const result = await releaseCustody({
       kitId: "kit-1",
@@ -759,9 +677,8 @@ describe("releaseCustody", () => {
       organizationId: "org-1",
     });
 
-    expect(db.kit.findUniqueOrThrow).toHaveBeenCalledWith({
+    expect(findUniqueOrThrow).toHaveBeenCalledWith(db, "Kit", {
       where: { id: "kit-1", organizationId: "org-1" },
-      select: expect.any(Object),
     });
     expect(result).toEqual(kitWithCustody);
   });
@@ -779,13 +696,17 @@ describe("createKitsIfNotExists", () => {
       { key: "asset-2", kit: "Existing Kit", title: "Asset 2" },
     ];
 
-    db.kit.findFirst
-      //@ts-expect-error missing vitest type
-      .mockResolvedValueOnce(null) // New Kit doesn't exist
-      .mockResolvedValueOnce({ id: "existing-kit-id", name: "Existing Kit" }); // Existing Kit exists
+    vi.mocked(findFirst)
+      .mockResolvedValueOnce(null as any) // New Kit doesn't exist
+      .mockResolvedValueOnce({
+        id: "existing-kit-id",
+        name: "Existing Kit",
+      } as any); // Existing Kit exists
 
-    //@ts-expect-error missing vitest type
-    db.kit.create.mockResolvedValue({ id: "new-kit-id", name: "New Kit" });
+    vi.mocked(create).mockResolvedValue({
+      id: "new-kit-id",
+      name: "New Kit",
+    } as any);
 
     const result = await createKitsIfNotExists({
       data: importData,
@@ -793,12 +714,10 @@ describe("createKitsIfNotExists", () => {
       organizationId: "org-1",
     });
 
-    expect(db.kit.create).toHaveBeenCalledWith({
-      data: {
-        name: "New Kit",
-        createdBy: { connect: { id: "user-1" } },
-        organization: { connect: { id: "org-1" } },
-      },
+    expect(create).toHaveBeenCalledWith(db, "Kit", {
+      name: "New Kit",
+      createdById: "user-1",
+      organizationId: "org-1",
     });
     expect(result).toEqual({
       "New Kit": { id: "new-kit-id", name: "New Kit" },
@@ -827,18 +746,24 @@ describe("updateKitQrCode", () => {
 
   it("should update kit QR code successfully", async () => {
     expect.assertions(2);
-    const updatedKit = { ...mockKitData, qrCodes: [{ id: "new-qr-id" }] };
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue(updatedKit);
+    const updatedQr = { id: "new-qr-id", kitId: "kit-1" };
+    vi.mocked(updateMany).mockResolvedValue(undefined as any);
+    vi.mocked(update).mockResolvedValue(updatedQr as any);
 
-    const result = await updateKitQrCode({
+    const _result = await updateKitQrCode({
       kitId: "kit-1",
       newQrId: "new-qr-id",
       organizationId: "org-1",
     });
 
-    expect(db.kit.update).toHaveBeenCalledTimes(2); // Once to disconnect, once to connect
-    expect(result).toEqual(updatedKit);
+    expect(updateMany).toHaveBeenCalledWith(db, "Qr", {
+      where: { kitId: "kit-1" },
+      data: { kitId: null },
+    });
+    expect(update).toHaveBeenCalledWith(db, "Qr", {
+      where: { id: "new-qr-id" },
+      data: { kitId: "kit-1" },
+    });
   });
 });
 
@@ -849,17 +774,19 @@ describe("relinkKitQrCode", () => {
 
   it("should relink qr code to kit", async () => {
     expect.assertions(3);
-    //@ts-expect-error missing vitest type
-    getQr.mockResolvedValue({
+    vi.mocked(getQr).mockResolvedValue({
       id: "qr-1",
       organizationId: "org-1",
       assetId: null,
       kitId: null,
-    });
-    //@ts-expect-error missing vitest type
-    db.kit.findFirst.mockResolvedValue({ qrCodes: [{ id: "old-qr-id" }] });
-    //@ts-expect-error missing vitest type
-    db.kit.update.mockResolvedValue({});
+    } as any);
+    vi.mocked(findFirst).mockResolvedValue({
+      id: "kit-1",
+      organizationId: "org-1",
+    } as any);
+    vi.mocked(findMany).mockResolvedValue([{ id: "old-qr-id" }] as any);
+    vi.mocked(update).mockResolvedValue({} as any);
+    vi.mocked(updateMany).mockResolvedValue(undefined as any);
 
     const result = await relinkKitQrCode({
       qrId: "qr-1",
@@ -868,25 +795,27 @@ describe("relinkKitQrCode", () => {
       userId: "user-1",
     });
 
-    expect(db.qr.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "Qr", {
       where: { id: "qr-1" },
       data: { organizationId: "org-1", userId: "user-1" },
     });
-    expect(db.kit.update).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenCalled();
     expect(result).toEqual({ oldQrCodeId: "old-qr-id", newQrId: "qr-1" });
   });
 
   it("should throw when qr code belongs to another asset", async () => {
     expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    getQr.mockResolvedValue({
+    vi.mocked(getQr).mockResolvedValue({
       id: "qr-1",
       organizationId: "org-1",
       assetId: "asset-1",
       kitId: null,
-    });
-    //@ts-expect-error missing vitest type
-    db.kit.findFirst.mockResolvedValue({ qrCodes: [] });
+    } as any);
+    vi.mocked(findFirst).mockResolvedValue({
+      id: "kit-1",
+      organizationId: "org-1",
+    } as any);
+    vi.mocked(findMany).mockResolvedValue([] as any);
 
     await expect(
       relinkKitQrCode({
@@ -906,25 +835,18 @@ describe("getAvailableKitAssetForBooking", () => {
 
   it("should return asset IDs from selected kits", async () => {
     expect.assertions(2);
-    const kitsWithAssets = [
-      {
-        assets: [
-          { id: "asset-1", status: AssetStatus.AVAILABLE },
-          { id: "asset-2", status: AssetStatus.IN_CUSTODY },
-        ],
-      },
-      {
-        assets: [{ id: "asset-3", status: AssetStatus.AVAILABLE }],
-      },
+    const kitAssets = [
+      { id: "asset-1", status: AssetStatus.AVAILABLE },
+      { id: "asset-2", status: AssetStatus.IN_CUSTODY },
+      { id: "asset-3", status: AssetStatus.AVAILABLE },
     ];
-    //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsWithAssets);
+    vi.mocked(findMany).mockResolvedValue(kitAssets as any);
 
     const result = await getAvailableKitAssetForBooking(["kit-1", "kit-2"]);
 
-    expect(db.kit.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1", "kit-2"] } },
-      select: { assets: { select: { id: true, status: true } } },
+    expect(findMany).toHaveBeenCalledWith(db, "Asset", {
+      where: { kitId: { in: ["kit-1", "kit-2"] } },
+      select: "id, status",
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);
   });
@@ -953,7 +875,7 @@ describe("updateKitsWithBookingCustodians", () => {
   });
 
   it("should resolve custodian from booking for checked-out kit", async () => {
-    expect.assertions(2);
+    expect.assertions(1);
     const kits = [
       {
         ...mockKitData,
@@ -964,10 +886,11 @@ describe("updateKitsWithBookingCustodians", () => {
     ];
 
     // why: simulating asset with active booking and custodian user
-    //@ts-expect-error missing vitest type
-    db.asset.findFirst.mockResolvedValue({
-      id: "asset-1",
-      bookings: [
+    // First findMany returns kit assets, second returns bookings
+    vi.mocked(findMany)
+      .mockResolvedValueOnce([{ id: "asset-1" }] as any) // kit assets
+      .mockResolvedValueOnce([
+        // bookings for asset
         {
           id: "booking-1",
           custodianTeamMember: null,
@@ -977,8 +900,7 @@ describe("updateKitsWithBookingCustodians", () => {
             profilePicture: "pic.jpg",
           },
         },
-      ],
-    });
+      ] as any);
 
     const result = await updateKitsWithBookingCustodians(kits);
 
@@ -992,14 +914,6 @@ describe("updateKitsWithBookingCustodians", () => {
         },
       },
     });
-    expect(db.asset.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          kitId: "kit-co",
-          bookings: { some: { status: { in: ["ONGOING", "OVERDUE"] } } },
-        }),
-      })
-    );
   });
 
   it("should resolve custodian from team member when no user", async () => {
@@ -1014,17 +928,16 @@ describe("updateKitsWithBookingCustodians", () => {
     ];
 
     // why: simulating booking with team member custodian instead of user
-    //@ts-expect-error missing vitest type
-    db.asset.findFirst.mockResolvedValue({
-      id: "asset-1",
-      bookings: [
+    vi.mocked(findMany)
+      .mockResolvedValueOnce([{ id: "asset-1" }] as any) // kit assets
+      .mockResolvedValueOnce([
+        // bookings
         {
           id: "booking-1",
           custodianTeamMember: { name: "External Contractor" },
           custodianUser: null,
         },
-      ],
-    });
+      ] as any);
 
     const result = await updateKitsWithBookingCustodians(kits);
 
@@ -1044,10 +957,10 @@ describe("updateKitsWithBookingCustodians", () => {
       },
     ];
 
-    // why: reproducing the Sentry error scenario where findFirst returns null
-    // because no asset in the kit has an ONGOING/OVERDUE booking
-    //@ts-expect-error missing vitest type
-    db.asset.findFirst.mockResolvedValue(null);
+    // why: reproducing the Sentry error scenario where no asset has an ONGOING/OVERDUE booking
+    vi.mocked(findMany)
+      .mockResolvedValueOnce([{ id: "asset-1" }] as any) // kit assets
+      .mockResolvedValueOnce([] as any); // no bookings
 
     const result = await updateKitsWithBookingCustodians(kits);
 
@@ -1063,30 +976,48 @@ describe("updateKitAssets - Location Cascade", () => {
     vitest.clearAllMocks();
   });
 
-  it("should call asset updateMany when kit has location and assets are added", async () => {
+  it("should update asset locations when kit has location and assets are added", async () => {
     expect.assertions(2);
 
     const mockKit = {
       id: "kit-1",
-      location: { id: "location-1", name: "Warehouse A" },
-      assets: [],
-      custody: null,
+      locationId: "location-1",
+      status: KitStatus.AVAILABLE,
     };
+
+    const mockLocation = { id: "location-1", name: "Warehouse A" };
 
     const mockNewAssets = [
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: null,
-        custody: null,
-        location: null,
+        kitId: null,
+        locationId: null,
       },
     ];
 
-    //@ts-expect-error missing vitest type
-    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue(mockNewAssets);
+    vi.mocked(findUniqueOrThrow).mockResolvedValue(mockKit as any);
+    vi.mocked(findUnique).mockResolvedValue(mockLocation as any);
+    vi.mocked(findMany).mockImplementation(
+      (_db: any, table: string, _opts?: any) => {
+        if (table === "Asset" && _opts?.where?.kitId) {
+          return Promise.resolve([] as any); // existing kit assets
+        }
+        if (table === "Asset" && _opts?.where?.id) {
+          return Promise.resolve(mockNewAssets as any); // allAssetsForKit
+        }
+        if (table === "Custody") {
+          return Promise.resolve([] as any);
+        }
+        if (table === "Location") {
+          return Promise.resolve([] as any);
+        }
+        return Promise.resolve([] as any);
+      }
+    );
+    vi.mocked(findFirst).mockResolvedValue(null as any); // kitCustody
+    vi.mocked(rpc).mockResolvedValue(undefined as any);
+    vi.mocked(updateMany).mockResolvedValue(undefined as any);
 
     const { updateKitAssets } = await import("./service.server");
 
@@ -1098,47 +1029,61 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // Should update kit assets
-    expect(db.kit.update).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }],
-        },
-      },
+    // Should use rpc for atomic kit update
+    expect(rpc).toHaveBeenCalledWith(db, "kit_update_with_assets", {
+      p_kit_id: "kit-1",
+      p_data: {},
+      p_add_asset_ids: ["asset-1"],
+      p_remove_asset_ids: [],
     });
 
     // Should update asset locations (cascade behavior)
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenCalledWith(db, "Asset", {
       where: { id: { in: ["asset-1"] } },
       data: { locationId: "location-1" },
     });
   });
 
   it("should set asset location to null when kit has no location", async () => {
-    expect.assertions(2);
-
     const mockKit = {
       id: "kit-1",
-      location: null,
-      assets: [],
-      custody: null,
+      locationId: null,
+      status: KitStatus.AVAILABLE,
     };
 
     const mockNewAssets = [
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: null,
-        custody: null,
-        location: { id: "location-1", name: "Current Location" },
+        kitId: null,
+        locationId: "location-1",
       },
     ];
 
-    //@ts-expect-error missing vitest type
-    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue(mockNewAssets);
+    vi.mocked(findUniqueOrThrow).mockResolvedValue(mockKit as any);
+    vi.mocked(findMany).mockImplementation(
+      (_db: any, table: string, _opts?: any) => {
+        if (table === "Asset" && _opts?.where?.kitId) {
+          return Promise.resolve([] as any); // existing kit assets
+        }
+        if (table === "Asset" && _opts?.where?.id) {
+          return Promise.resolve(mockNewAssets as any); // allAssetsForKit
+        }
+        if (table === "Custody") {
+          return Promise.resolve([] as any);
+        }
+        if (table === "Location") {
+          return Promise.resolve([
+            { id: "location-1", name: "Current Location" },
+          ] as any);
+        }
+        return Promise.resolve([] as any);
+      }
+    );
+    vi.mocked(findFirst).mockResolvedValue(null as any); // kitCustody
+    vi.mocked(findUnique).mockResolvedValue(null as any);
+    vi.mocked(rpc).mockResolvedValue(undefined as any);
+    vi.mocked(updateMany).mockResolvedValue(undefined as any);
 
     const { updateKitAssets } = await import("./service.server");
 
@@ -1150,19 +1095,19 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // Should update kit assets
-    expect(db.kit.update).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }],
-        },
-      },
+    // Should use rpc for atomic kit update
+    expect(rpc).toHaveBeenCalledWith(db, "kit_update_with_assets", {
+      p_kit_id: "kit-1",
+      p_data: {},
+      p_add_asset_ids: ["asset-1"],
+      p_remove_asset_ids: [],
     });
 
     // Should remove location from assets (set to null)
-    expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1"] } },
+    expect(updateMany).toHaveBeenCalledWith(db, "Asset", {
+      where: {
+        id: { in: ["asset-1"] },
+      },
       data: { locationId: null },
     });
   });

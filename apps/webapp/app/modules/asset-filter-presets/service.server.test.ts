@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  findMany,
+  findFirst,
+  count,
+  create,
+  update,
+  remove,
+} from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 import {
@@ -22,72 +30,62 @@ const mockPreset = {
   updatedAt: new Date(),
 };
 
-type MockDb = {
-  $transaction: <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>;
-  assetFilterPreset: {
-    findMany: ReturnType<typeof vi.fn>;
-    count: ReturnType<typeof vi.fn>;
-    findFirst: ReturnType<typeof vi.fn>;
-    create: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-  };
-};
-
-const dbMock = vi.hoisted<MockDb>(() => ({
-  $transaction: vi.fn(
-    <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> =>
-      callback(dbMock as MockDb)
-  ) as <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>,
-  assetFilterPreset: {
-    findMany: vi.fn(),
-    count: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-  },
+// why: stub — the real db is not used directly; query helpers are mocked below
+vi.mock("~/database/db.server", () => ({
+  db: {},
 }));
 
 // why: isolating database calls for unit testing the service logic
-vi.mock("~/database/db.server", () => ({
-  db: dbMock,
+vi.mock("~/database/query-helpers.server", () => ({
+  findMany: vi.fn(),
+  findFirst: vi.fn(),
+  count: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
 }));
+
+const mockedFindMany = vi.mocked(findMany);
+const mockedFindFirst = vi.mocked(findFirst);
+const mockedCount = vi.mocked(count);
+const mockedCreate = vi.mocked(create);
+const mockedUpdate = vi.mocked(update);
+const mockedRemove = vi.mocked(remove);
 
 describe("asset-filter-presets service", () => {
   beforeEach(() => {
-    // Reset the transaction mock to re-execute callbacks
-    (dbMock.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
-      <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock)
-    );
-
-    Object.values(dbMock.assetFilterPreset).forEach((mock) => {
-      (mock as ReturnType<typeof vi.fn>).mockReset();
-    });
+    vi.clearAllMocks();
   });
 
   describe("listPresetsForUser", () => {
     it("lists presets ordered by name", async () => {
-      dbMock.assetFilterPreset.findMany.mockResolvedValue([mockPreset]);
+      //@ts-expect-error mock setup
+      mockedFindMany.mockResolvedValue([mockPreset]);
 
       const presets = await listPresetsForUser({
         organizationId: "org-1",
         ownerId: "user-1",
       });
 
-      expect(dbMock.assetFilterPreset.findMany).toHaveBeenCalledWith({
-        where: { organizationId: "org-1", ownerId: "user-1" },
-        orderBy: [{ starred: "desc" }, { name: "asc" }],
-      });
+      expect(mockedFindMany).toHaveBeenCalledWith(
+        expect.anything(), // db
+        "AssetFilterPreset",
+        {
+          where: { organizationId: "org-1", ownerId: "user-1" },
+          orderBy: [{ starred: "desc" }, { name: "asc" }],
+        }
+      );
       expect(presets).toEqual([mockPreset]);
     });
   });
 
   describe("createPreset", () => {
     it("sanitizes query and trims name before creating a preset", async () => {
-      dbMock.assetFilterPreset.count.mockResolvedValue(0);
-      dbMock.assetFilterPreset.findFirst.mockResolvedValue(null);
-      dbMock.assetFilterPreset.create.mockResolvedValue(mockPreset);
+      //@ts-expect-error mock setup
+      mockedCount.mockResolvedValue(0);
+      mockedFindFirst.mockResolvedValue(null);
+      //@ts-expect-error mock setup
+      mockedCreate.mockResolvedValue(mockPreset);
 
       await createPreset({
         organizationId: "org-1",
@@ -96,18 +94,21 @@ describe("asset-filter-presets service", () => {
         query: "page=2&status=AVAILABLE",
       });
 
-      expect(dbMock.assetFilterPreset.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(mockedCreate).toHaveBeenCalledWith(
+        expect.anything(), // db
+        "AssetFilterPreset",
+        expect.objectContaining({
           organizationId: "org-1",
           ownerId: "user-1",
           name: "Weekly overview",
           query: "status=AVAILABLE", // page param should be stripped
-        }),
-      });
+        })
+      );
     });
 
     it("throws when the per-user limit is reached", async () => {
-      dbMock.assetFilterPreset.count.mockResolvedValue(20);
+      //@ts-expect-error mock setup
+      mockedCount.mockResolvedValue(20);
 
       await expect(
         createPreset({
@@ -120,8 +121,10 @@ describe("asset-filter-presets service", () => {
     });
 
     it("throws when a preset with the same name already exists", async () => {
-      dbMock.assetFilterPreset.count.mockResolvedValue(5);
-      dbMock.assetFilterPreset.findFirst.mockResolvedValue(mockPreset);
+      //@ts-expect-error mock setup
+      mockedCount.mockResolvedValue(5);
+      //@ts-expect-error mock setup
+      mockedFindFirst.mockResolvedValue(mockPreset);
 
       await expect(
         createPreset({
@@ -147,7 +150,7 @@ describe("asset-filter-presets service", () => {
 
   describe("renamePreset", () => {
     it("throws when renaming a preset that does not belong to the user", async () => {
-      dbMock.assetFilterPreset.findFirst.mockResolvedValue(null);
+      mockedFindFirst.mockResolvedValue(null);
 
       await expect(
         renamePreset({
@@ -160,10 +163,12 @@ describe("asset-filter-presets service", () => {
     });
 
     it("updates preset name with trimmed value", async () => {
-      dbMock.assetFilterPreset.findFirst
-        .mockResolvedValueOnce(mockPreset) // ownership check
+      mockedFindFirst
+        //@ts-expect-error mock setup — ownership check
+        .mockResolvedValueOnce(mockPreset)
         .mockResolvedValueOnce(null); // duplicate check
-      dbMock.assetFilterPreset.update.mockResolvedValue({
+      //@ts-expect-error mock setup
+      mockedUpdate.mockResolvedValue({
         ...mockPreset,
         name: "Renamed",
       });
@@ -175,15 +180,20 @@ describe("asset-filter-presets service", () => {
         name: "  Renamed  ",
       });
 
-      expect(dbMock.assetFilterPreset.update).toHaveBeenCalledWith({
-        where: { id: "preset-1" },
-        data: { name: "Renamed" },
-      });
+      expect(mockedUpdate).toHaveBeenCalledWith(
+        expect.anything(), // db
+        "AssetFilterPreset",
+        {
+          where: { id: "preset-1" },
+          data: { name: "Renamed" },
+        }
+      );
       expect(result.name).toBe("Renamed");
     });
 
     it("returns existing preset when name is unchanged", async () => {
-      dbMock.assetFilterPreset.findFirst.mockResolvedValue(mockPreset);
+      //@ts-expect-error mock setup
+      mockedFindFirst.mockResolvedValue(mockPreset);
 
       const result = await renamePreset({
         id: "preset-1",
@@ -192,15 +202,17 @@ describe("asset-filter-presets service", () => {
         name: "My preset",
       });
 
-      expect(dbMock.assetFilterPreset.update).not.toHaveBeenCalled();
+      expect(mockedUpdate).not.toHaveBeenCalled();
       expect(result).toEqual(mockPreset);
     });
   });
 
   describe("deletePreset", () => {
     it("deletes a preset owned by the user", async () => {
-      dbMock.assetFilterPreset.findFirst.mockResolvedValue(mockPreset);
-      dbMock.assetFilterPreset.delete.mockResolvedValue(mockPreset);
+      //@ts-expect-error mock setup
+      mockedFindFirst.mockResolvedValue(mockPreset);
+      //@ts-expect-error mock setup
+      mockedRemove.mockResolvedValue(mockPreset);
 
       await deletePreset({
         id: "preset-1",
@@ -208,13 +220,15 @@ describe("asset-filter-presets service", () => {
         ownerId: "user-1",
       });
 
-      expect(dbMock.assetFilterPreset.delete).toHaveBeenCalledWith({
-        where: { id: "preset-1" },
-      });
+      expect(mockedRemove).toHaveBeenCalledWith(
+        expect.anything(), // db
+        "AssetFilterPreset",
+        { id: "preset-1" }
+      );
     });
 
     it("throws when deleting a preset that does not belong to the user", async () => {
-      dbMock.assetFilterPreset.findFirst.mockResolvedValue(null);
+      mockedFindFirst.mockResolvedValue(null);
 
       await expect(
         deletePreset({

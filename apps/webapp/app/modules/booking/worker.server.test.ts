@@ -1,5 +1,5 @@
 import { BookingStatus } from "@shelf/database";
-import { db } from "~/database/db.server";
+import { findUnique, update } from "~/database/query-helpers.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
 import { BOOKING_SCHEDULER_EVENTS_ENUM } from "./constants";
@@ -9,17 +9,16 @@ import { registerBookingWorkers } from "./worker.server";
 
 // @vitest-environment node
 
-// why: testing worker handlers without executing actual database operations
+// why: stub — the real db is not used directly; query helpers are mocked below
 vitest.mock("~/database/db.server", () => ({
-  db: {
-    booking: {
-      findUnique: vitest.fn().mockResolvedValue(null),
-      update: vitest.fn().mockResolvedValue({}),
-    },
-    bookingSettings: {
-      findUnique: vitest.fn().mockResolvedValue(null),
-    },
-  },
+  db: {},
+}));
+
+// why: testing worker handlers without executing actual database operations
+vitest.mock("~/database/query-helpers.server", () => ({
+  findUnique: vitest.fn().mockResolvedValue(null),
+  findFirstOrThrow: vitest.fn().mockResolvedValue({}),
+  update: vitest.fn().mockResolvedValue({}),
 }));
 
 // why: preventing actual job scheduling during tests
@@ -94,6 +93,9 @@ vitest.mock("~/utils/error", () => ({
   },
 }));
 
+const mockedFindUnique = vitest.mocked(findUnique);
+const mockedUpdate = vitest.mocked(update);
+
 /**
  * Helper to register workers and extract the auto-archive handler.
  * Since handlers are internal (not exported), we invoke them via
@@ -136,21 +138,24 @@ describe("autoArchiveHandler", () => {
       organizationId: "org-1",
     };
 
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.findUnique.mockResolvedValue({
+    // findUnique for booking
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValueOnce(mockBooking);
+    // findUnique for bookingSettings
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValueOnce({
       autoArchiveBookings: true,
     });
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue({
+    //@ts-expect-error mock setup
+    mockedUpdate.mockResolvedValue({
       ...mockBooking,
       status: BookingStatus.ARCHIVED,
     });
 
     await workerHandler(mockJob);
 
-    expect(db.booking.update).toHaveBeenCalledWith(
+    expect(mockedUpdate).toHaveBeenCalledWith(
+      expect.stringMatching(/booking/i),
       expect.objectContaining({
         where: { id: "booking-1", status: BookingStatus.COMPLETE },
         data: expect.objectContaining({
@@ -169,20 +174,19 @@ describe("autoArchiveHandler", () => {
   });
 
   it("should skip when booking not found", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue(null);
+    mockedFindUnique.mockResolvedValue(null);
 
     await workerHandler(mockJob);
 
     expect(Logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("not found")
     );
-    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(mockedUpdate).not.toHaveBeenCalled();
   });
 
   it("should skip when booking is no longer COMPLETE", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue({
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValue({
       id: "booking-1",
       status: BookingStatus.ARCHIVED,
       custodianUserId: "user-1",
@@ -194,19 +198,19 @@ describe("autoArchiveHandler", () => {
     expect(Logger.info).toHaveBeenCalledWith(
       expect.stringContaining("no longer COMPLETE")
     );
-    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(mockedUpdate).not.toHaveBeenCalled();
   });
 
   it("should skip when auto-archive is disabled for org", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue({
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValueOnce({
       id: "booking-1",
       status: BookingStatus.COMPLETE,
       custodianUserId: "user-1",
       organizationId: "org-1",
     });
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.findUnique.mockResolvedValue({
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValueOnce({
       autoArchiveBookings: false,
     });
 
@@ -215,23 +219,22 @@ describe("autoArchiveHandler", () => {
     expect(Logger.info).toHaveBeenCalledWith(
       expect.stringContaining("disabled for organization")
     );
-    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(mockedUpdate).not.toHaveBeenCalled();
   });
 
   it("should skip on concurrent modification", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockResolvedValue({
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValueOnce({
       id: "booking-1",
       status: BookingStatus.COMPLETE,
       custodianUserId: "user-1",
       organizationId: "org-1",
     });
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.findUnique.mockResolvedValue({
+    //@ts-expect-error mock setup
+    mockedFindUnique.mockResolvedValueOnce({
       autoArchiveBookings: true,
     });
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockRejectedValue(new Error("concurrent modification"));
+    mockedUpdate.mockRejectedValue(new Error("concurrent modification"));
 
     await workerHandler(mockJob);
 
@@ -241,8 +244,7 @@ describe("autoArchiveHandler", () => {
   });
 
   it("should handle errors gracefully", async () => {
-    //@ts-expect-error missing vitest type
-    db.booking.findUnique.mockRejectedValue(new Error("DB connection error"));
+    mockedFindUnique.mockRejectedValue(new Error("DB connection error"));
 
     await workerHandler(mockJob);
 

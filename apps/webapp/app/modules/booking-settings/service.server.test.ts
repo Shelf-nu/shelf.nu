@@ -1,4 +1,5 @@
 import { db } from "~/database/db.server";
+import { update, upsert } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 import {
@@ -10,14 +11,14 @@ import {
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 // why: testing booking settings service logic without executing actual database operations
-vitest.mock("~/database/db.server", () => ({
-  db: {
-    bookingSettings: {
-      upsert: vitest.fn(),
-      update: vitest.fn(),
-    },
-  },
+vitest.mock("~/database/db.server", () => ({ db: {} }));
+vitest.mock("~/database/query-helpers.server", () => ({
+  upsert: vitest.fn(),
+  update: vitest.fn(),
 }));
+
+const mockUpsert = vitest.mocked(upsert);
+const mockUpdate = vitest.mocked(update);
 
 const mockBookingSettingsData = {
   id: "booking-settings-1",
@@ -38,17 +39,14 @@ describe("getBookingSettingsForOrganization", () => {
 
   it("should get existing booking settings successfully", async () => {
     expect.assertions(2);
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.upsert.mockResolvedValue(mockBookingSettingsData);
+    mockUpsert.mockResolvedValue(mockBookingSettingsData as any);
 
     const result = await getBookingSettingsForOrganization(mockOrganizationId);
 
-    expect(db.bookingSettings.upsert).toHaveBeenCalledWith({
-      where: {
-        organizationId: mockOrganizationId,
-      },
-      update: {},
-      create: {
+    expect(upsert).toHaveBeenCalledWith(
+      db,
+      "BookingSettings",
+      {
         bufferStartTime: 0,
         tagsRequired: false,
         maxBookingLength: null,
@@ -59,18 +57,8 @@ describe("getBookingSettingsForOrganization", () => {
         requireExplicitCheckinForSelfService: false,
         organizationId: mockOrganizationId,
       },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
-    });
+      { onConflict: "organizationId" }
+    );
     expect(result).toEqual(mockBookingSettingsData);
   });
 
@@ -83,17 +71,14 @@ describe("getBookingSettingsForOrganization", () => {
       maxBookingLength: null,
       organizationId: mockOrganizationId,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.upsert.mockResolvedValue(defaultSettings);
+    mockUpsert.mockResolvedValue(defaultSettings as any);
 
     const result = await getBookingSettingsForOrganization(mockOrganizationId);
 
-    expect(db.bookingSettings.upsert).toHaveBeenCalledWith({
-      where: {
-        organizationId: mockOrganizationId,
-      },
-      update: {},
-      create: {
+    expect(upsert).toHaveBeenCalledWith(
+      db,
+      "BookingSettings",
+      {
         bufferStartTime: 0,
         tagsRequired: false,
         maxBookingLength: null,
@@ -104,26 +89,15 @@ describe("getBookingSettingsForOrganization", () => {
         requireExplicitCheckinForSelfService: false,
         organizationId: mockOrganizationId,
       },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
-    });
+      { onConflict: "organizationId" }
+    );
     expect(result).toEqual(defaultSettings);
   });
 
   it("should throw ShelfError when database operation fails", async () => {
     expect.assertions(2);
     const dbError = new Error("Database connection failed");
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.upsert.mockRejectedValue(dbError);
+    mockUpsert.mockRejectedValue(dbError);
 
     await expect(
       getBookingSettingsForOrganization(mockOrganizationId)
@@ -157,28 +131,16 @@ describe("updateBookingSettings", () => {
       ...mockBookingSettingsData,
       bufferStartTime: 48,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
       bufferStartTime: 48,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: { bufferStartTime: 48 },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -189,28 +151,16 @@ describe("updateBookingSettings", () => {
       ...mockBookingSettingsData,
       tagsRequired: false,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
       tagsRequired: false,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: { tagsRequired: false },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -221,28 +171,16 @@ describe("updateBookingSettings", () => {
       ...mockBookingSettingsData,
       maxBookingLength: 72,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
       maxBookingLength: 72,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: { maxBookingLength: 72 },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -253,28 +191,16 @@ describe("updateBookingSettings", () => {
       ...mockBookingSettingsData,
       maxBookingLength: null,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
       maxBookingLength: null,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: { maxBookingLength: null },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -287,8 +213,7 @@ describe("updateBookingSettings", () => {
       tagsRequired: false,
       maxBookingLength: 240,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
@@ -297,23 +222,12 @@ describe("updateBookingSettings", () => {
       maxBookingLength: 240,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: {
         bufferStartTime: 12,
         tagsRequired: false,
         maxBookingLength: 240,
-      },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -325,8 +239,7 @@ describe("updateBookingSettings", () => {
       ...mockBookingSettingsData,
       bufferStartTime: 36,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
@@ -335,20 +248,9 @@ describe("updateBookingSettings", () => {
       maxBookingLength: undefined,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: { bufferStartTime: 36 },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -360,8 +262,7 @@ describe("updateBookingSettings", () => {
       bufferStartTime: 0,
       maxBookingLength: 0,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
@@ -369,22 +270,11 @@ describe("updateBookingSettings", () => {
       maxBookingLength: 0,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: {
         bufferStartTime: 0,
         maxBookingLength: 0,
-      },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -396,28 +286,16 @@ describe("updateBookingSettings", () => {
       ...mockBookingSettingsData,
       tagsRequired: false,
     };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
       tagsRequired: false,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: { tagsRequired: false },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -425,8 +303,7 @@ describe("updateBookingSettings", () => {
   it("should throw ShelfError when database operation fails", async () => {
     expect.assertions(2);
     const dbError = new Error("Database connection failed");
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockRejectedValue(dbError);
+    mockUpdate.mockRejectedValue(dbError);
 
     await expect(
       updateBookingSettings({
@@ -459,8 +336,7 @@ describe("updateBookingSettings", () => {
     const notFoundError = new Error("No rows found");
     //@ts-expect-error adding Postgres error properties
     notFoundError.code = "PGRST116";
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockRejectedValue(notFoundError);
+    mockUpdate.mockRejectedValue(notFoundError);
 
     await expect(
       updateBookingSettings({
@@ -502,27 +378,15 @@ describe("updateBookingSettings", () => {
   it("should not call update when no fields are provided", async () => {
     expect.assertions(2);
     const updatedSettings = { ...mockBookingSettingsData };
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+    mockUpdate.mockResolvedValue(updatedSettings as any);
 
     const result = await updateBookingSettings({
       organizationId: mockOrganizationId,
     });
 
-    expect(db.bookingSettings.update).toHaveBeenCalledWith({
+    expect(update).toHaveBeenCalledWith(db, "BookingSettings", {
       where: { organizationId: mockOrganizationId },
       data: {},
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
     expect(result).toEqual(updatedSettings);
   });
@@ -530,8 +394,7 @@ describe("updateBookingSettings", () => {
   it("should include all parameters in error additional data", async () => {
     expect.assertions(1);
     const dbError = new Error("Database connection failed");
-    //@ts-expect-error missing vitest type
-    db.bookingSettings.update.mockRejectedValue(dbError);
+    mockUpdate.mockRejectedValue(dbError);
 
     await expect(
       updateBookingSettings({
