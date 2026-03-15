@@ -39,36 +39,6 @@ export {
   ActivityAction,
 } from "./enums";
 
-// Re-export enum types (same names, but as types)
-export type {
-  AssetStatus,
-  AssetIndexMode,
-  TagUseFor,
-  NoteType,
-  ErrorCorrection,
-  BarcodeType,
-  Roles,
-  OrganizationType,
-  QrIdDisplayPreference,
-  OrganizationRoles,
-  CustomFieldType,
-  Currency,
-  InviteStatuses,
-  BookingStatus,
-  KitStatus,
-  UpdateStatus,
-  AuditStatus,
-  AuditAssetStatus,
-  AuditAssignmentRole,
-  PersonStatus,
-  SoftwareStatus,
-  LicenseStatus,
-  LicenseSource,
-  SyncSourceSystem,
-  SyncStatus,
-  ActivityAction,
-} from "./enums";
-
 // Model type aliases
 export type {
   Asset,

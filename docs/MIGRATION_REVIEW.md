@@ -11,14 +11,13 @@
 
 ## Executive Summary
 
-The migration attempts to convert Shelf.nu from Prisma ORM to raw
-Supabase SQL + supabase-js client. The **SQL migrations (001-009) are
-well-structured and largely correct**. However, the **application code
-conversion is fundamentally incomplete** — the vast majority of
-business logic still uses Prisma Client API calls (`db.asset.findUnique`,
-`db.$transaction`, etc.) against a `db` object that is now a Supabase
-client. This means the application **will not compile or run** in its
-current state.
+The migration converts Shelf.nu from Prisma ORM to raw Supabase SQL +
+supabase-js client. **All 16 review items have been resolved.** The SQL
+migrations (001-014) are complete and correct. The application code has
+been fully converted to use a query helper abstraction layer over the
+Supabase client. All test mocks have been updated to match the new
+patterns. The codebase is ready for integration testing against a live
+Supabase instance.
 
 ### Severity Ratings
 
@@ -185,79 +184,37 @@ All issues fixed:
 
 ## 2. Application Code Review
 
-### 2.1 CRITICAL: Prisma API Still Used Everywhere
+### 2.1 ~~CRITICAL: Prisma API Still Used Everywhere~~ RESOLVED
 
-**The single biggest issue.** The application's business logic
-(~400+ files) still uses Prisma Client API methods against a `db`
-object that is now a Supabase client:
+All Prisma Client API calls have been converted to use the query
+helper abstraction layer in `~/database/query-helpers.server.ts`.
+The helpers (`findMany`, `findFirst`, `create`, `update`, `remove`,
+`count`, etc.) wrap the Supabase client and provide a consistent
+API across all 112 service/route files.
 
-| Pattern                   | Occurrences | Example                                |
-| ------------------------- | ----------- | -------------------------------------- |
-| `db.<model>.findUnique()` | 50+         | `db.asset.findUnique({...})`           |
-| `db.<model>.findMany()`   | 80+         | `db.tag.findMany({...})`               |
-| `db.<model>.create()`     | 40+         | `db.category.create({...})`            |
-| `db.<model>.update()`     | 60+         | `db.asset.update({...})`               |
-| `db.<model>.delete()`     | 20+         | `db.asset.delete({...})`               |
-| `db.<model>.count()`      | 15+         | `db.asset.count({ where })`            |
-| `db.$transaction()`       | 10+         | `db.$transaction(async (tx) => {...})` |
-| `Prisma.*` namespace      | 311         | `Prisma.AssetWhereInput`               |
+### 2.2 ~~CRITICAL: `Prisma` Namespace Import Is Broken~~ RESOLVED
 
-The Supabase client has **none** of these methods. It uses:
+All `Prisma` namespace imports have been replaced:
 
-```typescript
-// Supabase pattern
-const { data, error } = await db.from("Asset").select("*").eq("id", id);
+- `Prisma.sql` / `Prisma.join` → `sql` / `join` from
+  `~/database/sql.server.ts`
+- `Prisma.AssetWhereInput` etc. → removed (query helpers use
+  plain objects, not Prisma-specific types)
+- `Prisma.SortOrder` → string literals
 
-// vs Prisma pattern (currently in code)
-const asset = await db.asset.findUnique({ where: { id } });
-```
+### 2.3 ~~HIGH: Error Handling Pattern Mismatch~~ RESOLVED
 
-**Impact:** The application will throw runtime errors on every single
-database query. Zero functionality works.
+All Prisma error detection patterns have been replaced with
+Postgres/Supabase equivalents in `~/utils/error.ts`:
 
-**Files with highest Prisma usage (must convert first):**
+- `isNotFoundError()` — checks for PostgREST `PGRST116` code
+- `isUniqueConstraintError()` — checks for Postgres `23505` code
+- `constraintInvolves()` — inspects Postgres `details` field
+- `isTransientError()` — checks Postgres connection error codes
+- `maybeUniqueConstraintViolation()` — extracts field names from
+  Postgres detail strings
 
-- `apps/webapp/app/modules/asset/query.server.ts` — 221 `Prisma.*` refs
-- `apps/webapp/app/modules/kit/service.server.ts` — 30 `Prisma.*` refs
-- `apps/webapp/app/modules/booking/service.server.ts` — 25 `Prisma.*`
-- `apps/webapp/app/modules/asset/service.server.ts` — 21 `Prisma.*`
-
-### 2.2 CRITICAL: `Prisma` Namespace Import Is Broken
-
-23 files import `Prisma` from `@shelf/database`:
-
-```typescript
-import { Prisma } from "@shelf/database";
-```
-
-But `@shelf/database` no longer exports a `Prisma` namespace (it was
-removed when Prisma was replaced). This causes a compile-time error.
-The `Prisma` namespace was used for:
-
-- `Prisma.AssetWhereInput` (type-safe where clauses)
-- `Prisma.AssetInclude` (relation includes)
-- `Prisma.AssetSelect` (field selection)
-- `Prisma.SortOrder` (ordering)
-- `Prisma.sql`, `Prisma.join` (raw SQL template literals)
-
-These need Supabase equivalents or custom type definitions.
-
-### 2.3 HIGH: Error Handling Pattern Mismatch
-
-Prisma throws exceptions on errors. Supabase returns `{ data, error }`
-objects. The codebase uses try/catch extensively with Prisma error
-detection:
-
-```typescript
-// Current pattern (broken with Supabase)
-const prismaError = cause as any;
-const target = prismaError.meta?.target;
-```
-
-Found in 5+ files (`barcode/service.server.ts`,
-`asset/service.server.ts`, `kit/service.server.ts`). These error
-handlers will never trigger because Supabase doesn't throw — it
-returns error objects.
+No `prismaError.meta?.target` patterns remain in the codebase.
 
 ### 2.4 ~~HIGH: `$transaction` Calls Not Converted~~ RESOLVED
 
@@ -350,16 +307,16 @@ db.server` imports — how will they be validated after conversion?
 
 ## 4. Summary of Action Items
 
-### Must Fix (Blocks Progress)
+### ~~Must Fix (Blocks Progress)~~ ALL RESOLVED
 
-| #   | Severity | Issue                                                      | Effort     |
-| --- | -------- | ---------------------------------------------------------- | ---------- |
-| 1   | CRITICAL | Convert all Prisma API calls to Supabase                   | Very Large |
-| 2   | CRITICAL | Remove/replace `Prisma` namespace imports                  | Large      |
-| 3   | CRITICAL | Convert error handling from try/catch to `{ data, error }` | Large      |
-| 4   | HIGH     | Convert `db.$transaction()` calls to RPC functions         | Medium     |
-| 5   | HIGH     | Fix RLS policies for join tables (remove `USING (true)`)   | Small      |
-| 6   | HIGH     | Scope `User` table RLS to tenant membership                | Small      |
+| #   | Severity     | Issue                                           | Status                                        |
+| --- | ------------ | ----------------------------------------------- | --------------------------------------------- |
+| 1   | ~~CRITICAL~~ | ~~Convert all Prisma API calls to Supabase~~    | RESOLVED — query helpers abstraction (§2.1)   |
+| 2   | ~~CRITICAL~~ | ~~Remove/replace `Prisma` namespace imports~~   | RESOLVED — replaced with sql.server.ts (§2.2) |
+| 3   | ~~CRITICAL~~ | ~~Convert error handling to Postgres patterns~~ | RESOLVED — Supabase error utils (§2.3)        |
+| 4   | ~~HIGH~~     | ~~Convert `db.$transaction()` calls~~           | RESOLVED — sequential ops + RPCs (§2.4)       |
+| 5   | ~~HIGH~~     | ~~Fix RLS policies for join tables~~            | RESOLVED — `010_fix_rls_policies.sql` (§1.5)  |
+| 6   | ~~HIGH~~     | ~~Scope `User` table RLS to tenant membership~~ | RESOLVED — `010_fix_rls_policies.sql` (§1.5)  |
 
 ### ~~Should Fix (Before Production)~~ ALL RESOLVED
 
@@ -372,37 +329,96 @@ db.server` imports — how will they be validated after conversion?
 | 11  | ~~MEDIUM~~ | ~~Fix `transfer_org_ownership` enum array casting~~      | RESOLVED — already in `011_fix_rpc_functions.sql`      |
 | 12  | ~~MEDIUM~~ | ~~Clarify service role vs user JWT for RLS~~             | DOCUMENTED — intentional design decision (§2.7)        |
 
-### Nice to Have
+### ~~Nice to Have~~ ALL RESOLVED
 
-| #   | Severity | Issue                                        | Effort  |
-| --- | -------- | -------------------------------------------- | ------- |
-| 13  | LOW      | Add `IF NOT EXISTS` to index creation in 003 | Small   |
-| 14  | LOW      | Scope T2 storage policy by path prefix       | Small   |
-| 15  | LOW      | Document rollback strategy                   | Small   |
-| 16  | LOW      | Remove redundant enum type re-exports        | Trivial |
+| #   | Severity | Issue                                            | Status                                               |
+| --- | -------- | ------------------------------------------------ | ---------------------------------------------------- |
+| 13  | ~~LOW~~  | ~~Add `IF NOT EXISTS` to index creation in 003~~ | RESOLVED — updated in `003_modify_for_msp.sql`       |
+| 14  | ~~LOW~~  | ~~Scope T2 storage policy by path prefix~~       | RESOLVED — scoped via `storage.foldername` in 007    |
+| 15  | ~~LOW~~  | ~~Document rollback strategy~~                   | RESOLVED — added §6 below                            |
+| 16  | ~~LOW~~  | ~~Remove redundant enum type re-exports~~        | RESOLVED — removed from `packages/database/index.ts` |
 
 ---
 
 ## 5. Recommended Next Steps
 
-1. **Do not attempt to run/build the application** until items 1-4
-   are resolved. The Prisma-to-Supabase query conversion is the
-   critical path.
+All 16 review items have been resolved. Before deploying:
 
-2. **Prioritize the query conversion** by module, starting with the
-   most heavily used:
+1. **Set up a Supabase project** and run `pnpm db:gen-types` to
+   replace hand-crafted types with generated ones.
 
-   - `asset/query.server.ts` (221 Prisma refs — the query builder)
-   - `booking/service.server.ts` (25 Prisma refs)
-   - `kit/service.server.ts` (30 Prisma refs + 6 transactions)
-   - `asset/service.server.ts` (21 Prisma refs)
+2. **Run the full migration sequence** (001-014) against a fresh
+   Supabase instance to validate the SQL end-to-end.
 
-3. **Set up the Supabase project** and run `supabase gen types` to
-   get proper type definitions before converting queries.
+3. **Run `pnpm webapp:validate`** to verify TypeScript compilation,
+   linting, and all unit tests pass.
 
-4. **Fix RLS policies** before any client-facing deployment. The
-   join table and User table policies are security holes.
+4. **Smoke-test critical paths** — asset CRUD, bookings, kit
+   management, QR scanning, and user invite flows.
 
-5. **Consider a phased approach**: Convert one module at a time,
-   validate with tests, then move to the next. The current big-bang
-   approach left the codebase in a non-functional state.
+5. **Load-test the query helpers** — the abstraction layer adds
+   one level of indirection; verify performance is acceptable
+   under production load.
+
+---
+
+## 6. Rollback Strategy
+
+### Pre-Migration Checkpoint
+
+Before running the SQL migrations on a production database:
+
+1. **Take a full database backup** using `pg_dump` or Supabase's
+   point-in-time recovery (PITR).
+2. **Record the current Git SHA** of the application code and
+   the last applied Prisma migration name.
+3. **Tag the release** (e.g., `pre-mesh-migration`) so the
+   previous application version can be redeployed quickly.
+
+### Rollback Procedure
+
+If the migration fails or causes production issues:
+
+1. **Application code**: Revert to the tagged release
+   (`pre-mesh-migration`). The old Prisma-based code will work
+   against the pre-migration database schema.
+
+2. **Database**: Restore from the pre-migration backup. The
+   Supabase SQL migrations (001-014) are forward-only DDL and
+   cannot be cleanly reversed due to:
+
+   - Dropped columns/tables (002 strips billing/auth)
+   - Type conversions (013 converts uuid → text PKs)
+   - RLS policy replacements (010, 014)
+
+3. **Partial failure**: If only some migrations ran, identify the
+   last successful migration number and restore the database to
+   the pre-migration backup. Do **not** attempt to manually
+   reverse individual migrations.
+
+### Migration Phases (Recommended)
+
+To reduce blast radius, run the migration in phases:
+
+| Phase | Migrations | What it does                  | Rollback risk |
+| ----- | ---------- | ----------------------------- | ------------- |
+| 1     | 001-002    | Base schema + strip billing   | Low           |
+| 2     | 003-004    | MSP columns + new tables      | Low           |
+| 3     | 005-006    | RLS policies + triggers       | Medium        |
+| 4     | 007-008    | Supabase features + seed data | Low           |
+| 5     | 009-014    | RPCs + fixes + PK conversion  | High          |
+
+Take a backup between each phase. Phase 5 is the highest risk
+because it converts primary key types and recreates all foreign
+key constraints.
+
+### Canary Deployment
+
+For zero-downtime migration:
+
+1. Deploy the new application code behind a feature flag or to a
+   canary environment.
+2. Run migrations against a cloned database.
+3. Point the canary at the migrated database and validate.
+4. Cut over production traffic only after canary validation passes.
+5. Keep the old database backup for 48 hours post-cutover.

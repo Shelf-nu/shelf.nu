@@ -81,8 +81,10 @@ CREATE POLICY "t1_asset_images_delete" ON storage.objects
   );
 
 -- T2 (Client users): read-only access to their company's images
+-- Scoped by path prefix: images are stored under {organizationId}/...
 CREATE POLICY "t2_asset_images_select" ON storage.objects
   FOR SELECT USING (
     bucket_id = 'asset-images'
     AND auth.tenant_tier() = 'T2'
+    AND (storage.foldername(name))[1] = auth.client_company_id()
   );
