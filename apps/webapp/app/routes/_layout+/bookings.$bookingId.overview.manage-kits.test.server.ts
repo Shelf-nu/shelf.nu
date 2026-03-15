@@ -213,9 +213,8 @@ describe("manage-kits route validation", () => {
 
       vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-kits");
 
       // Should succeed without validation since no new assets
       await expect(
@@ -276,9 +275,8 @@ describe("manage-kits route validation", () => {
       // Mock that kit is partially checked in (available for other bookings)
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(true);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-kits");
 
       // Should succeed because kit is partially checked in within booking context
       await expect(
@@ -322,9 +320,8 @@ describe("manage-kits route validation", () => {
       // Mock that kit is NOT partially checked in (truly checked out)
       vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-kits");
 
       // Should return error response because kit is truly checked out
       const response = await actionFunction(
@@ -360,9 +357,8 @@ describe("manage-kits route validation", () => {
 
       vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-kits"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-kits");
 
       // Should succeed because kit status is AVAILABLE
       await expect(

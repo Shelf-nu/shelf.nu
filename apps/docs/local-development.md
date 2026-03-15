@@ -219,14 +219,12 @@ pnpm --filter @shelf/webapp test:e2e:install # Install Playwright browsers
 ### Adding New Features
 
 1. **Create your feature files** in appropriate directories:
-
    - `apps/webapp/app/routes/` - New pages/routes
    - `apps/webapp/app/components/` - Reusable components
    - `apps/webapp/app/utils/` - Utility functions
    - `apps/webapp/app/modules/` - Business logic modules
 
 2. **Follow the established patterns**:
-
    - Use TypeScript for type safety
    - Follow Remix conventions for data loading
    - Use Tailwind for styling
