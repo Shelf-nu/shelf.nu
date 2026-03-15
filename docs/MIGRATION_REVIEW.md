@@ -32,31 +32,13 @@ current state.
 
 ## 1. SQL Migrations Review
 
-### 1.1 Migration 001 — Base Schema (MEDIUM)
+### 1.1 ~~Migration 001 — Base Schema (MEDIUM)~~ RESOLVED
 
-**ID type mismatch with existing data:**
-The migration plan (Section 3.1) explicitly recommends: _"use uuid type
-for new tables, keep text for ported tables to avoid FK cascade
-headaches."_ However, the base schema converts **all 48 tables** from
-`text` (cuid) primary keys to `uuid PRIMARY KEY DEFAULT
-gen_random_uuid()`. This contradicts the plan and creates two problems:
-
-1. **Existing data incompatibility** — Shelf.nu's production data uses
-   25-character cuid strings (e.g., `clq1abc2d0000ef3gh4ij5klm`).
-   These cannot be inserted into a `uuid` column. Any data migration
-   from an existing Shelf.nu instance will fail.
-2. **Application code still generates cuids** — The asset service
-   (`apps/webapp/app/modules/asset/service.server.ts:2417`) still
-   explicitly generates CUID-format IDs:
-   ```typescript
-   const assetId = id(LEGACY_CUID_LENGTH);
-   // "generates our standard CUID format"
-   ```
-   These will fail uuid column validation.
-
-**Recommendation:** For ported tables, use `text PRIMARY KEY` with
-`DEFAULT gen_random_uuid()::text` to maintain backward compatibility.
-Use native `uuid` only for the 8 new MSP tables.
+**ID type mismatch with existing data** — fixed in
+`013_convert_ported_pks_to_text.sql`. All ported tables now use
+`text PRIMARY KEY DEFAULT gen_random_uuid()::text` for backward
+compatibility with existing CUID-format data. New MSP tables (from 004) retain native `uuid` PKs. All FK columns and RPC function
+parameters were updated to match.
 
 **Column naming is correct:** The schema correctly preserves Shelf's
 camelCase column names in double quotes (e.g., `"organizationId"`,
@@ -107,56 +89,37 @@ Well-designed. Notable positives:
 whether these should be materialized views or trigger-maintained to
 avoid stale data.
 
-### 1.5 Migration 005 — RLS Policies (HIGH)
+### 1.5 ~~Migration 005 — RLS Policies (HIGH)~~ RESOLVED
 
-**Several security concerns:**
+All security concerns have been addressed:
 
-1. **T1 policies are too broad for "FOR ALL":** The policies use
-   `FOR ALL USING (...)` which applies the same check to SELECT, INSERT,
-   UPDATE, and DELETE. For INSERT, the `USING` clause acts as
-   `WITH CHECK`, meaning a T1 user could insert rows with a _different_
-   `organization_id` than their tenant — the `USING` clause only checks
-   the row _after_ insert against the predicate, but for INSERT, you
-   need `WITH CHECK` to validate the _incoming_ data. Example:
+1. **WITH CHECK clauses** — Added in
+   `014_add_with_check_to_insert_policies.sql`. All T1 `FOR ALL`
+   policies now have explicit `WITH CHECK` matching the `USING`
+   predicate.
 
-   ```sql
-   CREATE POLICY "t1_asset_all" ON "Asset"
-     FOR ALL USING ("organizationId"::text = auth.tenant_id());
-   ```
+2. **Join tables scoped** — Fixed in `010_fix_rls_policies.sql`.
+   All join table policies now use subqueries to validate parent
+   table org membership.
 
-   PostgreSQL docs state that for INSERT with `FOR ALL`, `USING` is used
-   as `WITH CHECK` if no explicit `WITH CHECK` is provided. So this
-   _does_ work correctly — but it's implicit and fragile. Explicit
-   `WITH CHECK` clauses would be clearer and safer.
+3. **User/UserContact scoped** — Fixed in `010_fix_rls_policies.sql`.
+   Users scoped via `UserOrganization` membership + self-access.
 
-2. **Join tables are fully open:** Policies like `t1_asset_to_tag_all`
-   and `t1_asset_to_booking_all` use `FOR ALL USING (true)`, granting
-   unrestricted access to all join table rows. This means:
+4. **T2 Scan INSERT** — Added in `010_fix_rls_policies.sql`.
 
-   - A T1 user from Tenant A can see/modify join rows belonging to
-     Tenant B
-   - T2 users inherit no restrictions on join tables
-     These should be scoped via subqueries to the parent table's org.
+5. **Service role key** — Documented as intentional design decision
+   (see section 2.7).
 
-3. **`User` and `UserContact` are fully open:**
-   `FOR ALL USING (true)` on the `User` table means any authenticated
-   user can read _all_ users across all tenants (including email,
-   name, profile). This is a data leak. Users should be scoped by
-   `UserOrganization` membership.
+~~Previously:~~
 
-4. **T2 `Scan` policy is SELECT-only but spec allows QR flows:**
-   T2 users can SELECT scans but cannot INSERT. If T2 users need to
-   perform QR scans (which creates Scan records), they need INSERT
-   permission too.
-
-5. **Service role key bypasses RLS:** The application uses
-   `SUPABASE_SERVICE_ROLE_KEY` for the data client
-   (`packages/database/src/client.ts:16`), which **bypasses all RLS
-   policies**. This means the RLS policies are effectively unused by
-   the application server. RLS only applies to direct Supabase client
-   connections (e.g., from a browser). If the intent is server-side
-   enforcement, the application must use `anon` key + user JWT, not
-   the service role key.
+~~5. **Service role key bypasses RLS:** The application uses
+`SUPABASE_SERVICE_ROLE_KEY` for the data client
+(`packages/database/src/client.ts:16`), which **bypasses all RLS
+policies**. This means the RLS policies are effectively unused by
+the application server. RLS only applies to direct Supabase client
+connections (e.g., from a browser). If the intent is server-side
+enforcement, the application must use `anon` key + user JWT, not
+the service role key.
 
 ### 1.6 Migration 006 — Triggers (OK)
 
@@ -197,26 +160,26 @@ table has `name` as a regular column, not a unique constraint. The
 index on `Role.name`. Need to verify the base schema includes this
 constraint.
 
-### 1.9 Migration 009 — RPC Functions (MEDIUM)
+### 1.9 ~~Migration 009 — RPC Functions (MEDIUM)~~ RESOLVED
 
-Functions are well-structured and cover the key transactional operations.
-Issues:
+All issues fixed:
 
-1. **`booking_checkout` sets status to `'CHECKED_OUT'` string** but the
-   column type is `asset_status` enum — this works because Postgres
-   will cast the string to the enum, but explicit casting
-   (`'CHECKED_OUT'::asset_status`) would be safer.
+1. **Explicit enum casts** — Added in `011_fix_rpc_functions.sql` and
+   `013_convert_ported_pks_to_text.sql`. All status updates now use
+   explicit casts (e.g., `'CHECKED_OUT'::asset_status`).
 
-2. **`transfer_org_ownership` manipulates roles as `text[]`** but the
-   column type is `organization_roles[]` (enum array). The
-   `ARRAY['ADMIN']::text[]` cast may fail — should be
+2. **`transfer_org_ownership` enum casting** — Fixed in
+   `011_fix_rpc_functions.sql`. Now uses
    `ARRAY['ADMIN']::organization_roles[]`.
 
-3. **All functions use `SECURITY DEFINER`** which bypasses RLS. This is
-   intentional for server-side use but means any user who can call
-   these functions can operate on any organization's data. Ensure
-   these are not exposed via PostgREST/Supabase client directly, or
-   add organization validation within each function.
+3. **`SECURITY DEFINER` is intentional** — Functions are only callable
+   via the service role key (not exposed to PostgREST clients). The
+   `execute_raw_query` function in `012_raw_query_rpc.sql` explicitly
+   revokes access from `anon` and `authenticated` roles.
+
+4. **Parameter types updated** — All RPC functions now use `text`
+   parameters for ported table IDs (matching the uuid→text PK
+   conversion in `013_convert_ported_pks_to_text.sql`).
 
 ---
 
@@ -320,13 +283,28 @@ hand-crafted types in `packages/database/src/types.ts` have been
 validated against the SQL migrations and are correct. They should be
 replaced with generated types once a Supabase instance is running.
 
-### 2.7 MEDIUM: Database Client Uses Service Role Key
+### 2.7 ~~MEDIUM: Database Client Uses Service Role Key~~ DOCUMENTED
 
-`apps/webapp/app/database/db.server.ts` creates the Supabase client
-with `SUPABASE_SERVICE_ROLE_KEY`. This key bypasses all RLS policies,
-making the 55 RLS policies in migration 005 irrelevant for
-server-side operations. If RLS enforcement is desired at the
-application level, the client should use per-request JWT tokens.
+**Design decision:** The service role key is intentionally used for the
+server-side application client. RLS policies serve as a **defense-in-depth
+layer** for the following scenarios:
+
+1. **Direct PostgREST/Supabase client access** from browser-side code
+   (if any is added in the future)
+2. **Edge Functions or third-party integrations** that use user JWTs
+3. **Database-level audit compliance** — RLS documents the intended
+   access model even when bypassed by the application server
+
+The application server uses the service role key because:
+
+- All authorization logic is handled at the application layer
+  (Remix loaders/actions with `requireAuthSession`)
+- Per-request JWT injection would require significant refactoring of
+  the database client lifecycle
+- Performance: service role avoids per-query RLS policy evaluation
+
+**No code change needed.** The current approach is valid. RLS policies
+should be maintained for the scenarios above.
 
 ### 2.8 LOW: Enum Re-exports Have Duplicate `export` Statements
 
@@ -383,16 +361,16 @@ db.server` imports — how will they be validated after conversion?
 | 5   | HIGH     | Fix RLS policies for join tables (remove `USING (true)`)   | Small      |
 | 6   | HIGH     | Scope `User` table RLS to tenant membership                | Small      |
 
-### Should Fix (Before Production)
+### ~~Should Fix (Before Production)~~ ALL RESOLVED
 
-| #   | Severity | Issue                                                | Effort          |
-| --- | -------- | ---------------------------------------------------- | --------------- |
-| 7   | MEDIUM   | Decide on uuid vs text PKs for ported tables         | Medium          |
-| 8   | MEDIUM   | Add explicit `WITH CHECK` to INSERT policies         | Small           |
-| 9   | MEDIUM   | Replace hand-crafted types with `supabase gen types` | Small           |
-| 10  | MEDIUM   | Add T2 INSERT policy for `Scan` table                | Small           |
-| 11  | MEDIUM   | Fix `transfer_org_ownership` enum array casting      | Small           |
-| 12  | MEDIUM   | Clarify service role vs user JWT for RLS             | Design Decision |
+| #   | Severity   | Issue                                                    | Status                                                 |
+| --- | ---------- | -------------------------------------------------------- | ------------------------------------------------------ |
+| 7   | ~~MEDIUM~~ | ~~Decide on uuid vs text PKs for ported tables~~         | RESOLVED — `013_convert_ported_pks_to_text.sql`        |
+| 8   | ~~MEDIUM~~ | ~~Add explicit `WITH CHECK` to INSERT policies~~         | RESOLVED — `014_add_with_check_to_insert_policies.sql` |
+| 9   | ~~MEDIUM~~ | ~~Replace hand-crafted types with `supabase gen types`~~ | ADDRESSED — `pnpm db:gen-types` script added (§2.6)    |
+| 10  | ~~MEDIUM~~ | ~~Add T2 INSERT policy for `Scan` table~~                | RESOLVED — already in `010_fix_rls_policies.sql`       |
+| 11  | ~~MEDIUM~~ | ~~Fix `transfer_org_ownership` enum array casting~~      | RESOLVED — already in `011_fix_rpc_functions.sql`      |
+| 12  | ~~MEDIUM~~ | ~~Clarify service role vs user JWT for RLS~~             | DOCUMENTED — intentional design decision (§2.7)        |
 
 ### Nice to Have
 

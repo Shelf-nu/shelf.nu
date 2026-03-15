@@ -182,25 +182,28 @@ const mockCount = count as ReturnType<typeof vitest.fn>;
 const mockCreateMany = createMany as ReturnType<typeof vitest.fn>;
 const mockQueryRaw = queryRaw as ReturnType<typeof vitest.fn>;
 
-// Reset all mocks before each test to prevent implementation leakage across describes
+// Reset query helper mocks before each test to prevent implementation leakage
 // why: vitest.clearAllMocks() only clears call history, not implementations set via
-// mockResolvedValue/mockRejectedValue. This caused cross-test contamination.
+// mockResolvedValue/mockRejectedValue/mockImplementation. This caused cross-test
+// contamination where e.g. mockRejectedValue from one test leaked into the next.
+// We selectively reset only query helper mocks (not vitest.mock() factories for
+// getUserByID, scheduler, etc. which need their implementations to persist).
 beforeEach(() => {
-  vitest.resetAllMocks();
-  // Re-establish default mock implementations after reset
-  mockCreate.mockResolvedValue({});
-  mockFindMany.mockResolvedValue([]);
-  mockFindFirst.mockResolvedValue(null);
-  mockFindFirstOrThrow.mockResolvedValue({});
-  mockFindUnique.mockResolvedValue(null);
-  mockFindUniqueOrThrow.mockResolvedValue({});
-  mockUpdate.mockResolvedValue({});
-  mockUpdateMany.mockResolvedValue([]);
-  mockRemove.mockResolvedValue([]);
-  mockDeleteMany.mockResolvedValue({ count: 0 });
-  mockCount.mockResolvedValue(0);
-  mockCreateMany.mockResolvedValue([]);
-  mockQueryRaw.mockResolvedValue([]);
+  vitest.clearAllMocks();
+  // Reset and re-establish default implementations for query helper mocks
+  mockCreate.mockReset().mockResolvedValue({});
+  mockFindMany.mockReset().mockResolvedValue([]);
+  mockFindFirst.mockReset().mockResolvedValue(null);
+  mockFindFirstOrThrow.mockReset().mockResolvedValue({});
+  mockFindUnique.mockReset().mockResolvedValue(null);
+  mockFindUniqueOrThrow.mockReset().mockResolvedValue({});
+  mockUpdate.mockReset().mockResolvedValue({});
+  mockUpdateMany.mockReset().mockResolvedValue([]);
+  mockRemove.mockReset().mockResolvedValue([]);
+  mockDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+  mockCount.mockReset().mockResolvedValue(0);
+  mockCreateMany.mockReset().mockResolvedValue([]);
+  mockQueryRaw.mockReset().mockResolvedValue([]);
 });
 
 const HOURS_BETWEEN_FROM_AND_TO = 8;
@@ -899,11 +902,12 @@ describe("updateBasicBooking", () => {
         lastName: "User",
       },
       custodianTeamMember: { id: "team-member-2", name: "TM" },
-      tags: [
-        { id: "tag-1", name: "Tag 1" },
-        { id: "tag-2", name: "Tag 2" },
-      ],
     });
+    // queryRaw fetches tags for this booking - return the same tags as input to show no change
+    mockQueryRaw.mockResolvedValueOnce([
+      { id: "tag-1", name: "Tag 1" },
+      { id: "tag-2", name: "Tag 2" },
+    ]);
     mockUpdate.mockResolvedValue({ id: "booking-1" });
 
     await updateBasicBooking({
@@ -1062,6 +1066,10 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.ONGOING,
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
+    mockFindMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -1099,8 +1107,13 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets(mockUpdateBookingAssetsParams);
 
     expect(mockQueryRaw).toHaveBeenCalled();
-    expect(mockUpdateMany).toHaveBeenCalled();
-    expect(mockUpdateMany).not.toHaveBeenCalled();
+    // Should update asset status but NOT kit status (no kitIds provided)
+    expect(mockUpdateMany).toHaveBeenCalledWith(db, "Asset", expect.anything());
+    expect(mockUpdateMany).not.toHaveBeenCalledWith(
+      db,
+      "Kit",
+      expect.anything()
+    );
   });
 
   it("should not update kit status when empty kitIds array provided", async () => {
@@ -1125,8 +1138,13 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets(params);
 
     expect(mockQueryRaw).toHaveBeenCalled();
-    expect(mockUpdateMany).toHaveBeenCalled();
-    expect(mockUpdateMany).not.toHaveBeenCalled();
+    // Should update asset status but NOT kit status (empty kitIds)
+    expect(mockUpdateMany).toHaveBeenCalledWith(db, "Asset", expect.anything());
+    expect(mockUpdateMany).not.toHaveBeenCalledWith(
+      db,
+      "Kit",
+      expect.anything()
+    );
   });
 
   it("should not update asset or kit status for RESERVED booking", async () => {
@@ -1138,6 +1156,10 @@ describe("updateBookingAssets", () => {
       status: BookingStatus.RESERVED,
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
+    mockFindMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
 
     const params = {
       ...mockUpdateBookingAssetsParams,
@@ -2066,17 +2088,22 @@ describe("extendBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [
-        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
-      ],
-      partialCheckins: [],
     };
     const extendedBooking = {
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
+    // queryRaw: 1) assets for booking, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // no clashing bookings
+      .mockResolvedValueOnce([{ count: 2 }]); // asset count
+    // findMany for partialCheckins
+    mockFindMany.mockResolvedValue([]);
     mockUpdate.mockResolvedValue(extendedBooking);
 
     const result = await extendBooking({
@@ -2127,10 +2154,16 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-1",
       custodianUserId: "user-1",
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
-      partialCheckins: [],
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // no clashing bookings
+      .mockResolvedValueOnce([{ count: 1 }]); // asset count
+    mockFindMany.mockResolvedValue([]); // no partialCheckins
     mockUpdate.mockResolvedValue({
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
@@ -2200,11 +2233,16 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different user created it
       custodianUserId: "user-2", // Different user is custodian
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
-      partialCheckins: [],
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([]); // No conflicts
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // no clashing bookings
+      .mockResolvedValueOnce([{ count: 1 }]); // asset count
+    mockFindMany.mockResolvedValue([]); // No partialCheckins or conflicts
     mockUpdate.mockResolvedValue({
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
@@ -2230,11 +2268,16 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different creator
       custodianUserId: "user-1", // But user is custodian
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
-      partialCheckins: [],
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([]); // No conflicts
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // no clashing bookings
+      .mockResolvedValueOnce([{ count: 1 }]); // asset count
+    mockFindMany.mockResolvedValue([]); // No partialCheckins or conflicts
     mockUpdate.mockResolvedValue({
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
@@ -2260,11 +2303,16 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-1", // User is creator
       custodianUserId: "user-2", // But different custodian
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
-      partialCheckins: [],
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([]); // No conflicts
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // no clashing bookings
+      .mockResolvedValueOnce([{ count: 1 }]); // asset count
+    mockFindMany.mockResolvedValue([]); // No partialCheckins or conflicts
     mockUpdate.mockResolvedValue({
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
@@ -2289,11 +2337,6 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
-      ],
-      partialCheckins: [],
     };
 
     const clashingBooking = {
@@ -2301,7 +2344,14 @@ describe("extendBooking", () => {
       name: "Conflicting Booking",
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([clashingBooking]); // Clashing booking exists
+    // queryRaw: 1) assets, 2) clashing bookings (found!)
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([clashingBooking]); // Clashing booking exists
+    mockFindMany.mockResolvedValue([]); // No partialCheckins
 
     await expect(
       extendBooking({
@@ -2323,11 +2373,16 @@ describe("extendBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
-      partialCheckins: [],
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([]); // No clashing bookings
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // No clashing bookings
+      .mockResolvedValueOnce([{ count: 1 }]); // asset count
+    mockFindMany.mockResolvedValue([]); // No partialCheckins
     mockUpdate.mockResolvedValue({
       ...mockBooking,
       to: new Date("2025-01-02T17:00:00Z"),
@@ -2352,8 +2407,6 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.OVERDUE,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
-      partialCheckins: [],
     };
 
     const extendedBooking = {
@@ -2362,7 +2415,14 @@ describe("extendBooking", () => {
       to: new Date("2025-01-02T17:00:00Z"),
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([]); // No conflicts
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      ])
+      .mockResolvedValueOnce([]) // No conflicts
+      .mockResolvedValueOnce([{ count: 1 }]); // asset count
+    mockFindMany.mockResolvedValue([]); // No partialCheckins
     mockUpdate.mockResolvedValue(extendedBooking);
 
     const result = await extendBooking({
@@ -2394,12 +2454,6 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
-        { id: "asset-3", status: AssetStatus.CHECKED_OUT }, // Still checked out
-      ],
-      partialCheckins: [{ assetIds: ["asset-1"] }],
     };
 
     const extendedBooking = {
@@ -2407,7 +2461,17 @@ describe("extendBooking", () => {
       to: new Date("2025-01-03T17:00:00Z"),
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    mockFindMany.mockResolvedValue([]); // No conflicts
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
+        { id: "asset-3", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      ])
+      .mockResolvedValueOnce([]) // No conflicts
+      .mockResolvedValueOnce([{ count: 3 }]); // asset count
+    // findMany: partialCheckins with asset-1 returned
+    mockFindMany.mockResolvedValue([{ assetIds: ["asset-1"] }]);
     mockUpdate.mockResolvedValue(extendedBooking);
 
     const result = await extendBooking({
@@ -2434,11 +2498,6 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
-      ],
-      partialCheckins: [{ assetIds: ["asset-1"] }],
     };
 
     const extendedBooking = {
@@ -2446,8 +2505,16 @@ describe("extendBooking", () => {
       to: new Date("2025-01-03T17:00:00Z"),
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    // asset-1 is booked elsewhere, but it's returned so shouldn't block
-    mockFindMany.mockResolvedValue([]);
+    // queryRaw: 1) assets, 2) clashing bookings, 3) asset count
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      ])
+      .mockResolvedValueOnce([]) // No clashing bookings for active assets
+      .mockResolvedValueOnce([{ count: 2 }]); // asset count
+    // findMany: partialCheckins - asset-1 was returned
+    mockFindMany.mockResolvedValue([{ assetIds: ["asset-1"] }]);
     mockUpdate.mockResolvedValue(extendedBooking);
 
     const result = await extendBooking({
@@ -2471,11 +2538,6 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out - has conflict
-      ],
-      partialCheckins: [{ assetIds: ["asset-1"] }],
     };
 
     const clashingBooking = {
@@ -2483,8 +2545,15 @@ describe("extendBooking", () => {
       name: "Conflicting Booking for Asset 2",
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
-    // asset-2 (active) has a conflict
-    mockFindMany.mockResolvedValue([clashingBooking]);
+    // queryRaw: 1) assets, 2) clashing bookings (found for active asset-2)
+    mockQueryRaw
+      .mockResolvedValueOnce([
+        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      ])
+      .mockResolvedValueOnce([clashingBooking]); // asset-2 has conflict
+    // findMany: partialCheckins - asset-1 was returned
+    mockFindMany.mockResolvedValue([{ assetIds: ["asset-1"] }]);
 
     await expect(
       extendBooking({
@@ -2507,14 +2576,18 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-3", status: AssetStatus.AVAILABLE }, // Returned
-      ],
-      partialCheckins: [{ assetIds: ["asset-1", "asset-2", "asset-3"] }],
     };
     mockFindUniqueOrThrow.mockResolvedValue(mockBooking);
+    // queryRaw: assets (all returned/AVAILABLE)
+    mockQueryRaw.mockResolvedValueOnce([
+      { id: "asset-1", status: AssetStatus.AVAILABLE },
+      { id: "asset-2", status: AssetStatus.AVAILABLE },
+      { id: "asset-3", status: AssetStatus.AVAILABLE },
+    ]);
+    // findMany: partialCheckins showing all assets returned
+    mockFindMany.mockResolvedValue([
+      { assetIds: ["asset-1", "asset-2", "asset-3"] },
+    ]);
 
     await expect(
       extendBooking({
@@ -2537,17 +2610,17 @@ describe("removeAssets", () => {
   });
 
   it("should remove assets from booking successfully", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     const mockBooking = {
       id: "booking-1",
       assetIds: ["asset-1", "asset-2"],
     };
-    mockUpdate.mockResolvedValue({
-      ...mockBooking,
+    // findUniqueOrThrow returns the booking after queryRaw DELETE
+    mockFindUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
       name: "Test Booking",
       status: BookingStatus.DRAFT,
-      assets: [],
     });
 
     await removeAssets({
@@ -2558,7 +2631,7 @@ describe("removeAssets", () => {
       organizationId: "org-1",
     });
 
-    // removeAssets now uses queryRaw for DELETE and findUniqueOrThrow for the booking
+    // removeAssets uses queryRaw for DELETE and findUniqueOrThrow for the booking
     expect(mockQueryRaw).toHaveBeenCalled();
     expect(mockFindUniqueOrThrow).toHaveBeenCalledWith(
       db,
@@ -2744,7 +2817,8 @@ describe("getOngoingBookingForAsset", () => {
       status: BookingStatus.ONGOING,
       organizationId: "org-1",
     };
-    mockFindFirst.mockResolvedValue(mockBooking);
+    // getOngoingBookingForAsset uses queryRaw, returns results[0] || null
+    mockQueryRaw.mockResolvedValueOnce([mockBooking]);
 
     const result = await getOngoingBookingForAsset({
       assetId: "asset-1",
@@ -2765,7 +2839,8 @@ describe("getOngoingBookingForAsset", () => {
       status: BookingStatus.OVERDUE,
       organizationId: "org-1",
     };
-    mockFindFirst.mockResolvedValue(mockBooking);
+    // getOngoingBookingForAsset uses queryRaw, returns results[0] || null
+    mockQueryRaw.mockResolvedValueOnce([mockBooking]);
 
     const result = await getOngoingBookingForAsset({
       assetId: "asset-2",
@@ -2780,8 +2855,8 @@ describe("getOngoingBookingForAsset", () => {
   it("should return null when asset is partially checked in", async () => {
     expect.assertions(2);
 
-    // Mock that no booking is found because the asset is partially checked in
-    mockFindFirst.mockResolvedValue(null);
+    // queryRaw returns empty array -> results[0] || null -> null
+    mockQueryRaw.mockResolvedValueOnce([]);
 
     const result = await getOngoingBookingForAsset({
       assetId: "asset-3",
@@ -2796,7 +2871,8 @@ describe("getOngoingBookingForAsset", () => {
 
   it("should return null when asset is not in any ONGOING or OVERDUE booking", async () => {
     expect.assertions(2);
-    mockFindFirst.mockResolvedValue(null);
+    // queryRaw returns empty array -> results[0] || null -> null
+    mockQueryRaw.mockResolvedValueOnce([]);
 
     const result = await getOngoingBookingForAsset({
       assetId: "asset-4",
@@ -2810,7 +2886,7 @@ describe("getOngoingBookingForAsset", () => {
 
   it("should only consider ONGOING and OVERDUE bookings, not RESERVED or DRAFT", async () => {
     expect.assertions(1);
-    mockFindFirst.mockResolvedValue(null);
+    mockQueryRaw.mockResolvedValueOnce([]);
 
     await getOngoingBookingForAsset({
       assetId: "asset-5",
@@ -2824,7 +2900,7 @@ describe("getOngoingBookingForAsset", () => {
 
   it("should filter by organization ID to ensure org isolation", async () => {
     expect.assertions(1);
-    mockFindFirst.mockResolvedValue(null);
+    mockQueryRaw.mockResolvedValueOnce([]);
 
     await getOngoingBookingForAsset({
       assetId: "asset-6",
@@ -2839,7 +2915,7 @@ describe("getOngoingBookingForAsset", () => {
     expect.assertions(1);
 
     const dbError = new Error("Database connection error");
-    mockFindFirst.mockRejectedValue(dbError);
+    mockQueryRaw.mockRejectedValueOnce(dbError);
 
     await expect(
       getOngoingBookingForAsset({
@@ -2860,7 +2936,8 @@ describe("getOngoingBookingForAsset", () => {
       status: BookingStatus.ONGOING,
       organizationId: "org-1",
     };
-    mockFindFirst.mockResolvedValue(checkedOutBooking);
+    // queryRaw returns the checked-out booking (SQL excludes partially checked in ones)
+    mockQueryRaw.mockResolvedValueOnce([checkedOutBooking]);
 
     const result = await getOngoingBookingForAsset({
       assetId: "asset-8",
