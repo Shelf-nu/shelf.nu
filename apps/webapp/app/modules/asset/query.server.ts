@@ -1,7 +1,8 @@
 import type { CustomFieldType } from "@shelf/database";
-import { sql, raw, join, empty, SqlFragment } from "~/database/sql.server";
-
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
+import type { SqlFragment } from "~/database/sql.server";
+import { sql, raw, join, empty } from "~/database/sql.server";
+
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";

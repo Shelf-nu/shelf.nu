@@ -1,12 +1,12 @@
 import type { ChangeEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AssetStatus } from "@shelf/database";
 import {
   Popover,
   PopoverContent,
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { AssetStatus } from "@shelf/database";
 import { parseISO } from "date-fns";
 import { useLoaderData } from "react-router";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";

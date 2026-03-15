@@ -1,7 +1,7 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BarcodeType } from "@shelf/database";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
+import type { BarcodeType } from "@shelf/database";
 import { useAtom } from "jotai";
 import {
   ArrowRight,

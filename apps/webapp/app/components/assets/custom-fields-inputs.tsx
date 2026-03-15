@@ -1,6 +1,5 @@
 import type { ReactElement, KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CustomFieldType, Currency, CustomField } from "@shelf/database";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -8,6 +7,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import type { CustomFieldType, Currency, CustomField } from "@shelf/database";
 import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
