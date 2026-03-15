@@ -1,4 +1,6 @@
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
+import { sql, queryRaw } from "~/database/sql.server";
 import { getLocationDescendantIds } from "~/modules/location/descendants.server";
 import { ShelfError } from "~/utils/error";
 
@@ -122,18 +124,16 @@ export async function getAssetsForLocationContext({
   }
 
   // Fetch all assets at the specified location(s)
-  const assets = await db.asset.findMany({
+  const assets = await findMany(db, "Asset", {
     where: {
       organizationId,
       locationId: { in: locationIds },
     },
-    select: {
-      id: true,
-    },
+    select: "id",
   });
 
   // Return just the asset IDs
-  return assets.map((asset) => asset.id);
+  return assets.map((asset: any) => asset.id);
 }
 
 /**
@@ -153,18 +153,16 @@ export async function getAssetsForKitContext({
   kitId: string;
 }): Promise<string[]> {
   // Fetch all assets assigned to the kit
-  const assets = await db.asset.findMany({
+  const assets = await findMany(db, "Asset", {
     where: {
       organizationId,
       kitId,
     },
-    select: {
-      id: true,
-    },
+    select: "id",
   });
 
   // Return just the asset IDs
-  return assets.map((asset) => asset.id);
+  return assets.map((asset: any) => asset.id);
 }
 
 /**
@@ -184,19 +182,18 @@ export async function getAssetsForUserContext({
   custodianUserId: string;
 }): Promise<string[]> {
   // Fetch all assets where the user is the current custodian
-  const assets = await db.asset.findMany({
-    where: {
-      organizationId,
-      custody: {
-        custodian: {
-          userId: custodianUserId,
-        },
-      },
-    },
-    select: {
-      id: true,
-    },
-  });
+  // Nested relation filter (custody.custodian.userId) requires raw SQL
+  const assets = await queryRaw<{ id: string }>(
+    db,
+    sql`
+      SELECT a."id"
+      FROM "Asset" a
+      INNER JOIN "Custody" c ON c."assetId" = a."id"
+      INNER JOIN "TeamMember" tm ON tm."id" = c."teamMemberId"
+      WHERE a."organizationId" = ${organizationId}
+        AND tm."userId" = ${custodianUserId}
+    `
+  );
 
   // Return just the asset IDs
   return assets.map((asset) => asset.id);

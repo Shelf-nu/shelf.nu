@@ -1,5 +1,13 @@
 import type { AuditNote, AuditAsset, User } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  create,
+  findFirst,
+  findMany,
+  update,
+  remove as removeRecord,
+  count,
+} from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 const label: "Audit" = "Audit";
@@ -25,26 +33,21 @@ export async function createAuditAssetNote({
   auditAssetId: AuditAsset["id"];
 }) {
   try {
-    return await db.auditNote.create({
-      data: {
-        content,
-        type: "COMMENT",
-        userId,
-        auditSessionId,
-        auditAssetId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-      },
+    const note = await create(db, "AuditNote", {
+      content,
+      type: "COMMENT",
+      userId,
+      auditSessionId,
+      auditAssetId,
     });
+
+    // Fetch the related user
+    const user = await findFirst(db, "User", {
+      where: { id: userId },
+      select: "id, firstName, lastName, email, profilePicture",
+    });
+
+    return { ...note, user };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -74,7 +77,7 @@ export async function updateAuditAssetNote({
 }) {
   try {
     // First verify the note exists and user owns it
-    const existingNote = await db.auditNote.findFirst({
+    const existingNote = await findFirst(db, "AuditNote", {
       where: {
         id: noteId,
         userId,
@@ -93,21 +96,18 @@ export async function updateAuditAssetNote({
       });
     }
 
-    return await db.auditNote.update({
+    const updatedNote = await update(db, "AuditNote", {
       where: { id: noteId },
       data: { content },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-      },
     });
+
+    // Fetch the related user
+    const user = await findFirst(db, "User", {
+      where: { id: updatedNote.userId },
+      select: "id, firstName, lastName, email, profilePicture",
+    });
+
+    return { ...updatedNote, user };
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -137,7 +137,7 @@ export async function deleteAuditAssetNote({
 }) {
   try {
     // First verify the note exists and user owns it
-    const existingNote = await db.auditNote.findFirst({
+    const existingNote = await findFirst(db, "AuditNote", {
       where: {
         id: noteId,
         userId,
@@ -156,9 +156,8 @@ export async function deleteAuditAssetNote({
       });
     }
 
-    return await db.auditNote.delete({
-      where: { id: noteId },
-    });
+    const [deleted] = await removeRecord(db, "AuditNote", { id: noteId });
+    return deleted;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -187,26 +186,30 @@ export async function getAuditAssetNotes({
   auditAssetId: AuditAsset["id"];
 }) {
   try {
-    return await db.auditNote.findMany({
+    const notes = await findMany(db, "AuditNote", {
       where: {
         auditSessionId,
         auditAssetId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
       },
       orderBy: {
         createdAt: "desc",
       },
     });
+
+    // Fetch related users for all notes
+    const userIds = [...new Set(notes.map((n) => n.userId))];
+    const users = userIds.length
+      ? await findMany(db, "User", {
+          where: { id: { in: userIds } },
+          select: "id, firstName, lastName, email, profilePicture",
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    return notes.map((note) => ({
+      ...note,
+      user: userMap.get(note.userId) || null,
+    }));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -233,17 +236,13 @@ export async function getAuditAssetDetailsCounts({
 }) {
   try {
     const [notesCount, imagesCount] = await Promise.all([
-      db.auditNote.count({
-        where: {
-          auditSessionId,
-          auditAssetId,
-        },
+      count(db, "AuditNote", {
+        auditSessionId,
+        auditAssetId,
       }),
-      db.auditImage.count({
-        where: {
-          auditSessionId,
-          auditAssetId,
-        },
+      count(db, "AuditImage", {
+        auditSessionId,
+        auditAssetId,
       }),
     ]);
 

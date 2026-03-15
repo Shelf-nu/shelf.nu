@@ -1,4 +1,4 @@
-import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { getKitsWhereInput } from "~/modules/kit/utils.server";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -29,7 +29,7 @@ export async function resolveLocationAssetIds({
     currentSearchParams: searchParams.toString(),
   });
 
-  const allAssets = await db.asset.findMany({
+  const allAssets = await findMany("asset", {
     where: {
       ...assetsWhere,
       locationId,
@@ -65,7 +65,7 @@ export async function resolveLocationKitIds({
     currentSearchParams: searchParams.toString(),
   });
 
-  const allKits = await db.kit.findMany({
+  const allKits = await findMany("kit", {
     where: {
       ...kitsWhere,
       locationId,

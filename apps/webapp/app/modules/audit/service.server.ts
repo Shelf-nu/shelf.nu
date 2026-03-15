@@ -7,6 +7,20 @@ import { z } from "zod";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import {
+  findMany,
+  findFirst,
+  findUnique,
+  findUniqueOrThrow,
+  create,
+  update,
+  count,
+  createMany,
+  updateMany,
+  deleteMany,
+  remove as removeRecord,
+} from "~/database/query-helpers.server";
+import { sql, raw, queryRaw } from "~/database/sql.server";
+import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
@@ -37,7 +51,6 @@ import {
 } from "./helpers.server";
 
 import type { AuditSchedulerData } from "./types";
-import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
 export const AUDIT_LIST_INCLUDE = {
@@ -208,15 +221,12 @@ export async function createAuditSession(
     });
   }
 
-  const assets = await db.asset.findMany({
+  const assets = await findMany(db, "Asset", {
     where: {
       id: { in: uniqueAssetIds },
       organizationId,
     },
-    select: {
-      id: true,
-      title: true,
-    },
+    select: "id, title",
   });
 
   if (assets.length !== uniqueAssetIds.length) {
@@ -234,91 +244,80 @@ export async function createAuditSession(
   // Creator is NOT automatically added as an assignee
   const uniqueAssigneeIds = assignee ? [assignee] : [];
 
-  const result = await db.$transaction(async (tx) => {
-    const session = await tx.auditSession.create({
-      data: {
-        name,
-        description,
-        organizationId,
-        createdById,
-        expectedAssetCount: assets.length,
-        missingAssetCount: assets.length,
-        scopeMeta: scopeMeta ?? undefined,
-        dueDate,
-      },
-    });
+  const session = await create(db, "AuditSession", {
+    name,
+    description,
+    organizationId,
+    createdById,
+    expectedAssetCount: assets.length,
+    missingAssetCount: assets.length,
+    scopeMeta: scopeMeta ?? undefined,
+    dueDate,
+  } as any);
 
-    if (assets.length > 0) {
-      await tx.auditAsset.createMany({
-        data: assets.map((asset) => ({
-          auditSessionId: session.id,
-          assetId: asset.id,
-          expected: true,
-        })),
-      });
-    }
-
-    if (uniqueAssigneeIds.length > 0) {
-      await tx.auditAssignment.createMany({
-        data: uniqueAssigneeIds.map((userId) => ({
-          auditSessionId: session.id,
-          userId,
-          // LEAD role is reserved for future use (e.g., when we support multiple assignees)
-          role: undefined,
-        })),
-      });
-    }
-
-    const sessionWithAssignments = await tx.auditSession.findUnique({
-      where: { id: session.id },
-      include: {
-        assignments: true,
-      },
-    });
-
-    if (!sessionWithAssignments) {
-      throw new ShelfError({
-        cause: null,
-        message: "Unable to load the newly created audit session.",
-        label,
-        additionalData: { sessionId: session.id },
-      });
-    }
-
-    // Create automatic note for audit creation
-    await createAuditCreationNote({
-      auditSessionId: session.id,
-      createdById,
-      expectedAssetCount: assets.length,
-      tx,
-    });
-
-    // Fetch the created audit assets to get their IDs
-    const createdAuditAssets = await tx.auditAsset.findMany({
-      where: {
+  if (assets.length > 0) {
+    await createMany(
+      db,
+      "AuditAsset",
+      assets.map((asset) => ({
         auditSessionId: session.id,
+        assetId: asset.id,
         expected: true,
-      },
-      select: {
-        id: true,
-        assetId: true,
-      },
-    });
-
-    // Create a map for quick lookup
-    const auditAssetMap = new Map(
-      createdAuditAssets.map((aa) => [aa.assetId, aa.id])
+      }))
     );
+  }
 
-    return {
-      session: sessionWithAssignments,
-      expectedAssets: assets.map((asset) => ({
-        id: asset.id,
-        name: asset.title,
-        auditAssetId: auditAssetMap.get(asset.id) ?? "",
-      })),
-    } satisfies CreateAuditSessionResult;
+  if (uniqueAssigneeIds.length > 0) {
+    await createMany(
+      db,
+      "AuditAssignment",
+      uniqueAssigneeIds.map((userId) => ({
+        auditSessionId: session.id,
+        userId,
+      }))
+    );
+  }
+
+  // Fetch session with assignments
+  const sessionAssignments = await findMany(db, "AuditAssignment", {
+    where: { auditSessionId: session.id },
   });
+
+  const sessionWithAssignments = {
+    ...session,
+    assignments: sessionAssignments,
+  };
+
+  // Create automatic note for audit creation
+  await createAuditCreationNote({
+    auditSessionId: session.id,
+    createdById,
+    expectedAssetCount: assets.length,
+    tx: db,
+  });
+
+  // Fetch the created audit assets to get their IDs
+  const createdAuditAssets = await findMany(db, "AuditAsset", {
+    where: {
+      auditSessionId: session.id,
+      expected: true,
+    },
+    select: "id, assetId",
+  });
+
+  // Create a map for quick lookup
+  const auditAssetMap = new Map(
+    createdAuditAssets.map((aa) => [aa.assetId, aa.id])
+  );
+
+  const result = {
+    session: sessionWithAssignments,
+    expectedAssets: assets.map((asset) => ({
+      id: asset.id,
+      name: asset.title,
+      auditAssetId: auditAssetMap.get(asset.id) ?? "",
+    })),
+  } satisfies CreateAuditSessionResult;
 
   // Create asset notes outside the transaction
   if (assets.length > 0) {
@@ -356,180 +355,179 @@ export async function updateAuditSession({
     assigneeUserId?: string | null;
   };
 }) {
-  // Use transaction to ensure atomicity
-  return db.$transaction(async (tx) => {
-    // Fetch the current audit to track changes
-    const currentAudit = await tx.auditSession.findUnique({
-      where: { id, organizationId },
-      select: {
-        name: true,
-        description: true,
-        status: true,
-        dueDate: true,
-        assignments: {
-          select: {
-            userId: true,
-          },
-        },
-      },
-    });
-
-    if (!currentAudit) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 404,
-      });
-    }
-
-    if (currentAudit.status === AuditStatus.CANCELLED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cancelled audits cannot be edited.",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 400,
-      });
-    }
-
-    if (currentAudit.status === AuditStatus.COMPLETED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Completed audits cannot be edited.",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 400,
-      });
-    }
-
-    // Track what changed for activity logging
-    const changes: Array<{ field: string; from: string; to: string }> = [];
-    const currentAssignee = currentAudit.assignments[0]?.userId || null;
-    const newAssignee =
-      data.assigneeUserId === undefined
-        ? undefined
-        : data.assigneeUserId || null;
-
-    // Track basic field changes
-    if (data.name !== undefined && data.name !== currentAudit.name) {
-      changes.push({
-        field: "name",
-        from: currentAudit.name,
-        to: data.name,
-      });
-    }
-
-    if (
-      data.description !== undefined &&
-      data.description !== currentAudit.description
-    ) {
-      changes.push({
-        field: "description",
-        from: currentAudit.description || "(empty)",
-        to: data.description || "(empty)",
-      });
-    }
-
-    // Check if due date changed
-    const dueDateChanged =
-      data.dueDate !== undefined &&
-      ((currentAudit.dueDate === null && data.dueDate !== null) ||
-        (currentAudit.dueDate !== null && data.dueDate === null) ||
-        (currentAudit.dueDate !== null &&
-          data.dueDate !== null &&
-          currentAudit.dueDate.getTime() !== data.dueDate.getTime()));
-
-    // Check if assignee changed
-    const assigneeChanged =
-      newAssignee !== undefined && newAssignee !== currentAssignee;
-
-    // Single update for all audit session fields
-    const updatedAudit = await tx.auditSession.update({
-      where: { id, organizationId },
-      data: {
-        name: data.name,
-        description: data.description,
-        dueDate: data.dueDate,
-      },
-    });
-
-    // Single batch operation for assignee changes
-    if (assigneeChanged) {
-      // Remove old assignee if exists
-      if (currentAssignee) {
-        await tx.auditAssignment.deleteMany({
-          where: { auditSessionId: id, userId: currentAssignee },
-        });
-      }
-      // Add new assignee if provided
-      if (newAssignee) {
-        await tx.auditAssignment.create({
-          data: { auditSessionId: id, userId: newAssignee },
-        });
-      }
-    }
-
-    // Create all activity notes in batch (minimize DB round trips)
-    const notePromises: Promise<any>[] = [];
-
-    // Basic field changes note
-    if (changes.length > 0) {
-      notePromises.push(
-        createAuditUpdateNote({
-          auditSessionId: id,
-          userId,
-          changes,
-          tx,
-        })
-      );
-    }
-
-    // Due date change note
-    if (dueDateChanged) {
-      notePromises.push(
-        createDueDateChangedNote({
-          auditSessionId: id,
-          userId,
-          oldDate: currentAudit.dueDate,
-          newDate: data.dueDate!,
-          tx,
-        })
-      );
-    }
-
-    // Assignee change notes
-    if (assigneeChanged) {
-      if (currentAssignee) {
-        notePromises.push(
-          createAssigneeRemovedNote({
-            auditSessionId: id,
-            userId,
-            assigneeUserId: currentAssignee,
-            tx,
-          })
-        );
-      }
-      if (newAssignee) {
-        notePromises.push(
-          createAssigneeAddedNote({
-            auditSessionId: id,
-            userId,
-            assigneeUserId: newAssignee,
-            tx,
-          })
-        );
-      }
-    }
-
-    // Execute all note creations in parallel
-    if (notePromises.length > 0) {
-      await Promise.all(notePromises);
-    }
-
-    return updatedAudit;
+  // Fetch the current audit to track changes
+  // TODO: convert complex Prisma include — nested relations fetched separately
+  const currentAuditBase = await findUnique(db, "AuditSession", {
+    where: { id, organizationId },
+    select: "id, name, description, status, dueDate",
   });
+
+  const currentAuditAssignments = currentAuditBase
+    ? await findMany(db, "AuditAssignment", {
+        where: { auditSessionId: id },
+        select: "userId",
+      })
+    : [];
+
+  const currentAudit = currentAuditBase
+    ? { ...currentAuditBase, assignments: currentAuditAssignments }
+    : null;
+
+  if (!currentAudit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 404,
+    });
+  }
+
+  if (currentAudit.status === AuditStatus.CANCELLED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Cancelled audits cannot be edited.",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 400,
+    });
+  }
+
+  if (currentAudit.status === AuditStatus.COMPLETED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Completed audits cannot be edited.",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 400,
+    });
+  }
+
+  // Track what changed for activity logging
+  const changes: Array<{ field: string; from: string; to: string }> = [];
+  const currentAssignee = currentAudit.assignments[0]?.userId || null;
+  const newAssignee =
+    data.assigneeUserId === undefined ? undefined : data.assigneeUserId || null;
+
+  // Track basic field changes
+  if (data.name !== undefined && data.name !== currentAudit.name) {
+    changes.push({
+      field: "name",
+      from: currentAudit.name,
+      to: data.name,
+    });
+  }
+
+  if (
+    data.description !== undefined &&
+    data.description !== currentAudit.description
+  ) {
+    changes.push({
+      field: "description",
+      from: currentAudit.description || "(empty)",
+      to: data.description || "(empty)",
+    });
+  }
+
+  // Check if due date changed
+  const dueDateChanged =
+    data.dueDate !== undefined &&
+    ((currentAudit.dueDate === null && data.dueDate !== null) ||
+      (currentAudit.dueDate !== null && data.dueDate === null) ||
+      (currentAudit.dueDate !== null &&
+        data.dueDate !== null &&
+        new Date(currentAudit.dueDate).getTime() !== data.dueDate.getTime()));
+
+  // Check if assignee changed
+  const assigneeChanged =
+    newAssignee !== undefined && newAssignee !== currentAssignee;
+
+  // Single update for all audit session fields
+  const updatedAudit = await update(db, "AuditSession", {
+    where: { id, organizationId },
+    data: {
+      name: data.name,
+      description: data.description,
+      dueDate: data.dueDate,
+    },
+  });
+
+  // Single batch operation for assignee changes
+  if (assigneeChanged) {
+    // Remove old assignee if exists
+    if (currentAssignee) {
+      await deleteMany(db, "AuditAssignment", {
+        auditSessionId: id,
+        userId: currentAssignee,
+      });
+    }
+    // Add new assignee if provided
+    if (newAssignee) {
+      await create(db, "AuditAssignment", {
+        auditSessionId: id,
+        userId: newAssignee,
+      } as any);
+    }
+  }
+
+  // Create all activity notes in batch (minimize DB round trips)
+  const notePromises: Promise<any>[] = [];
+
+  // Basic field changes note
+  if (changes.length > 0) {
+    notePromises.push(
+      createAuditUpdateNote({
+        auditSessionId: id,
+        userId,
+        changes,
+        tx: db,
+      })
+    );
+  }
+
+  // Due date change note
+  if (dueDateChanged) {
+    notePromises.push(
+      createDueDateChangedNote({
+        auditSessionId: id,
+        userId,
+        oldDate: currentAudit.dueDate,
+        newDate: data.dueDate!,
+        tx: db,
+      })
+    );
+  }
+
+  // Assignee change notes
+  if (assigneeChanged) {
+    if (currentAssignee) {
+      notePromises.push(
+        createAssigneeRemovedNote({
+          auditSessionId: id,
+          userId,
+          assigneeUserId: currentAssignee,
+          tx: db,
+        })
+      );
+    }
+    if (newAssignee) {
+      notePromises.push(
+        createAssigneeAddedNote({
+          auditSessionId: id,
+          userId,
+          assigneeUserId: newAssignee,
+          tx: db,
+        })
+      );
+    }
+  }
+
+  // Execute all note creations in parallel
+  if (notePromises.length > 0) {
+    await Promise.all(notePromises);
+  }
+
+  return updatedAudit;
 }
 
 export async function getAuditSessionDetails({
@@ -548,60 +546,19 @@ export async function getAuditSessionDetails({
       (org) => org.organizationId
     );
 
-    const session = await db.auditSession.findFirst({
-      where: {
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
-      include: {
-        assignments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-        createdBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-        assets: {
-          include: {
-            asset: {
-              select: {
-                id: true,
-                title: true,
-                mainImage: true,
-                thumbnailImage: true,
-              },
-            },
-            _count: {
-              select: {
-                notes: {
-                  where: { type: "COMMENT" },
-                },
-                images: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    // Build where clause with OR for multi-org lookup
+    const where: Record<string, any> = {
+      OR: [
+        { id, organizationId },
+        ...(userOrganizations?.length
+          ? [{ id, organizationId: { in: otherOrganizationIds } }]
+          : []),
+      ],
+    };
+
+    const session = (await findFirst(db, "AuditSession", {
+      where,
+    })) as any;
 
     if (!session) {
       throw new ShelfError({
@@ -612,6 +569,93 @@ export async function getAuditSessionDetails({
         label,
       });
     }
+
+    // Fetch nested relations separately
+    const [assignments, createdByUser, auditAssets] = await Promise.all([
+      // Assignments with user details
+      queryRaw<{
+        id: string;
+        auditSessionId: string;
+        userId: string;
+        role: string | null;
+        createdAt: string;
+        updatedAt: string;
+        user_id: string;
+        user_firstName: string | null;
+        user_lastName: string | null;
+        user_email: string;
+        user_profilePicture: string | null;
+      }>(
+        db,
+        sql`SELECT aa.*, u."id" AS "user_id", u."firstName" AS "user_firstName", u."lastName" AS "user_lastName", u."email" AS "user_email", u."profilePicture" AS "user_profilePicture" FROM "AuditAssignment" aa JOIN "User" u ON u."id" = aa."userId" WHERE aa."auditSessionId" = ${session.id}`
+      ),
+      // Created by user
+      findUniqueOrThrow(db, "User", {
+        where: { id: session.createdById },
+        select: "id, firstName, lastName, email, profilePicture",
+      }),
+      // Audit assets with asset details and counts
+      queryRaw<{
+        id: string;
+        auditSessionId: string;
+        assetId: string;
+        expected: boolean;
+        status: string;
+        scannedAt: string | null;
+        scannedById: string | null;
+        asset_id: string;
+        asset_title: string;
+        asset_mainImage: string | null;
+        asset_thumbnailImage: string | null;
+        notesCount: number;
+        imagesCount: number;
+      }>(
+        db,
+        sql`SELECT aas.*, a."id" AS "asset_id", a."title" AS "asset_title", a."mainImage" AS "asset_mainImage", a."thumbnailImage" AS "asset_thumbnailImage", (SELECT COUNT(*)::int FROM "AuditNote" an WHERE an."auditAssetId" = aas."id" AND an."type" = 'COMMENT') AS "notesCount", (SELECT COUNT(*)::int FROM "AuditImage" ai WHERE ai."auditAssetId" = aas."id") AS "imagesCount" FROM "AuditAsset" aas LEFT JOIN "Asset" a ON a."id" = aas."assetId" WHERE aas."auditSessionId" = ${session.id}`
+      ),
+    ]);
+
+    // Reshape assignments to match expected structure
+    session.assignments = assignments.map((a) => ({
+      id: a.id,
+      auditSessionId: a.auditSessionId,
+      userId: a.userId,
+      role: a.role,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+      user: {
+        id: a.user_id,
+        firstName: a.user_firstName,
+        lastName: a.user_lastName,
+        email: a.user_email,
+        profilePicture: a.user_profilePicture,
+      },
+    }));
+
+    session.createdBy = createdByUser;
+
+    // Reshape audit assets
+    session.assets = auditAssets.map((aa) => ({
+      id: aa.id,
+      auditSessionId: aa.auditSessionId,
+      assetId: aa.assetId,
+      expected: aa.expected,
+      status: aa.status,
+      scannedAt: aa.scannedAt,
+      scannedById: aa.scannedById,
+      asset: aa.asset_id
+        ? {
+            id: aa.asset_id,
+            title: aa.asset_title,
+            mainImage: aa.asset_mainImage,
+            thumbnailImage: aa.asset_thumbnailImage,
+          }
+        : null,
+      _count: {
+        notes: aa.notesCount ?? 0,
+        images: aa.imagesCount ?? 0,
+      },
+    }));
 
     /* User is accessing the audit in the wrong organization. In that case we need special 404 handling. */
     if (
@@ -643,8 +687,8 @@ export async function getAuditSessionDetails({
     }
 
     const expectedAssets: AuditExpectedAsset[] = session.assets
-      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => ({
+      .filter((auditAsset: any) => auditAsset.expected && auditAsset.asset)
+      .map((auditAsset: any) => ({
         id: auditAsset.assetId,
         name: auditAsset.asset?.title ?? "",
         auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
@@ -687,7 +731,7 @@ export async function scheduleNextAuditJob({
   try {
     const id = await scheduler.sendAfter(QueueNames.auditQueue, data, {}, when);
     if (id) {
-      await db.auditSession.update({
+      await update(db, "AuditSession", {
         where: { id: data.id },
         data: { activeSchedulerReference: id },
       });
@@ -717,9 +761,9 @@ export async function scheduleNextAuditJob({
  */
 async function cancelAuditReminders(auditId: string) {
   try {
-    const auditSession = await db.auditSession.findUnique({
+    const auditSession = await findUnique(db, "AuditSession", {
       where: { id: auditId },
-      select: { activeSchedulerReference: true },
+      select: "activeSchedulerReference",
     });
 
     if (!auditSession?.activeSchedulerReference) {
@@ -730,7 +774,7 @@ async function cancelAuditReminders(auditId: string) {
     }
 
     await scheduler.cancel(auditSession.activeSchedulerReference);
-    await db.auditSession.update({
+    await update(db, "AuditSession", {
       where: { id: auditId },
       data: { activeSchedulerReference: null },
     });
@@ -821,14 +865,9 @@ export async function getAssetsForAuditSession({
     // This shows all assets (expected + unexpected)
 
     // Get the filtered audit assets
-    const auditAssets = await db.auditAsset.findMany({
+    const auditAssets = await findMany(db, "AuditAsset", {
       where: auditAssetWhere,
-      select: {
-        id: true,
-        assetId: true,
-        expected: true,
-        status: true,
-      },
+      select: "id, assetId, expected, status",
     });
 
     const assetIds = auditAssets.map((aa) => aa.assetId);
@@ -856,83 +895,130 @@ export async function getAssetsForAuditSession({
       };
     }
 
-    // Build where clause
-    const where: Record<string, any> = {
-      organizationId,
-      id: { in: assetIds },
-    };
-
-    // Apply search filter if provided
+    // Fetch assets with full details using Supabase embedded resource syntax
+    // Build search condition for queryRaw if search is provided
+    let searchCondition = sql``;
     if (search) {
-      const searchTerm = search.toLowerCase().trim();
-      where.OR = [
-        { title: { contains: searchTerm, mode: "insensitive" } },
-        {
-          category: {
-            name: { contains: searchTerm, mode: "insensitive" },
-          },
-        },
-        {
-          location: {
-            name: { contains: searchTerm, mode: "insensitive" },
-          },
-        },
-      ];
+      const searchTerm = `%${search.toLowerCase().trim()}%`;
+      searchCondition = sql` AND (a."title" ILIKE ${searchTerm} OR EXISTS (SELECT 1 FROM "Category" c WHERE c."id" = a."categoryId" AND c."name" ILIKE ${searchTerm}) OR EXISTS (SELECT 1 FROM "Location" l WHERE l."id" = a."locationId" AND l."name" ILIKE ${searchTerm}))`;
     }
 
-    // Fetch assets with full details
-    const assets = await db.asset.findMany({
-      where,
-      select: {
-        id: true,
-        title: true,
-        mainImage: true,
-        thumbnailImage: true,
-        mainImageExpiration: true,
-        category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
+    const assetsRaw = await queryRaw<any>(
+      db,
+      sql`SELECT a."id", a."title", a."mainImage", a."thumbnailImage", a."mainImageExpiration", a."categoryId", a."locationId" FROM "Asset" a WHERE a."organizationId" = ${organizationId} AND a."id" = ANY(${assetIds}::text[]) ${searchCondition} ORDER BY a."title" ASC`
+    );
+
+    // Fetch related data for all returned assets
+    const returnedAssetIds = assetsRaw.map((a: any) => a.id);
+    const categoryIds = [
+      ...new Set(assetsRaw.map((a: any) => a.categoryId).filter(Boolean)),
+    ] as string[];
+    const locationIds = [
+      ...new Set(assetsRaw.map((a: any) => a.locationId).filter(Boolean)),
+    ] as string[];
+
+    const [categories, tags, locations, custodies] = await Promise.all([
+      categoryIds.length > 0
+        ? findMany(db, "Category", {
+            where: { id: { in: categoryIds } },
+            select: "id, name, color",
+          })
+        : [],
+      // Tags via many-to-many join table
+      returnedAssetIds.length > 0
+        ? queryRaw<{
+            assetId: string;
+            id: string;
+            name: string;
+            color: string | null;
+          }>(
+            db,
+            sql`SELECT at."A" AS "assetId", t."id", t."name", t."color" FROM "_AssetToTag" at JOIN "Tag" t ON t."id" = at."B" WHERE at."A" = ANY(${returnedAssetIds}::text[])`
+          )
+        : [],
+      locationIds.length > 0
+        ? queryRaw<{
+            id: string;
+            name: string;
+            parentId: string | null;
+            childrenCount: number;
+          }>(
+            db,
+            sql`SELECT l."id", l."name", l."parentId", (SELECT COUNT(*)::int FROM "Location" lc WHERE lc."parentId" = l."id") AS "childrenCount" FROM "Location" l WHERE l."id" = ANY(${locationIds}::text[])`
+          )
+        : [],
+      returnedAssetIds.length > 0
+        ? queryRaw<{
+            assetId: string;
+            custodianId: string;
+            custodianName: string;
+            userId: string | null;
+            userFirstName: string | null;
+            userLastName: string | null;
+            userEmail: string | null;
+            userProfilePicture: string | null;
+          }>(
+            db,
+            sql`SELECT cu."assetId", tm."id" AS "custodianId", tm."name" AS "custodianName", u."id" AS "userId", u."firstName" AS "userFirstName", u."lastName" AS "userLastName", u."email" AS "userEmail", u."profilePicture" AS "userProfilePicture" FROM "Custody" cu JOIN "TeamMember" tm ON tm."id" = cu."teamMemberId" LEFT JOIN "User" u ON u."id" = tm."userId" WHERE cu."assetId" = ANY(${returnedAssetIds}::text[])`
+          )
+        : [],
+    ]);
+
+    // Build lookup maps
+    const categoryMap = new Map(categories.map((c) => [c.id, c]));
+    const tagsByAsset = new Map<
+      string,
+      { id: string; name: string; color: string | null }[]
+    >();
+    for (const tag of tags) {
+      const existing = tagsByAsset.get(tag.assetId) || [];
+      existing.push({ id: tag.id, name: tag.name, color: tag.color });
+      tagsByAsset.set(tag.assetId, existing);
+    }
+    const locationMap = new Map(
+      locations.map((l) => [
+        l.id,
+        {
+          id: l.id,
+          name: l.name,
+          parentId: l.parentId,
+          _count: { children: l.childrenCount },
+        },
+      ])
+    );
+    const custodyByAsset = new Map(
+      custodies.map((c) => [
+        c.assetId,
+        {
+          custodian: {
+            id: c.custodianId,
+            name: c.custodianName,
+            user: c.userId
+              ? {
+                  id: c.userId,
+                  firstName: c.userFirstName,
+                  lastName: c.userLastName,
+                  email: c.userEmail,
+                  profilePicture: c.userProfilePicture,
+                }
+              : null,
           },
         },
-        tags: TAG_WITH_COLOR_SELECT,
-        location: {
-          select: {
-            id: true,
-            name: true,
-            parentId: true,
-            _count: {
-              select: {
-                children: true,
-              },
-            },
-          },
-        },
-        custody: {
-          select: {
-            custodian: {
-              select: {
-                id: true,
-                name: true,
-                user: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    profilePicture: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        title: "asc",
-      },
-    });
+      ])
+    );
+
+    // Assemble the assets with all nested data
+    const assets = assetsRaw.map((a: any) => ({
+      id: a.id,
+      title: a.title,
+      mainImage: a.mainImage,
+      thumbnailImage: a.thumbnailImage,
+      mainImageExpiration: a.mainImageExpiration,
+      category: a.categoryId ? categoryMap.get(a.categoryId) ?? null : null,
+      tags: tagsByAsset.get(a.id) || [],
+      location: a.locationId ? locationMap.get(a.locationId) ?? null : null,
+      custody: custodyByAsset.get(a.id) || null,
+    }));
 
     // Enrich assets with audit status data for "ALL" filter
     const enrichedAssets = assets.map((asset) => ({
@@ -975,7 +1061,7 @@ export async function recordAuditScan(
 
   try {
     // Verify the audit session exists and belongs to the organization
-    const session = await db.auditSession.findFirst({
+    const session = await findFirst(db, "AuditSession", {
       where: {
         id: auditSessionId,
         organizationId,
@@ -993,15 +1079,12 @@ export async function recordAuditScan(
     }
 
     // Check if this asset was already scanned in this audit
-    const existingScan = await db.auditScan.findFirst({
+    const existingScan = await findFirst(db, "AuditScan", {
       where: {
         auditSessionId,
         assetId,
       },
-      select: {
-        id: true,
-        auditAssetId: true,
-      },
+      select: "id, auditAssetId",
     });
 
     if (existingScan) {
@@ -1014,141 +1097,140 @@ export async function recordAuditScan(
       };
     }
 
-    // Pre-fetch user and asset data for note creation outside the transaction
+    // Pre-fetch user and asset data for note creation
     const [scannerUser, scannedAsset] = await Promise.all([
-      db.user.findUnique({
+      findUnique(db, "User", {
         where: { id: userId },
-        select: { id: true, firstName: true, lastName: true },
+        select: "id, firstName, lastName",
       }),
-      db.asset.findUnique({
+      findUnique(db, "Asset", {
         where: { id: assetId },
-        select: { id: true, title: true },
+        select: "id, title",
       }),
     ]);
 
-    // Record the scan in a transaction
-    const result = await db.$transaction(
-      async (tx) => {
-        // If this is the first scan and audit is still PENDING, activate it
-        if (session.status === AuditStatus.PENDING) {
-          await tx.auditSession.update({
-            where: { id: auditSessionId },
-            data: {
-              status: AuditStatus.ACTIVE,
-              startedAt: new Date(),
-            },
-          });
+    // Record the scan with sequential calls (replaces transaction)
+    // If this is the first scan and audit is still PENDING, activate it
+    if (session.status === AuditStatus.PENDING) {
+      await update(db, "AuditSession", {
+        where: { id: auditSessionId },
+        data: {
+          status: AuditStatus.ACTIVE,
+          startedAt: new Date().toISOString(),
+        },
+      });
 
-          // Create automatic note for audit being started
-          await createAuditStartedNote({
-            auditSessionId,
-            userId,
-            tx,
-            prefetchedUser: scannerUser,
-          });
-        }
+      // Create automatic note for audit being started
+      await createAuditStartedNote({
+        auditSessionId,
+        userId,
+        tx: db,
+        prefetchedUser: scannerUser,
+      });
+    }
 
-        // Create the scan record
-        const scan = await tx.auditScan.create({
-          data: {
-            auditSessionId,
-            code: qrId,
-            assetId,
-            scannedById: userId,
-            scannedAt: new Date(),
-          },
-        });
+    // Create the scan record
+    const scan = await create(db, "AuditScan", {
+      auditSessionId,
+      code: qrId,
+      assetId,
+      scannedById: userId,
+      scannedAt: new Date().toISOString(),
+    } as any);
 
-        let auditAssetId: string | null = null;
+    let auditAssetId: string | null = null;
 
-        // Update or create the audit asset record
-        if (isExpected) {
-          // Expected asset - update its status to FOUND
-          await tx.auditAsset.updateMany({
-            where: {
-              auditSessionId,
-              assetId,
-              expected: true,
-            },
-            data: {
-              status: AuditAssetStatus.FOUND,
-              scannedAt: new Date(),
-              scannedById: userId,
-            },
-          });
-
-          // Get the audit asset ID for return
-          const updatedAsset = await tx.auditAsset.findFirst({
-            where: {
-              auditSessionId,
-              assetId,
-              expected: true,
-            },
-            select: { id: true },
-          });
-
-          auditAssetId = updatedAsset?.id ?? null;
-        } else {
-          // Unexpected asset - create a new audit asset record
-          const auditAsset = await tx.auditAsset.create({
-            data: {
-              auditSessionId,
-              assetId,
-              expected: false,
-              status: AuditAssetStatus.UNEXPECTED,
-              scannedAt: new Date(),
-              scannedById: userId,
-            },
-          });
-          auditAssetId = auditAsset.id;
-        }
-
-        // Link the scan to the audit asset so we can query it later
-        if (auditAssetId) {
-          await tx.auditScan.update({
-            where: { id: scan.id },
-            data: { auditAssetId },
-          });
-        }
-
-        // Update the audit session counts
-        const updatedSession = await tx.auditSession.update({
-          where: { id: auditSessionId },
-          data: {
-            foundAssetCount: isExpected
-              ? { increment: 1 }
-              : session.foundAssetCount,
-            missingAssetCount: isExpected
-              ? { decrement: 1 }
-              : session.missingAssetCount,
-            unexpectedAssetCount: !isExpected
-              ? { increment: 1 }
-              : session.unexpectedAssetCount,
-          },
-        });
-
-        // Create automatic note for asset scan using pre-fetched data
-        await createAssetScanNote({
+    // Update or create the audit asset record
+    if (isExpected) {
+      // Expected asset - update its status to FOUND
+      await updateMany(db, "AuditAsset", {
+        where: {
           auditSessionId,
           assetId,
-          userId,
-          isExpected,
-          tx,
-          prefetchedUser: scannerUser,
-          prefetchedAsset: scannedAsset,
-        });
+          expected: true,
+        },
+        data: {
+          status: AuditAssetStatus.FOUND,
+          scannedAt: new Date().toISOString(),
+          scannedById: userId,
+        },
+      });
 
-        return {
-          scanId: scan.id,
-          auditAssetId,
-          foundAssetCount: updatedSession.foundAssetCount,
-          unexpectedAssetCount: updatedSession.unexpectedAssetCount,
-        };
-      },
-      { timeout: 15000 }
+      // Get the audit asset ID for return
+      const updatedAsset = await findFirst(db, "AuditAsset", {
+        where: {
+          auditSessionId,
+          assetId,
+          expected: true,
+        },
+        select: "id",
+      });
+
+      auditAssetId = updatedAsset?.id ?? null;
+    } else {
+      // Unexpected asset - create a new audit asset record
+      const auditAsset = await create(db, "AuditAsset", {
+        auditSessionId,
+        assetId,
+        expected: false,
+        status: AuditAssetStatus.UNEXPECTED,
+        scannedAt: new Date().toISOString(),
+        scannedById: userId,
+      } as any);
+      auditAssetId = auditAsset.id;
+    }
+
+    // Link the scan to the audit asset so we can query it later
+    if (auditAssetId) {
+      await update(db, "AuditScan", {
+        where: { id: scan.id },
+        data: { auditAssetId },
+      });
+    }
+
+    // Update the audit session counts using raw SQL for increment/decrement
+    const updatedSessions = await queryRaw<{
+      foundAssetCount: number;
+      unexpectedAssetCount: number;
+    }>(
+      db,
+      sql`UPDATE "AuditSession" SET "foundAssetCount" = ${
+        isExpected
+          ? sql`"foundAssetCount" + 1`
+          : sql`${session.foundAssetCount}`
+      }, "missingAssetCount" = ${
+        isExpected
+          ? sql`"missingAssetCount" - 1`
+          : sql`${session.missingAssetCount}`
+      }, "unexpectedAssetCount" = ${
+        !isExpected
+          ? sql`"unexpectedAssetCount" + 1`
+          : sql`${session.unexpectedAssetCount}`
+      }, "updatedAt" = NOW() WHERE "id" = ${auditSessionId} RETURNING "foundAssetCount", "unexpectedAssetCount"`
     );
 
-    return result;
+    const updatedSession = updatedSessions[0] ?? {
+      foundAssetCount: session.foundAssetCount,
+      unexpectedAssetCount: session.unexpectedAssetCount,
+    };
+
+    // Create automatic note for asset scan using pre-fetched data
+    await createAssetScanNote({
+      auditSessionId,
+      assetId,
+      userId,
+      isExpected,
+      tx: db,
+      prefetchedUser: scannerUser,
+      prefetchedAsset: scannedAsset,
+    });
+
+    return {
+      scanId: scan.id,
+      auditAssetId,
+      foundAssetCount: updatedSession.foundAssetCount,
+      unexpectedAssetCount: updatedSession.unexpectedAssetCount,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1176,7 +1258,7 @@ export async function getAuditScans({
 }): Promise<AuditScanData[]> {
   try {
     // Verify the audit session exists and belongs to the organization
-    const session = await db.auditSession.findFirst({
+    const session = await findFirst(db, "AuditSession", {
       where: {
         id: auditSessionId,
         organizationId,
@@ -1193,37 +1275,30 @@ export async function getAuditScans({
       });
     }
 
-    const scans = await db.auditScan.findMany({
-      where: { auditSessionId },
-      include: {
-        asset: {
-          select: {
-            id: true,
-            title: true,
-          },
-        },
-        auditAsset: {
-          select: {
-            id: true,
-            expected: true,
-            _count: {
-              select: {
-                notes: {
-                  where: { type: "COMMENT" },
-                },
-                images: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { scannedAt: "asc" },
-    });
+    // Fetch scans with asset and auditAsset data via raw query
+    const scans = await queryRaw<{
+      id: string;
+      auditSessionId: string;
+      code: string | null;
+      assetId: string | null;
+      scannedAt: string;
+      scannedById: string | null;
+      auditAssetId: string | null;
+      asset_id: string | null;
+      asset_title: string | null;
+      aa_id: string | null;
+      aa_expected: boolean | null;
+      aa_notesCount: number;
+      aa_imagesCount: number;
+    }>(
+      db,
+      sql`SELECT s.*, a."id" AS "asset_id", a."title" AS "asset_title", aa."id" AS "aa_id", aa."expected" AS "aa_expected", (SELECT COUNT(*)::int FROM "AuditNote" an WHERE an."auditAssetId" = aa."id" AND an."type" = 'COMMENT') AS "aa_notesCount", (SELECT COUNT(*)::int FROM "AuditImage" ai WHERE ai."auditAssetId" = aa."id") AS "aa_imagesCount" FROM "AuditScan" s LEFT JOIN "Asset" a ON a."id" = s."assetId" LEFT JOIN "AuditAsset" aa ON aa."id" = s."auditAssetId" WHERE s."auditSessionId" = ${auditSessionId} ORDER BY s."scannedAt" ASC`
+    );
 
     // For scans without auditAsset relation (created before the fix that links them),
     // look up AuditAsset by assetId
     const assetIdsWithoutLink = scans
-      .filter((s) => !s.auditAsset && s.assetId)
+      .filter((s) => !s.aa_id && s.assetId)
       .map((s) => s.assetId as string);
 
     const auditAssetsByAssetId = new Map<
@@ -1236,32 +1311,23 @@ export async function getAuditScans({
     >();
 
     if (assetIdsWithoutLink.length > 0) {
-      const auditAssets = await db.auditAsset.findMany({
-        where: {
-          auditSessionId,
-          assetId: { in: assetIdsWithoutLink },
-        },
-        select: {
-          id: true,
-          assetId: true,
-          expected: true,
-          _count: {
-            select: {
-              notes: {
-                where: { type: "COMMENT" },
-              },
-              images: true,
-            },
-          },
-        },
-      });
+      const auditAssets = await queryRaw<{
+        id: string;
+        assetId: string;
+        expected: boolean;
+        notesCount: number;
+        imagesCount: number;
+      }>(
+        db,
+        sql`SELECT aas."id", aas."assetId", aas."expected", (SELECT COUNT(*)::int FROM "AuditNote" an WHERE an."auditAssetId" = aas."id" AND an."type" = 'COMMENT') AS "notesCount", (SELECT COUNT(*)::int FROM "AuditImage" ai WHERE ai."auditAssetId" = aas."id") AS "imagesCount" FROM "AuditAsset" aas WHERE aas."auditSessionId" = ${auditSessionId} AND aas."assetId" = ANY(${assetIdsWithoutLink}::text[])`
+      );
 
       for (const aa of auditAssets) {
         if (aa.assetId) {
           auditAssetsByAssetId.set(aa.assetId, {
             id: aa.id,
             expected: aa.expected,
-            _count: aa._count,
+            _count: { notes: aa.notesCount, images: aa.imagesCount },
           });
         }
       }
@@ -1269,17 +1335,26 @@ export async function getAuditScans({
 
     return scans.map((scan) => {
       // Use direct relation if available, otherwise fall back to lookup by assetId
-      const auditAsset =
-        scan.auditAsset ??
-        (scan.assetId ? auditAssetsByAssetId.get(scan.assetId) : undefined);
+      const auditAsset = scan.aa_id
+        ? {
+            id: scan.aa_id,
+            expected: scan.aa_expected ?? false,
+            _count: {
+              notes: scan.aa_notesCount ?? 0,
+              images: scan.aa_imagesCount ?? 0,
+            },
+          }
+        : scan.assetId
+        ? auditAssetsByAssetId.get(scan.assetId)
+        : undefined;
 
       return {
         code: scan.code ?? "",
         assetId: scan.assetId ?? "",
         type: "asset" as const,
-        scannedAt: scan.scannedAt,
+        scannedAt: new Date(scan.scannedAt),
         isExpected: auditAsset?.expected ?? false,
-        assetTitle: scan.asset?.title ?? "",
+        assetTitle: scan.asset_title ?? "",
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
@@ -1316,140 +1391,144 @@ export async function completeAuditSession({
   hints: ClientHint;
 }): Promise<void> {
   try {
-    await db.$transaction(async (tx) => {
-      // Verify session exists and belongs to organization
-      const session = await tx.auditSession.findUnique({
-        where: { id: sessionId, organizationId },
-        select: { id: true, status: true },
+    // Verify session exists and belongs to organization
+    const session = await findUnique(db, "AuditSession", {
+      where: { id: sessionId, organizationId },
+      select: "id, status",
+    });
+
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session not found",
+        additionalData: { sessionId, organizationId },
+        status: 404,
+        label,
       });
+    }
 
-      if (!session) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit session not found",
-          additionalData: { sessionId, organizationId },
-          status: 404,
-          label,
-        });
-      }
+    if (session.status === AuditStatus.COMPLETED) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session is already completed",
+        additionalData: { sessionId },
+        status: 400,
+        label,
+      });
+    }
 
-      if (session.status === AuditStatus.COMPLETED) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit session is already completed",
-          additionalData: { sessionId },
-          status: 400,
-          label,
-        });
-      }
+    // Mark all expected assets that weren't scanned as MISSING
+    await updateMany(db, "AuditAsset", {
+      where: {
+        auditSessionId: sessionId,
+        expected: true,
+        status: "PENDING",
+      },
+      data: {
+        status: "MISSING",
+      },
+    });
 
-      // Mark all expected assets that weren't scanned as MISSING
-      await tx.auditAsset.updateMany({
-        where: {
+    // Get all counts for completion note
+    const [expectedCount, foundCount, missingCount, unexpectedCount] =
+      await Promise.all([
+        count(db, "AuditAsset", {
           auditSessionId: sessionId,
           expected: true,
-          status: "PENDING",
-        },
-        data: {
+        }),
+        count(db, "AuditAsset", {
+          auditSessionId: sessionId,
+          status: "FOUND",
+        }),
+        count(db, "AuditAsset", {
+          auditSessionId: sessionId,
           status: "MISSING",
-        },
-      });
+        }),
+        count(db, "AuditAsset", {
+          auditSessionId: sessionId,
+          expected: false,
+        }),
+      ]);
 
-      // Get all counts for completion note
-      const [expectedCount, foundCount, missingCount, unexpectedCount] =
-        await Promise.all([
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              expected: true,
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              status: "FOUND",
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              status: "MISSING",
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              expected: false,
-            },
-          }),
-        ]);
+    // Update session to completed
+    await update(db, "AuditSession", {
+      where: { id: sessionId },
+      data: {
+        status: AuditStatus.COMPLETED,
+        completedAt: new Date().toISOString(),
+        missingAssetCount: missingCount,
+      },
+    });
 
-      // Update session to completed
-      await tx.auditSession.update({
-        where: { id: sessionId },
-        data: {
-          status: AuditStatus.COMPLETED,
-          completedAt: new Date(),
-          missingAssetCount: missingCount,
-        },
-      });
-
-      // Create automatic completion note with stats and optional user message
-      await createAuditCompletedNote({
-        auditSessionId: sessionId,
-        userId,
-        expectedCount,
-        foundCount,
-        missingCount,
-        unexpectedCount,
-        completionNote,
-        tx,
-      });
+    // Create automatic completion note with stats and optional user message
+    await createAuditCompletedNote({
+      auditSessionId: sessionId,
+      userId,
+      expectedCount,
+      foundCount,
+      missingCount,
+      unexpectedCount,
+      completionNote,
+      tx: db,
     });
 
     // Fetch full audit details for email notification
-    const completedAudit = await db.auditSession.findUnique({
+    // TODO: convert complex Prisma include — nested relations fetched separately
+    const completedAuditBase = await findUnique(db, "AuditSession", {
       where: { id: sessionId },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        dueDate: true,
-        completedAt: true,
-        organizationId: true,
-        organization: {
-          select: {
-            name: true,
-            customEmailFooter: true,
-            owner: {
-              select: { email: true },
-            },
-          },
-        },
-        _count: {
-          select: { assets: true },
-        },
-        createdBy: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        assignments: {
-          include: {
-            user: {
-              select: {
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-      },
+      select:
+        "id, name, description, dueDate, completedAt, organizationId, createdById",
     });
+
+    let completedAudit: any = null;
+    if (completedAuditBase) {
+      const [org, createdBy, assignmentsRaw, assetCount] = await Promise.all([
+        queryRaw<{
+          name: string;
+          customEmailFooter: string | null;
+          ownerEmail: string;
+        }>(
+          db,
+          sql`SELECT o."name", o."customEmailFooter", u."email" AS "ownerEmail" FROM "Organization" o JOIN "User" u ON u."id" = o."userId" WHERE o."id" = ${completedAuditBase.organizationId}`
+        ),
+        findUniqueOrThrow(db, "User", {
+          where: { id: completedAuditBase.createdById },
+          select: "id, email, firstName, lastName",
+        }),
+        queryRaw<{
+          userId: string;
+          email: string;
+          firstName: string | null;
+          lastName: string | null;
+        }>(
+          db,
+          sql`SELECT aa."userId", u."email", u."firstName", u."lastName" FROM "AuditAssignment" aa JOIN "User" u ON u."id" = aa."userId" WHERE aa."auditSessionId" = ${sessionId}`
+        ),
+        count(db, "AuditAsset", { auditSessionId: sessionId }),
+      ]);
+
+      const orgData = org[0];
+      completedAudit = {
+        ...completedAuditBase,
+        organization: orgData
+          ? {
+              name: orgData.name,
+              customEmailFooter: orgData.customEmailFooter,
+              owner: { email: orgData.ownerEmail },
+            }
+          : null,
+        _count: { assets: assetCount },
+        createdBy,
+        assignments: assignmentsRaw.map((a) => ({
+          userId: a.userId,
+          user: {
+            email: a.email,
+            firstName: a.firstName,
+            lastName: a.lastName,
+          },
+        })),
+      };
+    }
 
     if (completedAudit && completedAudit.completedAt) {
       // Calculate if audit was overdue
@@ -1540,40 +1619,155 @@ export async function getAuditsForOrganization(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8;
 
-    const where: Record<string, any> = { organizationId };
+    // Build SQL conditions
+    const conditions = [sql`s."organizationId" = ${organizationId}`];
 
     // Filter by assignee for BASE/SELF_SERVICE users
     if (isSelfServiceOrBase && userId) {
-      where.assignments = {
-        some: {
-          userId,
-        },
-      };
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM "AuditAssignment" aa WHERE aa."auditSessionId" = s."id" AND aa."userId" = ${userId})`
+      );
     }
 
     // Add search filter
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-      ];
+      const searchTerm = `%${search}%`;
+      conditions.push(
+        sql`(s."name" ILIKE ${searchTerm} OR s."description" ILIKE ${searchTerm})`
+      );
     }
 
     // Add status filter
     if (status) {
-      where.status = status;
+      conditions.push(sql`s."status" = ${status}`);
     }
 
-    const [audits, totalAudits] = await Promise.all([
-      db.auditSession.findMany({
-        skip,
-        take,
-        where,
-        orderBy: { [orderBy]: orderDirection },
-        include: AUDIT_LIST_INCLUDE,
-      }),
-      db.auditSession.count({ where }),
+    const whereSql = conditions.reduce((acc, cond) => sql`${acc} AND ${cond}`);
+
+    // Sanitize orderBy to prevent SQL injection
+    const allowedOrderColumns: Record<string, string> = {
+      createdAt: '"createdAt"',
+      name: '"name"',
+      status: '"status"',
+      updatedAt: '"updatedAt"',
+      dueDate: '"dueDate"',
+    };
+    const orderCol = allowedOrderColumns[orderBy] || '"createdAt"';
+    const orderDir = orderDirection === "asc" ? "ASC" : "DESC";
+    const orderSql = sql`${raw(`${orderCol} ${orderDir}`)}`;
+
+    const [auditsRaw, countResult] = await Promise.all([
+      queryRaw<any>(
+        db,
+        sql`SELECT s.* FROM "AuditSession" s WHERE ${whereSql} ORDER BY ${orderSql} LIMIT ${take} OFFSET ${skip}`
+      ),
+      queryRaw<{ count: number }>(
+        db,
+        sql`SELECT COUNT(*)::int AS "count" FROM "AuditSession" s WHERE ${whereSql}`
+      ),
     ]);
+
+    const totalAudits = countResult[0]?.count ?? 0;
+
+    // Fetch related data for all returned audits (matching AUDIT_LIST_INCLUDE)
+    const auditIds = auditsRaw.map((a: any) => a.id);
+    let audits: any[] = auditsRaw;
+
+    if (auditIds.length > 0) {
+      const [
+        createdByUsers,
+        assignmentsWithUsers,
+        assetCounts,
+        scanCounts,
+        assignmentCounts,
+      ] = await Promise.all([
+        queryRaw<{
+          auditId: string;
+          firstName: string | null;
+          lastName: string | null;
+          email: string;
+          profilePicture: string | null;
+        }>(
+          db,
+          sql`SELECT s."id" AS "auditId", u."firstName", u."lastName", u."email", u."profilePicture" FROM "AuditSession" s JOIN "User" u ON u."id" = s."createdById" WHERE s."id" = ANY(${auditIds}::text[])`
+        ),
+        queryRaw<{
+          auditSessionId: string;
+          id: string;
+          userId: string;
+          role: string | null;
+          userFirstName: string | null;
+          userLastName: string | null;
+          userEmail: string;
+          userProfilePicture: string | null;
+        }>(
+          db,
+          sql`SELECT aa."auditSessionId", aa."id", aa."userId", aa."role", u."firstName" AS "userFirstName", u."lastName" AS "userLastName", u."email" AS "userEmail", u."profilePicture" AS "userProfilePicture" FROM "AuditAssignment" aa JOIN "User" u ON u."id" = aa."userId" WHERE aa."auditSessionId" = ANY(${auditIds}::text[])`
+        ),
+        queryRaw<{ auditSessionId: string; count: number }>(
+          db,
+          sql`SELECT "auditSessionId", COUNT(*)::int AS "count" FROM "AuditAsset" WHERE "auditSessionId" = ANY(${auditIds}::text[]) GROUP BY "auditSessionId"`
+        ),
+        queryRaw<{ auditSessionId: string; count: number }>(
+          db,
+          sql`SELECT "auditSessionId", COUNT(*)::int AS "count" FROM "AuditScan" WHERE "auditSessionId" = ANY(${auditIds}::text[]) GROUP BY "auditSessionId"`
+        ),
+        queryRaw<{ auditSessionId: string; count: number }>(
+          db,
+          sql`SELECT "auditSessionId", COUNT(*)::int AS "count" FROM "AuditAssignment" WHERE "auditSessionId" = ANY(${auditIds}::text[]) GROUP BY "auditSessionId"`
+        ),
+      ]);
+
+      // Build lookup maps
+      const createdByMap = new Map(createdByUsers.map((u) => [u.auditId, u]));
+      const assignmentsByAudit = new Map<string, any[]>();
+      for (const a of assignmentsWithUsers) {
+        const arr = assignmentsByAudit.get(a.auditSessionId) || [];
+        arr.push({
+          id: a.id,
+          userId: a.userId,
+          role: a.role,
+          auditSessionId: a.auditSessionId,
+          user: {
+            firstName: a.userFirstName,
+            lastName: a.userLastName,
+            email: a.userEmail,
+            profilePicture: a.userProfilePicture,
+          },
+        });
+        assignmentsByAudit.set(a.auditSessionId, arr);
+      }
+      const assetCountMap = new Map(
+        assetCounts.map((c) => [c.auditSessionId, c.count])
+      );
+      const scanCountMap = new Map(
+        scanCounts.map((c) => [c.auditSessionId, c.count])
+      );
+      const assignmentCountMap = new Map(
+        assignmentCounts.map((c) => [c.auditSessionId, c.count])
+      );
+
+      audits = auditsRaw.map((audit: any) => {
+        const cb = createdByMap.get(audit.id);
+        return {
+          ...audit,
+          createdBy: cb
+            ? {
+                firstName: cb.firstName,
+                lastName: cb.lastName,
+                email: cb.email,
+                profilePicture: cb.profilePicture,
+              }
+            : null,
+          assignments: assignmentsByAudit.get(audit.id) || [],
+          _count: {
+            assets: assetCountMap.get(audit.id) ?? 0,
+            scans: scanCountMap.get(audit.id) ?? 0,
+            assignments: assignmentCountMap.get(audit.id) ?? 0,
+          },
+        };
+      });
+    }
 
     return { audits, totalAudits };
   } catch (cause) {
@@ -1694,41 +1888,12 @@ export async function cancelAuditSession({
 }) {
   try {
     // Fetch audit session with creator and assignee info
-    const auditSession = await db.auditSession.findUnique({
+    // TODO: convert complex Prisma include — nested relations fetched separately
+    const auditSessionBase = await findUnique(db, "AuditSession", {
       where: { id: auditSessionId, organizationId },
-      include: {
-        createdBy: {
-          select: {
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        organization: {
-          include: {
-            owner: {
-              select: { email: true },
-            },
-          },
-        },
-        assignments: {
-          include: {
-            user: {
-              select: {
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        _count: {
-          select: { assets: true },
-        },
-      },
     });
 
-    if (!auditSession) {
+    if (!auditSessionBase) {
       throw new ShelfError({
         cause: null,
         message: "Audit not found",
@@ -1737,6 +1902,58 @@ export async function cancelAuditSession({
         status: 404,
       });
     }
+
+    // Fetch related data in parallel
+    const [createdBy, orgData, assignmentsRaw, assetCount] = await Promise.all([
+      findUniqueOrThrow(db, "User", {
+        where: { id: auditSessionBase.createdById },
+        select: "email, firstName, lastName",
+      }),
+      queryRaw<{
+        id: string;
+        name: string;
+        customEmailFooter: string | null;
+        ownerEmail: string;
+      }>(
+        db,
+        sql`SELECT o.*, u."email" AS "ownerEmail" FROM "Organization" o JOIN "User" u ON u."id" = o."userId" WHERE o."id" = ${auditSessionBase.organizationId}`
+      ),
+      queryRaw<{
+        id: string;
+        userId: string;
+        auditSessionId: string;
+        email: string;
+        firstName: string | null;
+        lastName: string | null;
+      }>(
+        db,
+        sql`SELECT aa."id", aa."userId", aa."auditSessionId", u."email", u."firstName", u."lastName" FROM "AuditAssignment" aa JOIN "User" u ON u."id" = aa."userId" WHERE aa."auditSessionId" = ${auditSessionId}`
+      ),
+      count(db, "AuditAsset", { auditSessionId }),
+    ]);
+
+    const org = orgData[0];
+    const auditSession = {
+      ...auditSessionBase,
+      createdBy,
+      organization: org
+        ? {
+            ...org,
+            owner: { email: org.ownerEmail },
+          }
+        : null,
+      assignments: assignmentsRaw.map((a) => ({
+        id: a.id,
+        userId: a.userId,
+        auditSessionId: a.auditSessionId,
+        user: {
+          email: a.email,
+          firstName: a.firstName,
+          lastName: a.lastName,
+        },
+      })),
+      _count: { assets: assetCount },
+    } as any;
 
     // Check if user is the creator
     if (auditSession.createdById !== userId) {
@@ -1768,20 +1985,21 @@ export async function cancelAuditSession({
     }
 
     // Update audit status to CANCELLED
-    const updatedAudit = await db.auditSession.update({
+    const updatedAudit = await update(db, "AuditSession", {
       where: { id: auditSessionId },
-      data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
+      data: {
+        status: AuditStatus.CANCELLED,
+        cancelledAt: new Date().toISOString(),
+      },
     });
 
     // Create activity note for cancellation
-    await db.auditNote.create({
-      data: {
-        content: `${auditSession.createdBy.firstName} ${auditSession.createdBy.lastName} cancelled the audit`,
-        type: "UPDATE",
-        userId,
-        auditSessionId,
-      },
-    });
+    await create(db, "AuditNote", {
+      content: `${auditSession.createdBy.firstName} ${auditSession.createdBy.lastName} cancelled the audit`,
+      type: "UPDATE",
+      userId,
+      auditSessionId,
+    } as any);
 
     // Send cancellation email to assignees (excluding creator)
     const assigneesToNotify = auditSession.assignments.filter(
@@ -1824,36 +2042,60 @@ export async function getPendingAuditsForOrganization({
 }: {
   organizationId: string;
 }) {
-  return db.auditSession.findMany({
+  // Fetch pending audits with creator and assignment data
+  const auditsRaw = await findMany(db, "AuditSession", {
     where: {
       organizationId,
       status: AuditStatus.PENDING,
     },
-    select: {
-      id: true,
-      name: true,
-      createdAt: true,
-      expectedAssetCount: true,
-      createdBy: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
-      assignments: {
-        select: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
+    select: "id, name, createdAt, expectedAssetCount, createdById",
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (auditsRaw.length === 0) return [];
+
+  const auditIds = auditsRaw.map((a) => a.id);
+  const creatorIds = [
+    ...new Set(auditsRaw.map((a) => a.createdById)),
+  ] as string[];
+
+  const [creators, assignmentsRaw] = await Promise.all([
+    creatorIds.length > 0
+      ? findMany(db, "User", {
+          where: { id: { in: creatorIds } },
+          select: "id, firstName, lastName",
+        })
+      : [],
+    queryRaw<{
+      auditSessionId: string;
+      firstName: string | null;
+      lastName: string | null;
+    }>(
+      db,
+      sql`SELECT aa."auditSessionId", u."firstName", u."lastName" FROM "AuditAssignment" aa JOIN "User" u ON u."id" = aa."userId" WHERE aa."auditSessionId" = ANY(${auditIds}::text[])`
+    ),
+  ]);
+
+  const creatorMap = new Map(creators.map((c) => [c.id, c]));
+  const assignmentsByAudit = new Map<string, any[]>();
+  for (const a of assignmentsRaw) {
+    const arr = assignmentsByAudit.get(a.auditSessionId) || [];
+    arr.push({ user: { firstName: a.firstName, lastName: a.lastName } });
+    assignmentsByAudit.set(a.auditSessionId, arr);
+  }
+
+  return auditsRaw.map((audit) => {
+    const creator = creatorMap.get(audit.createdById);
+    return {
+      id: audit.id,
+      name: audit.name,
+      createdAt: audit.createdAt,
+      expectedAssetCount: audit.expectedAssetCount,
+      createdBy: creator
+        ? { firstName: creator.firstName, lastName: creator.lastName }
+        : null,
+      assignments: assignmentsByAudit.get(audit.id) || [],
+    };
   });
 }
 
@@ -1876,102 +2118,90 @@ export async function addAssetsToAudit({
   addedCount: number;
   skippedCount: number;
 }> {
-  return db
-    .$transaction(async (tx) => {
-      // Verify audit exists and is PENDING
-      const audit = await tx.auditSession.findUnique({
-        where: { id: auditId, organizationId },
-        select: { id: true, name: true, status: true },
-      });
+  // Verify audit exists and is PENDING
+  const audit = await findUnique(db, "AuditSession", {
+    where: { id: auditId, organizationId },
+    select: "id, name, status",
+  });
 
-      if (!audit) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
-
-      if (audit.status !== AuditStatus.PENDING) {
-        throw new ShelfError({
-          cause: null,
-          message: "Can only add assets to pending audits",
-          additionalData: { auditId, status: audit.status },
-          label,
-          status: 400,
-        });
-      }
-
-      // Fetch existing audit assets to filter out duplicates
-      const existingAuditAssets = await tx.auditAsset.findMany({
-        where: {
-          auditSessionId: auditId,
-          assetId: { in: assetIds },
-        },
-        select: { assetId: true },
-      });
-
-      const existingAssetIds = new Set(
-        existingAuditAssets.map((aa) => aa.assetId)
-      );
-
-      // Filter out assets already in audit
-      const newAssetIds = assetIds.filter((id) => !existingAssetIds.has(id));
-
-      // Create new audit asset entries
-      if (newAssetIds.length > 0) {
-        await tx.auditAsset.createMany({
-          data: newAssetIds.map((assetId) => ({
-            auditSessionId: auditId,
-            assetId,
-            expected: true,
-            status: AuditAssetStatus.PENDING,
-          })),
-        });
-
-        // Update audit session counts
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { increment: newAssetIds.length },
-            missingAssetCount: { increment: newAssetIds.length },
-          },
-        });
-      }
-
-      const addedCount = newAssetIds.length;
-      const skippedCount = assetIds.length - addedCount;
-
-      // Create activity note with asset details
-      if (addedCount > 0) {
-        await createAssetsAddedToAuditNote({
-          auditSessionId: auditId,
-          userId,
-          addedAssetIds: newAssetIds,
-          skippedCount,
-          tx,
-        });
-      }
-
-      return { addedCount, skippedCount, newAssetIds, audit };
-    })
-    .then(async (result) => {
-      // Create asset notes outside the transaction
-      if (result.addedCount > 0) {
-        await createAssetNotesForAuditAddition({
-          assetIds: result.newAssetIds,
-          userId,
-          audit: result.audit,
-        });
-      }
-
-      return {
-        addedCount: result.addedCount,
-        skippedCount: result.skippedCount,
-      };
+  if (!audit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditId, organizationId },
+      label,
+      status: 404,
     });
+  }
+
+  if (audit.status !== AuditStatus.PENDING) {
+    throw new ShelfError({
+      cause: null,
+      message: "Can only add assets to pending audits",
+      additionalData: { auditId, status: audit.status },
+      label,
+      status: 400,
+    });
+  }
+
+  // Fetch existing audit assets to filter out duplicates
+  const existingAuditAssets = await findMany(db, "AuditAsset", {
+    where: {
+      auditSessionId: auditId,
+      assetId: { in: assetIds },
+    },
+    select: "assetId",
+  });
+
+  const existingAssetIds = new Set(existingAuditAssets.map((aa) => aa.assetId));
+
+  // Filter out assets already in audit
+  const newAssetIds = assetIds.filter((id) => !existingAssetIds.has(id));
+
+  // Create new audit asset entries
+  if (newAssetIds.length > 0) {
+    await createMany(
+      db,
+      "AuditAsset",
+      newAssetIds.map((assetId) => ({
+        auditSessionId: auditId,
+        assetId,
+        expected: true,
+        status: AuditAssetStatus.PENDING,
+      }))
+    );
+
+    // Update audit session counts using raw SQL for increment
+    await queryRaw(
+      db,
+      sql`UPDATE "AuditSession" SET "expectedAssetCount" = "expectedAssetCount" + ${newAssetIds.length}, "missingAssetCount" = "missingAssetCount" + ${newAssetIds.length}, "updatedAt" = NOW() WHERE "id" = ${auditId}`
+    );
+  }
+
+  const addedCount = newAssetIds.length;
+  const skippedCount = assetIds.length - addedCount;
+
+  // Create activity note with asset details
+  if (addedCount > 0) {
+    await createAssetsAddedToAuditNote({
+      auditSessionId: auditId,
+      userId,
+      addedAssetIds: newAssetIds,
+      skippedCount,
+      tx: db,
+    });
+  }
+
+  // Create asset notes
+  if (addedCount > 0) {
+    await createAssetNotesForAuditAddition({
+      assetIds: newAssetIds,
+      userId,
+      audit,
+    });
+  }
+
+  return { addedCount, skippedCount };
 }
 
 /**
@@ -1991,85 +2221,74 @@ export async function removeAssetFromAudit({
   organizationId: string;
   userId: string;
 }): Promise<void> {
-  return db
-    .$transaction(async (tx) => {
-      // Verify audit exists and is PENDING
-      const audit = await tx.auditSession.findUnique({
-        where: { id: auditId, organizationId },
-        select: { id: true, name: true, status: true },
-      });
+  // Verify audit exists and is PENDING
+  const audit = await findUnique(db, "AuditSession", {
+    where: { id: auditId, organizationId },
+    select: "id, name, status",
+  });
 
-      if (!audit) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
-
-      if (audit.status !== AuditStatus.PENDING) {
-        throw new ShelfError({
-          cause: null,
-          message: "Can only remove assets from pending audits",
-          additionalData: { auditId, status: audit.status },
-          label,
-          status: 400,
-        });
-      }
-
-      // Fetch the audit asset to get the actual asset ID
-      const auditAsset = await tx.auditAsset.findUnique({
-        where: { id: auditAssetId },
-        select: { assetId: true, expected: true },
-      });
-
-      if (!auditAsset) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit asset not found",
-          additionalData: { auditAssetId },
-          label,
-          status: 404,
-        });
-      }
-
-      // Delete the audit asset (cascade will delete related scans)
-      await tx.auditAsset.delete({
-        where: { id: auditAssetId },
-      });
-
-      // Update audit session counts
-      // If it was an expected asset, decrement expectedAssetCount
-      if (auditAsset.expected) {
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: 1 },
-            missingAssetCount: { decrement: 1 },
-          },
-        });
-      }
-
-      // Create activity note
-      await createAssetRemovedFromAuditNote({
-        auditSessionId: auditId,
-        assetId: auditAsset.assetId,
-        userId,
-        tx,
-      });
-
-      return { assetId: auditAsset.assetId, audit };
-    })
-    .then(async (result) => {
-      // Create asset note outside the transaction
-      await createAssetNotesForAuditRemoval({
-        assetIds: [result.assetId],
-        userId,
-        audit: result.audit,
-      });
+  if (!audit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditId, organizationId },
+      label,
+      status: 404,
     });
+  }
+
+  if (audit.status !== AuditStatus.PENDING) {
+    throw new ShelfError({
+      cause: null,
+      message: "Can only remove assets from pending audits",
+      additionalData: { auditId, status: audit.status },
+      label,
+      status: 400,
+    });
+  }
+
+  // Fetch the audit asset to get the actual asset ID
+  const auditAsset = await findUnique(db, "AuditAsset", {
+    where: { id: auditAssetId },
+    select: "assetId, expected",
+  });
+
+  if (!auditAsset) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit asset not found",
+      additionalData: { auditAssetId },
+      label,
+      status: 404,
+    });
+  }
+
+  // Delete the audit asset (cascade will delete related scans)
+  await removeRecord(db, "AuditAsset", { id: auditAssetId });
+
+  // Update audit session counts
+  // If it was an expected asset, decrement expectedAssetCount
+  if (auditAsset.expected) {
+    await queryRaw(
+      db,
+      sql`UPDATE "AuditSession" SET "expectedAssetCount" = "expectedAssetCount" - 1, "missingAssetCount" = "missingAssetCount" - 1, "updatedAt" = NOW() WHERE "id" = ${auditId}`
+    );
+  }
+
+  // Create activity note
+  await createAssetRemovedFromAuditNote({
+    auditSessionId: auditId,
+    assetId: auditAsset.assetId,
+    userId,
+    tx: db,
+  });
+
+  // Create asset note
+  await createAssetNotesForAuditRemoval({
+    assetIds: [auditAsset.assetId],
+    userId,
+    audit,
+  });
 }
 
 /**
@@ -2089,83 +2308,72 @@ export async function removeAssetsFromAudit({
   organizationId: string;
   userId: string;
 }): Promise<{ removedCount: number }> {
-  return db
-    .$transaction(async (tx) => {
-      // Verify audit exists and is PENDING
-      const audit = await tx.auditSession.findUnique({
-        where: { id: auditId, organizationId },
-        select: { id: true, name: true, status: true },
-      });
+  // Verify audit exists and is PENDING
+  const audit = await findUnique(db, "AuditSession", {
+    where: { id: auditId, organizationId },
+    select: "id, name, status",
+  });
 
-      if (!audit) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
-
-      if (audit.status !== AuditStatus.PENDING) {
-        throw new ShelfError({
-          cause: null,
-          message: "Can only remove assets from pending audits",
-          additionalData: { auditId, status: audit.status },
-          label,
-          status: 400,
-        });
-      }
-
-      // Fetch the audit assets to get the actual asset IDs
-      const auditAssets = await tx.auditAsset.findMany({
-        where: { id: { in: auditAssetIds } },
-        select: { id: true, assetId: true, expected: true },
-      });
-
-      if (auditAssets.length === 0) {
-        return { removedCount: 0, assetIds: [], audit };
-      }
-
-      const assetIds = auditAssets.map((aa) => aa.assetId);
-      const expectedCount = auditAssets.filter((aa) => aa.expected).length;
-
-      // Delete the audit assets (cascade will delete related scans)
-      await tx.auditAsset.deleteMany({
-        where: { id: { in: auditAssetIds } },
-      });
-
-      // Update audit session counts
-      if (expectedCount > 0) {
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: expectedCount },
-            missingAssetCount: { decrement: expectedCount },
-          },
-        });
-      }
-
-      // Create activity note
-      await createAssetsRemovedFromAuditNote({
-        auditSessionId: auditId,
-        assetIds,
-        userId,
-        tx,
-      });
-
-      return { removedCount: auditAssets.length, assetIds, audit };
-    })
-    .then(async (result) => {
-      // Create asset notes outside the transaction
-      if (result.removedCount > 0) {
-        await createAssetNotesForAuditRemoval({
-          assetIds: result.assetIds,
-          userId,
-          audit: result.audit,
-        });
-      }
-
-      return { removedCount: result.removedCount };
+  if (!audit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditId, organizationId },
+      label,
+      status: 404,
     });
+  }
+
+  if (audit.status !== AuditStatus.PENDING) {
+    throw new ShelfError({
+      cause: null,
+      message: "Can only remove assets from pending audits",
+      additionalData: { auditId, status: audit.status },
+      label,
+      status: 400,
+    });
+  }
+
+  // Fetch the audit assets to get the actual asset IDs
+  const auditAssets = await findMany(db, "AuditAsset", {
+    where: { id: { in: auditAssetIds } },
+    select: "id, assetId, expected",
+  });
+
+  if (auditAssets.length === 0) {
+    return { removedCount: 0 };
+  }
+
+  const assetIds = auditAssets.map((aa) => aa.assetId);
+  const expectedCount = auditAssets.filter((aa) => aa.expected).length;
+
+  // Delete the audit assets (cascade will delete related scans)
+  await deleteMany(db, "AuditAsset", { id: { in: auditAssetIds } });
+
+  // Update audit session counts
+  if (expectedCount > 0) {
+    await queryRaw(
+      db,
+      sql`UPDATE "AuditSession" SET "expectedAssetCount" = "expectedAssetCount" - ${expectedCount}, "missingAssetCount" = "missingAssetCount" - ${expectedCount}, "updatedAt" = NOW() WHERE "id" = ${auditId}`
+    );
+  }
+
+  // Create activity note
+  await createAssetsRemovedFromAuditNote({
+    auditSessionId: auditId,
+    assetIds,
+    userId,
+    tx: db,
+  });
+
+  // Create asset notes
+  if (auditAssets.length > 0) {
+    await createAssetNotesForAuditRemoval({
+      assetIds,
+      userId,
+      audit,
+    });
+  }
+
+  return { removedCount: auditAssets.length };
 }

@@ -1,4 +1,4 @@
-import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
@@ -119,9 +119,8 @@ export async function sendCheckinReminder(
       bookingName: booking.name,
       assetsCount: assetCount,
       custodian:
-        `${booking.custodianUser!.firstName} ${
-          booking.custodianUser?.lastName
-        }` || (booking.custodianTeamMember?.name as string),
+        `${booking.custodianUser!.firstName} ${booking.custodianUser
+          ?.lastName}` || (booking.custodianTeamMember?.name as string),
       from: booking.from!,
       to: booking.to!,
       bookingId: booking.id,
@@ -246,7 +245,7 @@ export async function sendBookingUpdatedEmail({
   try {
     if (changes.length === 0) return;
 
-    const booking = await db.booking.findUnique({
+    const booking = await findUnique("booking", {
       where: { id: bookingId, organizationId },
       include: BOOKING_INCLUDE_FOR_EMAIL,
     });
@@ -255,7 +254,7 @@ export async function sendBookingUpdatedEmail({
 
     const custodian = booking.custodianUser
       ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
-      : (booking.custodianTeamMember?.name ?? "");
+      : booking.custodianTeamMember?.name ?? "";
 
     const subject = `📝 Booking updated (${booking.name}) - shelf.nu`;
 
@@ -296,7 +295,7 @@ export async function sendBookingUpdatedEmail({
     // so we use the email directly)
     if (oldCustodianEmail) {
       // Look up the old custodian's user to check if they are the editor
-      const oldCustodianUser = await db.user.findUnique({
+      const oldCustodianUser = await findUnique("user", {
         where: { email: oldCustodianEmail },
         select: { id: true },
       });

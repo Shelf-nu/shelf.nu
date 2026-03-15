@@ -1,6 +1,6 @@
 import type { User } from "@shelf/database";
 import type PgBoss from "pg-boss";
-import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -41,7 +41,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
   (job: PgBoss.Job<AssetsSchedulerData>) => Promise<void>
 > = {
   REMINDER: async (job) => {
-    const reminder = await db.assetReminder.findFirst({
+    const reminder = await findFirst("assetReminder", {
       where: { id: job.data.reminderId },
       include: ASSET_REMINDER_INCLUDES_FOR_EMAIL,
     });
@@ -73,7 +73,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      * Then, in this case we have to send an email to the owner with special note.
      */
     if (hasTeamMemberWithoutUser) {
-      const owner = await db.user.findFirst({
+      const owner = await findFirst("user", {
         where: {
           userOrganizations: {
             some: {

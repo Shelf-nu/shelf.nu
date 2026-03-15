@@ -1,7 +1,11 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@shelf/database";
 import type PgBoss from "pg-boss";
-import { db } from "~/database/db.server";
+import {
+  findFirstOrThrow,
+  findUnique,
+  update,
+} from "~/database/query-helpers.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
@@ -26,19 +30,17 @@ import type { SchedulerData } from "./types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking not found",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
+  const booking = await findFirstOrThrow("booking", {
+    where: { id: data.id },
+    include: BOOKING_INCLUDE_FOR_EMAIL,
+  }).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Booking not found",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
     });
+  });
 
   const email = booking.custodianUser?.email;
 
@@ -74,19 +76,17 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 };
 
 const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking not found",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
+  const booking = await findFirstOrThrow("booking", {
+    where: { id: data.id },
+    include: BOOKING_INCLUDE_FOR_EMAIL,
+  }).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Booking not found",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
     });
+  });
 
   const email = booking.custodianUser?.email;
 
@@ -118,20 +118,18 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 };
 
 const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .update({
-      where: { id: data.id, status: BookingStatus.ONGOING },
-      data: { status: BookingStatus.OVERDUE },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking update failed",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
+  const booking = await update("booking", {
+    where: { id: data.id, status: BookingStatus.ONGOING },
+    data: { status: BookingStatus.OVERDUE },
+    include: BOOKING_INCLUDE_FOR_EMAIL,
+  }).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Booking update failed",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
     });
+  });
 
   /** Check this just in case  */
   if (booking.status !== BookingStatus.OVERDUE) {
@@ -190,7 +188,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   try {
     // Fetch the booking to check if it's still in COMPLETE status
-    const booking = await db.booking.findUnique({
+    const booking = await findUnique("booking", {
       where: { id: data.id },
       select: {
         id: true,
@@ -217,7 +215,7 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     }
 
     // Check if auto-archive is still enabled for this organization
-    const bookingSettings = await db.bookingSettings.findUnique({
+    const bookingSettings = await findUnique("bookingSettings", {
       where: { organizationId: booking.organizationId },
       select: { autoArchiveBookings: true },
     });
@@ -232,15 +230,13 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     // Archive the booking atomically — include status in where clause
     // to prevent race with concurrent manual archive (TOCTOU)
     const now = new Date();
-    const updatedBooking = await db.booking
-      .update({
-        where: { id: booking.id, status: BookingStatus.COMPLETE },
-        data: {
-          status: BookingStatus.ARCHIVED,
-          autoArchivedAt: now,
-        },
-      })
-      .catch(() => null);
+    const updatedBooking = await update("booking", {
+      where: { id: booking.id, status: BookingStatus.COMPLETE },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        autoArchivedAt: now,
+      },
+    }).catch(() => null);
 
     if (!updatedBooking) {
       Logger.info(

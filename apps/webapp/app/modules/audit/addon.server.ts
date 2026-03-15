@@ -2,6 +2,7 @@ import type { User } from "@shelf/database";
 import type Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { db } from "~/database/db.server";
+import { update } from "~/database/query-helpers.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
@@ -239,14 +240,14 @@ export async function linkAuditAddonToOrganization({
     });
 
     // Enable audits on the organization
-    await db.organization.update({
+    await update(db, "Organization", {
       where: { id: organizationId },
       data: {
         auditsEnabled: true,
-        auditsEnabledAt: new Date(),
+        auditsEnabledAt: new Date().toISOString(),
         ...(isTrialing && { usedAuditTrial: true }),
       },
-      select: { id: true },
+      select: "id",
     });
   } catch (cause) {
     throw new ShelfError({
@@ -333,15 +334,15 @@ export async function handleAuditAddonWebhook({
       const isTransferredSubscription =
         !!subscription?.metadata?.transferred_from_subscription;
 
-      await db.organization.update({
+      await update(db, "Organization", {
         where: { id: organizationId },
         data: {
           auditsEnabled: true,
-          auditsEnabledAt: new Date(),
+          auditsEnabledAt: new Date().toISOString(),
           ...(isTrialSubscription &&
             !isTransferredSubscription && { usedAuditTrial: true }),
         },
-        select: { id: true },
+        select: "id",
       });
       break;
     }
@@ -349,19 +350,19 @@ export async function handleAuditAddonWebhook({
       const isActive =
         subscription?.status === "active" ||
         subscription?.status === "trialing";
-      await db.organization.update({
+      await update(db, "Organization", {
         where: { id: organizationId },
         data: { auditsEnabled: isActive },
-        select: { id: true },
+        select: "id",
       });
       break;
     }
     case "customer.subscription.paused":
     case "customer.subscription.deleted": {
-      await db.organization.update({
+      await update(db, "Organization", {
         where: { id: organizationId },
         data: { auditsEnabled: false },
-        select: { id: true },
+        select: "id",
       });
       break;
     }

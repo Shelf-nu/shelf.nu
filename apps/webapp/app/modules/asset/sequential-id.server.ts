@@ -1,5 +1,7 @@
 /* eslint-disable no-console */
 import { db } from "~/database/db.server";
+import { count } from "~/database/query-helpers.server";
+import { sql, queryRaw } from "~/database/sql.server";
 
 /**
  * Sequential ID Service for Assets
@@ -19,7 +21,10 @@ export async function createOrganizationSequence(
   organizationId: string
 ): Promise<void> {
   try {
-    await db.$executeRaw`SELECT create_asset_sequence_for_org(${organizationId})`;
+    await queryRaw(
+      db,
+      sql`SELECT create_asset_sequence_for_org(${organizationId})`
+    );
   } catch (error) {
     console.error(
       `Failed to create sequence for organization ${organizationId}:`,
@@ -43,9 +48,10 @@ export async function getNextSequentialId(
   prefix: string = DEFAULT_PREFIX
 ): Promise<string> {
   try {
-    const result = await db.$queryRaw<[{ get_next_sequential_id: string }]>`
-      SELECT get_next_sequential_id(${organizationId}, ${prefix})
-    `;
+    const result = await queryRaw<{ get_next_sequential_id: string }>(
+      db,
+      sql`SELECT get_next_sequential_id(${organizationId}, ${prefix})`
+    );
 
     return result[0].get_next_sequential_id;
   } catch (error) {
@@ -74,9 +80,10 @@ export async function estimateNextSequentialId(
     await createOrganizationSequence(organizationId);
 
     // Get current sequence value without incrementing
-    const result = await db.$queryRaw<[{ currval: bigint }]>`
-      SELECT currval('org_' || ${organizationId} || '_asset_sequence') as currval
-    `;
+    const result = await queryRaw<{ currval: bigint }>(
+      db,
+      sql`SELECT currval('org_' || ${organizationId} || '_asset_sequence') as currval`
+    );
 
     const nextValue = Number(result[0].currval) + 1;
     return formatSequentialId(nextValue, prefix);
@@ -84,18 +91,19 @@ export async function estimateNextSequentialId(
     // If currval fails, sequence might not have been used yet
     // Find the highest existing sequential ID using proper numeric extraction
     // This avoids string sorting issues when IDs go beyond 9999
-    const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
-      SELECT COALESCE(MAX(
-        CASE 
+    const maxExisting = await queryRaw<{ max_num: number | null }>(
+      db,
+      sql`SELECT COALESCE(MAX(
+        CASE
           WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
           THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
-          ELSE 0 
+          ELSE 0
         END
       ), 0) as max_num
       FROM "Asset"
-      WHERE "organizationId" = ${organizationId} 
-      AND "sequentialId" IS NOT NULL
-    `;
+      WHERE "organizationId" = ${organizationId}
+      AND "sequentialId" IS NOT NULL`
+    );
 
     const highestNumber = maxExisting[0]?.max_num || 0;
     return formatSequentialId(highestNumber + 1, prefix);
@@ -128,7 +136,10 @@ export async function resetOrganizationSequence(
   organizationId: string
 ): Promise<void> {
   try {
-    await db.$executeRaw`SELECT reset_asset_sequence_for_org(${organizationId})`;
+    await queryRaw(
+      db,
+      sql`SELECT reset_asset_sequence_for_org(${organizationId})`
+    );
   } catch (error) {
     console.error(
       `Failed to reset sequence for organization ${organizationId}:`,
@@ -149,14 +160,14 @@ export async function organizationHasSequentialIds(
   organizationId: string
 ): Promise<boolean> {
   try {
-    const count = await db.asset.count({
+    const c = await count("asset", {
       where: {
         organizationId,
         sequentialId: { not: null },
       },
     });
 
-    return count > 0;
+    return c > 0;
   } catch (error) {
     console.error(
       `Failed to check sequential IDs for organization ${organizationId}:`,
@@ -177,7 +188,7 @@ export async function getAssetsWithoutSequentialIdCount(
   organizationId: string
 ): Promise<number> {
   try {
-    return await db.asset.count({
+    return await count("asset", {
       where: {
         organizationId,
         sequentialId: null,
@@ -242,30 +253,32 @@ export async function generateBulkSequentialIdsEfficient(
 
     // First, find the highest existing sequential ID to avoid conflicts
     // Using proper regex pattern [0-9]+ instead of \d to handle 1000+ assets
-    const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
-      SELECT COALESCE(MAX(
-        CASE 
+    const maxExisting = await queryRaw<{ max_num: number | null }>(
+      db,
+      sql`SELECT COALESCE(MAX(
+        CASE
           WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
           THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
-          ELSE 0 
+          ELSE 0
         END
       ), 0) as max_num
       FROM "Asset"
-      WHERE "organizationId" = ${organizationId} 
-      AND "sequentialId" IS NOT NULL
-    `;
+      WHERE "organizationId" = ${organizationId}
+      AND "sequentialId" IS NOT NULL`
+    );
 
     const startingNumber = (maxExisting[0]?.max_num || 0) + 1;
 
     // The CTE approach is creating duplicates - let's use batch processing instead
     // First, get all asset IDs that need sequential IDs, ordered consistently
-    const assetIds = await db.$queryRaw<{ id: string }[]>`
-      SELECT id
-      FROM "Asset" 
-      WHERE "organizationId" = ${organizationId} 
+    const assetIds = await queryRaw<{ id: string }>(
+      db,
+      sql`SELECT id
+      FROM "Asset"
+      WHERE "organizationId" = ${organizationId}
       AND "sequentialId" IS NULL
-      ORDER BY id ASC
-    `;
+      ORDER BY id ASC`
+    );
 
     // Process in smaller batches to avoid memory issues and ensure atomicity
     const BATCH_SIZE = 1000;
@@ -285,18 +298,23 @@ export async function generateBulkSequentialIdsEfficient(
       }));
 
       // Update this batch
-      const batchResult = await db.$executeRaw`
-        UPDATE "Asset" 
-        SET "sequentialId" = batch_data.sequential_id
-        FROM (
-          SELECT unnest(${values.map((v) => v.id)}::text[]) as id,
-                 unnest(${values.map(
-                   (v) => v.sequentialId
-                 )}::text[]) as sequential_id
-        ) as batch_data
-        WHERE "Asset".id::text = batch_data.id
-        AND "Asset"."sequentialId" IS NULL
-      `;
+      const batchResultRows = await queryRaw<{ count: number }>(
+        db,
+        sql`WITH updated AS (
+          UPDATE "Asset"
+          SET "sequentialId" = batch_data.sequential_id
+          FROM (
+            SELECT unnest(${values.map((v) => v.id)}::text[]) as id,
+                   unnest(${values.map(
+                     (v) => v.sequentialId
+                   )}::text[]) as sequential_id
+          ) as batch_data
+          WHERE "Asset".id::text = batch_data.id
+          AND "Asset"."sequentialId" IS NULL
+          RETURNING 1
+        ) SELECT count(*)::int as count FROM updated`
+      );
+      const batchResult = batchResultRows[0]?.count ?? 0;
 
       totalUpdated += Number(batchResult);
       console.log(
@@ -308,19 +326,20 @@ export async function generateBulkSequentialIdsEfficient(
 
     const result = totalUpdated;
     // Update the sequence to continue from the right place for new assets
-    const totalAssetsWithIds = await db.asset.count({
+    const totalAssetsWithIds = await count("asset", {
       where: {
         organizationId,
         sequentialId: { not: null },
       },
     });
 
-    await db.$executeRaw`
-      SELECT setval(
-        'org_' || ${organizationId} || '_asset_sequence', 
+    await queryRaw(
+      db,
+      sql`SELECT setval(
+        'org_' || ${organizationId} || '_asset_sequence',
         GREATEST(${totalAssetsWithIds}, 1)
-      )
-    `;
+      )`
+    );
 
     console.log(
       `Generated bulk sequential IDs for organization ${organizationId}: ${result} assets updated, starting from ${prefix}-${String(

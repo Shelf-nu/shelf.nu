@@ -6,6 +6,13 @@ import type {
   User,
 } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  create,
+  findFirst,
+  findMany,
+  remove as removeRecord,
+  count,
+} from "~/database/query-helpers.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -122,19 +129,17 @@ export async function uploadAuditImage({
     }
 
     // Create the database record
-    const auditImage = await db.auditImage.create({
-      data: {
-        imageUrl: imagePublicUrl,
-        thumbnailUrl: thumbnailPublicUrl ?? null,
-        description: description ?? null,
-        auditSessionId,
-        auditAssetId: auditAssetId ?? null,
-        uploadedById,
-        organizationId,
-      },
+    const auditImage = await create(db, "AuditImage", {
+      imageUrl: imagePublicUrl,
+      thumbnailUrl: thumbnailPublicUrl ?? null,
+      description: description ?? null,
+      auditSessionId,
+      auditAssetId: auditAssetId ?? null,
+      uploadedById,
+      organizationId,
     });
 
-    return auditImage;
+    return auditImage as AuditImage;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -159,25 +164,12 @@ async function validateImageLimits({
   auditAssetId?: AuditAsset["id"];
   organizationId: Organization["id"];
 }) {
-  // Safety check - ensure the AuditImage model exists
-  if (!db.auditImage) {
-    throw new ShelfError({
-      cause: null,
-      message:
-        "AuditImage model not available. Please restart the server after running migrations.",
-      additionalData: { auditSessionId, auditAssetId, organizationId },
-      label,
-    });
-  }
-
   if (auditAssetId) {
     // Check asset-specific image limit
-    const assetImageCount = await db.auditImage.count({
-      where: {
-        auditSessionId,
-        auditAssetId,
-        organizationId,
-      },
+    const assetImageCount = await count(db, "AuditImage", {
+      auditSessionId,
+      auditAssetId,
+      organizationId,
     });
 
     if (assetImageCount >= MAX_IMAGES_PER_ASSET) {
@@ -195,12 +187,10 @@ async function validateImageLimits({
     }
   } else {
     // Check general audit image limit (images not tied to specific assets)
-    const generalImageCount = await db.auditImage.count({
-      where: {
-        auditSessionId,
-        auditAssetId: null,
-        organizationId,
-      },
+    const generalImageCount = await count(db, "AuditImage", {
+      auditSessionId,
+      auditAssetId: null,
+      organizationId,
     });
 
     if (generalImageCount >= MAX_GENERAL_IMAGES_PER_AUDIT) {
@@ -230,7 +220,7 @@ export async function deleteAuditImage({
 }): Promise<boolean> {
   try {
     // Get the image record to retrieve URLs
-    const image = await db.auditImage.findFirst({
+    const image = await findFirst(db, "AuditImage", {
       where: {
         id: imageId,
         organizationId,
@@ -253,11 +243,7 @@ export async function deleteAuditImage({
     }
 
     // Delete from database
-    await db.auditImage.delete({
-      where: {
-        id: imageId,
-      },
-    });
+    await removeRecord(db, "AuditImage", { id: imageId });
 
     return true;
   } catch (cause) {
@@ -302,34 +288,59 @@ export async function getAuditImages({
       where.auditAssetId = auditAssetId;
     }
 
-    const images = await db.auditImage.findMany({
+    const images = await findMany(db, "AuditImage", {
       where,
-      include: {
-        uploadedBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            profilePicture: true,
-          },
-        },
-        auditAsset: {
-          include: {
-            asset: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-          },
-        },
-      },
       orderBy: {
         createdAt: "desc",
       },
     });
 
-    return images;
+    // Fetch related uploadedBy users
+    const uploaderIds = [...new Set(images.map((img) => img.uploadedById))];
+    const uploaders = uploaderIds.length
+      ? await findMany(db, "User", {
+          where: { id: { in: uploaderIds } },
+          select: "id, firstName, lastName, profilePicture",
+        })
+      : [];
+    const uploaderMap = new Map(uploaders.map((u) => [u.id, u]));
+
+    // Fetch related audit assets with their assets
+    const auditAssetIds = [
+      ...new Set(images.map((img) => img.auditAssetId).filter(Boolean)),
+    ] as string[];
+    const auditAssets = auditAssetIds.length
+      ? await findMany(db, "AuditAsset", {
+          where: { id: { in: auditAssetIds } },
+        })
+      : [];
+
+    // Fetch the actual assets for the audit assets
+    const assetIds = auditAssets.map((aa) => aa.assetId);
+    const assets = assetIds.length
+      ? await findMany(db, "Asset", {
+          where: { id: { in: assetIds } },
+          select: "id, title",
+        })
+      : [];
+    const assetMap = new Map(assets.map((a) => [a.id, a]));
+    const auditAssetMap = new Map(
+      auditAssets.map((aa) => [
+        aa.id,
+        {
+          ...aa,
+          asset: assetMap.get(aa.assetId) || null,
+        },
+      ])
+    );
+
+    return images.map((img) => ({
+      ...img,
+      uploadedBy: uploaderMap.get(img.uploadedById) || null,
+      auditAsset: img.auditAssetId
+        ? auditAssetMap.get(img.auditAssetId) || null
+        : null,
+    }));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -371,7 +382,7 @@ export async function getAuditImageCount({
       where.auditAssetId = auditAssetId;
     }
 
-    return await db.auditImage.count({ where });
+    return await count(db, "AuditImage", where);
   } catch (cause) {
     throw new ShelfError({
       cause,

@@ -12,6 +12,7 @@ import type {
   AuditAssignment,
 } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { findMany, findUnique } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 import { getQrCodeMaps } from "../qr/service.server";
 
@@ -101,34 +102,14 @@ export async function fetchAllAuditPdfRelatedData(
 ): Promise<AuditPdfDbResult> {
   try {
     // Fetch audit session with creator and assignee information
-    const session = await db.auditSession.findUnique({
+    // TODO: convert Prisma include (createdBy, assignments.user) to Supabase join/select
+    const session: any = await findUnique(db, "AuditSession" as any, {
       where: {
         id: auditSessionId,
         organizationId,
       },
-      include: {
-        createdBy: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-        assignments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      select:
+        "*, createdBy:User!createdById(firstName, lastName, email, profilePicture), assignments:AuditAssignment(*, user:User!userId(id, firstName, lastName, email, profilePicture))",
     });
 
     if (!session) {
@@ -158,13 +139,9 @@ export async function fetchAllAuditPdfRelatedData(
     }
 
     // Fetch all audit assets (both expected and unexpected)
-    const auditAssets = await db.auditAsset.findMany({
+    const auditAssets = await findMany(db, "AuditAsset" as any, {
       where: { auditSessionId },
-      select: {
-        assetId: true,
-        expected: true,
-        status: true,
-      },
+      select: "assetId, expected, status",
     });
 
     const assetIds = auditAssets.map((aa) => aa.assetId);
@@ -178,21 +155,11 @@ export async function fetchAllAuditPdfRelatedData(
     );
 
     // Fetch all images for this audit with asset relationship
-    const images = await db.auditImage.findMany({
+    // TODO: convert Prisma include (auditAsset.asset) to Supabase join/select
+    const images: any[] = await findMany(db, "AuditImage" as any, {
       where: { auditSessionId },
-      include: {
-        auditAsset: {
-          select: {
-            id: true,
-            asset: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-          },
-        },
-      },
+      select:
+        "*, auditAsset:AuditAsset!auditAssetId(id, asset:Asset!assetId(id, title))",
       orderBy: { createdAt: "asc" },
     });
 
@@ -201,55 +168,30 @@ export async function fetchAllAuditPdfRelatedData(
     const assetImages = images.filter((img) => img.auditAssetId !== null);
 
     // Fetch recent activity notes (limit to 15 most recent)
-    const activityNotes = await db.auditNote.findMany({
+    // TODO: convert Prisma include (user) to Supabase join/select
+    const activityNotes: any[] = await findMany(db, "AuditNote" as any, {
       where: { auditSessionId },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
+      select: "*, user:User!userId(firstName, lastName, email)",
       orderBy: { createdAt: "desc" },
       take: 15,
     });
 
     // Fetch assets and organization details in parallel for efficiency
+    // TODO: convert Prisma include (category, location, qrCodes) to Supabase join/select
     const [assets, organization] = await Promise.all([
       assetIds.length > 0
-        ? db.asset.findMany({
+        ? findMany(db, "Asset", {
             where: {
               id: { in: assetIds },
               organizationId,
             },
-            include: {
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                  color: true,
-                },
-              },
-              location: {
-                select: {
-                  name: true,
-                },
-              },
-              qrCodes: true,
-            },
+            select:
+              "*, category:Category!categoryId(id, name, color), location:Location!locationId(name), qrCodes:Qr(*)",
           })
         : Promise.resolve([]),
-      db.organization.findUnique({
+      findUnique(db, "Organization", {
         where: { id: organizationId },
-        select: {
-          id: true,
-          name: true,
-          imageId: true,
-          currency: true,
-          updatedAt: true,
-        },
+        select: "id, name, imageId, currency, updatedAt",
       }),
     ]);
 

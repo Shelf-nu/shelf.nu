@@ -1,6 +1,6 @@
 import type { AssetReminder } from "@shelf/database";
 import { isBefore } from "date-fns";
-import { db } from "~/database/db.server";
+import { update } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -35,7 +35,7 @@ export async function scheduleAssetReminder({
       when
     );
 
-    await db.assetReminder.update({
+    await update("assetReminder", {
       where: { id: data.reminderId },
       data: { activeSchedulerReference: reference },
     });

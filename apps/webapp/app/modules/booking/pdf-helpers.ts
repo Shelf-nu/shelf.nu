@@ -10,7 +10,7 @@ import type {
   User,
   Tag,
 } from "@shelf/database";
-import { db } from "~/database/db.server";
+import { findMany, findUnique } from "~/database/query-helpers.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
@@ -79,7 +79,7 @@ export async function fetchAllPdfRelatedData(
     const orderDirection = sortParams?.orderDirection || "desc";
 
     const [assets, organization] = await Promise.all([
-      db.asset.findMany({
+      findMany("asset", {
         where: {
           id: { in: booking?.assets.map((a) => a.id) || [] },
         },
@@ -102,7 +102,7 @@ export async function fetchAllPdfRelatedData(
           },
         },
       }),
-      db.organization.findUnique({
+      findUnique("organization", {
         where: { id: organizationId },
         select: {
           imageId: true,
