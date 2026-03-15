@@ -456,9 +456,9 @@ describe("updateBookingSettings", () => {
 
   it("should handle organization not found error", async () => {
     expect.assertions(2);
-    const notFoundError = new Error("Record not found");
-    //@ts-expect-error adding Prisma error properties
-    notFoundError.code = "P2025";
+    const notFoundError = new Error("No rows found");
+    //@ts-expect-error adding Postgres error properties
+    notFoundError.code = "PGRST116";
     //@ts-expect-error missing vitest type
     db.bookingSettings.update.mockRejectedValue(notFoundError);
 

@@ -1,7 +1,7 @@
 import {
   ShelfError,
   isLikeShelfError,
-  isPrismaTransientError,
+  isTransientError,
   makeShelfError,
 } from "./error";
 
@@ -38,10 +38,10 @@ describe(makeShelfError.name, () => {
       });
     });
   });
-  describe("cause is a transient Prisma error", () => {
-    it("should return a 503 DB error for a direct P2024 cause", () => {
-      const cause = Object.assign(new Error("Connection pool timeout"), {
-        code: "P2024",
+  describe("cause is a transient database error", () => {
+    it("should return a 503 DB error for a direct connection failure", () => {
+      const cause = Object.assign(new Error("Connection failure"), {
+        code: "08006",
       });
 
       const error = makeShelfError(cause);
@@ -51,12 +51,12 @@ describe(makeShelfError.name, () => {
       expect(error.message).toContain("temporary database connectivity");
     });
 
-    it("should return a 503 DB error when P2024 is wrapped in a ShelfError", () => {
-      const prismaError = Object.assign(new Error("Connection pool timeout"), {
-        code: "P2024",
+    it("should return a 503 DB error when connection error is wrapped in a ShelfError", () => {
+      const dbError = Object.assign(new Error("Connection failure"), {
+        code: "08006",
       });
       const wrappedCause = new ShelfError({
-        cause: prismaError,
+        cause: dbError,
         label: "User",
         message: "The user you are trying to access does not exist",
         status: 404,
@@ -70,12 +70,12 @@ describe(makeShelfError.name, () => {
       expect(error.cause).toBe(wrappedCause);
     });
 
-    it("should return a 503 DB error when P2024 is nested two ShelfError layers deep", () => {
-      const prismaError = Object.assign(new Error("Connection pool timeout"), {
-        code: "P2024",
+    it("should return a 503 DB error when connection error is nested two ShelfError layers deep", () => {
+      const dbError = Object.assign(new Error("Connection failure"), {
+        code: "08006",
       });
       const innerCause = new ShelfError({
-        cause: prismaError,
+        cause: dbError,
         label: "User",
         message: "The user you are trying to access does not exist",
         status: 404,
@@ -94,12 +94,12 @@ describe(makeShelfError.name, () => {
       expect(error.message).toContain("temporary database connectivity");
     });
 
-    it("should preserve domain errors for genuine P2025 (not found)", () => {
-      const prismaError = Object.assign(new Error("Record not found"), {
-        code: "P2025",
+    it("should preserve domain errors for PGRST116 (not found)", () => {
+      const dbError = Object.assign(new Error("No rows found"), {
+        code: "PGRST116",
       });
       const wrappedCause = new ShelfError({
-        cause: prismaError,
+        cause: dbError,
         label: "User",
         message: "The user you are trying to access does not exist",
         status: 404,
@@ -397,28 +397,28 @@ describe(ShelfError.name, () => {
   });
 });
 
-describe(isPrismaTransientError.name, () => {
-  it.each(["P2024", "P1001", "P1002", "P1008", "P1017"])(
-    "should return true for transient error code %s",
+describe(isTransientError.name, () => {
+  it.each(["08000", "08003", "08006", "57014", "57P01"])(
+    "should return true for transient Postgres error code %s",
     (code) => {
       const error = Object.assign(new Error("some error"), { code });
-      expect(isPrismaTransientError(error)).toBe(true);
+      expect(isTransientError(error)).toBe(true);
     }
   );
 
-  it("should return false for P2025 (not found)", () => {
-    const error = Object.assign(new Error("Record not found"), {
-      code: "P2025",
+  it("should return false for 23505 (unique violation)", () => {
+    const error = Object.assign(new Error("Unique constraint"), {
+      code: "23505",
     });
-    expect(isPrismaTransientError(error)).toBe(false);
+    expect(isTransientError(error)).toBe(false);
   });
 
   it("should return false for null", () => {
-    expect(isPrismaTransientError(null)).toBe(false);
+    expect(isTransientError(null)).toBe(false);
   });
 
   it("should return false for a plain Error without code", () => {
-    expect(isPrismaTransientError(new Error("something"))).toBe(false);
+    expect(isTransientError(new Error("something"))).toBe(false);
   });
 
   it.each([
@@ -427,6 +427,6 @@ describe(isPrismaTransientError.name, () => {
     "Can't reach database server at host:5432",
   ])("should detect transient error by message: %s", (message) => {
     const error = new Error(message);
-    expect(isPrismaTransientError(error)).toBe(true);
+    expect(isTransientError(error)).toBe(true);
   });
 });

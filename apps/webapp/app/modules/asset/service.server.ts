@@ -1090,7 +1090,7 @@ export async function createAsset({
       const errorMessage =
         cause instanceof Error ? cause.message : String(cause);
 
-      if (errorCode === "23505" || errorCode === "P2002") {
+      if (errorCode === "23505") {
         // Handle sequential ID conflicts with retry
         if (
           errorMessage.includes("sequentialId") &&

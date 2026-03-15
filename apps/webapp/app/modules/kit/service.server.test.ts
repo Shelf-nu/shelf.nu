@@ -305,10 +305,11 @@ describe("createKit", () => {
     expect.assertions(1);
 
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.kit.create.mockRejectedValue(constraintError);

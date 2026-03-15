@@ -509,11 +509,26 @@ export function maybeUniqueConstraintViolation(
 /**
  * Checks if a Supabase/Postgres error is a unique constraint violation (23505).
  */
-function isUniqueConstraintViolation(cause: unknown): boolean {
+export function isUniqueConstraintError(cause: unknown): boolean {
   if (typeof cause !== "object" || cause === null) return false;
   if ("code" in cause && cause.code === "23505") return true;
   if ("message" in cause && typeof (cause as any).message === "string") {
     return (cause as any).message.toLowerCase().includes("unique constraint");
   }
   return false;
+}
+
+/** Keep internal alias for backward compat within this file */
+const isUniqueConstraintViolation = isUniqueConstraintError;
+
+/**
+ * Checks if a unique constraint error involves a specific column.
+ * Supabase/Postgres errors include a `details` field like:
+ *   Key (value, "organizationId")=(foo, bar) already exists.
+ */
+export function constraintInvolves(cause: unknown, field: string): boolean {
+  if (typeof cause !== "object" || cause === null) return false;
+  const details = "details" in cause ? String((cause as any).details) : "";
+  const message = "message" in cause ? String((cause as any).message) : "";
+  return details.includes(field) || message.includes(field);
 }

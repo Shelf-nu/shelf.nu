@@ -170,12 +170,13 @@ describe("createBarcode", () => {
   it("should handle constraint violations with detailed validation", async () => {
     expect.assertions(1);
 
-    // Mock Prisma constraint violation error
+    // Mock Postgres unique constraint violation error
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.barcode.create.mockRejectedValue(constraintError);
@@ -281,12 +282,13 @@ describe("createBarcodes", () => {
   it("should handle constraint violations with detailed validation", async () => {
     expect.assertions(1);
 
-    // Mock Prisma constraint violation error
+    // Mock Postgres unique constraint violation error
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.barcode.createMany.mockRejectedValue(constraintError);
@@ -321,12 +323,13 @@ describe("createBarcodes", () => {
   it("should handle constraint violations for kit barcodes", async () => {
     expect.assertions(1);
 
-    // Mock Prisma constraint violation error
+    // Mock Postgres unique constraint violation error
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.barcode.createMany.mockRejectedValue(constraintError);
@@ -407,12 +410,13 @@ describe("updateBarcode", () => {
   it("should handle constraint violations with detailed validation", async () => {
     expect.assertions(1);
 
-    // Mock Prisma constraint violation error
+    // Mock Postgres unique constraint violation error
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.barcode.update.mockRejectedValue(constraintError);
@@ -446,12 +450,13 @@ describe("updateBarcode", () => {
   it("should handle constraint violations for kit barcodes", async () => {
     expect.assertions(1);
 
-    // Mock Prisma constraint violation error
+    // Mock Postgres unique constraint violation error
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.barcode.update.mockRejectedValue(constraintError);
@@ -671,13 +676,14 @@ describe("updateBarcodes", () => {
         },
       ]);
 
-    // Mock Prisma constraint violation error in transaction
+    // Mock Postgres unique constraint violation error in transaction
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
 
-    //@ts-expect-error adding Prisma error properties
-    constraintError.meta = { target: ["value"] };
+    //@ts-expect-error adding Postgres error properties
+    constraintError.details =
+      'Key (value, "organizationId")=(DUPLICATE123, org1) already exists.';
 
     //@ts-expect-error missing vitest type
     db.$transaction.mockRejectedValue(constraintError);
@@ -718,10 +724,10 @@ describe("updateBarcodes", () => {
         },
       ]);
 
-    // Mock Prisma constraint violation error in transaction
+    // Mock Postgres unique constraint violation error in transaction
     const constraintError = new Error("Unique constraint failed");
-    //@ts-expect-error adding Prisma error properties
-    constraintError.code = "P2002";
+    //@ts-expect-error adding Postgres error properties
+    constraintError.code = "23505";
 
     //@ts-expect-error missing vitest type
     constraintError.meta = { target: ["value"] };

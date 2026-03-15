@@ -14,6 +14,8 @@ import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   maybeUniqueConstraintViolation,
+  isUniqueConstraintError,
+  constraintInvolves,
   VALIDATION_ERROR,
   isLikeShelfError,
 } from "~/utils/error";
@@ -77,11 +79,8 @@ export async function createBarcode({
   } catch (cause) {
     // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
-
-      if (target && target.includes("value")) {
+    if (isUniqueConstraintError(cause)) {
+      if (constraintInvolves(cause, "value")) {
         // Use existing validation function for detailed error messages
         const relationshipType = assetId ? "asset" : "kit";
         await validateBarcodeUniqueness(
@@ -156,11 +155,8 @@ export async function createBarcodes({
   } catch (cause) {
     // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
-
-      if (target && target.includes("value")) {
+    if (isUniqueConstraintError(cause)) {
+      if (constraintInvolves(cause, "value")) {
         // Use existing validation function for detailed error messages
         const relationshipType = assetId ? "asset" : "kit";
         await validateBarcodeUniqueness(
@@ -223,11 +219,8 @@ export async function updateBarcode({
   } catch (cause) {
     // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
-
-      if (target && target.includes("value") && value !== undefined) {
+    if (isUniqueConstraintError(cause)) {
+      if (constraintInvolves(cause, "value") && value !== undefined) {
         const relationshipType = assetId ? "asset" : "kit";
         const currentItemId = assetId || kitId;
 
@@ -632,11 +625,8 @@ export async function updateBarcodes({
   } catch (cause) {
     // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
-
-      if (target && target.includes("value")) {
+    if (isUniqueConstraintError(cause)) {
+      if (constraintInvolves(cause, "value")) {
         // Use existing validation function for detailed error messages
         const currentItemId = assetId || kitId;
         const relationshipType = assetId ? "asset" : "kit";
