@@ -305,7 +305,21 @@ patterns were not addressed. These need to be either:
 - Converted to Supabase RPC functions (preferred)
 - Rewritten as sequential operations (if atomicity isn't critical)
 
-### 2.5 MEDIUM: Types Are Hand-Crafted, Not Generated
+### 2.5 HIGH: Query Helpers Exist But Are Unused
+
+A comprehensive 546-line query helper layer was created at
+`apps/webapp/app/database/query-helpers.server.ts` that maps
+Prisma-style operations (`findMany`, `findFirst`, `create`, `update`,
+`delete`) to Supabase PostgREST queries. It includes `throwIfError()`,
+`throwIfNotFound()`, filter translation (contains, in, notIn, gte,
+lte, etc.), and ordering.
+
+**However, none of the service files use it.** They still call
+`db.asset.findMany()` instead of `findMany(db, "Asset", ...)`. This
+helper is the intended bridge but was never wired up. The conversion
+work should use this abstraction as the starting point.
+
+### 2.6 MEDIUM: Types Are Hand-Crafted, Not Generated
 
 `packages/database/src/types.ts` is described as "hand-crafted from SQL
 migrations to match supabase gen types output." The migration plan
@@ -318,7 +332,7 @@ npx supabase gen types typescript --project-id <project-id> > types/database.ts
 Hand-crafted types risk drift from the actual schema. When the Supabase
 project is set up, these should be replaced with generated types.
 
-### 2.6 MEDIUM: Database Client Uses Service Role Key
+### 2.7 MEDIUM: Database Client Uses Service Role Key
 
 `apps/webapp/app/database/db.server.ts` creates the Supabase client
 with `SUPABASE_SERVICE_ROLE_KEY`. This key bypasses all RLS policies,
@@ -326,7 +340,7 @@ making the 55 RLS policies in migration 005 irrelevant for
 server-side operations. If RLS enforcement is desired at the
 application level, the client should use per-request JWT tokens.
 
-### 2.7 LOW: Enum Re-exports Have Duplicate `export` Statements
+### 2.8 LOW: Enum Re-exports Have Duplicate `export` Statements
 
 `packages/database/src/index.ts` exports enums as both values and types
 with identical names:
