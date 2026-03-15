@@ -2,35 +2,128 @@
 import { AuditStatus } from "@shelf/database";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
+import { findFirstOrThrow } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import {
-  AUDIT_INCLUDE_FOR_EMAIL,
-  AUDIT_SCHEDULER_EVENTS_ENUM,
-} from "./constants";
+import { AUDIT_SCHEDULER_EVENTS_ENUM } from "./constants";
 import { sendAuditReminderEmail, sendAuditOverdueEmail } from "./email-helpers";
 import { scheduleNextAuditJob } from "./service.server";
 import type { AuditSchedulerData } from "./types";
+
+/**
+ * Fetches an audit session with all data needed for email notifications.
+ * Replaces the Prisma AUDIT_INCLUDE_FOR_EMAIL pattern.
+ */
+async function fetchAuditForEmail(auditId: string) {
+  // Fetch the base audit
+  const audit = await findFirstOrThrow(db, "AuditSession", {
+    where: { id: auditId },
+    select: "id, name, description, dueDate, status, organizationId",
+  });
+
+  // Fetch related data in parallel
+  const [createdByRows, assignmentRows, orgRows, assetCountRows] =
+    await Promise.all([
+      queryRaw<{
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+      }>(
+        db,
+        sql`
+        SELECT u."id", u."firstName", u."lastName", u."email"
+        FROM "User" u
+        JOIN "AuditSession" a ON a."createdById" = u."id"
+        WHERE a."id" = ${auditId}
+      `
+      ),
+      queryRaw<{
+        id: string;
+        userId: string;
+        email: string;
+        firstName: string | null;
+        lastName: string | null;
+      }>(
+        db,
+        sql`
+        SELECT aa."id", aa."userId",
+               u."email", u."firstName", u."lastName"
+        FROM "AuditAssignment" aa
+        JOIN "User" u ON u."id" = aa."userId"
+        WHERE aa."auditSessionId" = ${auditId}
+      `
+      ),
+      queryRaw<{
+        name: string;
+        customEmailFooter: string | null;
+        ownerEmail: string;
+      }>(
+        db,
+        sql`
+        SELECT o."name", o."customEmailFooter",
+               u."email" as "ownerEmail"
+        FROM "Organization" o
+        JOIN "User" u ON u."id" = o."userId"
+        WHERE o."id" = ${audit.organizationId}
+      `
+      ),
+      queryRaw<{ count: number }>(
+        db,
+        sql`
+        SELECT COUNT(*)::int as "count"
+        FROM "AuditAsset"
+        WHERE "auditSessionId" = ${auditId}
+      `
+      ),
+    ]);
+
+  const createdBy = createdByRows[0];
+  const org = orgRows[0];
+
+  return {
+    ...audit,
+    createdBy: {
+      id: createdBy.id,
+      firstName: createdBy.firstName,
+      lastName: createdBy.lastName,
+      email: createdBy.email,
+    },
+    assignments: assignmentRows.map((a) => ({
+      id: a.id,
+      userId: a.userId,
+      user: {
+        email: a.email,
+        firstName: a.firstName,
+        lastName: a.lastName,
+      },
+    })),
+    organization: {
+      name: org.name,
+      customEmailFooter: org.customEmailFooter,
+      owner: { email: org.ownerEmail },
+    },
+    _count: {
+      assets: assetCountRows[0]?.count ?? 0,
+    },
+  };
+}
 
 /**
  * 24-hour reminder handler
  * Sends reminder email to assignees and schedules the next reminder (4h)
  */
 const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
-  const audit = await db.auditSession
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: AUDIT_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Audit not found",
-        additionalData: { data, work: data.eventType },
-        label: "Audit",
-      });
+  const audit = await fetchAuditForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Audit not found",
+      additionalData: { data, work: data.eventType },
+      label: "Audit",
     });
+  });
 
   // Only send if audit has due date and is not completed/cancelled
   if (
@@ -47,7 +140,9 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     });
 
     // Schedule 4h reminder
-    const when4h = new Date(audit.dueDate.getTime() - 4 * 60 * 60 * 1000);
+    const when4h = new Date(
+      new Date(audit.dueDate).getTime() - 4 * 60 * 60 * 1000
+    );
     await scheduleNextAuditJob({
       data: {
         ...data,
@@ -63,19 +158,14 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
  * Sends reminder email to assignees and schedules the next reminder (1h)
  */
 const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
-  const audit = await db.auditSession
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: AUDIT_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Audit not found",
-        additionalData: { data, work: data.eventType },
-        label: "Audit",
-      });
+  const audit = await fetchAuditForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Audit not found",
+      additionalData: { data, work: data.eventType },
+      label: "Audit",
     });
+  });
 
   // Only send if audit has due date and is not completed/cancelled
   if (
@@ -92,7 +182,9 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     });
 
     // Schedule 1h reminder
-    const when1h = new Date(audit.dueDate.getTime() - 1 * 60 * 60 * 1000);
+    const when1h = new Date(
+      new Date(audit.dueDate).getTime() - 1 * 60 * 60 * 1000
+    );
     await scheduleNextAuditJob({
       data: {
         ...data,
@@ -108,19 +200,14 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
  * Sends reminder email to assignees and schedules the overdue notice
  */
 const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
-  const audit = await db.auditSession
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: AUDIT_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Audit not found",
-        additionalData: { data, work: data.eventType },
-        label: "Audit",
-      });
+  const audit = await fetchAuditForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Audit not found",
+      additionalData: { data, work: data.eventType },
+      label: "Audit",
     });
+  });
 
   // Only send if audit has due date and is not completed/cancelled
   if (
@@ -142,7 +229,7 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
         ...data,
         eventType: AUDIT_SCHEDULER_EVENTS_ENUM.overdueNotice,
       },
-      when: audit.dueDate,
+      when: new Date(audit.dueDate),
     });
   }
 };
@@ -153,19 +240,14 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
  * Does NOT change audit status (handled on frontend)
  */
 const overdueNotice = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
-  const audit = await db.auditSession
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: AUDIT_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Audit not found",
-        additionalData: { data, work: data.eventType },
-        label: "Audit",
-      });
+  const audit = await fetchAuditForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Audit not found",
+      additionalData: { data, work: data.eventType },
+      label: "Audit",
     });
+  });
 
   // Only send if audit is still not completed/cancelled
   if (

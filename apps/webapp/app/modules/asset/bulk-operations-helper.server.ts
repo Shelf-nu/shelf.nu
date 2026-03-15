@@ -1,6 +1,7 @@
 import type { Asset, AssetIndexSettings } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { findMany } from "~/database/query-helpers.server";
+import { rpc } from "~/database/transaction.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
@@ -58,15 +59,11 @@ async function getAdvancedFilteredAssetIds({
 
     // Minimal query: only SELECT id, but include necessary joins
     // Joins are needed because WHERE clause may reference: c.name, l.name, t.id, tm.name, etc.
-    const { data: results, error } = await db.rpc(
-      "get_advanced_filtered_asset_ids",
-      {
-        p_organization_id: organizationId,
-        p_where_clause: whereClause,
-      }
-    );
+    const results = await rpc(db, "get_advanced_filtered_asset_ids", {
+      p_organization_id: organizationId,
+      p_where_clause: whereClause,
+    });
 
-    if (error) throw error;
     return (results as Array<{ id: string }>).map((r) => r.id);
   } catch (cause) {
     throw new ShelfError({

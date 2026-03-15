@@ -1,3 +1,4 @@
+import { findUnique, findMany, create } from "~/database/query-helpers.server";
 import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
@@ -16,22 +17,18 @@ export async function createAuditCreationNote({
   auditSessionId: string;
   createdById: string;
   expectedAssetCount: number;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
-  const creator = await tx.user.findUnique({
+  const creator = await findUnique(tx, "User", {
     where: { id: createdById },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-    },
+    select: "id, firstName, lastName",
   });
 
   if (!creator) {
     return; // Skip note creation if user not found
   }
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: creator.id,
@@ -44,7 +41,7 @@ export async function createAuditCreationNote({
         expectedAssetCount === 1 ? "" : "s"
       }.`,
     },
-  });
+  } as any);
 }
 
 /**
@@ -64,7 +61,7 @@ export async function createAssetScanNote({
   assetId: string;
   userId: string;
   isExpected: boolean;
-  tx: any; // Prisma transaction client
+  tx: any;
   prefetchedUser?: {
     id: string;
     firstName: string | null;
@@ -72,21 +69,17 @@ export async function createAssetScanNote({
   } | null;
   prefetchedAsset?: { id: string; title: string } | null;
 }) {
-  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  // Use pre-fetched data if available, otherwise fetch
   const [asset, scanner] = await Promise.all([
     prefetchedAsset ??
-      tx.asset.findUnique({
+      findUnique(tx, "Asset", {
         where: { id: assetId },
-        select: { id: true, title: true },
+        select: "id, title",
       }),
     prefetchedUser ??
-      tx.user.findUnique({
+      findUnique(tx, "User", {
         where: { id: userId },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
+        select: "id, firstName, lastName",
       }),
   ]);
 
@@ -97,7 +90,7 @@ export async function createAssetScanNote({
   const assetStatus = isExpected ? "expected" : "unexpected";
   const assetLink = wrapAssetsWithDataForNote(asset, "scanned");
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: scanner.id,
@@ -108,7 +101,7 @@ export async function createAssetScanNote({
         lastName: scanner.lastName,
       })} scanned ${assetStatus} asset ${assetLink}.`,
     },
-  });
+  } as any);
 }
 
 /**
@@ -123,20 +116,16 @@ export async function createAssetScanRemovedNote({
   auditSessionId: string;
   assetId: string;
   userId: string;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
   const [asset, remover] = await Promise.all([
-    tx.asset.findUnique({
+    findUnique(tx, "Asset", {
       where: { id: assetId },
-      select: { id: true, title: true },
+      select: "id, title",
     }),
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
   ]);
 
@@ -146,7 +135,7 @@ export async function createAssetScanRemovedNote({
 
   const assetLink = wrapAssetsWithDataForNote(asset, "removed");
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: remover.id,
@@ -157,7 +146,7 @@ export async function createAssetScanRemovedNote({
         lastName: remover.lastName,
       })} removed scanned asset ${assetLink}.`,
     },
-  });
+  } as any);
 }
 
 /**
@@ -172,30 +161,26 @@ export async function createAuditStartedNote({
 }: {
   auditSessionId: string;
   userId: string;
-  tx: any; // Prisma transaction client
+  tx: any;
   prefetchedUser?: {
     id: string;
     firstName: string | null;
     lastName: string | null;
   } | null;
 }) {
-  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  // Use pre-fetched data if available, otherwise fetch
   const starter =
     prefetchedUser ??
-    (await tx.user.findUnique({
+    (await findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }));
 
   if (!starter) {
     return; // Skip note creation if user not found
   }
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: starter.id,
@@ -206,7 +191,7 @@ export async function createAuditStartedNote({
         lastName: starter.lastName,
       })} started the audit.`,
     },
-  });
+  } as any);
 }
 
 /**
@@ -231,15 +216,11 @@ export async function createAuditCompletedNote({
   missingCount: number;
   unexpectedCount: number;
   completionNote?: string | null;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
-  const completer = await tx.user.findUnique({
+  const completer = await findUnique(tx, "User", {
     where: { id: userId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-    },
+    select: "id, firstName, lastName",
   });
 
   if (!completer) {
@@ -261,12 +242,12 @@ export async function createAuditCompletedNote({
   }
 
   // Fetch and append audit images if any were uploaded during completion
-  const auditImages = await tx.auditImage.findMany({
+  const auditImages = await findMany(tx, "AuditImage", {
     where: {
       auditSessionId,
       auditAssetId: null, // Only general audit images, not asset-specific
     },
-    select: { id: true },
+    select: "id",
     orderBy: { createdAt: "asc" },
   });
 
@@ -276,14 +257,14 @@ export async function createAuditCompletedNote({
   }
 
   // Create a single COMMENT note for better layout
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: completer.id,
       type: "COMMENT",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -299,15 +280,11 @@ export async function createAuditUpdateNote({
   auditSessionId: string;
   userId: string;
   changes: Array<{ field: string; from: string; to: string }>;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
-  const updater = await tx.user.findUnique({
+  const updater = await findUnique(tx, "User", {
     where: { id: userId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-    },
+    select: "id, firstName, lastName",
   });
 
   if (!updater || changes.length === 0) {
@@ -326,14 +303,14 @@ export async function createAuditUpdateNote({
     lastName: updater.lastName,
   })} updated audit details:\n\n${changeDescriptions.join("\n\n")}`;
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: updater.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -351,29 +328,31 @@ export async function createAuditAssetImagesAddedNote({
   auditAssetId: string;
   userId: string;
   imageIds: string[];
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
-  const [uploader, asset] = await Promise.all([
-    tx.user.findUnique({
+  const [uploader, auditAsset] = await Promise.all([
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
-    tx.auditAsset.findUnique({
+    findUnique(tx, "AuditAsset", {
       where: { id: auditAssetId },
-      include: {
-        asset: {
-          select: { id: true, title: true },
-        },
-      },
+      select: "id, assetId",
     }),
   ]);
 
-  if (!uploader || !asset) {
+  if (!uploader || !auditAsset) {
     return; // Skip note creation if user or asset not found
+  }
+
+  // Fetch the asset details separately
+  const asset = await findUnique(tx, "Asset", {
+    where: { id: auditAsset.assetId },
+    select: "id, title",
+  });
+
+  if (!asset) {
+    return;
   }
 
   const imageCount = imageIds.length;
@@ -384,15 +363,13 @@ export async function createAuditAssetImagesAddedNote({
     id: uploader.id,
     firstName: uploader.firstName,
     lastName: uploader.lastName,
-  })} added ${imageCount} ${imageWord} to ${wrapAssetsWithDataForNote(
-    asset.asset
-  )}.`;
+  })} added ${imageCount} ${imageWord} to ${wrapAssetsWithDataForNote(asset)}.`;
 
   // Add the audit_images tag for rendering
   const imageIdsStr = imageIds.join(",");
   content += `\n\n{% audit_images count=${imageCount} ids="${imageIdsStr}" /%}`;
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       auditAssetId, // Associate with specific asset
@@ -400,7 +377,7 @@ export async function createAuditAssetImagesAddedNote({
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -417,15 +394,11 @@ export async function createDueDateChangedNote({
   userId: string;
   oldDate: Date | null;
   newDate: Date | null;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
-  const updater = await tx.user.findUnique({
+  const updater = await findUnique(tx, "User", {
     where: { id: userId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-    },
+    select: "id, firstName, lastName",
   });
 
   if (!updater) {
@@ -477,14 +450,14 @@ export async function createDueDateChangedNote({
     return; // No change, skip note creation
   }
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: updater.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -499,24 +472,16 @@ export async function createAssigneeAddedNote({
   auditSessionId: string;
   userId: string;
   assigneeUserId: string;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
   const [updater, assignee] = await Promise.all([
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: assigneeUserId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
   ]);
 
@@ -534,14 +499,14 @@ export async function createAssigneeAddedNote({
     lastName: assignee.lastName,
   })}.`;
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: updater.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -556,24 +521,16 @@ export async function createAssigneeRemovedNote({
   auditSessionId: string;
   userId: string;
   assigneeUserId: string;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
   const [updater, assignee] = await Promise.all([
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: assigneeUserId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
   ]);
 
@@ -591,14 +548,14 @@ export async function createAssigneeRemovedNote({
     lastName: assignee.lastName,
   })}.`;
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: updater.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -616,20 +573,16 @@ export async function createAssetsAddedToAuditNote({
   userId: string;
   addedAssetIds: string[];
   skippedCount: number;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
   const [adder, addedAssets] = await Promise.all([
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
-    tx.asset.findMany({
+    findMany(tx, "Asset", {
       where: { id: { in: addedAssetIds } },
-      select: { id: true, title: true },
+      select: "id, title",
       orderBy: { title: "asc" },
     }),
   ]);
@@ -653,14 +606,14 @@ export async function createAssetsAddedToAuditNote({
     } skipped as already in audit)`;
   }
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: adder.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -676,20 +629,16 @@ export async function createAssetRemovedFromAuditNote({
   auditSessionId: string;
   assetId: string;
   userId: string;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
   const [remover, asset] = await Promise.all([
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
-    tx.asset.findUnique({
+    findUnique(tx, "Asset", {
       where: { id: assetId },
-      select: { id: true, title: true },
+      select: "id, title",
     }),
   ]);
 
@@ -705,14 +654,14 @@ export async function createAssetRemovedFromAuditNote({
     lastName: remover.lastName,
   })} removed ${assetMarkdoc} from audit.`;
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: remover.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
 
 /**
@@ -728,20 +677,16 @@ export async function createAssetsRemovedFromAuditNote({
   auditSessionId: string;
   assetIds: string[];
   userId: string;
-  tx: any; // Prisma transaction client
+  tx: any;
 }) {
   const [remover, assets] = await Promise.all([
-    tx.user.findUnique({
+    findUnique(tx, "User", {
       where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
+      select: "id, firstName, lastName",
     }),
-    tx.asset.findMany({
+    findMany(tx, "Asset", {
       where: { id: { in: assetIds } },
-      select: { id: true, title: true },
+      select: "id, title",
       orderBy: { title: "asc" },
     }),
   ]);
@@ -758,12 +703,12 @@ export async function createAssetsRemovedFromAuditNote({
     lastName: remover.lastName,
   })} removed ${assetsMarkdoc} from audit.`;
 
-  await tx.auditNote.create({
+  await create(tx, "AuditNote", {
     data: {
       auditSessionId,
       userId: remover.id,
       type: "UPDATE",
       content,
     },
-  });
+  } as any);
 }
