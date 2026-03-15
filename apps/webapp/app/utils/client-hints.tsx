@@ -50,8 +50,8 @@ export function getHints(request?: Request) {
     typeof document !== "undefined"
       ? document.cookie
       : typeof request !== "undefined"
-        ? (request.headers.get("Cookie") ?? "")
-        : "";
+      ? request.headers.get("Cookie") ?? ""
+      : "";
 
   return Object.entries(clientHints).reduce(
     (acc, [name, hint]) => {

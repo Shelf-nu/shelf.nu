@@ -161,7 +161,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ]);
 
     const currentUserTeamMember = isSelfService
-      ? (teamMembers.find((tm) => tm.userId === userId) ?? null)
+      ? teamMembers.find((tm) => tm.userId === userId) ?? null
       : null;
 
     if (totalPages !== 0 && page > totalPages) {

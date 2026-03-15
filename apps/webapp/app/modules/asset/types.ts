@@ -51,10 +51,8 @@ export interface UpdateAssetPayload {
   request: Request;
 }
 
-export interface CreateAssetFromContentImportPayload extends Record<
-  string,
-  any
-> {
+export interface CreateAssetFromContentImportPayload
+  extends Record<string, any> {
   key: string; // Unique identifier for the asset in the import (this is generated while parsing the csv file)
   title: string;
   description?: string;
@@ -67,10 +65,8 @@ export interface CreateAssetFromContentImportPayload extends Record<
   imageUrl?: string; // URL of the image to import
 }
 
-export interface CreateAssetFromBackupImportPayload extends Record<
-  string,
-  any
-> {
+export interface CreateAssetFromBackupImportPayload
+  extends Record<string, any> {
   id: string;
   title: string;
   description?: string;

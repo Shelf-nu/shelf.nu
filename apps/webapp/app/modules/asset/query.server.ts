@@ -394,13 +394,13 @@ function addBooleanFilter(
 function addDateFilter(whereClause: SqlFragment, filter: Filter): SqlFragment {
   switch (filter.operator) {
     case "is":
-      return sql`${whereClause} AND a."${raw(
-        filter.name
-      )}"::date = ${filter.value}::date`;
+      return sql`${whereClause} AND a."${raw(filter.name)}"::date = ${
+        filter.value
+      }::date`;
     case "isNot":
-      return sql`${whereClause} AND a."${raw(
-        filter.name
-      )}"::date != ${filter.value}::date`;
+      return sql`${whereClause} AND a."${raw(filter.name)}"::date != ${
+        filter.value
+      }::date`;
     case "before":
       return sql`${whereClause} AND a."${raw(filter.name)}" < ${
         filter.value
@@ -492,8 +492,8 @@ function addEnumFilter(whereClause: SqlFragment, filter: Filter): SqlFragment {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-              ? filter.value
-              : [filter.value]
+            ? filter.value
+            : [filter.value]
         ).filter(Boolean);
 
         if (values.includes("uncategorized")) {
@@ -567,8 +567,8 @@ function addEnumFilter(whereClause: SqlFragment, filter: Filter): SqlFragment {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-              ? filter.value
-              : [filter.value]
+            ? filter.value
+            : [filter.value]
         ).filter(Boolean);
 
         const hasLocation = values.includes("in-location");
@@ -660,8 +660,8 @@ function addEnumFilter(whereClause: SqlFragment, filter: Filter): SqlFragment {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-              ? filter.value
-              : [filter.value]
+            ? filter.value
+            : [filter.value]
         ).filter(Boolean);
 
         const hasInKit = values.includes("in-kit");
@@ -935,8 +935,8 @@ function addCustodyFilter(
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
           : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+          ? filter.value
+          : [filter.value]
       ).filter(Boolean);
 
       const hasInCustody = values.includes("in-custody");
@@ -1087,8 +1087,8 @@ function addUpcomingBookingsFilter(
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
           : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+          ? filter.value
+          : [filter.value]
       ).filter(Boolean);
 
       const hasBooking = values.includes("has-booking");

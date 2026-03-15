@@ -409,15 +409,15 @@ export async function getTeamMemberForForm({
             select: userSelect,
           })
         : custodianUserId
-          ? await findFirst(db, "TeamMember", {
-              where: {
-                userId: custodianUserId,
-                organizationId,
-                deletedAt: null,
-              },
-              select: userSelect,
-            })
-          : null;
+        ? await findFirst(db, "TeamMember", {
+            where: {
+              userId: custodianUserId,
+              organizationId,
+              deletedAt: null,
+            },
+            select: userSelect,
+          })
+        : null;
 
       await fixTeamMembersNames(
         custodianTeamMember

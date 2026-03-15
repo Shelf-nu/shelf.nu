@@ -113,7 +113,9 @@ export async function getLocation(
       otherOrganizationIds.length > 0
     ) {
       locationQuery = locationQuery.or(
-        `organizationId.eq.${organizationId},organizationId.in.(${otherOrganizationIds.join(",")})`
+        `organizationId.eq.${organizationId},organizationId.in.(${otherOrganizationIds.join(
+          ","
+        )})`
       );
     } else {
       locationQuery = locationQuery.eq("organizationId", organizationId);

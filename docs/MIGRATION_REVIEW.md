@@ -132,6 +132,7 @@ avoid stale data.
 2. **Join tables are fully open:** Policies like `t1_asset_to_tag_all`
    and `t1_asset_to_booking_all` use `FOR ALL USING (true)`, granting
    unrestricted access to all join table rows. This means:
+
    - A T1 user from Tenant A can see/modify join rows belonging to
      Tenant B
    - T2 users inherit no restrictions on join tables
@@ -425,6 +426,7 @@ db.server` imports — how will they be validated after conversion?
 
 2. **Prioritize the query conversion** by module, starting with the
    most heavily used:
+
    - `asset/query.server.ts` (221 Prisma refs — the query builder)
    - `booking/service.server.ts` (25 Prisma refs)
    - `kit/service.server.ts` (30 Prisma refs + 6 transactions)

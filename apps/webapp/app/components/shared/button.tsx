@@ -71,8 +71,7 @@ export interface CommonButtonProps {
  * Props specific to HTML button elements
  */
 export interface HTMLButtonProps
-  extends
-    Omit<CommonButtonProps, "disabled" | "title">,
+  extends Omit<CommonButtonProps, "disabled" | "title">,
     Omit<
       ButtonHTMLAttributes<HTMLButtonElement>,
       keyof CommonButtonProps | "disabled" | "type"
@@ -87,8 +86,7 @@ export interface HTMLButtonProps
  * Props specific to Link components
  */
 export interface LinkButtonProps
-  extends
-    CommonButtonProps,
+  extends CommonButtonProps,
     Omit<LinkProps, keyof CommonButtonProps | "disabled"> {
   as?: typeof Link;
   to: string;
@@ -220,8 +218,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       variant === "inherit"
         ? "inline-flex items-center"
         : textualVariants.has(variant as ButtonVariant)
-          ? "inline-flex items-start justify-start gap-2 text-left max-w-xl"
-          : "inline-flex items-center justify-center rounded font-semibold text-center gap-2 max-w-xl border text-sm box-shadow-xs";
+        ? "inline-flex items-start justify-start gap-2 text-left max-w-xl"
+        : "inline-flex items-center justify-center rounded font-semibold text-center gap-2 max-w-xl border text-sm box-shadow-xs";
 
     const isDisabled =
       typeof disabled === "boolean" ? disabled : disabled !== undefined;
@@ -339,7 +337,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
                 className={finalStyles}
                 aria-label={ariaLabel}
                 prefetch={
-                  isLinkProps(props) ? (props.prefetch ?? "none") : undefined
+                  isLinkProps(props) ? props.prefetch ?? "none" : undefined
                 }
                 ref={ref}
                 disabled={isDisabled}
@@ -367,7 +365,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           {...props}
           className={finalStyles}
           aria-label={ariaLabel}
-          prefetch={isLinkProps(props) ? (props.prefetch ?? "none") : undefined}
+          prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
           ref={ref}
           disabled={isDisabled}
           /** In the case when the button is disabled but there is no disabled reason, we still need to handle these events */

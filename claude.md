@@ -70,13 +70,13 @@ Execute migration files in order:
 
 ## Integration Points
 
-| System            | Direction                 | Purpose                                                       |
-| ----------------- | ------------------------- | ------------------------------------------------------------- |
+| System            | Direction                 | Purpose                                                         |
+| ----------------- | ------------------------- | --------------------------------------------------------------- |
 | ConnectWise PSA   | Bidirectional             | Config items ↔ person ↔ assets. Warranty data (via ScalePad). |
-| NinjaOne          | Inbound (source of truth) | Device data, agent check-in, device-to-person assignment      |
-| Liongard          | Inbound                   | M365 license assignments per user, tenant config              |
-| ControlMap        | Outbound                  | Push asset register data for compliance frameworks            |
-| Stealth Peanut T0 | Auth + API proxy          | All creds stored/proxied at T0. Modules never hold creds.     |
+| NinjaOne          | Inbound (source of truth) | Device data, agent check-in, device-to-person assignment        |
+| Liongard          | Inbound                   | M365 license assignments per user, tenant config                |
+| ControlMap        | Outbound                  | Push asset register data for compliance frameworks              |
+| Stealth Peanut T0 | Auth + API proxy          | All creds stored/proxied at T0. Modules never hold creds.       |
 
 ## Stack
 

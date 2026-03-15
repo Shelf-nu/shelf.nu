@@ -181,8 +181,8 @@ function formatInvalidNumericMessage(
     typeof rawValue === "string"
       ? rawValue.trim()
       : rawValue === undefined || rawValue === null
-        ? ""
-        : String(rawValue);
+      ? ""
+      : String(rawValue);
   const assetPart = options?.assetTitle
     ? ` (asset: '${options.assetTitle}')`
     : "";

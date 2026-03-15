@@ -595,8 +595,8 @@ export async function getOrganizationAdmins({
       select: "roles, user:User(id, firstName, lastName, email)",
     });
 
-    const admins = (userOrgs as any[]).filter((uo) =>
-      uo.roles?.includes(OrganizationRoles.ADMIN)
+    const admins = (userOrgs as any[]).filter(
+      (uo) => uo.roles?.includes(OrganizationRoles.ADMIN)
     );
 
     return admins.map((a: any) => a.user);
@@ -848,8 +848,8 @@ export async function transferOwnership({
       const subscriptionStatus = subscriptionTransferError
         ? `Failed - ${subscriptionTransferError.message}`
         : subscriptionTransferred
-          ? "Yes"
-          : "No (not requested)";
+        ? "Yes"
+        : "No (not requested)";
 
       sendEmail({
         subject: subscriptionTransferError

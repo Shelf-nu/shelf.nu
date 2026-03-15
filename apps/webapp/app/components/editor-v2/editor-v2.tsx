@@ -31,10 +31,11 @@ import { useRawBlockDialog } from "./hooks/use-raw-block-dialog";
 import { useSlashCommands } from "./hooks/use-slash-commands";
 import { useToolbarState } from "./hooks/use-toolbar-state";
 
-interface EditorV2Props extends Omit<
-  TextareaHTMLAttributes<HTMLTextAreaElement>,
-  "defaultValue" | "onChange"
-> {
+interface EditorV2Props
+  extends Omit<
+    TextareaHTMLAttributes<HTMLTextAreaElement>,
+    "defaultValue" | "onChange"
+  > {
   label: string;
   name: string;
   defaultValue: string;

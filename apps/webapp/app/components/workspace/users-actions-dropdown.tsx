@@ -147,17 +147,16 @@ export function TeamUsersActionsDropdown({
                     isCurrentUser
                       ? { reason: "You cannot change your own role" }
                       : isSSO
-                        ? {
-                            reason:
-                              "This user is managed via SSO. Role changes must be made through your identity provider.",
-                          }
-                        : isAdministrator &&
-                            roleEnum === OrganizationRoles.ADMIN
-                          ? {
-                              reason:
-                                "Only the workspace owner can change an Administrator's role.",
-                            }
-                          : disabled
+                      ? {
+                          reason:
+                            "This user is managed via SSO. Role changes must be made through your identity provider.",
+                        }
+                      : isAdministrator && roleEnum === OrganizationRoles.ADMIN
+                      ? {
+                          reason:
+                            "Only the workspace owner can change an Administrator's role.",
+                        }
+                      : disabled
                   }
                   onClick={() => {
                     setOpen(false);
