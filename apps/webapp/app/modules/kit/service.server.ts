@@ -2259,8 +2259,8 @@ export async function updateKitAssets({
      * the assets CHECKED_OUT
      */
     if (kit.status === KitStatus.CHECKED_OUT) {
-      await db.asset.updateMany({
-        where: { id: { in: newlyAddedAssets.map((a) => a.id) } },
+      await updateMany(db, "Asset", {
+        where: { id: { in: newlyAddedAssets.map((a: any) => a.id) } },
         data: { status: AssetStatus.CHECKED_OUT },
       });
     }
