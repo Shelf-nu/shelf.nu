@@ -3980,18 +3980,13 @@ export async function bulkArchiveBookings({
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
-    const bookings = await db.booking.findMany({
+    const bookings = await findMany(db, "Booking", {
       where,
-      select: {
-        id: true,
-        status: true,
-        custodianUserId: true,
-        activeSchedulerReference: true,
-      },
+      select: "id, status, custodianUserId, activeSchedulerReference",
     });
 
     const someBookingNotComplete = bookings.some(
-      (b) => b.status !== "COMPLETE"
+      (b: any) => b.status !== "COMPLETE"
     );
 
     /** Bookings must be complete to add them in archive */
@@ -4009,23 +4004,22 @@ export async function bulkArchiveBookings({
       });
     }
 
-    await db.$transaction(async (tx) => {
-      /** Updating status of bookings to ARCHIVED  */
-      await tx.booking.updateMany({
-        where: { id: { in: bookings.map((b) => b.id) } },
-        data: { status: BookingStatus.ARCHIVED },
-      });
-
-      /** Create booking status transition notes for each booking */
-      for (const booking of bookings) {
-        await createStatusTransitionNote({
-          bookingId: booking.id,
-          fromStatus: booking.status,
-          toStatus: BookingStatus.ARCHIVED,
-          custodianUserId: booking.custodianUserId || undefined,
-        });
-      }
+    // Sequential operations replacing db.$transaction
+    /** Updating status of bookings to ARCHIVED  */
+    await updateMany(db, "Booking", {
+      where: { id: { in: bookings.map((b: any) => b.id) } },
+      data: { status: BookingStatus.ARCHIVED },
     });
+
+    /** Create booking status transition notes for each booking */
+    for (const bk of bookings) {
+      await createStatusTransitionNote({
+        bookingId: (bk as any).id,
+        fromStatus: (bk as any).status,
+        toStatus: BookingStatus.ARCHIVED,
+        custodianUserId: (bk as any).custodianUserId || undefined,
+      });
+    }
 
     /** Cancel any active schedulers */
     await Promise.all(bookings.map((b) => cancelScheduler(b)));
