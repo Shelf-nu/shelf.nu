@@ -1,6 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
 import { exportAuditNotesToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
@@ -48,15 +49,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const audit = await db.auditSession.findFirstOrThrow({
-      where: { id: auditId, organizationId },
-      select: {
-        name: true,
-        assignments: {
-          select: { userId: true },
-        },
-      },
-    });
+    const auditRows = await queryRaw<{
+      name: string | null;
+      assignments: Array<{ userId: string }>;
+    }>(
+      db,
+      sql`
+        SELECT
+          a."name",
+          COALESCE(
+            json_agg(json_build_object('userId', sa."userId"))
+            FILTER (WHERE sa."userId" IS NOT NULL),
+            '[]'
+          ) AS "assignments"
+        FROM "AuditSession" a
+        LEFT JOIN "AuditAssignment" sa ON sa."auditSessionId" = a."id"
+        WHERE a."id" = ${auditId} AND a."organizationId" = ${organizationId}
+        GROUP BY a."id"
+      `
+    );
+
+    if (auditRows.length === 0) {
+      throw new Error("No rows found in AuditSession");
+    }
+
+    const audit = auditRows[0];
 
     requireAuditAssigneeForBaseSelfService({
       audit,

@@ -24,6 +24,7 @@ import {
 import { Td, Th } from "~/components/table";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 
 import { getPaginatedAndFilterableSettingInvites } from "~/modules/invite/service.server";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
@@ -52,9 +53,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
 
     /** Get the organization */
-    const organization = await db.organization.findFirst({
+    const organization = await findFirst(db, "Organization", {
       where: { id: organizationId },
-      include: { owner: true },
     });
 
     if (!organization) {

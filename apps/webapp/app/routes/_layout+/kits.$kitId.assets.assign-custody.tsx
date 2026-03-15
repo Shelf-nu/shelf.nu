@@ -22,7 +22,13 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
-import { create, update } from "~/database/query-helpers.server";
+import {
+  count,
+  create,
+  findMany,
+  update,
+} from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
@@ -129,23 +135,46 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId: role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
     };
 
-    const teamMembers = await db.teamMember
-      .findMany({
-        where,
-        include: { user: true },
-        orderBy: { userId: "asc" },
-        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching team members. Please try again or contact support.",
-          label: "Kit",
-        });
-      });
+    const takeLimit =
+      searchParams.get("getAll") === "teamMember" ? "" : sql` LIMIT 12`;
+    const selfServiceFilter =
+      role === OrganizationRoles.SELF_SERVICE
+        ? sql` AND tm."userId" = ${userId}`
+        : sql``;
 
-    const totalTeamMembers = await db.teamMember.count({ where });
+    const teamMemberRows = await queryRaw<{
+      id: string;
+      name: string;
+      organizationId: string;
+      userId: string | null;
+      deletedAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+      userJson: Record<string, unknown> | null;
+    }>(
+      db,
+      sql`SELECT tm.*, row_to_json(u.*) AS "userJson"
+          FROM "TeamMember" tm
+          LEFT JOIN "User" u ON u."id" = tm."userId"
+          WHERE tm."deletedAt" IS NULL
+            AND tm."organizationId" = ${organizationId}${selfServiceFilter}
+          ORDER BY tm."userId" ASC${takeLimit}`
+    ).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message:
+          "Something went wrong while fetching team members. Please try again or contact support.",
+        label: "Kit",
+      });
+    });
+
+    const teamMembers = teamMemberRows.map((r) => ({
+      ...r,
+      user: r.userJson ?? null,
+      userJson: undefined,
+    }));
+
+    const totalTeamMembers = await count(db, "TeamMember", where);
 
     return payload({
       showModal: true,
@@ -234,20 +263,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    const kit = await db.kit.update({
+    // Update kit status
+    const kit = await update(db, "Kit", {
       where: { id: kitId, organizationId },
-      data: {
-        status: KitStatus.IN_CUSTODY,
-        custody: { create: { custodian: { connect: { id: custodianId } } } },
-      },
-      include: {
-        assets: true,
-      },
+      data: { status: KitStatus.IN_CUSTODY },
+      select: "id, name",
+    });
+
+    // Create kit custody record
+    await create(db, "KitCustody", {
+      kitId,
+      custodianId,
+    });
+
+    // Fetch kit assets
+    const kitAssets = await findMany(db, "Asset", {
+      where: { kitId },
+      select: "id",
     });
 
     // Update custody for all assets
     await Promise.all(
-      kit.assets.map(async (asset) => {
+      kitAssets.map(async (asset) => {
         await update(db, "Asset", {
           where: { id: asset.id, organizationId },
           data: { status: AssetStatus.IN_CUSTODY },
@@ -276,7 +313,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
       type: NoteType.UPDATE,
       userId,
-      assetIds: kit.assets.map((asset) => asset.id),
+      assetIds: kitAssets.map((asset) => asset.id),
     });
 
     sendNotification({

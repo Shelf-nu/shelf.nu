@@ -147,27 +147,20 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     let auditNotesCount = 0;
     let auditImagesCount = 0;
     if (auditSessionId && barcode.asset?.id) {
-      const auditAsset = await db.auditAsset.findFirst({
-        where: {
-          auditSessionId,
-          assetId: barcode.asset.id,
-        },
-        select: { id: true },
+      const auditAsset = await findFirst(db, "AuditAsset", {
+        where: { auditSessionId, assetId: barcode.asset.id },
+        select: "id",
       });
       auditAssetId = auditAsset?.id;
       if (auditAssetId) {
         const [notesCount, imagesCount] = await Promise.all([
-          db.auditNote.count({
-            where: {
-              auditSessionId,
-              auditAssetId,
-            },
+          count(db, "AuditNote", {
+            auditSessionId,
+            auditAssetId,
           }),
-          db.auditImage.count({
-            where: {
-              auditSessionId,
-              auditAssetId,
-            },
+          count(db, "AuditImage", {
+            auditSessionId,
+            auditAssetId,
           }),
         ]);
         auditNotesCount = notesCount;

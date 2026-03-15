@@ -2,6 +2,7 @@ import type { Organization, SsoDetails } from "@shelf/database";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { findUnique } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import {
   deleteAuthAccount,
   getAuthUserById,
@@ -10,7 +11,6 @@ import {
   emailMatchesDomains,
   parseDomains,
 } from "~/modules/organization/service.server";
-import { USER_WITH_SSO_DETAILS_SELECT } from "~/modules/user/fields";
 import {
   createUserFromSSO,
   updateUserFromSSO,
@@ -64,13 +64,64 @@ export async function resolveUserAndOrgForSsoCallback({
   };
 }) {
   try {
-    // First check if user exists
-    const user = await db.user.findUnique({
-      where: {
-        email: authSession.email,
-      },
-      select: USER_WITH_SSO_DETAILS_SELECT,
-    });
+    // First check if user exists (with SSO details via nested relations)
+    const userRows = await queryRaw<{
+      id: string;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      sso: boolean;
+      userOrganizations: {
+        roles: string[];
+        organization: {
+          id: string;
+          name: string;
+          enabledSso: boolean;
+          ssoDetails: {
+            id: string;
+            domain: string;
+            baseUserGroupId: string | null;
+            selfServiceGroupId: string | null;
+            adminGroupId: string | null;
+          } | null;
+        };
+      }[];
+    }>(
+      db,
+      sql`
+        SELECT
+          u."id", u."email", u."firstName", u."lastName", u."sso",
+          COALESCE(
+            (SELECT jsonb_agg(jsonb_build_object(
+              'roles', uo."roles",
+              'organization', jsonb_build_object(
+                'id', o."id",
+                'name', o."name",
+                'enabledSso', o."enabledSso",
+                'ssoDetails', (
+                  SELECT jsonb_build_object(
+                    'id', sd."id",
+                    'domain', sd."domain",
+                    'baseUserGroupId', sd."baseUserGroupId",
+                    'selfServiceGroupId', sd."selfServiceGroupId",
+                    'adminGroupId', sd."adminGroupId"
+                  )
+                  FROM "SsoDetails" sd
+                  WHERE sd."organizationId" = o."id"
+                )
+              )
+            ))
+            FROM "UserOrganization" uo
+            JOIN "Organization" o ON o."id" = uo."organizationId"
+            WHERE uo."userId" = u."id"),
+            '[]'::jsonb
+          ) AS "userOrganizations"
+        FROM "User" u
+        WHERE u."email" = ${authSession.email}
+        LIMIT 1
+      `
+    );
+    const user = userRows[0] ?? null;
 
     // If user exists, check if they're trying to convert from email to SSO
     if (user) {
@@ -144,13 +195,16 @@ interface DomainCheckResult {
  */
 export async function getConfiguredSSODomains(): Promise<SSODomainConfig[]> {
   try {
-    const domains = await db.$queryRaw<SSODomainConfig[]>`
-      SELECT 
-        id::text,
-        sso_provider_id::text as "ssoProviderId",
-        domain
-      FROM auth.sso_domains
-    `;
+    const domains = await queryRaw<SSODomainConfig>(
+      db,
+      sql`
+        SELECT
+          id::text,
+          sso_provider_id::text as "ssoProviderId",
+          domain
+        FROM auth.sso_domains
+      `
+    );
 
     return domains;
   } catch (cause) {
@@ -174,11 +228,14 @@ export async function checkDomainSSOStatus(
     const domain = email.split("@")[1]?.toLowerCase();
 
     // Check all SSO providers configured for this domain
-    const ssoConfigs = await db.$queryRaw<{ ssoProviderId: string }[]>`
-      SELECT sso_provider_id::text as "ssoProviderId"
-      FROM auth.sso_domains
-      WHERE lower(domain) = ${domain}
-    `;
+    const ssoConfigs = await queryRaw<{ ssoProviderId: string }>(
+      db,
+      sql`
+        SELECT sso_provider_id::text as "ssoProviderId"
+        FROM auth.sso_domains
+        WHERE lower(domain) = ${domain}
+      `
+    );
 
     if (ssoConfigs.length === 0) {
       return {
@@ -192,18 +249,19 @@ export async function checkDomainSSOStatus(
     const ssoProviderIds = ssoConfigs.map((config) => config.ssoProviderId);
 
     // Find organization where this domain is included in their comma-separated domains
-    const linkedOrg = await db.organization.findFirst({
-      where: {
-        ssoDetails: {
-          domain: {
-            contains: domain,
-          },
-        },
-      },
-      include: {
-        ssoDetails: true,
-      },
-    });
+    const linkedOrgRows = await queryRaw<
+      Organization & { ssoDetails: SsoDetails | null }
+    >(
+      db,
+      sql`
+        SELECT o.*, to_jsonb(sd) AS "ssoDetails"
+        FROM "Organization" o
+        JOIN "SsoDetails" sd ON sd."organizationId" = o."id"
+        WHERE sd."domain" LIKE '%' || ${domain} || '%'
+        LIMIT 1
+      `
+    );
+    const linkedOrg = linkedOrgRows[0] ?? null;
 
     // If we found an org, verify the domain is actually in their list
     const isValidDomain = linkedOrg?.ssoDetails

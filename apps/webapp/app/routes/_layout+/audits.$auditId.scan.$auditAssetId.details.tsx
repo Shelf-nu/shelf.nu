@@ -26,6 +26,14 @@ import {
 import { AuditImageUploadDialog } from "~/components/audit/audit-image-upload-dialog";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import {
+  create,
+  findMany,
+  findUnique,
+  remove,
+  update,
+} from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import {
@@ -66,30 +74,46 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { organizationId, isSelfServiceOrBase } = permissionResult;
 
-    // Fetch audit asset with notes and images
-    const auditAsset = await db.auditAsset.findFirst({
-      where: {
-        id: auditAssetId,
-        auditSession: {
-          organizationId,
-        },
-      },
-      include: {
-        asset: {
-          select: {
-            id: true,
-            title: true,
-          },
-        },
-        auditSession: {
-          select: {
-            assignments: {
-              select: { userId: true },
+    // Fetch audit asset with related asset + audit session assignments
+    const auditAssetRows = await queryRaw<{
+      id: string;
+      auditSessionId: string;
+      assetId: string;
+      status: string;
+      expected: boolean;
+      scannedAt: string | null;
+      scannedById: string | null;
+      assetTitle: string;
+      assignmentUserId: string | null;
+    }>(
+      db,
+      sql`
+        SELECT aa.*, ast."id" AS "assetId", ast."title" AS "assetTitle",
+               asgn."userId" AS "assignmentUserId"
+        FROM "AuditAsset" aa
+        JOIN "AuditSession" s ON s."id" = aa."auditSessionId"
+        JOIN "Asset" ast ON ast."id" = aa."assetId"
+        LEFT JOIN "AuditAssignment" asgn ON asgn."auditSessionId" = s."id"
+        WHERE aa."id" = ${auditAssetId}
+          AND s."organizationId" = ${organizationId}
+      `
+    );
+
+    const auditAsset =
+      auditAssetRows.length > 0
+        ? {
+            ...auditAssetRows[0],
+            asset: {
+              id: auditAssetRows[0].assetId,
+              title: auditAssetRows[0].assetTitle,
             },
-          },
-        },
-      },
-    });
+            auditSession: {
+              assignments: auditAssetRows
+                .filter((r) => r.assignmentUserId !== null)
+                .map((r) => ({ userId: r.assignmentUserId! })),
+            },
+          }
+        : null;
 
     if (!auditAsset) {
       throw new ShelfError({
@@ -108,43 +132,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       auditId,
     });
 
-    // Fetch notes for this audit asset
-    const notes = await db.auditNote.findMany({
-      where: {
-        auditSessionId: auditId,
-        auditAssetId: auditAssetId,
-      },
-      select: {
-        id: true,
-        content: true,
-        createdAt: true,
-        userId: true,
-        type: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+    // Fetch notes for this audit asset (with user relation)
+    const noteRows = await queryRaw<{
+      id: string;
+      content: string;
+      createdAt: string;
+      userId: string | null;
+      type: string;
+      userFirstName: string | null;
+      userLastName: string | null;
+      userEmail: string | null;
+      userProfilePicture: string | null;
+    }>(
+      db,
+      sql`
+        SELECT n."id", n."content", n."createdAt", n."userId", n."type",
+               u."id" AS "noteUserId", u."firstName" AS "userFirstName",
+               u."lastName" AS "userLastName", u."email" AS "userEmail",
+               u."profilePicture" AS "userProfilePicture"
+        FROM "AuditNote" n
+        LEFT JOIN "User" u ON u."id" = n."userId"
+        WHERE n."auditSessionId" = ${auditId}
+          AND n."auditAssetId" = ${auditAssetId}
+        ORDER BY n."createdAt" DESC
+      `
+    );
+
+    const notes = noteRows.map((r) => ({
+      id: r.id,
+      content: r.content,
+      createdAt: r.createdAt,
+      userId: r.userId,
+      type: r.type,
+      user: r.userId
+        ? {
+            id: r.userId,
+            firstName: r.userFirstName,
+            lastName: r.userLastName,
+            email: r.userEmail,
+            profilePicture: r.userProfilePicture,
+          }
+        : null,
+    }));
 
     // Fetch images
-    const images = await db.auditImage.findMany({
+    const images = await findMany(db, "AuditImage", {
       where: {
         auditAssetId: auditAssetId,
       },
-      select: {
-        id: true,
-        imageUrl: true,
-        thumbnailUrl: true,
-      },
+      select: "id, imageUrl, thumbnailUrl",
       orderBy: {
         createdAt: "desc",
       },
@@ -203,25 +239,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      const note = await db.auditNote.create({
-        data: {
-          content: content.trim(),
-          auditSessionId: auditId,
-          auditAssetId: auditAssetId,
-          userId,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              profilePicture: true,
-            },
-          },
-        },
+      const createdNote = await create(db, "AuditNote", {
+        content: content.trim(),
+        auditSessionId: auditId,
+        auditAssetId: auditAssetId,
+        userId,
       });
+
+      // Fetch the user relation separately for the response
+      const noteUserRows = await queryRaw<{
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+        profilePicture: string | null;
+      }>(
+        db,
+        sql`SELECT "id", "firstName", "lastName", "email", "profilePicture"
+            FROM "User" WHERE "id" = ${userId}`
+      );
+
+      const note = {
+        ...createdNote,
+        user: noteUserRows[0] ?? null,
+      };
 
       return payload({ note });
     }
@@ -240,9 +281,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       // Prevent deletion of auto-generated notes (UPDATE type)
-      const noteToDelete = await db.auditNote.findUnique({
+      const noteToDelete = await findUnique(db, "AuditNote", {
         where: { id: noteId },
-        select: { type: true },
+        select: "type",
       });
 
       if (noteToDelete?.type === "UPDATE") {
@@ -255,11 +296,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      await db.auditNote.delete({
-        where: {
-          id: noteId,
-        },
-      });
+      await remove(db, "AuditNote", { id: noteId });
 
       return payload({ success: true });
     }
@@ -312,34 +349,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         uploadedImages.push(image);
       }
 
-      // Create a note in a transaction to track the image uploads
-      await db.$transaction(async (tx) => {
-        const imageIds = uploadedImages.map((img) => img.id);
-        // Create note with custom content if provided, otherwise use default
-        if (noteContent?.trim()) {
-          // User provided a note - create a COMMENT note with images
-          await tx.auditNote.create({
-            data: {
-              auditSessionId: auditId,
-              auditAssetId: auditAssetId,
-              userId,
-              content: `${noteContent.trim()}\n\n{% audit_images count=${
-                imageIds.length
-              } ids="${imageIds.join(",")}" /%}`,
-              type: "COMMENT",
-            },
-          });
-        } else {
-          // No note provided - use default auto-generated note
-          await createAuditAssetImagesAddedNote({
-            auditSessionId: auditId,
-            auditAssetId: auditAssetId,
-            userId,
-            imageIds,
-            tx,
-          });
-        }
-      });
+      // Sequential operations replacing db.$transaction
+      const imageIds = uploadedImages.map((img) => img.id);
+      // Create note with custom content if provided, otherwise use default
+      if (noteContent?.trim()) {
+        // User provided a note - create a COMMENT note with images
+        await create(db, "AuditNote", {
+          auditSessionId: auditId,
+          auditAssetId: auditAssetId,
+          userId,
+          content: `${noteContent.trim()}\n\n{% audit_images count=${
+            imageIds.length
+          } ids="${imageIds.join(",")}" /%}`,
+          type: "COMMENT",
+        });
+      } else {
+        // No note provided - use default auto-generated note
+        await createAuditAssetImagesAddedNote({
+          auditSessionId: auditId,
+          auditAssetId: auditAssetId,
+          userId,
+          imageIds,
+          tx: db,
+        });
+      }
 
       return payload({ images: uploadedImages });
     }
@@ -399,50 +432,48 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         uploadedImages.push(image);
       }
 
-      // Update the note to append the audit_images tag
-      await db.$transaction(async (tx) => {
-        const existingNote = await tx.auditNote.findUnique({
-          where: { id: noteId },
+      // Sequential operations replacing db.$transaction
+      const existingNote = await findUnique(db, "AuditNote", {
+        where: { id: noteId },
+      });
+
+      if (!existingNote) {
+        throw new ShelfError({
+          cause: null,
+          message: "Note not found",
+          additionalData: { noteId },
+          label: "Audit Image",
+          status: 404,
         });
+      }
 
-        if (!existingNote) {
-          throw new ShelfError({
-            cause: null,
-            message: "Note not found",
-            additionalData: { noteId },
-            label: "Audit Image",
-            status: 404,
-          });
-        }
+      // Extract existing image IDs from content if any
+      const existingImageIds: string[] = [];
+      const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
+      let match;
+      while ((match = regex.exec(existingNote.content)) !== null) {
+        existingImageIds.push(...match[1].split(","));
+      }
 
-        // Extract existing image IDs from content if any
-        const existingImageIds: string[] = [];
-        const regex = /{%\s*audit_images[^%]*ids="([^"]+)"[^%]*%}/g;
-        let match;
-        while ((match = regex.exec(existingNote.content)) !== null) {
-          existingImageIds.push(...match[1].split(","));
-        }
+      // Add new image IDs
+      const newImageIds = uploadedImages.map((img) => img.id);
+      const allImageIds = [...existingImageIds, ...newImageIds];
 
-        // Add new image IDs
-        const newImageIds = uploadedImages.map((img) => img.id);
-        const allImageIds = [...existingImageIds, ...newImageIds];
+      // Remove existing audit_images tags and append new one with all images
+      let updatedContent = existingNote.content.replace(
+        /{%\s*audit_images[^%]*%}/g,
+        ""
+      );
+      updatedContent = updatedContent.trim();
+      updatedContent += `\n\n{% audit_images count=${
+        allImageIds.length
+      } ids="${allImageIds.join(",")}" /%}`;
 
-        // Remove existing audit_images tags and append new one with all images
-        let updatedContent = existingNote.content.replace(
-          /{%\s*audit_images[^%]*%}/g,
-          ""
-        );
-        updatedContent = updatedContent.trim();
-        updatedContent += `\n\n{% audit_images count=${
-          allImageIds.length
-        } ids="${allImageIds.join(",")}" /%}`;
-
-        await tx.auditNote.update({
-          where: { id: noteId },
-          data: {
-            content: updatedContent,
-          },
-        });
+      await update(db, "AuditNote", {
+        where: { id: noteId },
+        data: {
+          content: updatedContent,
+        },
       });
 
       return payload({ images: uploadedImages });

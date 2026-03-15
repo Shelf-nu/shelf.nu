@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
 import {
@@ -31,32 +32,30 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     );
 
     /** Fetch OWNER and ADMIN users in this org, excluding the target user */
-    const userOrgs = await db.userOrganization.findMany({
-      where: {
-        organizationId,
-        userId: { not: excludeUserId },
-        roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-        },
-      },
-      select: {
-        roles: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
-    });
+    const userOrgs = await queryRaw<{
+      roles: string[];
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    }>(
+      db,
+      sql`
+        SELECT uo."roles",
+               u."id", u."firstName", u."lastName", u."email"
+        FROM "UserOrganization" uo
+        JOIN "User" u ON u."id" = uo."userId"
+        WHERE uo."organizationId" = ${organizationId}
+          AND uo."userId" != ${excludeUserId}
+          AND (uo."roles" && ARRAY['OWNER', 'ADMIN']::"OrganizationRoles"[])
+      `
+    );
 
     return data(
       userOrgs.map((uo) => ({
-        id: uo.user.id,
-        name: `${uo.user.firstName ?? ""} ${uo.user.lastName ?? ""}`.trim(),
-        email: uo.user.email,
+        id: uo.id,
+        name: `${uo.firstName ?? ""} ${uo.lastName ?? ""}`.trim(),
+        email: uo.email,
         isOwner: uo.roles.includes(OrganizationRoles.OWNER),
       }))
     );

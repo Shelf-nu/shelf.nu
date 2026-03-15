@@ -6,6 +6,7 @@ import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
 import { KitBulkLocationUpdateSchema } from "~/components/kits/bulk-location-update-dialog";
 import { BulkReleaseKitCustodySchema } from "~/components/kits/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
   bulkAssignKitCustody,
@@ -139,13 +140,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
         const { kitIds } = parseData(formData, BulkReleaseKitCustodySchema);
 
         if (isSelfService) {
-          const custodies = await db.kitCustody.findMany({
-            where: { kitId: { in: kitIds } },
-            select: { custodian: { select: { id: true, userId: true } } },
-          });
+          const custodyRows = await queryRaw<{
+            custodianId: string;
+            custodianUserId: string | null;
+          }>(
+            db,
+            sql`SELECT tm."id" AS "custodianId", tm."userId" AS "custodianUserId"
+                FROM "KitCustody" kc
+                JOIN "TeamMember" tm ON tm."id" = kc."teamMemberId"
+                WHERE kc."kitId" = ANY(${kitIds}::text[])`
+          );
 
           if (
-            custodies.some((custody) => custody.custodian.userId !== userId)
+            custodyRows.some((custody) => custody.custodianUserId !== userId)
           ) {
             throw new ShelfError({
               cause: null,

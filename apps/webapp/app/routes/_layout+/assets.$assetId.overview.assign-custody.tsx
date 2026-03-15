@@ -16,6 +16,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
+import { count } from "~/database/query-helpers.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
@@ -121,7 +122,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    const totalTeamMembers = await db.teamMember.count({ where });
+    const totalTeamMembers = await count(db, "TeamMember", where);
 
     return payload({
       showModal: true,

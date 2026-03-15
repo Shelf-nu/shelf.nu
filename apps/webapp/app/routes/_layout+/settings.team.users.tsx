@@ -20,6 +20,7 @@ import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
@@ -49,9 +50,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
 
     /** Get the organization */
-    const organization = await db.organization.findFirst({
+    const organization = await findFirst(db, "Organization", {
       where: { id: organizationId },
-      include: { owner: true },
     });
 
     if (!organization) {

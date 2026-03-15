@@ -3,6 +3,8 @@ import { data } from "react-router";
 import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
+import { remove } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { createAuditNote } from "~/modules/audit/note-service.server";
 import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -38,16 +40,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { organizationId, isSelfServiceOrBase } = permissionResult;
 
     // Validate that the audit belongs to the user's organization
-    const audit = await db.auditSession.findUnique({
-      where: { id: auditId },
-      select: {
-        id: true,
-        organizationId: true,
-        assignments: {
-          select: { userId: true },
-        },
-      },
-    });
+    const auditRows = await queryRaw<{
+      id: string;
+      organizationId: string;
+      assignments: Array<{ userId: string }>;
+    }>(
+      db,
+      sql`
+        SELECT
+          a."id",
+          a."organizationId",
+          COALESCE(
+            json_agg(json_build_object('userId', sa."userId"))
+            FILTER (WHERE sa."userId" IS NOT NULL),
+            '[]'
+          ) AS "assignments"
+        FROM "AuditSession" a
+        LEFT JOIN "AuditAssignment" sa ON sa."auditSessionId" = a."id"
+        WHERE a."id" = ${auditId}
+        GROUP BY a."id"
+      `
+    );
+
+    const audit = auditRows[0] ?? null;
 
     if (!audit || audit.organizationId !== organizationId) {
       throw new ShelfError({
@@ -112,11 +127,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           senderId: authSession.userId,
         });
 
-        await db.auditNote.delete({
-          where: {
-            id: noteId,
-            userId, // Ensure user can only delete their own notes
-          },
+        await remove(db, "AuditNote", {
+          id: noteId,
+          userId, // Ensure user can only delete their own notes
         });
 
         return data(payload(null));

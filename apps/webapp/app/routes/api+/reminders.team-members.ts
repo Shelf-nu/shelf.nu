@@ -2,6 +2,7 @@ import type { Custody, TeamMember, User } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -9,19 +10,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-const TEAM_MEMBER_INCLUDE = {
-  custodies: true,
-  user: {
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      profilePicture: true,
-    },
-  },
-};
 
 export type ReminderTeamMember = TeamMember & {
   custodies: Custody[];
@@ -43,29 +31,38 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        deletedAt: null,
-        organizationId,
-        AND: [
-          { user: { isNot: null } },
-          {
-            user: {
-              userOrganizations: {
-                some: {
-                  AND: [
-                    { organizationId },
-                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
-                  ],
-                },
-              },
-            },
-          },
-        ],
-      },
-      orderBy: { createdAt: "desc" },
-      include: TEAM_MEMBER_INCLUDE,
-    });
+    const teamMembers = await queryRaw<ReminderTeamMember>(
+      db,
+      sql`
+        SELECT tm.*,
+          COALESCE(
+            (SELECT jsonb_agg(c)
+             FROM "Custody" c
+             WHERE c."teamMemberId" = tm."id"),
+            '[]'::jsonb
+          ) AS "custodies",
+          (SELECT jsonb_build_object(
+            'id', u."id",
+            'email', u."email",
+            'firstName', u."firstName",
+            'lastName', u."lastName",
+            'profilePicture', u."profilePicture"
+          )
+          FROM "User" u
+          WHERE u."id" = tm."userId") AS "user"
+        FROM "TeamMember" tm
+        WHERE tm."deletedAt" IS NULL
+          AND tm."organizationId" = ${organizationId}
+          AND tm."userId" IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM "UserOrganization" uo
+            WHERE uo."userId" = tm."userId"
+              AND uo."organizationId" = ${organizationId}
+              AND (uo."roles" && ARRAY['ADMIN', 'OWNER']::"OrganizationRoles"[])
+          )
+        ORDER BY tm."createdAt" DESC
+      `
+    );
 
     return data(payload({ teamMembers }));
   } catch (cause) {

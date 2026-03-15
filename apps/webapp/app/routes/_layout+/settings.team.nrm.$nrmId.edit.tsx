@@ -14,6 +14,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { update } from "~/database/query-helpers.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -72,7 +73,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { name } = parseData(await request.formData(), NewOrEditMemberSchema);
 
-    await db.teamMember.update({
+    await update(db, "TeamMember", {
       where: { id: nrmId, organizationId },
       data: { name: name.trim() },
     });

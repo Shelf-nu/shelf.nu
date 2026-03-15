@@ -17,6 +17,7 @@ import { CsvError, parse } from "csv-parse";
 import { format } from "date-fns";
 import iconv from "iconv-lite";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import {
   fetchAssetsForExport,
   getAdvancedPaginatedAndFilterableAssets,
@@ -34,7 +35,6 @@ import {
   columnsLabelsMap,
   parseColumnName,
 } from "~/modules/asset-index-settings/helpers";
-import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
   getBookings,
   getBookingsFilterData,
@@ -654,18 +654,36 @@ export async function exportBookingsFromIndexToCsv({
       });
       bookings = bookingsData.bookings;
     } else {
-      bookings = await db.booking.findMany({
-        where: { id: { in: bookingsIds }, organizationId },
-        include: {
-          ...BOOKING_COMMON_INCLUDE,
-          assets: {
-            select: {
-              title: true,
-            },
-          },
-          tags: { select: { name: true } },
-        },
-      });
+      bookings = await queryRaw<FlexibleBooking>(
+        db,
+        sql`
+          SELECT
+            b.*,
+            COALESCE(
+              (SELECT jsonb_agg(jsonb_build_object(
+                'title', a."title"
+              ))
+              FROM "_AssetToBooking" ab
+              JOIN "Asset" a ON a."id" = ab."A"
+              WHERE ab."B" = b."id"),
+              '[]'::jsonb
+            ) AS "assets",
+            COALESCE(
+              (SELECT jsonb_agg(jsonb_build_object('name', t."name"))
+              FROM "_BookingToTag" bt
+              JOIN "Tag" t ON t."id" = bt."B"
+              WHERE bt."A" = b."id"),
+              '[]'::jsonb
+            ) AS "tags",
+            to_jsonb(ctm) AS "custodianTeamMember",
+            to_jsonb(cu) AS "custodianUser"
+          FROM "Booking" b
+          LEFT JOIN "TeamMember" ctm ON ctm."id" = b."custodianTeamMemberId"
+          LEFT JOIN "User" cu ON cu."id" = b."custodianUserId"
+          WHERE b."id" = ANY(${bookingsIds})
+            AND b."organizationId" = ${organizationId}
+        `
+      );
     }
 
     // Pass both assets and columns to the build function
@@ -723,75 +741,24 @@ const notesToCsv = (notes: ActivityNote[], formatter: Intl.DateTimeFormat) => {
   return [ACTIVITY_HEADER, ...rows].join("\n");
 };
 
-type ActivityNoteRecord = {
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+type ActivityNoteRow = {
   content: string | null;
-  createdAt: Date;
+  createdAt: string;
   type: string;
+  firstName: string | null;
+  lastName: string | null;
 };
 
-type NoteFetcher<Where> = (args: {
-  where: Where;
-  include: {
-    user: {
-      select: {
-        firstName: true;
-        lastName: true;
-      };
-    };
-  };
-  orderBy: {
-    createdAt: "desc";
-  };
-}) => Promise<ActivityNoteRecord[]>;
-
-type ExportNotesToCsvArgs<Where> = {
-  request: Request;
-  where: Where;
-  findMany: NoteFetcher<Where>;
-};
-
-async function exportNotesToCsv<Where>({
-  request,
-  where,
-  findMany,
-}: ExportNotesToCsvArgs<Where>) {
-  const formatter = getDateTimeFormat(request, {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
-
-  const notes = await findMany({
-    where,
-    include: {
-      user: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-
-  const activityNotes = notes.map<ActivityNote>((note) => ({
-    content: note.content ?? "",
-    createdAt: note.createdAt,
-    type: note.type as ActivityNote["type"],
-    user: note.user
-      ? {
-          firstName: note.user.firstName,
-          lastName: note.user.lastName,
-        }
-      : null,
+function mapNoteRowsToActivityNotes(rows: ActivityNoteRow[]): ActivityNote[] {
+  return rows.map((row) => ({
+    content: row.content ?? "",
+    createdAt: new Date(row.createdAt),
+    type: row.type as ActivityNote["type"],
+    user:
+      row.firstName !== null || row.lastName !== null
+        ? { firstName: row.firstName, lastName: row.lastName }
+        : null,
   }));
-
-  return notesToCsv(activityNotes, formatter);
 }
 
 export async function exportAssetNotesToCsv({
@@ -803,14 +770,26 @@ export async function exportAssetNotesToCsv({
   assetId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Record<string, any>>({
-    request,
-    where: {
-      assetId,
-      asset: { organizationId },
-    },
-    findMany: (args) => db.note.findMany(args) as Promise<ActivityNoteRecord[]>,
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
   });
+
+  const rows = await queryRaw<ActivityNoteRow>(
+    db,
+    sql`
+      SELECT n."content", n."createdAt", n."type",
+             u."firstName", u."lastName"
+      FROM "Note" n
+      LEFT JOIN "User" u ON u."id" = n."userId"
+      JOIN "Asset" a ON a."id" = n."assetId"
+      WHERE n."assetId" = ${assetId}
+        AND a."organizationId" = ${organizationId}
+      ORDER BY n."createdAt" DESC
+    `
+  );
+
+  return notesToCsv(mapNoteRowsToActivityNotes(rows), formatter);
 }
 
 export async function exportBookingNotesToCsv({
@@ -822,15 +801,26 @@ export async function exportBookingNotesToCsv({
   bookingId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Record<string, any>>({
-    request,
-    where: {
-      bookingId,
-      booking: { organizationId },
-    },
-    findMany: (args) =>
-      db.bookingNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
   });
+
+  const rows = await queryRaw<ActivityNoteRow>(
+    db,
+    sql`
+      SELECT bn."content", bn."createdAt", bn."type",
+             u."firstName", u."lastName"
+      FROM "BookingNote" bn
+      LEFT JOIN "User" u ON u."id" = bn."userId"
+      JOIN "Booking" b ON b."id" = bn."bookingId"
+      WHERE bn."bookingId" = ${bookingId}
+        AND b."organizationId" = ${organizationId}
+      ORDER BY bn."createdAt" DESC
+    `
+  );
+
+  return notesToCsv(mapNoteRowsToActivityNotes(rows), formatter);
 }
 
 export async function exportAuditNotesToCsv({
@@ -842,15 +832,26 @@ export async function exportAuditNotesToCsv({
   auditId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Record<string, any>>({
-    request,
-    where: {
-      auditSessionId: auditId,
-      auditSession: { organizationId },
-    },
-    findMany: (args) =>
-      db.auditNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
   });
+
+  const rows = await queryRaw<ActivityNoteRow>(
+    db,
+    sql`
+      SELECT an."content", an."createdAt", an."type",
+             u."firstName", u."lastName"
+      FROM "AuditNote" an
+      LEFT JOIN "User" u ON u."id" = an."userId"
+      JOIN "AuditSession" ase ON ase."id" = an."auditSessionId"
+      WHERE an."auditSessionId" = ${auditId}
+        AND ase."organizationId" = ${organizationId}
+      ORDER BY an."createdAt" DESC
+    `
+  );
+
+  return notesToCsv(mapNoteRowsToActivityNotes(rows), formatter);
 }
 
 export async function exportLocationNotesToCsv({
@@ -862,15 +863,26 @@ export async function exportLocationNotesToCsv({
   locationId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Record<string, any>>({
-    request,
-    where: {
-      locationId,
-      location: { organizationId },
-    },
-    findMany: (args) =>
-      db.locationNote.findMany(args) as Promise<ActivityNoteRecord[]>,
+  const formatter = getDateTimeFormat(request, {
+    dateStyle: "short",
+    timeStyle: "short",
   });
+
+  const rows = await queryRaw<ActivityNoteRow>(
+    db,
+    sql`
+      SELECT ln."content", ln."createdAt", ln."type",
+             u."firstName", u."lastName"
+      FROM "LocationNote" ln
+      LEFT JOIN "User" u ON u."id" = ln."userId"
+      JOIN "Location" l ON l."id" = ln."locationId"
+      WHERE ln."locationId" = ${locationId}
+        AND l."organizationId" = ${organizationId}
+      ORDER BY ln."createdAt" DESC
+    `
+  );
+
+  return notesToCsv(mapNoteRowsToActivityNotes(rows), formatter);
 }
 
 /** Define some types to use for normalizing bookings across the different fetches */
@@ -1036,14 +1048,25 @@ export async function exportNRMsToCsv({
   organizationId: Organization["id"];
 }) {
   try {
-    const where: Record<string, any> = nrmIds.includes(ALL_SELECTED_KEY)
-      ? { organizationId }
-      : { id: { in: nrmIds }, organizationId };
+    const idFilter = nrmIds.includes(ALL_SELECTED_KEY)
+      ? sql``
+      : sql` AND tm."id" = ANY(${nrmIds})`;
 
-    const teamMembers = await db.teamMember.findMany({
-      where,
-      include: { _count: { select: { custodies: true } } },
-    });
+    const teamMembers = await queryRaw<{
+      id: string;
+      name: string;
+      _count: { custodies: number };
+    }>(
+      db,
+      sql`
+        SELECT tm.*,
+               jsonb_build_object(
+                 'custodies', (SELECT COUNT(*) FROM "Custody" c WHERE c."teamMemberId" = tm."id")::int
+               ) AS "_count"
+        FROM "TeamMember" tm
+        WHERE tm."organizationId" = ${organizationId}${idFilter}
+      `
+    );
 
     return buildCsvExportDataFromTeamMembers({ teamMembers });
   } catch (cause) {

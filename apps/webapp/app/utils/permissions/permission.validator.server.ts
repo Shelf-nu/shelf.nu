@@ -1,5 +1,6 @@
 import { OrganizationRoles } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 
 import {
   Role2PermissionMap,
@@ -23,7 +24,7 @@ export async function hasPermission(
 
   try {
     if (!roles || !Array.isArray(roles)) {
-      const userOrg = await db.userOrganization.findFirst({
+      const userOrg = await findFirst(db, "UserOrganization", {
         where: { userId, organizationId },
       });
 

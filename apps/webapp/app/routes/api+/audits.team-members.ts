@@ -2,6 +2,7 @@ import type { TeamMember, User } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -9,18 +10,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-const TEAM_MEMBER_INCLUDE = {
-  user: {
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      profilePicture: true,
-    },
-  },
-};
 
 export type AuditTeamMember = TeamMember & {
   user: Pick<
@@ -46,20 +35,50 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     // Fetch team members who have user accounts (exclude NRMs)
-    const teamMembers = await db.teamMember.findMany({
-      where: {
-        deletedAt: null,
-        organizationId,
-        user: { isNot: null }, // Only users, no NRMs
-      },
-      orderBy: [
-        // Users first
-        { user: { firstName: "asc" } },
-        // Then by name for any edge cases
-        { name: "asc" },
-      ],
-      include: TEAM_MEMBER_INCLUDE,
-    });
+    const rows = await queryRaw<
+      Record<string, unknown> & {
+        userId: string | null;
+        userEmail: string | null;
+        userFirstName: string | null;
+        userLastName: string | null;
+        userProfilePicture: string | null;
+      }
+    >(
+      db,
+      sql`SELECT tm.*, u."id" AS "userId", u."email" AS "userEmail",
+                 u."firstName" AS "userFirstName",
+                 u."lastName" AS "userLastName",
+                 u."profilePicture" AS "userProfilePicture"
+          FROM "TeamMember" tm
+          LEFT JOIN "User" u ON u."id" = tm."userId"
+          WHERE tm."deletedAt" IS NULL
+            AND tm."organizationId" = ${organizationId}
+            AND tm."userId" IS NOT NULL
+          ORDER BY u."firstName" ASC, tm."name" ASC`
+    );
+
+    const teamMembers = rows.map((r) => {
+      const {
+        userId: _uId,
+        userEmail,
+        userFirstName,
+        userLastName,
+        userProfilePicture,
+        ...rest
+      } = r;
+      return {
+        ...rest,
+        user: r.userId
+          ? {
+              id: r.userId,
+              email: userEmail,
+              firstName: userFirstName,
+              lastName: userLastName,
+              profilePicture: userProfilePicture,
+            }
+          : null,
+      };
+    }) as AuditTeamMember[];
 
     return data(payload({ teamMembers }));
   } catch (cause) {

@@ -22,6 +22,7 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { db } from "~/database/db.server";
 import { findUnique, create, update } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import {
@@ -56,30 +57,53 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    const organization = await db.organization
-      .findFirstOrThrow({
-        where: { id: organizationId },
-        include: {
-          qrCodes: {
-            include: {
-              asset: true,
-            },
-          },
-          owner: true,
-          ssoDetails: true,
-          workingHours: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Organization not found",
-          message:
-            "The organization you are trying to access does not exist or you do not have permission to access it.",
-          additionalData: { userId, params },
-          label: "Admin dashboard",
-        });
+    const orgRows = await queryRaw<Record<string, any>>(
+      db,
+      sql`SELECT o.*,
+                 u."id" AS "owner_id", u."firstName" AS "owner_firstName",
+                 u."lastName" AS "owner_lastName", u."email" AS "owner_email",
+                 sd."id" AS "sso_id", sd."domain" AS "sso_domain",
+                 sd."adminGroupId" AS "sso_adminGroupId",
+                 sd."selfServiceGroupId" AS "sso_selfServiceGroupId",
+                 wh."id" AS "wh_id"
+          FROM "Organization" o
+          LEFT JOIN "User" u ON u."id" = o."userId"
+          LEFT JOIN "SsoDetails" sd ON sd."id" = o."ssoDetailsId"
+          LEFT JOIN "WorkingHours" wh ON wh."organizationId" = o."id"
+          WHERE o."id" = ${organizationId}
+          LIMIT 1`
+    );
+
+    if (!orgRows.length) {
+      throw new ShelfError({
+        cause: null,
+        title: "Organization not found",
+        message:
+          "The organization you are trying to access does not exist or you do not have permission to access it.",
+        additionalData: { userId, params },
+        label: "Admin dashboard",
       });
+    }
+
+    const orgRow = orgRows[0];
+    const organization = {
+      ...orgRow,
+      owner: {
+        id: orgRow.owner_id,
+        firstName: orgRow.owner_firstName,
+        lastName: orgRow.owner_lastName,
+        email: orgRow.owner_email,
+      },
+      ssoDetails: orgRow.sso_id
+        ? {
+            id: orgRow.sso_id,
+            domain: orgRow.sso_domain,
+            adminGroupId: orgRow.sso_adminGroupId,
+            selfServiceGroupId: orgRow.sso_selfServiceGroupId,
+          }
+        : null,
+      workingHours: orgRow.wh_id ? { id: orgRow.wh_id } : null,
+    };
 
     if (!organization.workingHours) {
       await createDefaultWorkingHours(organization.id);

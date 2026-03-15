@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -36,42 +37,80 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return data(payload({ kits: [] }));
     }
 
-    const kits = await db.kit.findMany({
-      where: {
-        id: { in: kitIds },
-        organizationId, // Ensure user can only see kits from their organization
-      },
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        imageExpiration: true,
-        assets: {
-          select: {
-            id: true,
-            title: true,
-            mainImage: true,
-            mainImageExpiration: true,
-            category: {
-              select: {
-                name: true,
-              },
-            },
-          },
-          orderBy: {
-            title: "asc",
-          },
-        },
-        _count: {
-          select: {
-            assets: true,
-          },
-        },
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
+    const rows = await queryRaw<{
+      kitId: string;
+      kitName: string;
+      kitImage: string | null;
+      kitImageExpiration: string | null;
+      assetCount: number;
+      assetId: string | null;
+      assetTitle: string | null;
+      assetMainImage: string | null;
+      assetMainImageExpiration: string | null;
+      categoryName: string | null;
+    }>(
+      db,
+      sql`SELECT
+            k."id" AS "kitId",
+            k."name" AS "kitName",
+            k."image" AS "kitImage",
+            k."imageExpiration" AS "kitImageExpiration",
+            (SELECT COUNT(*)::int FROM "Asset" WHERE "kitId" = k."id") AS "assetCount",
+            a."id" AS "assetId",
+            a."title" AS "assetTitle",
+            a."mainImage" AS "assetMainImage",
+            a."mainImageExpiration" AS "assetMainImageExpiration",
+            c."name" AS "categoryName"
+          FROM "Kit" k
+          LEFT JOIN "Asset" a ON a."kitId" = k."id"
+          LEFT JOIN "Category" c ON c."id" = a."categoryId"
+          WHERE k."id" = ANY(${kitIds})
+            AND k."organizationId" = ${organizationId}
+          ORDER BY k."name" ASC, a."title" ASC`
+    );
+
+    // Reshape flat rows into nested kit objects
+    const kitMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        image: string | null;
+        imageExpiration: string | null;
+        assets: Array<{
+          id: string;
+          title: string;
+          mainImage: string | null;
+          mainImageExpiration: string | null;
+          category: { name: string } | null;
+        }>;
+        _count: { assets: number };
+      }
+    >();
+
+    for (const row of rows) {
+      if (!kitMap.has(row.kitId)) {
+        kitMap.set(row.kitId, {
+          id: row.kitId,
+          name: row.kitName,
+          image: row.kitImage,
+          imageExpiration: row.kitImageExpiration,
+          assets: [],
+          _count: { assets: row.assetCount },
+        });
+      }
+      if (row.assetId) {
+        kitMap.get(row.kitId)!.assets.push({
+          id: row.assetId,
+          title: row.assetTitle!,
+          mainImage: row.assetMainImage,
+          mainImageExpiration: row.assetMainImageExpiration,
+          category: row.categoryName ? { name: row.categoryName } : null,
+        });
+      }
+    }
+
+    const kits = Array.from(kitMap.values());
 
     return data(payload({ kits }));
   } catch (cause) {

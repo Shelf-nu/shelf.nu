@@ -2,7 +2,6 @@ import { data } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { findUnique } from "~/database/query-helpers.server";
 import { queryRaw, sql } from "~/database/sql.server";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
@@ -33,16 +32,28 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     });
 
     // Enforce assignee access for BASE/SELF_SERVICE roles on audit mutations.
-    const audit = await db.auditSession.findUnique({
-      where: { id: auditId },
-      select: {
-        id: true,
-        organizationId: true,
-        assignments: {
-          select: { userId: true },
-        },
-      },
-    });
+    const auditRows = await queryRaw<{
+      id: string;
+      organizationId: string;
+      assignmentUserId: string | null;
+    }>(
+      db,
+      sql`SELECT a."id", a."organizationId", aa."userId" AS "assignmentUserId"
+          FROM "AuditSession" a
+          LEFT JOIN "AuditAssignment" aa ON aa."auditSessionId" = a."id"
+          WHERE a."id" = ${auditId}`
+    );
+
+    const audit =
+      auditRows.length > 0
+        ? {
+            id: auditRows[0].id,
+            organizationId: auditRows[0].organizationId,
+            assignments: auditRows
+              .filter((r) => r.assignmentUserId !== null)
+              .map((r) => ({ userId: r.assignmentUserId! })),
+          }
+        : null;
 
     if (!audit || audit.organizationId !== organizationId) {
       throw new ShelfError({

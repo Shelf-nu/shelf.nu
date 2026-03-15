@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs, redirect, data } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -21,11 +22,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Verify the user is a member of the target organization
-    const membership = await db.userOrganization.findUnique({
-      where: {
-        userId_organizationId: { userId, organizationId },
-      },
-      select: { id: true },
+    const membership = await findUnique(db, "UserOrganization", {
+      where: { userId, organizationId },
+      select: "id",
     });
 
     if (!membership) {

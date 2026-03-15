@@ -27,6 +27,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { useSearchParams } from "~/hooks/search-params";
 import {
   getPaginatedAndFilterableQrCodes,
@@ -51,7 +52,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
 
     /** We do this to get all the batches ever created so we can have the filter */
-    const batches = await db.printBatch.findMany();
+    const batches = await findMany(db, "PrintBatch", {});
 
     if (totalPages > 0 && page > totalPages) {
       return redirect("/admin-dashboard/qrs?page=1");

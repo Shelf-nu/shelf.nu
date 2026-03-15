@@ -1,6 +1,8 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findFirstOrThrow } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
 
@@ -12,38 +14,31 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const image = await db.image
-      .findFirstOrThrow({
-        where: { id: imageId },
-        select: {
-          ownerOrgId: true,
-          contentType: true,
-          blob: true,
-          userId: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Image not found",
-          message:
-            "The image you are trying to access does not exist or you do not have permission to access it.",
-          additionalData: { userId, imageId },
-          status: 404,
-          label: "Image",
-        });
+    const image = await findFirstOrThrow(db, "Image", {
+      where: { id: imageId },
+      select: "ownerOrgId, contentType, blob, userId",
+    }).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        title: "Image not found",
+        message:
+          "The image you are trying to access does not exist or you do not have permission to access it.",
+        additionalData: { userId, imageId },
+        status: 404,
+        label: "Image",
       });
-
-    const userOrganizations = await db.userOrganization.findMany({
-      where: { userId: authSession.userId },
-      select: {
-        organization: {
-          select: { id: true },
-        },
-      },
     });
 
-    const orgIds = userOrganizations.map((uo) => uo.organization.id);
+    const orgRows = await queryRaw<{ organizationId: string }>(
+      db,
+      sql`
+        SELECT uo."organizationId"
+        FROM "UserOrganization" uo
+        WHERE uo."userId" = ${authSession.userId}
+      `
+    );
+
+    const orgIds = orgRows.map((row) => row.organizationId);
 
     if (!orgIds.includes(image.ownerOrgId)) {
       throw new ShelfError({

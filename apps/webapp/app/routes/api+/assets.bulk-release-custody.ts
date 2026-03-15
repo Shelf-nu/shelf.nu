@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@shelf/database";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -44,15 +45,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     if (role === OrganizationRoles.SELF_SERVICE) {
-      const custodies = await db.custody.findMany({
-        where: {
-          assetId: { in: assetIds },
-          asset: { organizationId },
-        },
-        select: { custodian: { select: { id: true, userId: true } } },
-      });
+      const custodyRows = await queryRaw<{
+        custodianId: string;
+        custodianUserId: string | null;
+      }>(
+        db,
+        sql`SELECT tm."id" AS "custodianId", tm."userId" AS "custodianUserId"
+            FROM "Custody" c
+            JOIN "Asset" a ON a."id" = c."assetId"
+            JOIN "TeamMember" tm ON tm."id" = c."teamMemberId"
+            WHERE c."assetId" = ANY(${assetIds}::text[])
+              AND a."organizationId" = ${organizationId}`
+      );
 
-      if (custodies.some((custody) => custody.custodian.userId !== userId)) {
+      if (custodyRows.some((custody) => custody.custodianUserId !== userId)) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",

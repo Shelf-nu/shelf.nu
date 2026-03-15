@@ -26,6 +26,13 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { db } from "~/database/db.server";
+import {
+  count,
+  findFirst,
+  remove,
+  update,
+} from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -92,9 +99,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const auditSession = await db.auditSession.findFirst({
+    const auditSession = await findFirst(db, "AuditSession", {
       where: { id: auditId, organizationId },
-      select: { status: true },
+      select: "status",
     });
 
     if (!auditSession) {
@@ -154,81 +161,73 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      await db.$transaction(async (tx) => {
-        const existingScan = await tx.auditScan.findFirst({
-          where: { auditSessionId: auditId, assetId },
-          include: {
-            auditAsset: {
-              select: { id: true, expected: true },
-            },
-          },
-        });
+      // Sequential operations replacing db.$transaction
+      const existingScanRows = await queryRaw<{
+        id: string;
+        auditAssetId: string | null;
+        auditAsset_id: string | null;
+        auditAsset_expected: boolean | null;
+      }>(
+        db,
+        sql`
+          SELECT
+            s."id",
+            s."auditAssetId",
+            aa."id" AS "auditAsset_id",
+            aa."expected" AS "auditAsset_expected"
+          FROM "AuditScan" s
+          LEFT JOIN "AuditAsset" aa ON aa."id" = s."auditAssetId"
+          WHERE s."auditSessionId" = ${auditId} AND s."assetId" = ${assetId}
+          LIMIT 1
+        `
+      );
 
-        if (!existingScan) {
-          return;
-        }
+      const existingScan = existingScanRows[0] ?? null;
+
+      if (existingScan) {
+        const auditAsset = existingScan.auditAsset_id
+          ? {
+              id: existingScan.auditAsset_id,
+              expected: existingScan.auditAsset_expected,
+            }
+          : null;
 
         // Keep audit asset state aligned with removal before recalculating counts.
-        if (existingScan.auditAsset?.expected) {
-          await tx.auditAsset.update({
-            where: { id: existingScan.auditAsset.id },
+        if (auditAsset?.expected) {
+          await update(db, "AuditAsset", {
+            where: { id: auditAsset.id },
             data: {
               status: "MISSING",
               scannedAt: null,
               scannedById: null,
             },
           });
-
-          await tx.auditSession.update({
-            where: { id: auditId },
-            data: {
-              foundAssetCount: { decrement: 1 },
-              missingAssetCount: { increment: 1 },
-            },
-          });
-        } else if (existingScan.auditAsset?.id) {
-          await tx.auditAsset.delete({
-            where: { id: existingScan.auditAsset.id },
-          });
-
-          await tx.auditSession.update({
-            where: { id: auditId },
-            data: {
-              unexpectedAssetCount: { decrement: 1 },
-            },
-          });
+        } else if (auditAsset?.id) {
+          await remove(db, "AuditAsset", { id: auditAsset.id });
         }
 
-        await tx.auditScan.delete({
-          where: { id: existingScan.id },
-        });
+        await remove(db, "AuditScan", { id: existingScan.id });
 
         // Recalculate counts to ensure overview stats reflect current state.
         const [foundCount, missingCount, unexpectedCount] = await Promise.all([
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: auditId,
-              expected: true,
-              status: "FOUND",
-            },
+          count(db, "AuditAsset", {
+            auditSessionId: auditId,
+            expected: true,
+            status: "FOUND",
           }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: auditId,
-              expected: true,
-              status: "MISSING",
-            },
+          count(db, "AuditAsset", {
+            auditSessionId: auditId,
+            expected: true,
+            status: "MISSING",
           }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: auditId,
-              expected: false,
-              status: "UNEXPECTED",
-            },
+          count(db, "AuditAsset", {
+            auditSessionId: auditId,
+            expected: false,
+            status: "UNEXPECTED",
           }),
         ]);
 
-        await tx.auditSession.update({
+        await update(db, "AuditSession", {
           where: { id: auditId },
           data: {
             foundAssetCount: foundCount,
@@ -241,9 +240,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           assetId,
           userId,
-          tx,
+          tx: db,
         });
-      });
+      }
 
       return payload({ success: true });
     }

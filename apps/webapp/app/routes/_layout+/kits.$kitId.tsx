@@ -26,6 +26,7 @@ import { ScanDetails } from "~/components/location/scan-details";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { remove, update } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -282,13 +283,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           { additionalData: { userId, organizationId, kitId } }
         );
 
-        const kit = await db.kit.update({
-          where: { id: kitId, organizationId },
-          data: {
-            assets: { disconnect: { id: assetId } },
-          },
-          select: { name: true, custody: { select: { custodianId: true } } },
+        // Disconnect the asset from the kit
+        await update(db, "Asset", {
+          where: { id: assetId },
+          data: { kitId: null },
         });
+
+        // Fetch kit name and custody info
+        const kitRows = await queryRaw<{
+          name: string;
+          custodianId: string | null;
+        }>(
+          db,
+          sql`SELECT k."name", kc."custodianId"
+              FROM "Kit" k
+              LEFT JOIN "KitCustody" kc ON kc."kitId" = k."id"
+              WHERE k."id" = ${kitId} AND k."organizationId" = ${organizationId}`
+        );
+        const kit = {
+          name: kitRows[0]?.name ?? "",
+          custody: kitRows[0]?.custodianId
+            ? { custodianId: kitRows[0].custodianId }
+            : null,
+        };
 
         /**
          * If kit was in custody then we have to make the asset available

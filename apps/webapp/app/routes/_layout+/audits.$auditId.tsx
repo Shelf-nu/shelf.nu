@@ -16,6 +16,7 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { count, findMany } from "~/database/query-helpers.server";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -178,8 +179,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     // Calculate stats for dynamic button text
-    const scanCount = await db.auditScan.count({
-      where: { auditSessionId: auditId },
+    const scanCount = await count(db, "AuditScan", {
+      auditSessionId: auditId,
     });
     const hasScans = scanCount > 0;
 
@@ -218,17 +219,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const header = { title: `${session.name} · Overview` };
 
     // Fetch team members for audit assignment (used in edit dialog)
-    const teamMembers = await db.teamMember.findMany({
+    const teamMembers = await findMany(db, "TeamMember", {
       where: {
         organizationId,
         deletedAt: null,
         userId: { not: null }, // Only team members with user accounts
       },
-      select: {
-        id: true,
-        name: true,
-        userId: true,
-      },
+      select: "id, name, userId",
       orderBy: { name: "asc" },
     });
 

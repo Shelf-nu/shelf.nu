@@ -4,6 +4,7 @@ import { data } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -171,39 +172,78 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     // Send email notification if audit is assigned to someone other than the creator
     if (assignee && assignee !== userId) {
-      // Fetch full audit details for email
-      const auditForEmail = await db.auditSession.findUnique({
-        where: { id: session.id },
-        include: {
-          createdBy: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
-          organization: {
-            include: {
-              owner: {
-                select: { email: true },
+      // Fetch full audit details for email via raw query (nested includes)
+      const emailRows = await queryRaw<{
+        id: string;
+        name: string;
+        description: string | null;
+        dueDate: string | null;
+        organizationId: string;
+        createdById: string;
+        creatorFirstName: string | null;
+        creatorLastName: string | null;
+        orgName: string;
+        orgId: string;
+        ownerEmail: string | null;
+        assetCount: number;
+        assignmentId: string | null;
+        assignmentUserId: string | null;
+        assigneeEmail: string | null;
+        assigneeFirstName: string | null;
+        assigneeLastName: string | null;
+      }>(
+        db,
+        sql`SELECT
+              s."id", s."name", s."description", s."dueDate",
+              s."organizationId", s."createdById",
+              cb."firstName" AS "creatorFirstName",
+              cb."lastName" AS "creatorLastName",
+              o."name" AS "orgName", o."id" AS "orgId",
+              ow."email" AS "ownerEmail",
+              (SELECT COUNT(*)::int FROM "AuditAsset"
+               WHERE "auditSessionId" = s."id") AS "assetCount",
+              aa."id" AS "assignmentId",
+              aa."userId" AS "assignmentUserId",
+              au."email" AS "assigneeEmail",
+              au."firstName" AS "assigneeFirstName",
+              au."lastName" AS "assigneeLastName"
+            FROM "AuditSession" s
+            LEFT JOIN "User" cb ON cb."id" = s."createdById"
+            LEFT JOIN "Organization" o ON o."id" = s."organizationId"
+            LEFT JOIN "User" ow ON ow."id" = o."userId"
+            LEFT JOIN "AuditAssignment" aa
+              ON aa."auditSessionId" = s."id"
+            LEFT JOIN "User" au ON au."id" = aa."userId"
+            WHERE s."id" = ${session.id}`
+      );
+
+      const auditForEmail =
+        emailRows.length > 0
+          ? {
+              ...emailRows[0],
+              createdBy: {
+                firstName: emailRows[0].creatorFirstName,
+                lastName: emailRows[0].creatorLastName,
               },
-            },
-          },
-          _count: {
-            select: { assets: true },
-          },
-          assignments: {
-            include: {
-              user: {
-                select: {
-                  email: true,
-                  firstName: true,
-                  lastName: true,
-                },
+              organization: {
+                id: emailRows[0].orgId,
+                name: emailRows[0].orgName,
+                owner: { email: emailRows[0].ownerEmail },
               },
-            },
-          },
-        },
-      });
+              _count: { assets: emailRows[0].assetCount },
+              assignments: emailRows
+                .filter((r) => r.assignmentId !== null)
+                .map((r) => ({
+                  id: r.assignmentId!,
+                  userId: r.assignmentUserId!,
+                  user: {
+                    email: r.assigneeEmail!,
+                    firstName: r.assigneeFirstName,
+                    lastName: r.assigneeLastName,
+                  },
+                })),
+            }
+          : null;
 
       if (auditForEmail) {
         const assigneeUser = auditForEmail.assignments.find(

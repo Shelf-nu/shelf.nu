@@ -7,6 +7,7 @@ import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getKit, releaseCustody } from "~/modules/kit/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -85,16 +86,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     if (isSelfService) {
-      const custody = await db.kitCustody.findUnique({
-        where: { kitId },
-        select: {
-          custodian: {
-            select: { id: true, userId: true },
-          },
-        },
-      });
+      const custodyRows = await queryRaw<{
+        custodianId: string;
+        custodianUserId: string | null;
+      }>(
+        db,
+        sql`SELECT tm."id" AS "custodianId", tm."userId" AS "custodianUserId"
+            FROM "KitCustody" kc
+            JOIN "TeamMember" tm ON tm."id" = kc."teamMemberId"
+            WHERE kc."kitId" = ${kitId}
+            LIMIT 1`
+      );
 
-      if (custody?.custodian?.userId !== userId) {
+      if (!custodyRows.length || custodyRows[0].custodianUserId !== userId) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",

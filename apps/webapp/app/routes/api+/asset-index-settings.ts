@@ -2,6 +2,7 @@ import { AssetIndexMode } from "@shelf/database";
 import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { update } from "~/database/query-helpers.server";
 import type {
   Column,
   ColumnLabelKey,
@@ -121,7 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           })
         );
 
-        await db.assetIndexSettings.update({
+        await update(db, "AssetIndexSettings", {
           where: { userId_organizationId: { userId, organizationId } },
           data: { freezeColumn },
         });
@@ -137,7 +138,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           })
         );
 
-        await db.assetIndexSettings.update({
+        await update(db, "AssetIndexSettings", {
           where: { userId_organizationId: { userId, organizationId } },
           data: { showAssetImage },
         });

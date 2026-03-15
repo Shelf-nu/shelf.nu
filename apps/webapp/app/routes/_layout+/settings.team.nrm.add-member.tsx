@@ -63,11 +63,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { name } = payload;
 
-    await db.teamMember.create({
-      data: {
-        name: name.trim(),
-        organizationId,
-      },
+    await create(db, "TeamMember", {
+      name: name.trim(),
+      organizationId,
     });
 
     sendNotification({

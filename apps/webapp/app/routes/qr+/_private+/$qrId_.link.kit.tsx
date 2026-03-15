@@ -34,6 +34,7 @@ import {
 import { Td } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { count } from "~/database/query-helpers.server";
 
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -124,7 +125,7 @@ export const loader = async ({
             label: "Assets",
           });
         }),
-      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      count(db, "TeamMember", { deletedAt: null, organizationId }),
     ]);
 
     if (totalPages !== 0 && page > totalPages) {
