@@ -29,13 +29,13 @@ import {
   findUniqueOrThrow,
   create,
   update,
-  remove,
+  remove as removeRecord,
   count,
   createMany,
   updateMany,
   deleteMany,
 } from "~/database/query-helpers.server";
-import { sql, raw, empty, SqlFragment, queryRaw } from "~/database/sql.server";
+import { sql, raw, empty, queryRaw } from "~/database/sql.server";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -1528,7 +1528,7 @@ export async function deleteAsset({
       select: "alertDateTime, activeSchedulerReference",
     });
 
-    await remove(db, "Asset", { id, organizationId });
+    await removeRecord(db, "Asset", { id, organizationId });
 
     await Promise.all(reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
@@ -3306,38 +3306,39 @@ export async function bulkUpdateAssetLocation({
       (a) => a.location?.id !== newLocation?.id
     );
 
-    await db.$transaction(async (tx) => {
-      if (assetsToUpdate.length > 0) {
-        /** Updating location of assets to newLocation */
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
-          data: { locationId: newLocation?.id ? newLocation.id : null },
-        });
+    // TODO: convert Prisma $transaction to Supabase RPC or sequential queries
+    if (assetsToUpdate.length > 0) {
+      /** Updating location of assets to newLocation */
+      await updateMany(db, "Asset", {
+        where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
+        data: { locationId: newLocation?.id ? newLocation.id : null },
+      });
 
-        /** Creating notes for the assets */
-        await tx.note.createMany({
-          data: assetsToUpdate.map((asset) => {
-            const isRemoving = !newLocationId;
+      /** Creating notes for the assets */
+      await createMany(
+        db,
+        "Note",
+        assetsToUpdate.map((asset) => {
+          const isRemoving = !newLocationId;
 
-            const content = getLocationUpdateNoteContent({
-              currentLocation: asset.location,
-              newLocation,
-              userId,
-              firstName: user?.firstName ?? "",
-              lastName: user?.lastName ?? "",
-              isRemoving,
-            });
+          const content = getLocationUpdateNoteContent({
+            currentLocation: asset.location,
+            newLocation,
+            userId,
+            firstName: user?.firstName ?? "",
+            lastName: user?.lastName ?? "",
+            isRemoving,
+          });
 
-            return {
-              content,
-              type: "UPDATE",
-              userId,
-              assetId: asset.id,
-            };
-          }),
-        });
-      }
-    });
+          return {
+            content,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }) as any
+      );
+    }
 
     // Create location activity notes
     const userLink = wrapUserLinkForNote({
@@ -3451,11 +3452,8 @@ export async function bulkUpdateAssetCategory({
       settings,
     });
 
-    await db.asset.updateMany({
-      where: {
-        id: { in: resolvedIds },
-        organizationId,
-      },
+    await updateMany(db, "Asset", {
+      where: { id: { in: resolvedIds }, organizationId },
       data: {
         /** If nothing is selected then we have to remove the relation and set category to null */
         categoryId: !categoryId ? null : categoryId,
@@ -3505,51 +3503,56 @@ export async function bulkAssignAssetTags({
 
     const loadUserForNotes = createLoadUserForNotes(userId);
 
-    const previousTagsByAssetId = await db.asset
-      .findMany({
-        where: {
-          id: { in: resolvedIds },
-          organizationId,
-        },
-        select: {
-          id: true,
-          tags: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      })
-      .then((assets) =>
-        assets.reduce<Map<string, TagSummary[]>>((acc, asset) => {
-          acc.set(asset.id, asset.tags);
-          return acc;
-        }, new Map())
-      );
+    // TODO: convert Prisma nested select to Supabase join for tags
+    const assetsWithTags: any[] = await findMany(db, "Asset", {
+      where: { id: { in: resolvedIds }, organizationId },
+      select: "id, tags:Tag(id, name)",
+    });
+    const previousTagsByAssetId = assetsWithTags.reduce<
+      Map<string, TagSummary[]>
+    >((acc, asset) => {
+      acc.set(asset.id, asset.tags ?? []);
+      return acc;
+    }, new Map());
 
-    const updatePromises = resolvedIds.map((id) =>
-      db.asset.update({
-        where: { id, organizationId },
-        data: {
-          tags: {
-            [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
-              id: tagId,
-            })),
-          },
-        },
-        include: {
-          tags: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      })
-    );
+    // Handle tag connect/disconnect via join table
+    for (const assetId of resolvedIds) {
+      if (remove) {
+        // Disconnect: remove tag associations
+        for (const tagId of tagsIds) {
+          await deleteMany(
+            db,
+            "_AssetToTag" as any,
+            {
+              A: assetId,
+              B: tagId,
+            } as any
+          );
+        }
+      } else {
+        // Connect: add tag associations (ignore if already exists)
+        for (const tagId of tagsIds) {
+          try {
+            await create(
+              db,
+              "_AssetToTag" as any,
+              {
+                A: assetId,
+                B: tagId,
+              } as any
+            );
+          } catch {
+            // Ignore unique constraint violations (tag already connected)
+          }
+        }
+      }
+    }
 
-    const updatedAssets = await Promise.all(updatePromises);
+    // Re-fetch assets with updated tags for change notes
+    const updatedAssets: any[] = await findMany(db, "Asset", {
+      where: { id: { in: resolvedIds }, organizationId },
+      select: "id, tags:Tag(id, name)",
+    });
 
     await Promise.all(
       updatedAssets.map((asset) =>
@@ -3557,7 +3560,7 @@ export async function bulkAssignAssetTags({
           assetId: asset.id,
           userId,
           previousTags: previousTagsByAssetId.get(asset.id) ?? [],
-          currentTags: asset.tags,
+          currentTags: asset.tags ?? [],
           loadUserForNotes,
         })
       )
@@ -3601,7 +3604,7 @@ export async function bulkMarkAvailability({
     });
 
     // Simple, consistent where clause
-    await db.asset.updateMany({
+    await updateMany(db, "Asset", {
       where: {
         id: { in: resolvedIds },
         organizationId,
@@ -3636,20 +3639,28 @@ export async function relinkAssetQrCode({
   assetId: Asset["id"];
   organizationId: Organization["id"];
 }) {
-  const [qr, user, asset] = await Promise.all([
+  // TODO: convert Prisma nested select to Supabase join for qrCodes
+  const [qr, user, asset]: [any, any, any] = await Promise.all([
     getQr({ id: qrId }),
     getUserByID(userId, {
       select: {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Record<string, any>,
+      } as Record<string, any>,
     }),
-    db.asset.findFirst({
+    findFirst(db, "Asset", {
       where: { id: assetId, organizationId },
-      select: { qrCodes: { select: { id: true } } },
+      select: "id",
     }),
   ]);
+
+  // Get existing QR codes for the asset
+  const existingQrCodes = await findMany(db, "Qr", {
+    where: { assetId },
+    select: "id",
+  });
+  const oldQrCode = existingQrCodes[0];
 
   /** User cannot link qr code of other organization */
   if (qr.organizationId && qr.organizationId !== organizationId) {
@@ -3683,35 +3694,37 @@ export async function relinkAssetQrCode({
     });
   }
 
-  const oldQrCode = asset?.qrCodes[0];
-
   await Promise.all([
-    db.qr.update({
+    // Update the QR code's org and user
+    update(db, "Qr", {
       where: { id: qr.id },
       data: { organizationId, userId },
     }),
-    db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        qrCodes: {
-          set: [],
-          connect: { id: qr.id },
-        },
-      },
-    }),
-    createNote({
-      assetId,
-      userId,
-      type: "UPDATE",
-      content: `${wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      })} changed QR code ${
-        oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**.`,
+    // Disconnect all existing QR codes from asset
+    updateMany(db, "Qr", {
+      where: { assetId },
+      data: { assetId: null },
     }),
   ]);
+
+  // Connect the new QR code to the asset
+  await update(db, "Qr", {
+    where: { id: qr.id },
+    data: { assetId },
+  });
+
+  await createNote({
+    assetId,
+    userId,
+    type: "UPDATE",
+    content: `${wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    })} changed QR code ${
+      oldQrCode ? `from **${oldQrCode.id}**` : ""
+    } to **${qrId}**.`,
+  });
 }
 
 export async function getUserAssetsTabLoaderData({
@@ -3823,18 +3836,18 @@ export async function getEntitiesWithSelectedValues({
     totalLocations,
   ] = await Promise.all([
     /** Categories start */
-    db.category.findMany({
+    findMany(db, "Category", {
       where: { organizationId, id: { notIn: selectedCategoryIds } },
       take: allSelectedEntries.includes("category") ? undefined : 12,
     }),
-    db.category.findMany({
+    findMany(db, "Category", {
       where: { organizationId, id: { in: selectedCategoryIds } },
     }),
-    db.category.count({ where: { organizationId } }),
+    count(db, "Category", { organizationId }),
     /** Categories end */
 
     /** Tags start */
-    db.tag.findMany({
+    findMany(db, "Tag", {
       where: {
         organizationId,
         id: { notIn: selectedTagIds },
@@ -3846,7 +3859,7 @@ export async function getEntitiesWithSelectedValues({
       take: allSelectedEntries.includes("tag") ? undefined : 12,
       orderBy: { name: "asc" },
     }),
-    db.tag.findMany({
+    findMany(db, "Tag", {
       where: {
         organizationId,
         id: { in: selectedTagIds },
@@ -3857,26 +3870,21 @@ export async function getEntitiesWithSelectedValues({
       },
       orderBy: { name: "asc" },
     }),
-    db.tag.count({
-      where: {
-        organizationId,
-        OR: [
-          { useFor: { isEmpty: true } },
-          { useFor: { has: TagUseFor.ASSET } },
-        ],
-      },
+    count(db, "Tag", {
+      organizationId,
+      OR: [{ useFor: { isEmpty: true } }, { useFor: { has: TagUseFor.ASSET } }],
     }),
     /** Tags end */
 
     /** Location start */
-    db.location.findMany({
+    findMany(db, "Location", {
       where: { organizationId, id: { notIn: selectedLocationIds } },
       take: allSelectedEntries.includes("location") ? undefined : 12,
     }),
-    db.location.findMany({
+    findMany(db, "Location", {
       where: { organizationId, id: { in: selectedLocationIds } },
     }),
-    db.location.count({ where: { organizationId } }),
+    count(db, "Location", { organizationId }),
     /** Location end */
   ]);
 
@@ -3907,7 +3915,7 @@ export async function getCategoriesForCreateAndEdit({
   try {
     const [categoryExcludedSelected, selectedCategories, totalCategories] =
       await Promise.all([
-        db.category.findMany({
+        findMany(db, "Category", {
           where: {
             organizationId,
             id: Array.isArray(categorySelected)
@@ -3916,7 +3924,7 @@ export async function getCategoriesForCreateAndEdit({
           },
           take: getAllEntries.includes("category") ? undefined : 12,
         }),
-        db.category.findMany({
+        findMany(db, "Category", {
           where: {
             organizationId,
             id: Array.isArray(categorySelected)
@@ -3924,7 +3932,7 @@ export async function getCategoriesForCreateAndEdit({
               : categorySelected,
           },
         }),
-        db.category.count({ where: { organizationId } }),
+        count(db, "Category", { organizationId }),
       ]);
 
     return {
@@ -3958,14 +3966,14 @@ export async function getLocationsForCreateAndEdit({
 
     const [locationExcludedSelected, selectedLocation, totalLocations] =
       await Promise.all([
-        db.location.findMany({
+        findMany(db, "Location", {
           where: { organizationId, id: { not: locationSelected } },
           take: getAllEntries.includes("location") ? undefined : 12,
         }),
-        db.location.findMany({
+        findMany(db, "Location", {
           where: { organizationId, id: locationSelected },
         }),
-        db.location.count({ where: { organizationId } }),
+        count(db, "Location", { organizationId }),
       ]);
 
     return {

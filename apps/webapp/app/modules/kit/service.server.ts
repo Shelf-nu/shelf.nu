@@ -66,11 +66,9 @@ import {
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UpdateKitPayload } from "./types";
-import {
-  GET_KIT_STATIC_INCLUDES,
-  KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
-  KITS_INCLUDE_FIELDS,
-} from "./types";
+// TODO: These Prisma-style includes are no longer directly used with Supabase query helpers.
+// Keeping the import commented out for reference during migration.
+// import { GET_KIT_STATIC_INCLUDES, KIT_SELECT_FIELDS_FOR_LIST_ITEMS, KITS_INCLUDE_FIELDS } from "./types";
 import { getKitsWhereInput } from "./utils.server";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
@@ -2316,94 +2314,123 @@ export async function bulkRemoveAssetsFromKits({
       settings,
     });
 
-    const assets = await db.asset.findMany({
+    // Fetch assets with their kit and custody info
+    const assetsRaw = (await findMany(db, "Asset", {
       where: { id: { in: resolvedIds }, organizationId },
-      select: {
-        id: true,
-        title: true,
-        kit: {
-          select: { id: true, name: true, custody: { select: { id: true } } },
-        },
-        custody: {
-          select: {
-            id: true,
-            custodian: {
-              select: {
-                name: true,
-                user: {
-                  select: { id: true, firstName: true, lastName: true },
-                },
-              },
-            },
-          },
-        },
-      },
+      select: "id, title, kitId",
+    })) as any[];
+
+    // Fetch kit info for these assets
+    const assetKitIds = [
+      ...new Set(assetsRaw.map((a: any) => a.kitId).filter(Boolean)),
+    ];
+    const kitsForAssets =
+      assetKitIds.length > 0
+        ? await findMany(db, "Kit", {
+            where: { id: { in: assetKitIds } },
+            select: "id, name",
+          })
+        : [];
+    const kitMap = new Map((kitsForAssets as any[]).map((k: any) => [k.id, k]));
+
+    // Fetch kit custodies
+    const kitCustodies =
+      assetKitIds.length > 0
+        ? await findMany(db, "KitCustody", {
+            where: { kitId: { in: assetKitIds } },
+            select: "id, kitId",
+          })
+        : [];
+    const kitCustodyMap = new Map(
+      (kitCustodies as any[]).map((c: any) => [c.kitId, c])
+    );
+
+    // Fetch asset custodies
+    const assetIdsForCustody = assetsRaw.map((a: any) => a.id);
+    const assetCustodies = await findMany(db, "Custody", {
+      where: { assetId: { in: assetIdsForCustody } },
+      select: "*, TeamMember(name, User(id, firstName, lastName))",
+    });
+    const custodyMap = new Map(
+      (assetCustodies as any[]).map((c: any) => [c.assetId, c])
+    );
+
+    // Build enriched assets
+    const assets = assetsRaw.map((a: any) => ({
+      ...a,
+      kit: a.kitId
+        ? {
+            ...kitMap.get(a.kitId),
+            custody: kitCustodyMap.get(a.kitId) || null,
+          }
+        : null,
+      custody: custodyMap.get(a.id) || null,
+    }));
+
+    /**
+     * If there are assets whose kits were in custody, then we have to remove the custody FIRST
+     * to avoid orphaned custody records when status is set to AVAILABLE
+     */
+    const assetsWhoseKitsInCustody = assets.filter(
+      (asset: any) => !!asset.kit?.custody && asset.custody
+    );
+
+    const custodyIdsToDelete = assetsWhoseKitsInCustody.map((a: any) => {
+      invariant(a.custody, "Custody not found over asset");
+      return a.custody.id;
     });
 
-    await db.$transaction(async (tx) => {
-      /**
-       * If there are assets whose kits were in custody, then we have to remove the custody FIRST
-       * to avoid orphaned custody records when status is set to AVAILABLE
-       */
-      const assetsWhoseKitsInCustody = assets.filter(
-        (asset) => !!asset.kit?.custody && asset.custody
+    if (custodyIdsToDelete.length > 0) {
+      await deleteMany(db, "Custody", { id: { in: custodyIdsToDelete } });
+    }
+
+    /** Removing assets from kits - AFTER custody is deleted */
+    await updateMany(db, "Asset", {
+      where: { id: { in: assets.map((a: any) => a.id) } },
+      data: { kitId: null, status: AssetStatus.AVAILABLE },
+    });
+
+    /** Create notes for assets released from custody */
+    if (assetsWhoseKitsInCustody.length > 0) {
+      await createMany(
+        db,
+        "Note",
+        assetsWhoseKitsInCustody.map((asset: any) => {
+          const custodianDisplay = asset.custody?.TeamMember
+            ? wrapCustodianForNote({
+                teamMember: asset.custody.TeamMember,
+              })
+            : "**Unknown Custodian**";
+          return {
+            content: `${actor} released ${custodianDisplay}'s custody.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        })
       );
+    }
 
-      const custodyIdsToDelete = assetsWhoseKitsInCustody.map((a) => {
-        invariant(a.custody, "Custody not found over asset");
-        return a.custody.id;
-      });
-
-      if (custodyIdsToDelete.length > 0) {
-        await tx.custody.deleteMany({
-          where: { id: { in: custodyIdsToDelete } },
-        });
-      }
-
-      /** Removing assets from kits - AFTER custody is deleted */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((a) => a.id) } },
-        data: { kitId: null, status: AssetStatus.AVAILABLE },
-      });
-
-      /** Create notes for assets released from custody */
-      if (assetsWhoseKitsInCustody.length > 0) {
-        await tx.note.createMany({
-          data: assetsWhoseKitsInCustody.map((asset) => {
-            const custodianDisplay = asset.custody?.custodian
-              ? wrapCustodianForNote({
-                  teamMember: asset.custody.custodian,
-                })
-              : "**Unknown Custodian**";
-            return {
-              content: `${actor} released ${custodianDisplay}'s custody.`,
-              type: "UPDATE",
-              userId,
-              assetId: asset.id,
-            };
-          }),
-        });
-      }
-
-      /** Create notes for assets removed from kit */
-      const assetsRemovedFromKit = assets.filter((asset) => asset.kit);
-      if (assetsRemovedFromKit.length > 0) {
-        await tx.note.createMany({
-          data: assetsRemovedFromKit.map((asset) => {
-            const kitLink = wrapLinkForNote(
-              `/kits/${asset.kit!.id}`,
-              asset.kit!.name.trim()
-            );
-            return {
-              content: `${actor} removed asset from ${kitLink}.`,
-              type: "UPDATE",
-              userId,
-              assetId: asset.id,
-            };
-          }),
-        });
-      }
-    });
+    /** Create notes for assets removed from kit */
+    const assetsRemovedFromKit = assets.filter((asset: any) => asset.kit);
+    if (assetsRemovedFromKit.length > 0) {
+      await createMany(
+        db,
+        "Note",
+        assetsRemovedFromKit.map((asset: any) => {
+          const kitLink = wrapLinkForNote(
+            `/kits/${asset.kit!.id}`,
+            asset.kit!.name.trim()
+          );
+          return {
+            content: `${actor} removed asset from ${kitLink}.`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        })
+      );
+    }
 
     return true;
   } catch (cause) {
