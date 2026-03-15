@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  Asset,
-  Booking,
-  Category,
-  Custody,
-  Prisma,
-  Tag,
-} from "@shelf/database";
+import type { Asset, Booking, Category, Custody, Tag } from "@shelf/database";
 import { AssetStatus, BookingStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
@@ -298,7 +291,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } satisfies Record<string, boolean>,
     });
 
     const booking = await db.booking
@@ -753,7 +746,7 @@ const RowComponent = ({
   item,
 }: {
   item: AssetsFromViewItem & {
-    location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
+    location?: any | null;
   };
 }) => {
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);

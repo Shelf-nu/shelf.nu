@@ -1,4 +1,4 @@
-import type { Prisma, Organization } from "@shelf/database";
+import type { Organization } from "@shelf/database";
 import { OrganizationType } from "@shelf/database";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
@@ -309,7 +309,7 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
             },
           },
         },
-      } satisfies Prisma.UserSelect,
+      },
     }),
     getUserTierLimit(userId),
   ]);

@@ -1,4 +1,4 @@
-import type { Prisma, User } from "@shelf/database";
+import type { User } from "@shelf/database";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -30,7 +30,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
     },
   },
   organization: { select: { name: true, customEmailFooter: true } },
-} satisfies Prisma.AssetReminderInclude;
+} satisfies Record<string, any>;
 
 type UserToEmail = Pick<User, "email" | "firstName" | "lastName"> & {
   isOwner?: boolean;

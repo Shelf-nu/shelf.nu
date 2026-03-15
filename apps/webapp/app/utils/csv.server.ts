@@ -3,7 +3,6 @@ import type {
   AssetIndexSettings,
   Note,
   Organization,
-  Prisma,
   Tag,
   TeamMember,
 } from "@shelf/database";
@@ -804,7 +803,7 @@ export async function exportAssetNotesToCsv({
   assetId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Prisma.NoteWhereInput>({
+  return exportNotesToCsv<Record<string, any>>({
     request,
     where: {
       assetId,
@@ -823,7 +822,7 @@ export async function exportBookingNotesToCsv({
   bookingId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Prisma.BookingNoteWhereInput>({
+  return exportNotesToCsv<Record<string, any>>({
     request,
     where: {
       bookingId,
@@ -843,7 +842,7 @@ export async function exportAuditNotesToCsv({
   auditId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Prisma.AuditNoteWhereInput>({
+  return exportNotesToCsv<Record<string, any>>({
     request,
     where: {
       auditSessionId: auditId,
@@ -863,7 +862,7 @@ export async function exportLocationNotesToCsv({
   locationId: string;
   organizationId: string;
 }) {
-  return exportNotesToCsv<Prisma.LocationNoteWhereInput>({
+  return exportNotesToCsv<Record<string, any>>({
     request,
     where: {
       locationId,
@@ -1037,7 +1036,7 @@ export async function exportNRMsToCsv({
   organizationId: Organization["id"];
 }) {
   try {
-    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
+    const where: Record<string, any> = nrmIds.includes(ALL_SELECTED_KEY)
       ? { organizationId }
       : { id: { in: nrmIds }, organizationId };
 
@@ -1062,9 +1061,7 @@ export async function exportNRMsToCsv({
 export function buildCsvExportDataFromTeamMembers({
   teamMembers,
 }: {
-  teamMembers: Prisma.TeamMemberGetPayload<{
-    include: { _count: { select: { custodies: true } } };
-  }>[];
+  teamMembers: any[];
 }) {
   try {
     const headers = {

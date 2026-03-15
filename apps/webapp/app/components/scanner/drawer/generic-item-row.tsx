@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import type { Prisma } from "@shelf/database";
 import { motion } from "framer-motion";
 import { useSetAtom } from "jotai";
 import type { ScanListItem } from "~/atoms/qr-scanner";
@@ -61,13 +60,12 @@ type GenericItemRowProps<T> = {
    * This can allow for additional data to be fetched or included in the asset request for better UX
    * The strings inside the array should be a json representation of prisma's include/select syntax,
    */
-  assetExtraInclude?: Prisma.AssetInclude;
+  assetExtraInclude?: Record<string, any>;
   /**
    * Optional array of strings to be sent as search params to the get-scanned-item endpoint
    * This can allow for additional data to be fetched or included in the kit request for better UX
-   * The strings inside the array should be a json representation of prisma's include/select syntax,
    */
-  kitExtraInclude?: Prisma.KitInclude;
+  kitExtraInclude?: Record<string, any>;
   /**
    * Optional additional search params to be sent to the get-scanned-item endpoint
    */

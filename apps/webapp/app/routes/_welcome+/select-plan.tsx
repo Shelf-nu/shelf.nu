@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Currency, Prisma } from "@shelf/database";
+import type { Currency } from "@shelf/database";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { useLoaderData, useNavigation } from "react-router";
 import { Form } from "~/components/custom-form";
@@ -46,7 +46,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const user = await getUserByID(userId, {
-      select: { id: true, customerId: true } satisfies Prisma.UserSelect,
+      select: { id: true, customerId: true } satisfies Record<string, any>,
     });
 
     /** Get the Stripe customer */

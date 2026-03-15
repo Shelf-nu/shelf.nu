@@ -1,4 +1,4 @@
-import { OrganizationRoles, type Prisma } from "@shelf/database";
+import { OrganizationRoles } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
@@ -113,7 +113,7 @@ export const action = async ({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     const assetWithCustody = await getAsset({

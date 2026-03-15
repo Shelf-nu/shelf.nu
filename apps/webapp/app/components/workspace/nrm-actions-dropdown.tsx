@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { Prisma } from "@shelf/database";
 import { useLoaderData } from "react-router";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import {
@@ -18,15 +17,7 @@ import { Button } from "../shared/button";
 export function TeamMembersActionsDropdown({
   teamMember,
 }: {
-  teamMember: Prisma.TeamMemberGetPayload<{
-    include: {
-      _count: {
-        select: {
-          custodies: true;
-        };
-      };
-    };
-  }>;
+  teamMember: any;
 }) {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const { isPersonalOrg } = useLoaderData<typeof loader>();

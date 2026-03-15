@@ -1,4 +1,3 @@
-import { Prisma } from "@shelf/database";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
@@ -67,83 +66,86 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Helper function to create search conditions for text fields
     const createTextSearchConditions = (term: string, fields: string[]) =>
       fields.map((field) => ({
-        [field]: { contains: term, mode: Prisma.QueryMode.insensitive },
+        [field]: { contains: term, mode: "insensitive" as const },
       }));
 
     // Kit search conditions
-    const kitSearchConditions: Prisma.KitWhereInput[] = searchTerms.map(
+    const kitSearchConditions: Record<string, any>[] = searchTerms.map(
       (term) => ({
         OR: [
           ...createTextSearchConditions(term, ["name", "description"]),
-          { id: { contains: term, mode: Prisma.QueryMode.insensitive } },
+          { id: { contains: term, mode: "insensitive" as const } },
         ],
       })
     );
 
     // Booking search conditions
-    const bookingSearchConditions: Prisma.BookingWhereInput[] = searchTerms.map(
+    const bookingSearchConditions: Record<string, any>[] = searchTerms.map(
       (term) => ({
         OR: [
           ...createTextSearchConditions(term, ["name", "description"]),
-          { id: { contains: term, mode: Prisma.QueryMode.insensitive } },
+          { id: { contains: term, mode: "insensitive" as const } },
         ],
       })
     );
 
     // Location search conditions
-    const locationSearchConditions: Prisma.LocationWhereInput[] =
-      searchTerms.map((term) => ({
+    const locationSearchConditions: Record<string, any>[] = searchTerms.map(
+      (term) => ({
         OR: [
           ...createTextSearchConditions(term, [
             "name",
             "description",
             "address",
           ]),
-          { id: { contains: term, mode: Prisma.QueryMode.insensitive } },
+          { id: { contains: term, mode: "insensitive" as const } },
         ],
-      }));
+      })
+    );
 
     // Team member search conditions
-    const teamMemberSearchConditions: Prisma.TeamMemberWhereInput[] =
-      searchTerms.map((term) => ({
+    const teamMemberSearchConditions: Record<string, any>[] = searchTerms.map(
+      (term) => ({
         OR: [
-          { name: { contains: term, mode: Prisma.QueryMode.insensitive } },
-          { id: { contains: term, mode: Prisma.QueryMode.insensitive } },
+          { name: { contains: term, mode: "insensitive" as const } },
+          { id: { contains: term, mode: "insensitive" as const } },
           {
             user: {
               OR: [
                 {
                   firstName: {
                     contains: term,
-                    mode: Prisma.QueryMode.insensitive,
+                    mode: "insensitive" as const,
                   },
                 },
                 {
                   lastName: {
                     contains: term,
-                    mode: Prisma.QueryMode.insensitive,
+                    mode: "insensitive" as const,
                   },
                 },
                 {
                   email: {
                     contains: term,
-                    mode: Prisma.QueryMode.insensitive,
+                    mode: "insensitive" as const,
                   },
                 },
               ],
             },
           },
         ],
-      }));
+      })
+    );
 
     // Audit search conditions
-    const auditSearchConditions: Prisma.AuditSessionWhereInput[] =
-      searchTerms.map((term) => ({
+    const auditSearchConditions: Record<string, any>[] = searchTerms.map(
+      (term) => ({
         OR: [
           ...createTextSearchConditions(term, ["name", "description"]),
-          { id: { contains: term, mode: Prisma.QueryMode.insensitive } },
+          { id: { contains: term, mode: "insensitive" as const } },
         ],
-      }));
+      })
+    );
 
     // Check if this is a personal workspace - they don't have bookings or team members
     const isPersonalWorkspace = isPersonalOrg(currentOrganization);
@@ -160,12 +162,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     // Prepare where clauses for other entities
 
-    const kitWhere: Prisma.KitWhereInput = {
+    const kitWhere: Record<string, any> = {
       organizationId,
       ...(kitSearchConditions.length ? { OR: kitSearchConditions } : {}),
     };
 
-    const bookingWhere: Prisma.BookingWhereInput = {
+    const bookingWhere: Record<string, any> = {
       organizationId,
       ...(bookingSearchConditions.length
         ? { OR: bookingSearchConditions }
@@ -174,14 +176,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(canSeeAllBookings ? {} : { custodianUserId: userId }),
     };
 
-    const locationWhere: Prisma.LocationWhereInput = {
+    const locationWhere: Record<string, any> = {
       organizationId,
       ...(locationSearchConditions.length
         ? { OR: locationSearchConditions }
         : {}),
     };
 
-    const teamMemberWhere: Prisma.TeamMemberWhereInput = {
+    const teamMemberWhere: Record<string, any> = {
       organizationId,
       deletedAt: null,
       ...(teamMemberSearchConditions.length
@@ -214,7 +216,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           }),
     };
 
-    const auditWhere: Prisma.AuditSessionWhereInput = {
+    const auditWhere: Record<string, any> = {
       organizationId,
       ...(auditSearchConditions.length ? { OR: auditSearchConditions } : {}),
       ...(isSelfServiceOrBase && userId

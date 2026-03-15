@@ -4,7 +4,6 @@ import type {
   AuditSession,
   Organization,
   User,
-  Prisma,
 } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -287,32 +286,9 @@ export async function getAuditImages({
   auditSessionId: AuditSession["id"];
   organizationId: Organization["id"];
   auditAssetId?: AuditAsset["id"] | null;
-}): Promise<
-  Prisma.AuditImageGetPayload<{
-    include: {
-      uploadedBy: {
-        select: {
-          id: true;
-          firstName: true;
-          lastName: true;
-          profilePicture: true;
-        };
-      };
-      auditAsset: {
-        include: {
-          asset: {
-            select: {
-              id: true;
-              title: true;
-            };
-          };
-        };
-      };
-    };
-  }>[]
-> {
+}): Promise<any[]> {
   try {
-    const where: Prisma.AuditImageWhereInput = {
+    const where: Record<string, any> = {
       auditSessionId,
       organizationId,
     };

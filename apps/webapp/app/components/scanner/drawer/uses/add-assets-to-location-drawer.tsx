@@ -1,5 +1,4 @@
 import type { CSSProperties } from "react";
-import type { Prisma } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import { z } from "zod";
@@ -208,18 +207,10 @@ export function AssetRow({
   location,
 }: {
   asset: AssetFromQrWithLocation;
-  location: Pick<
-    Prisma.LocationGetPayload<{
-      include: {
-        assets: {
-          select: {
-            id: true;
-          };
-        };
-      };
-    }>,
-    "id" | "assets"
-  >;
+  location: {
+    id: string;
+    assets: Array<{ id: string }>;
+  };
 }) {
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
@@ -293,14 +284,10 @@ export function KitRow({
   location,
 }: {
   kit: KitFromQr;
-  location: Pick<
-    Prisma.LocationGetPayload<{
-      include: {
-        kits: { select: { id: true } };
-      };
-    }>,
-    "id" | "kits"
-  >;
+  location: {
+    id: string;
+    kits: Array<{ id: string }>;
+  };
 }) {
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [

@@ -1,9 +1,13 @@
-import type { Prisma } from "@shelf/database";
-import type { BOOKING_INCLUDE_FOR_EMAIL } from "~/modules/booking/constants";
+import type { Booking, Organization, TeamMember, User } from "@shelf/database";
 
-export type BookingForEmail = Prisma.BookingGetPayload<{
-  include: typeof BOOKING_INCLUDE_FOR_EMAIL;
-}>;
+export type BookingForEmail = Booking & {
+  custodianTeamMember: TeamMember | null;
+  custodianUser: User | null;
+  organization: Organization & {
+    owner: { email: string } | null;
+  };
+  _count: { assets: number };
+};
 
 export type EmailPayloadType = {
   /** Email address of recipient */

@@ -1,4 +1,4 @@
-import { AssetStatus, BarcodeType, type Prisma } from "@shelf/database";
+import { AssetStatus, BarcodeType } from "@shelf/database";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -244,7 +244,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     const { image } = parseData(

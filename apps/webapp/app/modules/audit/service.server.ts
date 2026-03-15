@@ -1,6 +1,5 @@
 import { AuditAssetStatus } from "@shelf/database";
 import { AuditStatus } from "@shelf/database";
-import type { Prisma } from "@shelf/database";
 import type { AuditAssignment, AuditSession } from "@shelf/database";
 import type { UserOrganization } from "@shelf/database";
 import { z } from "zod";
@@ -69,7 +68,7 @@ export const AUDIT_LIST_INCLUDE = {
       assignments: true,
     },
   },
-} satisfies Prisma.AuditSessionInclude;
+} satisfies Record<string, any>;
 
 export type AuditScopeMeta = {
   contextType?: string | null;
@@ -787,7 +786,7 @@ export async function getAssetsForAuditSession({
 
   try {
     // Build where clause for audit assets based on status filter
-    const auditAssetWhere: Prisma.AuditAssetWhereInput = {
+    const auditAssetWhere: Record<string, any> = {
       auditSessionId,
     };
 
@@ -858,7 +857,7 @@ export async function getAssetsForAuditSession({
     }
 
     // Build where clause
-    const where: Prisma.AssetWhereInput = {
+    const where: Record<string, any> = {
       organizationId,
       id: { in: assetIds },
     };
@@ -1541,7 +1540,7 @@ export async function getAuditsForOrganization(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8;
 
-    const where: Prisma.AuditSessionWhereInput = { organizationId };
+    const where: Record<string, any> = { organizationId };
 
     // Filter by assignee for BASE/SELF_SERVICE users
     if (isSelfServiceOrBase && userId) {

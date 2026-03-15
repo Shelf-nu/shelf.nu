@@ -1,5 +1,5 @@
 import { AssetStatus, BookingStatus } from "@shelf/database";
-import type { Asset, Booking, Organization, Prisma } from "@shelf/database";
+import type { Asset, Booking, Organization } from "@shelf/database";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import type { ErrorLabel } from "~/utils/error";
@@ -13,8 +13,8 @@ export function getBookingWhereInput({
 }: {
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
-}): Prisma.BookingWhereInput {
-  const where: Prisma.BookingWhereInput = { organizationId };
+}): Record<string, any> {
+  const where: Record<string, any> = { organizationId };
 
   if (!currentSearchParams) {
     return where;
@@ -152,7 +152,7 @@ export function createBookingConflictConditions({
   fromDate?: Date | string | null;
   toDate?: Date | string | null;
   includeCurrentBooking?: boolean;
-}): Prisma.Asset$bookingsArgs {
+}): Record<string, any> {
   return {
     where: {
       ...(fromDate && toDate

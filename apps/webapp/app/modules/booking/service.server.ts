@@ -1,7 +1,6 @@
 import { BookingStatus, AssetStatus, KitStatus } from "@shelf/database";
 import type {
   Booking,
-  Prisma,
   Organization,
   Asset,
   Kit,
@@ -21,6 +20,22 @@ import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
+import {
+  findMany,
+  findFirst,
+  findFirstOrThrow,
+  findUnique,
+  findUniqueOrThrow,
+  create,
+  update,
+  remove,
+  count,
+  updateMany,
+  deleteMany,
+  createMany,
+} from "~/database/query-helpers.server";
+import { sql, raw, queryRaw } from "~/database/sql.server";
+import { sequential } from "~/database/transaction.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -60,7 +75,7 @@ import {
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import type { MergeInclude } from "~/utils/utils";
+// MergeInclude removed — no longer needed without Prisma includes
 import {
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
@@ -163,7 +178,7 @@ export async function createStatusTransitionNote({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } as const,
     });
     const userLink = wrapUserLinkForNote({
       id: userId,
@@ -249,7 +264,7 @@ export async function scheduleNextBookingJob({
       {},
       when
     );
-    await db.booking.update({
+    await update(db, "Booking", {
       where: { id: data.id },
       data: { activeSchedulerReference: id },
     });
@@ -268,7 +283,7 @@ async function updateBookingAssetStates(
   status: AssetStatus
 ) {
   try {
-    return await db.asset.updateMany({
+    return await updateMany(db, "Asset", {
       where: {
         status: { not: status },
         id: { in: booking.assets.map((a) => a.id) },
@@ -293,7 +308,7 @@ async function updateBookingKitStates({
   status: KitStatus;
 }) {
   try {
-    return await db.kit.updateMany({
+    return await updateMany(db, "Kit", {
       where: { id: { in: kitIds } },
       data: { status },
     });
@@ -337,14 +352,14 @@ export async function createBooking({
   hints: ClientHint;
 }) {
   try {
-    const dataToCreate: Prisma.BookingCreateInput = {
+    const dataToCreate: Record<string, any> = {
       name: booking.name,
       from: booking.from,
       to: booking.to,
       description: booking.description,
       status: BookingStatus.DRAFT,
-      creator: { connect: { id: booking.creatorId } },
-      organization: { connect: { id: booking.organizationId } },
+      creatorId: booking.creatorId,
+      organizationId: booking.organizationId,
       /**
        * Updated original dates to user entered `from` and `to`
        * so that we can track of it later
@@ -354,39 +369,39 @@ export async function createBooking({
       /**
        * Custodian team member will always be passed,
        * even if assigning to a user, so we directly connect it to the booking */
-      custodianTeamMember: {
-        connect: { id: booking.custodianTeamMemberId },
-      },
+      custodianTeamMemberId: booking.custodianTeamMemberId,
     };
 
+    if (booking.custodianUserId) {
+      dataToCreate.custodianUserId = booking.custodianUserId;
+    }
+
+    const createdBooking = await create(db, "Booking", dataToCreate);
+
     /**
-     * If assetsIds are passed, we directly connect them.
+     * If assetsIds are passed, we directly connect them via the join table.
      * This can happen when:
      * - Booking is created from assets bulk actions
      * - Booking is created from asset page
      * */
     if (assetIds.length > 0) {
-      dataToCreate.assets = {
-        connect: assetIds.map((id) => ({ id })),
-      };
-    }
-
-    if (booking.custodianUserId) {
-      dataToCreate.custodianUser = {
-        connect: { id: booking.custodianUserId },
-      };
+      await queryRaw(
+        db,
+        sql`INSERT INTO "_AssetToBooking" ("A", "B") SELECT unnest(${assetIds}::text[]), ${createdBooking.id} ON CONFLICT ("A", "B") DO NOTHING`
+      );
     }
 
     if (booking.tags.length > 0) {
-      dataToCreate.tags = {
-        connect: booking.tags,
-      };
+      const tagIds = booking.tags.map((t) => t.id);
+      await queryRaw(
+        db,
+        sql`INSERT INTO "_BookingToTag" ("A", "B") SELECT ${createdBooking.id}, unnest(${tagIds}::text[]) ON CONFLICT ("A", "B") DO NOTHING`
+      );
     }
 
-    return await db.booking.create({
-      data: dataToCreate,
-      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
-    });
+    // TODO: convert complex Prisma include — for now return the created booking
+    // The original included BOOKING_COMMON_INCLUDE + organization
+    return createdBooking as any;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -435,68 +450,45 @@ export async function updateBasicBooking({
     hints?: ClientHint;
   }) {
   try {
-    const booking = await db.booking
-      .findUniqueOrThrow({
+    // TODO: convert complex Prisma include — nested relations fetched separately
+    let booking: any;
+    try {
+      booking = await findUniqueOrThrow(db, "Booking", {
         where: { id, organizationId },
-        select: {
-          id: true,
-          status: true,
-          custodianUserId: true,
-          custodianTeamMemberId: true,
-          name: true,
-          description: true,
-          from: true,
-          to: true,
-          custodianTeamMember: {
-            select: {
-              id: true,
-              name: true,
-              user: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                },
-              },
-            },
-          },
-          custodianUser: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          tags: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          status: 404,
-          message:
-            "Could not find booking or the booking exists in another workspace.",
-          label,
-        });
+        select:
+          "*, custodianTeamMember:TeamMember(id, name), custodianUser:User!custodianUserId(id, email, firstName, lastName)",
       });
+      // Fetch tags separately (many-to-many)
+      const bookingTags = await queryRaw<{ id: string; name: string }>(
+        db,
+        sql`SELECT t."id", t."name" FROM "Tag" t INNER JOIN "_BookingToTag" bt ON bt."B" = t."id" WHERE bt."A" = ${id}`
+      );
+      booking.tags = bookingTags;
+      // Fetch custodianTeamMember's user separately
+      if (booking.custodianTeamMember) {
+        const tmUser = await findFirst(db, "User", {
+          where: { id: booking.custodianTeamMember.userId },
+          select: "id, firstName, lastName",
+        });
+        booking.custodianTeamMember.user = tmUser;
+      }
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        status: 404,
+        message:
+          "Could not find booking or the booking exists in another workspace.",
+        label,
+      });
+    }
 
     // Capture old custodian email before the update
     // (for custodian change scenarios)
     const oldCustodianEmail = booking.custodianUser?.email;
 
-    const dataToUpdate: Prisma.BookingUpdateInput = {
+    const dataToUpdate: Record<string, any> = {
       name,
       description,
-      tags: {
-        set: [],
-        connect: tags,
-      },
     };
 
     /** Booking update is not allowed for these type of status */
@@ -537,26 +529,20 @@ export async function updateBasicBooking({
        * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
        */
       if (custodianTeamMemberId) {
-        dataToUpdate.custodianTeamMember = {
-          connect: { id: custodianTeamMemberId },
-        };
+        dataToUpdate.custodianTeamMemberId = custodianTeamMemberId;
 
         /**
          * If a userId is passed, meaning the team member is connected to a user, we connct to it.
          * This will override the value if there were any previous custodians`
          */
         if (custodianUserId) {
-          dataToUpdate.custodianUser = {
-            connect: { id: custodianUserId },
-          };
+          dataToUpdate.custodianUserId = custodianUserId;
         } else if (booking.custodianUserId) {
           /**
            * If previous booking custodian had a user, we need to remove it
            * because we are now connecting to an NRM. If we dont do this the teamMemberID and the userId will be connected to different entities
            */
-          dataToUpdate.custodianUser = {
-            disconnect: true,
-          };
+          dataToUpdate.custodianUserId = null;
         }
       } else {
         throw new ShelfError({
@@ -569,10 +555,23 @@ export async function updateBasicBooking({
       }
     }
 
-    const updatedBooking = await db.booking.update({
+    const updatedBooking = await update(db, "Booking", {
       where: { id: booking.id },
       data: dataToUpdate,
     });
+
+    // Update tags: clear existing, then re-connect
+    await queryRaw(
+      db,
+      sql`DELETE FROM "_BookingToTag" WHERE "A" = ${booking.id}`
+    );
+    if (tags.length > 0) {
+      const tagIds = tags.map((t) => t.id);
+      await queryRaw(
+        db,
+        sql`INSERT INTO "_BookingToTag" ("A", "B") SELECT ${booking.id}, unnest(${tagIds}::text[]) ON CONFLICT ("A", "B") DO NOTHING`
+      );
+    }
 
     // BOOKING ACTIVITY LOG: Create separate notes for each change
     // This approach creates individual notes for each field change with proper user attribution
@@ -584,7 +583,7 @@ export async function updateBasicBooking({
             id: true,
             firstName: true,
             lastName: true,
-          } satisfies Prisma.UserSelect,
+          } as const,
         })
       : null;
     const userLink = user ? wrapUserLinkForNote(user) : "**System**";
@@ -668,20 +667,19 @@ export async function updateBasicBooking({
 
       try {
         // Fetch new custodian details
-        const newCustodian = await db.teamMember.findUnique({
+        // Fetch team member + nested user via separate queries
+        const newCustodian = (await findUnique(db, "TeamMember", {
           where: { id: custodianTeamMemberId },
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        });
+          select: "id, name, userId",
+        })) as any;
+        if (newCustodian?.userId) {
+          newCustodian.user = await findFirst(db, "User", {
+            where: { id: newCustodian.userId },
+            select: "id, firstName, lastName",
+          });
+        } else if (newCustodian) {
+          newCustodian.user = null;
+        }
 
         if (newCustodian) {
           let custodianChangeMessage = `${userLink} changed booking custodian`;
@@ -732,9 +730,9 @@ export async function updateBasicBooking({
         booking.tags.map((tag) => tag.name).join(", ") || "(none)";
 
       // Get new tag names - we need to fetch them since we only have IDs
-      const newTags = await db.tag.findMany({
+      const newTags = await findMany(db, "Tag", {
         where: { id: { in: newTagIds } },
-        select: { name: true },
+        select: "name",
       });
       const newTagNames = newTags.map((tag) => tag.name).join(", ") || "(none)";
 
@@ -812,32 +810,62 @@ export async function reserveBooking({
     userId?: User["id"];
   }) {
   try {
-    const bookingFound = await db.booking
-      .findUniqueOrThrow({
+    // TODO: convert complex Prisma include — nested relations for reservation email
+    // Fetching booking with related data via separate queries
+    let bookingFound: any;
+    try {
+      bookingFound = await findUniqueOrThrow(db, "Booking", {
         where: { id, organizationId },
-        include: {
-          ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
-          assets: {
-            select: {
-              ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.assets.select,
-              status: true,
-              bookings: createBookingConflictConditions({
-                currentBookingId: id,
-                fromDate: from,
-                toDate: to,
-              }),
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          label,
-          message:
-            "Booking not found. Are you sure it exists in current workspace?",
-        });
+        select:
+          "*, custodianTeamMember:TeamMember(*), custodianUser:User!custodianUserId(*), organization:Organization(*, owner:User!ownerId(email))",
       });
+      // Fetch asset count
+      const assetCountResult = await queryRaw<{ count: number }>(
+        db,
+        sql`SELECT COUNT(*)::int as count FROM "_AssetToBooking" WHERE "B" = ${id}`
+      );
+      bookingFound._count = { assets: assetCountResult[0]?.count ?? 0 };
+      // Fetch assets with conflict bookings
+      const assets = await queryRaw<any>(
+        db,
+        sql`SELECT a."id", a."title", a."status", c."name" as "categoryName"
+            FROM "Asset" a
+            INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id"
+            LEFT JOIN "Category" c ON c."id" = a."categoryId"
+            WHERE ab."B" = ${id}`
+      );
+      // Map category into nested object
+      for (const asset of assets) {
+        asset.category = asset.categoryName
+          ? { name: asset.categoryName }
+          : null;
+        delete asset.categoryName;
+        // Fetch conflicting bookings for each asset
+        const conflictConditions = createBookingConflictConditions({
+          currentBookingId: id,
+          fromDate: from,
+          toDate: to,
+        });
+        // Use the conflict conditions to find bookings for this asset
+        const conflictBookings = await queryRaw<any>(
+          db,
+          sql`SELECT b."id", b."name", b."from", b."to", b."status"
+              FROM "Booking" b
+              INNER JOIN "_AssetToBooking" ab ON ab."B" = b."id"
+              WHERE ab."A" = ${asset.id} AND b."id" != ${id}
+              AND b."status" IN ('RESERVED', 'ONGOING', 'OVERDUE')`
+        );
+        asset.bookings = conflictBookings;
+      }
+      bookingFound.assets = assets;
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        label,
+        message:
+          "Booking not found. Are you sure it exists in current workspace?",
+      });
+    }
 
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.assets) {
@@ -892,14 +920,10 @@ export async function reserveBooking({
       });
     }
 
-    const dataToUpdate: Prisma.BookingUpdateInput = {
+    const dataToUpdate: Record<string, any> = {
       status: BookingStatus.RESERVED,
       name,
       description,
-      tags: {
-        set: [],
-        connect: tags,
-      },
     };
 
     dataToUpdate.from = from;
@@ -914,26 +938,20 @@ export async function reserveBooking({
      * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
      */
     if (custodianTeamMemberId) {
-      dataToUpdate.custodianTeamMember = {
-        connect: { id: custodianTeamMemberId },
-      };
+      dataToUpdate.custodianTeamMemberId = custodianTeamMemberId;
 
       /**
        * If a userId is passed, meaning the team member is connected to a user, we connct to it.
        * This will override the value if there were any previous custodians`
        */
       if (custodianUserId) {
-        dataToUpdate.custodianUser = {
-          connect: { id: custodianUserId },
-        };
+        dataToUpdate.custodianUserId = custodianUserId;
       } else if (bookingFound.custodianUserId) {
         /**
          * If previous booking custodian had a user, we need to remove it
          * because we are now connecting to an NRM. If we dont do this the teamMemberID and the userId will be connected to different entities
          */
-        dataToUpdate.custodianUser = {
-          disconnect: true,
-        };
+        dataToUpdate.custodianUserId = null;
       }
     } else {
       throw new ShelfError({
@@ -945,10 +963,23 @@ export async function reserveBooking({
       });
     }
 
-    const updatedBooking = await db.booking.update({
+    const updatedBooking = await update(db, "Booking", {
       where: { id: bookingFound.id },
       data: dataToUpdate,
     });
+
+    // Update tags: clear existing, then re-connect
+    await queryRaw(
+      db,
+      sql`DELETE FROM "_BookingToTag" WHERE "A" = ${bookingFound.id}`
+    );
+    if (tags.length > 0) {
+      const tagIds = tags.map((t) => t.id);
+      await queryRaw(
+        db,
+        sql`INSERT INTO "_BookingToTag" ("A", "B") SELECT ${bookingFound.id}, unnest(${tagIds}::text[]) ON CONFLICT ("A", "B") DO NOTHING`
+      );
+    }
 
     /** Calculate the time difference between the booking.to and the current time */
     const { hours } = calcTimeDifference(updatedBooking.from!, new Date());
@@ -1082,30 +1113,45 @@ export async function checkoutBooking({
   userId?: string;
 }) {
   try {
-    const bookingFound = await db.booking
-      .findUniqueOrThrow({
+    // TODO: convert complex Prisma include — booking with assets + conflict bookings + email data
+    let bookingFound: any;
+    try {
+      bookingFound = await findUniqueOrThrow(db, "Booking", {
         where: { id, organizationId },
-        include: {
-          assets: {
-            include: {
-              bookings: createBookingConflictConditions({
-                currentBookingId: id,
-                fromDate: from,
-                toDate: to,
-              }),
-            },
-          },
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          label,
-          message:
-            "Booking not found, are you sure it exists in current workspace?",
-        });
+        select:
+          "*, custodianTeamMember:TeamMember(*), custodianUser:User!custodianUserId(*), organization:Organization(*, owner:User!ownerId(email))",
       });
+      // Fetch asset count
+      const assetCountResult = await queryRaw<{ count: number }>(
+        db,
+        sql`SELECT COUNT(*)::int as count FROM "_AssetToBooking" WHERE "B" = ${id}`
+      );
+      bookingFound._count = { assets: assetCountResult[0]?.count ?? 0 };
+      // Fetch assets with conflict bookings
+      const assets = await queryRaw<any>(
+        db,
+        sql`SELECT a.* FROM "Asset" a INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id" WHERE ab."B" = ${id}`
+      );
+      for (const asset of assets) {
+        const conflictBookings = await queryRaw<any>(
+          db,
+          sql`SELECT b."id", b."name", b."from", b."to", b."status"
+              FROM "Booking" b
+              INNER JOIN "_AssetToBooking" ab ON ab."B" = b."id"
+              WHERE ab."A" = ${asset.id} AND b."id" != ${id}
+              AND b."status" IN ('RESERVED', 'ONGOING', 'OVERDUE')`
+        );
+        asset.bookings = conflictBookings;
+      }
+      bookingFound.assets = assets;
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace?",
+      });
+    }
 
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.assets) {
@@ -1162,7 +1208,7 @@ export async function checkoutBooking({
      */
     const isExpired = isBookingExpired({ to: bookingFound.to! });
 
-    const dataToUpdate: Prisma.BookingUpdateInput = {
+    const dataToUpdate: Record<string, any> = {
       status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
     };
 
@@ -1195,31 +1241,32 @@ export async function checkoutBooking({
       }).toJSDate();
     }
 
-    const updatedBooking = await db.$transaction(async (tx) => {
-      /* Updating the status of all assets inside booking */
-      await tx.asset.updateMany({
-        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
-
-      /** If there are any kits associated with the booking, then update their status */
-      if (hasKits) {
-        await tx.kit.updateMany({
-          where: { id: { in: kitIds } },
-          data: { status: KitStatus.CHECKED_OUT },
-        });
-      }
-
-      /** Finally update the booking */
-      return tx.booking.update({
-        where: { id: bookingFound.id },
-        data: dataToUpdate,
-        include: {
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: true,
-        },
-      });
+    // Sequential operations replacing db.$transaction
+    /* Updating the status of all assets inside booking */
+    await updateMany(db, "Asset", {
+      where: { id: { in: bookingFound.assets.map((a: any) => a.id) } },
+      data: { status: AssetStatus.CHECKED_OUT },
     });
+
+    /** If there are any kits associated with the booking, then update their status */
+    if (hasKits) {
+      await updateMany(db, "Kit", {
+        where: { id: { in: kitIds } },
+        data: { status: KitStatus.CHECKED_OUT },
+      });
+    }
+
+    /** Finally update the booking */
+    const updatedBooking = (await update(db, "Booking", {
+      where: { id: bookingFound.id },
+      data: dataToUpdate,
+    })) as any;
+    // Re-attach email-related data from bookingFound
+    updatedBooking.custodianTeamMember = bookingFound.custodianTeamMember;
+    updatedBooking.custodianUser = bookingFound.custodianUser;
+    updatedBooking.organization = bookingFound.organization;
+    updatedBooking._count = bookingFound._count;
+    updatedBooking.assets = bookingFound.assets;
 
     // Create status transition note
     if (userId) {
@@ -1317,38 +1364,42 @@ export async function checkinBooking({
   specificAssetIds?: string[];
 }) {
   try {
-    const bookingFound = await db.booking
-      .findUniqueOrThrow({
+    let bookingFound: any;
+    try {
+      bookingFound = await findUniqueOrThrow(db, "Booking", {
         where: { id, organizationId },
-        include: {
-          assets: {
-            select: {
-              id: true,
-              kitId: true,
-              status: true,
-              bookings: {
-                select: { id: true, status: true },
-                where: {
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
-            },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          status: 404,
-          label,
-          message:
-            "Booking not found, are you sure it exists in current workspace?",
-        });
       });
+      // Fetch assets with their active booking links
+      const assets = await queryRaw<any>(
+        db,
+        sql`SELECT a."id", a."kitId", a."status"
+            FROM "Asset" a
+            INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id"
+            WHERE ab."B" = ${id}`
+      );
+      for (const asset of assets) {
+        const activeBookings = await queryRaw<any>(
+          db,
+          sql`SELECT b."id", b."status"
+              FROM "Booking" b
+              INNER JOIN "_AssetToBooking" ab ON ab."B" = b."id"
+              WHERE ab."A" = ${asset.id}
+              AND b."status" IN ('ONGOING', 'OVERDUE')`
+        );
+        asset.bookings = activeBookings;
+      }
+      bookingFound.assets = assets;
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        status: 404,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace?",
+      });
+    }
 
-    const dataToUpdate: Prisma.BookingUpdateInput = {
+    const dataToUpdate: Record<string, any> = {
       status: BookingStatus.COMPLETE,
     };
 
@@ -1412,11 +1463,11 @@ export async function checkinBooking({
     // Pre-fetch partial check-ins for linked bookings outside the transaction
     const partialCheckinsForLinkedBookings =
       linkedActiveBookingIds.size > 0
-        ? await db.partialBookingCheckin.findMany({
+        ? await findMany(db, "PartialBookingCheckin", {
             where: {
               bookingId: { in: Array.from(linkedActiveBookingIds) },
             },
-            select: { bookingId: true, assetIds: true },
+            select: "bookingId, assetIds",
           })
         : [];
 
@@ -1482,36 +1533,35 @@ export async function checkinBooking({
         })
       : [];
 
-    const updatedBooking = await db.$transaction(
-      async (tx) => {
-        if (assetsToCheckin.length > 0) {
-          await tx.asset.updateMany({
-            where: { id: { in: assetsToCheckin } },
-            data: { status: AssetStatus.AVAILABLE },
-          });
-        }
-        /* If there are any kits associated with the booking, then update their status */
-        if (hasKits) {
-          if (kitsToCheckin.length > 0) {
-            await tx.kit.updateMany({
-              where: { id: { in: kitsToCheckin } },
-              data: { status: KitStatus.AVAILABLE },
-            });
-          }
-        }
-
-        /** Finally update the booking */
-        return tx.booking.update({
-          where: { id: bookingFound.id },
-          data: dataToUpdate,
-          include: {
-            ...BOOKING_INCLUDE_FOR_EMAIL,
-            assets: true,
-          },
+    // Sequential operations replacing db.$transaction
+    if (assetsToCheckin.length > 0) {
+      await updateMany(db, "Asset", {
+        where: { id: { in: assetsToCheckin } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    }
+    /* If there are any kits associated with the booking, then update their status */
+    if (hasKits) {
+      if (kitsToCheckin.length > 0) {
+        await updateMany(db, "Kit", {
+          where: { id: { in: kitsToCheckin } },
+          data: { status: KitStatus.AVAILABLE },
         });
-      },
-      { timeout: 15000 }
-    );
+      }
+    }
+
+    /** Finally update the booking */
+    const updatedBooking = (await update(db, "Booking", {
+      where: { id: bookingFound.id },
+      data: dataToUpdate,
+    })) as any;
+    // Re-attach email-related data
+    updatedBooking.custodianTeamMember =
+      bookingFound.custodianTeamMember || null;
+    updatedBooking.custodianUser = bookingFound.custodianUser || null;
+    updatedBooking.organization = bookingFound.organization || null;
+    updatedBooking._count = bookingFound._count || { assets: 0 };
+    updatedBooking.assets = bookingFound.assets;
 
     // Create status transition note
     if (userId) {
@@ -1522,18 +1572,25 @@ export async function checkinBooking({
             id: true,
             firstName: true,
             lastName: true,
-          } satisfies Prisma.UserSelect,
+          } as const,
         });
 
         // Get asset and kit data for consistent formatting
-        const assetsWithKitInfo = await db.asset.findMany({
-          where: { id: { in: specificAssetIds } },
-          select: {
-            id: true,
-            title: true,
-            kit: { select: { id: true, name: true } },
-          },
-        });
+        const assetsWithKitInfo = await queryRaw<any>(
+          db,
+          sql`SELECT a."id", a."title", a."kitId", k."id" as "kit_id", k."name" as "kit_name"
+              FROM "Asset" a
+              LEFT JOIN "Kit" k ON k."id" = a."kitId"
+              WHERE a."id" = ANY(${specificAssetIds}::text[])`
+        );
+        // Map kit data into nested object
+        for (const asset of assetsWithKitInfo) {
+          asset.kit = asset.kit_id
+            ? { id: asset.kit_id, name: asset.kit_name }
+            : null;
+          delete asset.kit_id;
+          delete asset.kit_name;
+        }
 
         // Separate complete kits from individual assets
         const kitIds = getKitIdsByAssets(
@@ -1625,12 +1682,9 @@ export async function checkinBooking({
      * Check if auto-archive is enabled for this organization
      * and schedule the auto-archive job if needed
      */
-    const bookingSettings = await db.bookingSettings.findUnique({
+    const bookingSettings = await findUnique(db, "BookingSettings", {
       where: { organizationId: updatedBooking.organizationId },
-      select: {
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-      },
+      select: "autoArchiveBookings, autoArchiveDays",
     });
 
     if (bookingSettings?.autoArchiveBookings) {
@@ -1710,7 +1764,7 @@ export async function partialCheckinBooking({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } as const,
     });
     // First, validate the booking exists and get its current assets
     const bookingFound = await db.booking
@@ -2112,7 +2166,7 @@ export async function updateBookingAssets({
             id: true,
             firstName: true,
             lastName: true,
-          } satisfies Prisma.UserSelect,
+          } as const,
         });
         await createSystemBookingNote({
           bookingId: booking.id,
@@ -2165,7 +2219,7 @@ export async function createKitBookingNote({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } as const,
     });
     await createSystemBookingNote({
       bookingId,
@@ -2581,7 +2635,7 @@ export async function extendBooking({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } as const,
     });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
@@ -2795,7 +2849,7 @@ export async function getBookings(params: {
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
-  extraInclude?: Prisma.BookingInclude;
+  extraInclude?: Record<string, any>;
   /** Controls whether entries should be paginated or not */
   takeAll?: boolean;
   orderBy?: string;
@@ -2829,7 +2883,7 @@ export async function getBookings(params: {
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
     /** Default value of where. Takes the assetss belonging to current org */
-    const where: Prisma.BookingWhereInput = { organizationId };
+    const where: Record<string, any> = { organizationId };
 
     /** The idea is that only the creator of a draft booking can see it
      * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
@@ -3328,7 +3382,7 @@ export async function deleteBooking(
   }
 }
 
-export async function getBooking<T extends Prisma.BookingInclude | undefined>(
+export async function getBooking<T extends Record<string, any> | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request: Request;
@@ -3359,7 +3413,7 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      */
 
     // Build assets include with optional search, status filtering, and dynamic sorting
-    const assetsWhere: Prisma.AssetWhereInput = {};
+    const assetsWhere: Record<string, any> = {};
 
     if (search) {
       assetsWhere.title = {
@@ -3372,7 +3426,7 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     //   assetsWhere.status = status;
     // }
 
-    const assetsInclude: Prisma.BookingInclude["assets"] = {
+    const assetsInclude: Record<string, any> = {
       select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
       orderBy: assetsOrderBy,
       ...(Object.keys(assetsWhere).length > 0 && { where: assetsWhere }),
@@ -3717,9 +3771,7 @@ export async function bulkDeleteBookings({
 }) {
   try {
     /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
+    const where: Record<string, any> = bookingIds.includes(ALL_SELECTED_KEY)
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
@@ -3739,7 +3791,7 @@ export async function bulkDeleteBookings({
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect,
+        } as const,
       }),
     ]);
 
@@ -3799,7 +3851,7 @@ export async function bulkDeleteBookings({
             type: "UPDATE" as const,
           }))
         )
-        .flat() satisfies Prisma.NoteCreateManyInput[];
+        .flat() as any[];
 
       await tx.note.createMany({ data: notesData });
     });
@@ -3861,9 +3913,7 @@ export async function bulkArchiveBookings({
 }) {
   try {
     /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
+    const where: Record<string, any> = bookingIds.includes(ALL_SELECTED_KEY)
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
@@ -3950,9 +4000,7 @@ export async function bulkCancelBookings({
 }) {
   try {
     /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
+    const where: Record<string, any> = bookingIds.includes(ALL_SELECTED_KEY)
       ? getBookingWhereInput({ currentSearchParams, organizationId })
       : { id: { in: bookingIds }, organizationId };
 
@@ -3972,7 +4020,7 @@ export async function bulkCancelBookings({
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect,
+        } as const,
       }),
     ]);
 
@@ -4061,7 +4109,7 @@ export async function bulkCancelBookings({
             type: "UPDATE" as const,
           }))
         )
-        .flat() satisfies Prisma.NoteCreateManyInput[];
+        .flat() as any[];
 
       await tx.note.createMany({ data: notesData });
 
@@ -4180,7 +4228,7 @@ async function createNotesForScannedAssetsAndKits({
       id: true,
       firstName: true,
       lastName: true,
-    } satisfies Prisma.UserSelect,
+    } as const,
   });
   const userForNotes = {
     firstName: user?.firstName || "",

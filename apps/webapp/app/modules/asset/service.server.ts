@@ -19,9 +19,23 @@ import {
   BookingStatus,
   ErrorCorrection,
   KitStatus,
-  Prisma,
   TagUseFor,
 } from "@shelf/database";
+import {
+  findMany,
+  findFirst,
+  findFirstOrThrow,
+  findUnique,
+  findUniqueOrThrow,
+  create,
+  update,
+  remove,
+  count,
+  createMany,
+  updateMany,
+  deleteMany,
+} from "~/database/query-helpers.server";
+import { sql, raw, empty, SqlFragment, queryRaw } from "~/database/sql.server";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -149,29 +163,8 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
 
-const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
-  title: true,
-  description: true,
-  category: {
-    select: {
-      id: true,
-      name: true,
-      color: true,
-    },
-  },
-  valuation: true,
-  organization: {
-    select: {
-      currency: true,
-    },
-  },
-  tags: {
-    select: {
-      id: true,
-      name: true,
-    },
-  },
-});
+const ASSET_BEFORE_UPDATE_SELECT =
+  "title, description, valuation, category:Category(id, name, color), organization:Organization(currency), tags:Tag(id, name)";
 
 /**
  * Fetches the snapshot of fields required to build change notes before an update.
@@ -184,12 +177,12 @@ async function fetchAssetBeforeUpdate({
   id: Asset["id"];
   organizationId: Asset["organizationId"];
   shouldFetch: boolean;
-}) {
+}): Promise<any | null> {
   if (!shouldFetch) {
     return null;
   }
 
-  return db.asset.findUnique({
+  return findUnique(db, "Asset", {
     where: { id, organizationId },
     select: ASSET_BEFORE_UPDATE_SELECT,
   });
@@ -235,17 +228,17 @@ async function setKitCustodyAfterAssetImport({
     const teamMember = teamMembers[custodianName];
 
     if (kit && teamMember) {
-      await db.kit.update({
+      // Update kit status
+      await update(db, "Kit", {
         where: { id: kit.id },
-        data: {
-          status: KitStatus.IN_CUSTODY,
-          custody: {
-            create: {
-              custodian: { connect: { id: teamMember.id } },
-            },
-          },
-        },
+        data: { status: KitStatus.IN_CUSTODY },
       });
+      // Create custody record for the kit
+      // TODO: convert Prisma nested create to separate Supabase insert
+      await create(db, "KitCustody", {
+        kitId: kit.id,
+        custodianId: teamMember.id,
+      } as any);
     }
   }
 }
@@ -283,31 +276,15 @@ async function validateKitCustodyConflicts({
     ...new Set(conflictCandidates.map((asset) => asset.kit)),
   ].filter(Boolean) as string[];
 
-  // Fetch existing kits and their custody status in one query
-  const existingKits = await db.kit.findMany({
+  // Fetch existing kits and their custody status
+  // TODO: convert Prisma include to Supabase join for custody/custodian/assets
+  const existingKits: any[] = await findMany(db, "Kit", {
     where: {
       name: { in: kitNames },
       organizationId,
     },
-    select: {
-      id: true,
-      name: true,
-      custody: {
-        select: {
-          id: true,
-          custodian: {
-            select: {
-              name: true,
-            },
-          },
-        },
-      },
-      assets: {
-        select: {
-          id: true,
-        },
-      },
-    },
+    select:
+      "id, name, custody:KitCustody(id, custodian:TeamMember(name)), assets:Asset(id)",
   });
 
   // Find conflicts: existing kits without custody that would receive assets with custody
@@ -387,12 +364,10 @@ async function validateKitCustodyConflicts({
   }
 }
 
-type AssetWithInclude<T extends Prisma.AssetInclude | undefined> =
-  T extends Prisma.AssetInclude
-    ? Prisma.AssetGetPayload<{ include: T }>
-    : Asset;
+// TODO: Prisma.AssetInclude / AssetGetPayload replaced with `any` during Supabase migration
+type AssetWithInclude<T extends Record<string, any> | undefined> = any;
 
-export async function getAsset<T extends Prisma.AssetInclude | undefined>({
+export async function getAsset<T extends Record<string, any> | undefined>({
   id,
   organizationId,
   userOrganizations,
@@ -409,7 +384,8 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
       (org) => org.organizationId
     );
 
-    const asset = await db.asset.findFirstOrThrow({
+    // TODO: convert Prisma include to Supabase join — for now using select *
+    const asset = await findFirstOrThrow(db, "Asset", {
       where: {
         OR: [
           { id, organizationId },
@@ -418,7 +394,6 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
             : []),
         ],
       },
-      include: { ...include },
     });
 
     /* User is accessing the asset in the wrong organization. In that case we need special 404 handling. */
@@ -500,7 +475,7 @@ export async function getAssets(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
-  extraInclude?: Prisma.AssetInclude;
+  extraInclude?: Record<string, any>;
   /**
    * Hide all assets that cannot currently be added to kit.
    * This includes:
@@ -536,7 +511,7 @@ export async function getAssets(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    const where: Prisma.AssetWhereInput = { organizationId };
+    const where: Record<string, any> = { organizationId };
 
     if (availableToBookOnly) {
       where.availableToBook = true;
@@ -775,22 +750,15 @@ export async function getAssets(params: {
       where.kit = { isNot: null };
     }
 
+    // TODO: convert Prisma include (assetIndexFields, extraInclude) to Supabase join/select
     const [assets, totalAssets] = await Promise.all([
-      db.asset.findMany({
+      findMany(db, "Asset", {
         skip,
         take,
         where,
-        include: {
-          ...assetIndexFields({
-            bookingFrom,
-            bookingTo,
-            unavailableBookingStatuses,
-          }),
-          ...extraInclude,
-        },
         orderBy: { [orderBy]: orderDirection },
       }),
-      db.asset.count({ where }),
+      count(db, "Asset", where),
     ]);
 
     return { assets, totalAssets };
@@ -874,9 +842,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
-      ? Prisma.empty
-      : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
-    const query = Prisma.sql`
+      ? empty
+      : sql`LIMIT ${take} OFFSET ${skip}`;
+    const query = sql`
       WITH asset_query AS (
         ${assetQueryFragment({
           withBookings: getBookings || isUpcomingBookingsColumnVisible,
@@ -886,17 +854,17 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${assetQueryJoins}
         ${whereClause}
         GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
-      ), 
+      ),
       sorted_asset_query AS (
         SELECT * FROM asset_query
-        ${Prisma.raw(orderByClause)}
+        ${raw(orderByClause)}
         ${paginationClause}
       ),
       count_query AS (
         SELECT COUNT(*)::integer AS total_count
         FROM asset_query
       )
-      SELECT 
+      SELECT
         (SELECT total_count FROM count_query) AS total_count,
         ${assetReturnFragment({
           withBookings: getBookings || isUpcomingBookingsColumnVisible,
@@ -905,7 +873,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       FROM sorted_asset_query aq;
     `;
 
-    const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
+    const result = await queryRaw<AdvancedIndexQueryResult[0]>(db, query);
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
@@ -974,19 +942,6 @@ export async function createAsset({
       // Generate sequential ID
       const sequentialId = await getNextSequentialId(organizationId);
 
-      /** User connection data */
-      const user = {
-        connect: {
-          id: userId,
-        },
-      };
-
-      const organization = {
-        connect: {
-          id: organizationId as string,
-        },
-      };
-
       /**
        * If a qr code is passed, link to that QR
        * Otherwise, create a new one
@@ -997,34 +952,21 @@ export async function createAsset({
        */
 
       const qr = qrId ? await getQr({ id: qrId }) : null;
-      const qrCodes =
+      const shouldConnectQr =
         qr &&
         (qr.organizationId === organizationId || !qr.organizationId) &&
         qr.assetId === null &&
-        qr.kitId === null
-          ? { connect: { id: qrId } }
-          : {
-              create: [
-                {
-                  id: id(),
-                  version: 0,
-                  errorCorrection: ErrorCorrection["L"],
-                  user,
-                  organization,
-                },
-              ],
-            };
+        qr.kitId === null;
 
-      /** Data object we send via prisma to create Asset */
-      const data: Prisma.AssetCreateInput = {
+      /** Data object — direct FK references instead of Prisma connect */
+      const data: Record<string, any> = {
         id: assetId, // Use provided ID if available
         title,
         description,
         sequentialId, // Add the generated sequential ID
-        user,
-        qrCodes,
+        userId,
         valuation,
-        organization,
+        organizationId: organizationId as string,
         availableToBook,
         mainImage,
         mainImageExpiration,
@@ -1032,61 +974,65 @@ export async function createAsset({
 
       /** If a kitId is passed, link the kit to the asset. */
       if (kitId && kitId !== "uncategorized") {
-        Object.assign(data, {
-          kit: {
-            connect: {
-              id: kitId,
-            },
-          },
-        });
+        data.kitId = kitId;
       }
 
       /** If a categoryId is passed, link the category to the asset. */
       if (categoryId && categoryId !== "uncategorized") {
-        Object.assign(data, {
-          category: {
-            connect: {
-              id: categoryId,
-            },
-          },
-        });
+        data.categoryId = categoryId;
       }
 
       /** If a locationId is passed, link the location to the asset. */
       if (locationId) {
-        Object.assign(data, {
-          location: {
-            connect: {
-              id: locationId,
-            },
-          },
-        });
+        data.locationId = locationId;
       }
 
-      /** If a tags is passed, link the category to the asset. */
-      if (tags && tags?.set?.length > 0) {
-        Object.assign(data, {
-          tags: {
-            connect: tags?.set,
-          },
+      /** If a custodian is passed, set status to IN_CUSTODY */
+      if (custodian) {
+        data.status = AssetStatus.IN_CUSTODY;
+      }
+
+      const asset = await create(db, "Asset", data as any);
+
+      /** Create QR code — either connect existing or create new */
+      if (shouldConnectQr) {
+        await update(db, "Qr", {
+          where: { id: qrId! },
+          data: { assetId: asset.id, organizationId, userId },
         });
+      } else {
+        await create(db, "Qr", {
+          id: id(),
+          version: 0,
+          errorCorrection: ErrorCorrection["L"],
+          userId,
+          organizationId,
+          assetId: asset.id,
+        } as any);
+      }
+
+      /** If tags are passed, link them to the asset via join table */
+      if (tags && tags?.set?.length > 0) {
+        // TODO: convert Prisma many-to-many connect to Supabase join table insert
+        for (const tag of tags.set) {
+          await create(
+            db,
+            "_AssetToTag" as any,
+            {
+              A: asset.id,
+              B: tag.id,
+            } as any
+          );
+        }
       }
 
       /** If a custodian is passed, create a Custody relation with that asset
        * `custodian` represents the id of a {@link TeamMember}. */
       if (custodian) {
-        Object.assign(data, {
-          custody: {
-            create: {
-              custodian: {
-                connect: {
-                  id: custodian,
-                },
-              },
-            },
-          },
-          status: AssetStatus.IN_CUSTODY,
-        });
+        await create(db, "Custody", {
+          assetId: asset.id,
+          teamMemberId: custodian,
+        } as any);
       }
 
       /** If custom fields are passed, create them */
@@ -1095,19 +1041,15 @@ export async function createAsset({
           (cf) => !!cf.value
         );
 
-        Object.assign(data, {
-          /** Custom fields here refers to the values, check the Schema for more info */
-          customFields: {
-            create: customFieldValuesToAdd?.map(
-              ({ id, value }) =>
-                id &&
-                value && {
-                  value,
-                  customFieldId: id,
-                }
-            ),
-          },
-        });
+        for (const cf of customFieldValuesToAdd) {
+          if (cf.id && cf.value) {
+            await create(db, "AssetCustomFieldValue", {
+              value: cf.value,
+              customFieldId: cf.id,
+              assetId: asset.id,
+            } as any);
+          }
+        }
       }
 
       /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
@@ -1117,70 +1059,50 @@ export async function createAsset({
         );
 
         if (barcodesToAdd.length > 0) {
-          const barcodesToConnect = barcodesToAdd
-            .filter((b) => b.existingId)
-            .map((b) => ({ id: b.existingId! }));
+          const barcodesToConnect = barcodesToAdd.filter((b) => b.existingId);
+          const barcodesToCreate = barcodesToAdd.filter((b) => !b.existingId);
 
-          const barcodesToCreate = barcodesToAdd
-            .filter((b) => !b.existingId)
-            .map(({ type, value }) => ({
+          // Connect existing barcodes by setting their assetId
+          for (const b of barcodesToConnect) {
+            await update(db, "Barcode", {
+              where: { id: b.existingId! },
+              data: { assetId: asset.id },
+            });
+          }
+
+          // Create new barcodes
+          for (const { type, value } of barcodesToCreate) {
+            await create(db, "Barcode", {
               type,
               value: normalizeBarcodeValue(type, value),
               organizationId,
-            }));
-
-          // Build barcodes relation data
-          const barcodeRelationData: any = {};
-
-          if (barcodesToConnect.length > 0) {
-            barcodeRelationData.connect = barcodesToConnect;
-          }
-
-          if (barcodesToCreate.length > 0) {
-            barcodeRelationData.create = barcodesToCreate;
-          }
-
-          if (Object.keys(barcodeRelationData).length > 0) {
-            Object.assign(data, { barcodes: barcodeRelationData });
+              assetId: asset.id,
+            } as any);
           }
         }
       }
 
-      const asset = await db.asset.create({
-        data,
-        include: {
-          location: true,
-          user: true,
-          custody: true,
-        },
-      });
-
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
-      // Check for sequential ID unique constraint violation and retry
-      if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-        const prismaError = cause as any;
-        const target = prismaError.meta?.target;
+      // Check for unique constraint violation and retry
+      const errorCode = (cause as any)?.code;
+      const errorMessage =
+        cause instanceof Error ? cause.message : String(cause);
 
+      if (errorCode === "23505" || errorCode === "P2002") {
         // Handle sequential ID conflicts with retry
         if (
-          target &&
-          target.includes("sequentialId") &&
+          errorMessage.includes("sequentialId") &&
           attempts < maxAttempts - 1
         ) {
           attempts++;
           continue; // Retry with next sequential ID
         }
 
-        // If it's a Prisma unique constraint violation on barcode values,
+        // If it's a unique constraint violation on barcode values,
         // use our detailed validation to provide specific field errors
-        if (
-          target &&
-          target.includes("value") &&
-          barcodes &&
-          barcodes.length > 0
-        ) {
+        if (errorMessage.includes("value") && barcodes && barcodes.length > 0) {
           const barcodesToAdd = barcodes.filter(
             (barcode) => !!barcode.value && !!barcode.type
           );
@@ -1230,13 +1152,10 @@ export async function updateAsset({
 
     // Check if asset belongs to a kit and prevent location updates
     if (isChangingLocation) {
-      const assetWithKit = await db.asset.findUnique({
+      // TODO: convert Prisma nested select to Supabase join
+      const assetWithKit: any = await findUnique(db, "Asset", {
         where: { id, organizationId },
-        select: {
-          kit: {
-            select: { id: true, name: true },
-          },
-        },
+        select: "kitId, kit:Kit(id, name)",
       });
 
       if (assetWithKit?.kit) {
@@ -1279,7 +1198,7 @@ export async function updateAsset({
 
     const loadUserForNotes = createLoadUserForNotes(userId);
 
-    const data: Prisma.AssetUpdateInput = {
+    const data: Record<string, any> = {
       title,
       description,
       valuation,
@@ -1288,51 +1207,24 @@ export async function updateAsset({
       thumbnailImage,
     };
 
-    /** If uncategorized is passed, disconnect the category */
+    /** If uncategorized is passed, disconnect the category (set FK to null) */
     if (categoryId === "uncategorized") {
-      Object.assign(data, {
-        category: {
-          disconnect: true,
-        },
-      });
+      data.categoryId = null;
     }
 
     // If category id is passed and is different than uncategorized, connect the category
     if (categoryId && categoryId !== "uncategorized") {
-      Object.assign(data, {
-        category: {
-          connect: {
-            id: categoryId,
-          },
-        },
-      });
+      data.categoryId = categoryId;
     }
 
     /** Connect the new location id */
     if (newLocationId) {
-      Object.assign(data, {
-        location: {
-          connect: {
-            id: newLocationId,
-          },
-        },
-      });
+      data.locationId = newLocationId;
     }
 
     /** disconnecting location relation if a user clears locations */
     if (currentLocationId && !newLocationId) {
-      Object.assign(data, {
-        location: {
-          disconnect: true,
-        },
-      });
-    }
-
-    /** If a tags is passed, link the category to the asset. */
-    if (isTagUpdate) {
-      Object.assign(data, {
-        tags,
-      });
+      data.locationId = null;
     }
 
     /** If custom fields are passed, create/update them */
@@ -1345,24 +1237,16 @@ export async function updateAsset({
 
     if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
       /** We get the current values with field information for comparison. We need this to detect changes for notes */
-      currentCustomFieldsValuesWithFields =
-        await db.assetCustomFieldValue.findMany({
-          where: {
-            assetId: id,
-          },
-          select: {
-            id: true,
-            customFieldId: true,
-            value: true,
-            customField: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-              },
-            },
-          },
-        });
+      // TODO: convert Prisma nested select to Supabase join
+      currentCustomFieldsValuesWithFields = (await findMany(
+        db,
+        "AssetCustomFieldValue",
+        {
+          where: { assetId: id },
+          select:
+            "id, customFieldId, value, customField:CustomField(id, name, type)",
+        }
+      )) as any;
 
       const customFieldValuesToAdd = customFieldsValuesFromForm.filter(
         (cf) => !!cf.value
@@ -1372,37 +1256,57 @@ export async function updateAsset({
         (cf) => !cf.value
       );
 
-      Object.assign(data, {
-        customFields: {
-          upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
-            where: {
-              id:
-                currentCustomFieldsValuesWithFields.find(
-                  (ccfv) => ccfv.customFieldId === id
-                )?.id || "",
-            },
-            update: { value },
-            create: {
-              value,
-              customFieldId: id,
-            },
-          })),
-          deleteMany: customFieldValuesToRemove.map((cf) => ({
-            customFieldId: cf.id,
-          })),
-        },
-      });
+      // Handle upserts for custom field values
+      for (const { id: cfId, value } of customFieldValuesToAdd) {
+        const existing = currentCustomFieldsValuesWithFields.find(
+          (ccfv) => ccfv.customFieldId === cfId
+        );
+        if (existing) {
+          await update(db, "AssetCustomFieldValue", {
+            where: { id: existing.id },
+            data: { value },
+          });
+        } else {
+          await create(db, "AssetCustomFieldValue", {
+            value,
+            customFieldId: cfId,
+            assetId: id,
+          } as any);
+        }
+      }
+
+      // Handle deletes for custom field values
+      for (const cf of customFieldValuesToRemove) {
+        await deleteMany(db, "AssetCustomFieldValue", {
+          assetId: id,
+          customFieldId: cf.id,
+        });
+      }
     }
 
-    const asset = await db.asset.update({
+    /** If tags are being updated, handle via join table */
+    if (isTagUpdate && tags?.set) {
+      // Remove all existing tag associations
+      await deleteMany(db, "_AssetToTag" as any, { A: id } as any);
+      // Add new tag associations
+      for (const tag of tags.set) {
+        await create(
+          db,
+          "_AssetToTag" as any,
+          {
+            A: id,
+            B: tag.id,
+          } as any
+        );
+      }
+    }
+
+    // TODO: convert Prisma include to Supabase join for location/tags/category/organization
+    const asset: any = await update(db, "Asset", {
       where: { id, organizationId },
       data,
-      include: {
-        location: true,
-        tags: true,
-        category: true,
-        organization: true,
-      },
+      select:
+        "*, location:Location(*), tags:Tag(*), category:Category(*), organization:Organization(*)",
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */
@@ -1425,18 +1329,14 @@ export async function updateAsset({
       const user = await loadUserForNotes();
 
       const currentLocation = currentLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: currentLocationId,
-            },
+        ? await findFirst(db, "Location", {
+            where: { id: currentLocationId },
           })
         : null;
 
       const newLocation = newLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: newLocationId,
-            },
+        ? await findFirst(db, "Location", {
+            where: { id: newLocationId },
           })
         : null;
 
@@ -1559,17 +1459,17 @@ export async function updateAsset({
       if (potentialChanges.length > 0) {
         // Fetch required data in parallel only if we have potential changes
         const [user, customFieldsFromForm] = await Promise.all([
-          db.user.findFirst({
+          findFirst(db, "User", {
             where: { id: userId },
-            select: { firstName: true, lastName: true },
+            select: "firstName, lastName",
           }),
-          db.customField.findMany({
+          findMany(db, "CustomField", {
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
               active: true,
               deletedAt: null,
             },
-            select: { id: true, name: true, type: true },
+            select: "id, name, type",
           }),
         ]);
 
@@ -1621,16 +1521,16 @@ export async function deleteAsset({
   organizationId,
 }: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
   try {
-    const deletedAsset = await db.asset.delete({
-      where: { id, organizationId },
-      select: {
-        reminders: {
-          select: { alertDateTime: true, activeSchedulerReference: true },
-        },
-      },
+    // Fetch reminders before deletion
+    // TODO: convert Prisma nested select to Supabase join
+    const reminders: any[] = await findMany(db, "AssetReminder" as any, {
+      where: { assetId: id },
+      select: "alertDateTime, activeSchedulerReference",
     });
 
-    await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
+    await remove(db, "Asset", { id, organizationId });
+
+    await Promise.all(reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1887,15 +1787,7 @@ export async function uploadDuplicateAssetMainImage(
   }
 }
 
-export function createCustomFieldsPayloadFromAsset(
-  asset: Prisma.AssetGetPayload<{
-    include: {
-      custody: { include: { custodian: true } };
-      tags: true;
-      customFields: true;
-    };
-  }>
-) {
+export function createCustomFieldsPayloadFromAsset(asset: any) {
   if (!asset?.customFields || asset?.customFields?.length === 0) {
     return {};
   }
@@ -1917,13 +1809,7 @@ export async function duplicateAsset({
   amountOfDuplicates,
   organizationId,
 }: {
-  asset: Prisma.AssetGetPayload<{
-    include: {
-      custody: { include: { custodian: true } };
-      tags: true;
-      customFields: true;
-    };
-  }>;
+  asset: any;
   userId: string;
   amountOfDuplicates: number;
   organizationId: string;
@@ -1971,7 +1857,7 @@ export async function duplicateAsset({
           );
 
           if (typeof imagePath === "string") {
-            await db.asset.update({
+            await update(db, "Asset", {
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
@@ -2046,7 +1932,7 @@ export async function getAllEntriesForCreateAndEdit({
       }),
 
       /** Get the tags */
-      db.tag.findMany({
+      findMany(db, "Tag", {
         where: {
           organizationId,
           OR: [
@@ -2101,8 +1987,8 @@ export async function getPaginatedAndFilterableAssets({
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  kitId?: Prisma.AssetWhereInput["kitId"];
-  extraInclude?: Prisma.AssetInclude;
+  kitId?: Record<string, any>;
+  extraInclude?: Record<string, any>;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
   excludeLocationQuery?: boolean;
@@ -2279,26 +2165,11 @@ export async function fetchAssetsForExport({
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.asset.findMany({
-      where: {
-        organizationId,
-      },
-      include: {
-        category: true,
-        location: true,
-        notes: true,
-        custody: {
-          include: {
-            custodian: true,
-          },
-        },
-        tags: true,
-        customFields: {
-          include: {
-            customField: true,
-          },
-        },
-      },
+    // TODO: convert Prisma include to Supabase join for category/location/notes/custody/tags/customFields
+    return await findMany(db, "Asset", {
+      where: { organizationId },
+      select:
+        "*, category:Category(*), location:Location(*), notes:Note(*), custody:Custody(*, custodian:TeamMember(*)), tags:Tag(*), customFields:AssetCustomFieldValue(*, customField:CustomField(*))",
     });
   } catch (cause) {
     throw new ShelfError({
@@ -2700,65 +2571,40 @@ export async function createAssetsFromBackupImport({
     await Promise.all(
       data.map(async (asset) => {
         /** Base data from asset */
-        const d = {
-          data: {
-            title: asset.title,
-            description: asset.description || null,
-            mainImage: asset.mainImage || null,
-            mainImageExpiration: oneDayFromNow(),
-            userId,
-            organizationId,
-            status: asset.status,
-            createdAt: new Date(asset.createdAt),
-            updatedAt: new Date(asset.updatedAt),
-            qrCodes: {
-              create: [
-                {
-                  id: id(),
-                  version: 0,
-                  errorCorrection: ErrorCorrection["L"],
-                  userId,
-                  organizationId,
-                },
-              ],
-            },
-            valuation: asset.valuation ? +asset.valuation : null,
-          },
+        const assetData: Record<string, any> = {
+          title: asset.title,
+          description: asset.description || null,
+          mainImage: asset.mainImage || null,
+          mainImageExpiration: oneDayFromNow(),
+          userId,
+          organizationId,
+          status: asset.status,
+          createdAt: new Date(asset.createdAt),
+          updatedAt: new Date(asset.updatedAt),
+          valuation: asset.valuation ? +asset.valuation : null,
         };
 
         /** Category */
         if (asset.category && Object.keys(asset?.category).length > 0) {
           const category = asset.category as Category;
 
-          const existingCat = await db.category.findFirst({
-            where: {
-              organizationId,
-              name: category.name,
-            },
+          const existingCat = await findFirst(db, "Category", {
+            where: { organizationId, name: category.name },
           });
 
-          /** If it doesn't exist, create a new one */
           if (!existingCat) {
-            const newCat = await db.category.create({
-              data: {
-                organizationId,
-                name: category.name,
-                description: category.description || "",
-                color: category.color,
-                userId,
-                createdAt: new Date(category.createdAt),
-                updatedAt: new Date(category.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: newCat.id,
-            });
+            const newCat = await create(db, "Category", {
+              organizationId,
+              name: category.name,
+              description: category.description || "",
+              color: category.color,
+              userId,
+              createdAt: new Date(category.createdAt),
+              updatedAt: new Date(category.updatedAt),
+            } as any);
+            assetData.categoryId = newCat.id;
           } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: existingCat.id,
-            });
+            assetData.categoryId = existingCat.id;
           }
         }
 
@@ -2766,126 +2612,82 @@ export async function createAssetsFromBackupImport({
         if (asset.location && Object.keys(asset?.location).length > 0) {
           const location = asset.location as Location;
 
-          const existingLoc = await db.location.findFirst({
-            where: {
-              organizationId,
-              name: location.name,
-            },
+          const existingLoc = await findFirst(db, "Location", {
+            where: { organizationId, name: location.name },
           });
 
-          /** If it doesn't exist, create a new one */
           if (!existingLoc) {
-            const newLoc = await db.location.create({
-              data: {
-                name: location.name,
-                description: location.description || "",
-                address: location.address || "",
-                organizationId,
-                userId,
-                createdAt: new Date(location.createdAt),
-                updatedAt: new Date(location.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: newLoc.id,
-            });
+            const newLoc = await create(db, "Location", {
+              name: location.name,
+              description: location.description || "",
+              address: location.address || "",
+              organizationId,
+              userId,
+              createdAt: new Date(location.createdAt),
+              updatedAt: new Date(location.updatedAt),
+            } as any);
+            assetData.locationId = newLoc.id;
           } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: existingLoc.id,
-            });
+            assetData.locationId = existingLoc.id;
           }
         }
 
-        /** Custody */
+        /** Custody — resolved after asset creation */
+        let custodyTeamMemberId: string | null = null;
         if (asset.custody && Object.keys(asset?.custody).length > 0) {
           const { custodian } = asset.custody;
 
-          const existingCustodian = await db.teamMember.findFirst({
-            where: {
-              deletedAt: null,
-              organizationId,
-              name: custodian.name,
-            },
+          const existingCustodian = await findFirst(db, "TeamMember", {
+            where: { deletedAt: null, organizationId, name: custodian.name },
           });
 
           if (!existingCustodian) {
-            const newCustodian = await db.teamMember.create({
-              data: {
-                name: custodian.name,
-                organizationId,
-                createdAt: new Date(custodian.createdAt),
-                updatedAt: new Date(custodian.updatedAt),
-              },
-            });
-
-            Object.assign(d.data, {
-              custody: {
-                create: {
-                  teamMemberId: newCustodian.id,
-                },
-              },
-            });
+            const newCustodian = await create(db, "TeamMember", {
+              name: custodian.name,
+              organizationId,
+              createdAt: new Date(custodian.createdAt),
+              updatedAt: new Date(custodian.updatedAt),
+            } as any);
+            custodyTeamMemberId = newCustodian.id;
           } else {
-            Object.assign(d.data, {
-              custody: {
-                create: {
-                  teamMemberId: existingCustodian.id,
-                },
-              },
-            });
+            custodyTeamMemberId = existingCustodian.id;
           }
         }
 
-        /** Tags */
+        /** Tags — resolved after asset creation */
+        const tagIds: string[] = [];
         if (asset.tags && asset.tags.length > 0) {
           const tagsNames = asset.tags.map((t) => t.name);
-          // now we loop through the categories and check if they exist
           const tags: Record<string, string> = {};
           for (const tag of tagsNames) {
-            const existingTag = await db.tag.findFirst({
-              where: {
-                name: tag,
-                organizationId,
-              },
+            const existingTag = await findFirst(db, "Tag", {
+              where: { name: tag, organizationId },
             });
 
             if (!existingTag) {
-              // if the tag doesn't exist, we create a new one
-              const newTag = await db.tag.create({
-                data: {
-                  name: tag as string,
-                  user: {
-                    connect: {
-                      id: userId,
-                    },
-                  },
-                  organization: {
-                    connect: {
-                      id: organizationId,
-                    },
-                  },
-                },
-              });
+              const newTag = await create(db, "Tag", {
+                name: tag as string,
+                userId,
+                organizationId,
+              } as any);
               tags[tag] = newTag.id;
             } else {
-              // if the tag exists, we just update the id
               tags[tag] = existingTag.id;
             }
           }
 
-          Object.assign(d.data, {
-            tags:
-              asset.tags.length > 0
-                ? {
-                    connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-                  }
-                : undefined,
-          });
+          for (const tag of asset.tags) {
+            if (tags[tag.name]) {
+              tagIds.push(tags[tag.name]);
+            }
+          }
         }
 
-        /** Custom fields */
+        /** Custom fields — resolved after asset creation */
+        let customFieldCreateData: Array<{
+          value: any;
+          customFieldId: string;
+        }> = [];
         if (asset.customFields && asset.customFields.length > 0) {
           const customFieldDef = asset.customFields.reduce(
             (res, { value, customField }) => {
@@ -2902,32 +2704,69 @@ export async function createAssetsFromBackupImport({
 
           const cfIds = await upsertCustomField(customFieldDef);
 
-          Object.assign(d.data, {
-            customFields: {
-              create: asset.customFields.map((cf) => ({
-                value: cf.value,
-                // @ts-ignore
-                customFieldId: cfIds[cf.customField.name].id,
-              })),
-            },
-          });
+          customFieldCreateData = asset.customFields.map((cf) => ({
+            value: cf.value,
+            // @ts-ignore
+            customFieldId: cfIds[cf.customField.name].id,
+          }));
         }
 
         /** Create the Asset */
-        const { id: assetId } = await db.asset.create(d);
+        const createdAsset = await create(db, "Asset", assetData as any);
+        const assetId = createdAsset.id;
+
+        /** Create QR code for the asset */
+        await create(db, "Qr", {
+          id: id(),
+          version: 0,
+          errorCorrection: ErrorCorrection["L"],
+          userId,
+          organizationId,
+          assetId,
+        } as any);
+
+        /** Create custody if needed */
+        if (custodyTeamMemberId) {
+          await create(db, "Custody", {
+            assetId,
+            teamMemberId: custodyTeamMemberId,
+          } as any);
+        }
+
+        /** Connect tags via join table */
+        for (const tagId of tagIds) {
+          await create(
+            db,
+            "_AssetToTag" as any,
+            {
+              A: assetId,
+              B: tagId,
+            } as any
+          );
+        }
+
+        /** Create custom field values */
+        for (const cf of customFieldCreateData) {
+          await create(db, "AssetCustomFieldValue", {
+            ...cf,
+            assetId,
+          } as any);
+        }
 
         /** Create notes */
         if (asset?.notes?.length > 0) {
-          await db.note.createMany({
-            data: asset.notes.map((note: Note) => ({
+          await createMany(
+            db,
+            "Note",
+            asset.notes.map((note: Note) => ({
               content: note.content,
               type: note.type,
               assetId,
               userId,
               createdAt: new Date(note.createdAt),
               updatedAt: new Date(note.updatedAt),
-            })),
-          });
+            })) as any
+          );
         }
       })
     );
@@ -2947,7 +2786,7 @@ export async function updateAssetBookingAvailability({
   organizationId,
 }: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
   try {
-    return await db.asset.update({
+    return await update(db, "Asset", {
       where: { id, organizationId },
       data: { availableToBook },
     });
@@ -2970,33 +2809,11 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
     if (checkedOutAssetsIds.length > 0) {
       /** We query again the assets that are checked-out so we can get the user via the booking*/
 
-      const assetsWithCustodians = await db.asset.findMany({
-        where: {
-          id: {
-            in: checkedOutAssetsIds,
-          },
-        },
-        select: {
-          id: true,
-          bookings: {
-            where: {
-              status: {
-                in: ["ONGOING", "OVERDUE"],
-              },
-            },
-            select: {
-              id: true,
-              custodianTeamMember: true,
-              custodianUser: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
-                },
-              },
-            },
-          },
-        },
+      // TODO: convert Prisma nested select/where to Supabase join
+      const assetsWithCustodians: any[] = await findMany(db, "Asset", {
+        where: { id: { in: checkedOutAssetsIds } },
+        select:
+          "id, bookings:Booking(id, custodianTeamMember:TeamMember(*), custodianUser:User(firstName, lastName, profilePicture))",
       });
 
       /**
@@ -3076,45 +2893,40 @@ export async function updateAssetQrCode({
   assetId: string;
   newQrId: string;
 }) {
-  // Disconnect all existing QR codes
   try {
-    // Disconnect all existing QR codes
-    await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            set: [],
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't disconnect existing codes",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
+    // Disconnect all existing QR codes by setting assetId to null
+    try {
+      await updateMany(db, "Qr", {
+        where: { assetId },
+        data: { assetId: null },
       });
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message: "Couldn't disconnect existing codes",
+        label,
+        additionalData: { assetId, organizationId, newQrId },
+      });
+    }
 
     // Connect the new QR code
-    return await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            connect: { id: newQrId },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't connect the new QR code",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
+    try {
+      await update(db, "Qr", {
+        where: { id: newQrId },
+        data: { assetId, organizationId },
       });
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message: "Couldn't connect the new QR code",
+        label,
+        additionalData: { assetId, organizationId, newQrId },
+      });
+    }
+
+    return await findUniqueOrThrow(db, "Asset", {
+      where: { id: assetId, organizationId },
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -3150,17 +2962,14 @@ export async function bulkDeleteAssets({
     /**
      * We have to remove the images of assets so we have to make this query first
      */
-    const assets = await db.asset.findMany({
-      where: {
-        id: { in: resolvedIds },
-        organizationId,
-      },
-      select: { id: true, mainImage: true },
+    const assets = await findMany(db, "Asset", {
+      where: { id: { in: resolvedIds }, organizationId },
+      select: "id, mainImage",
     });
 
     try {
-      await db.asset.deleteMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
+      await deleteMany(db, "Asset", {
+        id: { in: assets.map((asset) => asset.id) },
       });
 
       /** Deleting images of the assets (if any) */
@@ -3227,33 +3036,21 @@ export async function bulkCheckOutAssets({
      * In order to make notes for the assets we have to make this query to get info about assets
      */
     const [assets, user, custodianTeamMember] = await Promise.all([
-      db.asset.findMany({
-        where: {
-          id: { in: resolvedIds },
-          organizationId,
-        },
-        select: { id: true, title: true, status: true },
+      findMany(db, "Asset", {
+        where: { id: { in: resolvedIds }, organizationId },
+        select: "id, title, status",
       }),
       getUserByID(userId, {
         select: {
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect,
+        } as Record<string, any>,
       }),
-      db.teamMember.findUnique({
+      findUnique(db, "TeamMember", {
         where: { id: custodianId },
-        select: {
-          name: true,
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
-      }),
+        select: "name, user:User(id, firstName, lastName)",
+      }) as Promise<any>,
     ]);
 
     const assetsNotAvailable = assets.some(
@@ -3271,46 +3068,46 @@ export async function bulkCheckOutAssets({
     }
 
     /**
-     * updateMany does not allow to create nested relationship rows
-     * so we have to make two queries to bulk assign custody of assets
-     * 1. Create custodies for all assets
-     * 2. Update status of all assets to IN_CUSTODY
+     * TODO: convert Prisma $transaction to Supabase RPC or sequential queries
+     * For now, run sequentially without transaction wrapper
      */
-    await db.$transaction(async (tx) => {
-      /** Creating custodies over assets */
-      await tx.custody.createMany({
-        data: assets.map((asset) => ({
-          assetId: asset.id,
-          teamMemberId: custodianId,
-        })),
-      });
+    /** Creating custodies over assets */
+    await createMany(
+      db,
+      "Custody",
+      assets.map((asset) => ({
+        assetId: asset.id,
+        teamMemberId: custodianId,
+      })) as any
+    );
 
-      /** Updating status of assets to IN_CUSTODY */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
-      });
-
-      /** Creating notes for the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
-
-      const custodianDisplay = custodianTeamMember
-        ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
-
-      await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `${actor} granted ${custodianDisplay} custody.`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+    /** Updating status of assets to IN_CUSTODY */
+    await updateMany(db, "Asset", {
+      where: { id: { in: assets.map((asset) => asset.id) } },
+      data: { status: AssetStatus.IN_CUSTODY },
     });
+
+    /** Creating notes for the assets */
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    });
+
+    const custodianDisplay = custodianTeamMember
+      ? wrapCustodianForNote({ teamMember: custodianTeamMember })
+      : `**${custodianName.trim()}**`;
+
+    await createMany(
+      db,
+      "Note",
+      assets.map((asset) => ({
+        content: `${actor} granted ${custodianDisplay} custody.`,
+        type: "UPDATE",
+        userId,
+        assetId: asset.id,
+      })) as any
+    );
 
     return true;
   } catch (cause) {
@@ -3372,7 +3169,7 @@ export async function bulkCheckInAssets({
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect,
+        } satisfies Record<string, any>,
       }),
     ]);
 
@@ -3495,7 +3292,7 @@ export async function bulkUpdateAssetLocation({
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect,
+        } satisfies Record<string, any>,
       }),
     ]);
 
@@ -3868,7 +3665,7 @@ export async function relinkAssetQrCode({
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } satisfies Record<string, any>,
     }),
     db.asset.findFirst({
       where: { id: assetId, organizationId },

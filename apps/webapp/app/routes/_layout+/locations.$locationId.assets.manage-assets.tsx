@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, type Prisma } from "@shelf/database";
+import { AssetStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -435,17 +435,7 @@ export default function AddAssetsToLocation() {
   );
 }
 
-const RowComponent = ({
-  item,
-}: {
-  item: Prisma.AssetGetPayload<{
-    include: {
-      location: typeof LOCATION_WITH_HIERARCHY;
-      category: true;
-      tags: true;
-    };
-  }>;
-}) => {
+const RowComponent = ({ item }: { item: any }) => {
   const { tags, category } = item;
 
   return (

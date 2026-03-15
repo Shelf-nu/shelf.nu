@@ -1,4 +1,3 @@
-import { Prisma } from "@shelf/database";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -337,8 +336,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     } catch (updateError) {
       // Asset was deleted between the initial read and this update — not a bug
       if (
-        updateError instanceof Prisma.PrismaClientKnownRequestError &&
-        updateError.code === "P2025"
+        updateError instanceof Error &&
+        "code" in updateError &&
+        (updateError as any).code === "P2025"
       ) {
         return data(payload({ asset: null }));
       }

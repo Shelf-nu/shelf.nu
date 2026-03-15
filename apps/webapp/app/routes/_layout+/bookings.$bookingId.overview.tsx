@@ -1,9 +1,4 @@
-import {
-  BookingStatus,
-  TagUseFor,
-  OrganizationRoles,
-  type Prisma,
-} from "@shelf/database";
+import { BookingStatus, TagUseFor, OrganizationRoles } from "@shelf/database";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -589,7 +584,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } satisfies Record<string, any>,
     });
 
     const headers = [

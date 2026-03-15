@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Prisma, TeamMember } from "@shelf/database";
+import type { TeamMember } from "@shelf/database";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 
@@ -22,15 +22,7 @@ import { TrashIcon, XIcon } from "../icons/library";
 export const DeleteMember = ({
   teamMember,
 }: {
-  teamMember: Prisma.TeamMemberGetPayload<{
-    include: {
-      _count: {
-        select: {
-          custodies: true;
-        };
-      };
-    };
-  }>;
+  teamMember: TeamMember & { _count: { custodies: number } };
 }) => {
   const hasCustodies = useMemo(
     () => teamMember?._count.custodies > 0,

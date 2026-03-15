@@ -1,4 +1,4 @@
-import type { PrintBatch, Prisma } from "@shelf/database";
+import type { PrintBatch, Qr } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -155,37 +155,18 @@ export default function Area51() {
 const ListUserContent = ({
   item,
 }: {
-  item: Prisma.QrGetPayload<{
-    include: {
-      asset: {
-        select: {
-          id: true;
-          title: true;
-        };
-      };
-      kit: {
-        select: {
-          id: true;
-          name: true;
-        };
-      };
-      organization: {
-        select: {
-          id: true;
-          name: true;
-        };
-      };
-      user: {
-        select: {
-          id: true;
-          email: true;
-          firstName: true;
-          lastName: true;
-        };
-      };
-      batch: true;
-    };
-  }>;
+  item: Qr & {
+    asset: { id: string; title: string } | null;
+    kit: { id: string; name: string } | null;
+    organization: { id: string; name: string } | null;
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+    } | null;
+    batch: PrintBatch | null;
+  };
 }) => (
   <>
     <Td className=" p-0 md:p-0">

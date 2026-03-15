@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { Prisma } from "@shelf/database";
 import { MapPinIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -56,9 +55,9 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const kitCanBeReleased = kit.custody;
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
 
-  const kitCustody = kit.custody as unknown as Prisma.KitCustodyGetPayload<{
-    select: { custodian: { select: { userId: true } } };
-  }>;
+  const kitCustody = kit.custody as unknown as {
+    custodian?: { userId?: string | null } | null;
+  };
 
   const someAssetIsNotAvailable = kit.assets.some(
     (asset) => asset.status !== "AVAILABLE"

@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AssetStatus,
-  BookingStatus,
-  KitStatus,
-  type Prisma,
-} from "@shelf/database";
+import { AssetStatus, BookingStatus, KitStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   LinksFunction,
@@ -81,29 +76,8 @@ export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export type KitForBooking = Prisma.KitGetPayload<{
-  include: {
-    location: typeof LOCATION_WITH_HIERARCHY;
-    _count: { select: { assets: true } };
-    assets: {
-      select: {
-        id: true;
-        status: true;
-        availableToBook: true;
-        custody: true;
-        bookings: {
-          select: {
-            id: true;
-            status: true;
-            name: true;
-            from: true;
-            to: true;
-          };
-        };
-      };
-    };
-  };
-}>;
+// TODO: Replace with proper Supabase type after migration
+export type KitForBooking = any;
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -309,7 +283,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      } satisfies Record<string, boolean>,
     });
 
     const selectedKits = await db.kit.findMany({

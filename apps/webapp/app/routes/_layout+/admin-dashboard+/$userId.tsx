@@ -7,7 +7,6 @@ import {
   type CustomTierLimit,
   OrganizationRoles,
   type UserBusinessIntel,
-  type Prisma,
 } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, useLoaderData, Link, useFetcher } from "react-router";
@@ -122,7 +121,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
             timeline: true,
           },
         },
-      } satisfies Prisma.UserSelect,
+      } satisfies Record<string, any>,
     });
 
     const userOrganizations = await db.userOrganization
@@ -337,7 +336,7 @@ export const action = async ({
             email: true,
             firstName: true,
             lastName: true,
-          } satisfies Prisma.UserSelect,
+          } satisfies Record<string, any>,
         });
         await createStripeCustomer({
           email: user.email,

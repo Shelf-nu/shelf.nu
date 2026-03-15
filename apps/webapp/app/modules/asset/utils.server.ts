@@ -2,7 +2,6 @@ import type {
   Asset,
   AssetStatus,
   Location,
-  Prisma,
   CustomFieldType,
 } from "@shelf/database";
 import _ from "lodash";
@@ -449,7 +448,7 @@ export function getAssetsWhereInput({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
 }) {
-  const where: Prisma.AssetWhereInput = { organizationId };
+  const where: Record<string, any> = { organizationId };
 
   if (!currentSearchParams) {
     return where;

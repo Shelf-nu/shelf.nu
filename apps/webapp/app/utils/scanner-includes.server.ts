@@ -1,4 +1,4 @@
-import type { Prisma } from "@shelf/database";
+import type { Asset, Custody, Kit, Location } from "@shelf/database";
 
 export const CUSTODY_INCLUDE = {
   custody: {
@@ -66,11 +66,31 @@ export const BARCODE_INCLUDE = {
   },
 };
 
-// Type exports for reuse
-export type KitFromScanner = Prisma.KitGetPayload<{
-  include: typeof KIT_INCLUDE;
-}>;
+type CustodyWithCustodian = Custody & {
+  custodian: {
+    name: string;
+    user: {
+      firstName: string;
+      lastName: string;
+      profilePicture: string | null;
+    } | null;
+  };
+};
 
-export type AssetFromScanner = Prisma.AssetGetPayload<{
-  include: typeof ASSET_INCLUDE;
-}>;
+// Type exports for reuse
+export type KitFromScanner = Kit & {
+  location: Pick<Location, "id" | "name"> | null;
+  _count: { assets: number };
+  assets: Array<{
+    id: string;
+    status: string;
+    availableToBook: boolean;
+    custody: any;
+  }>;
+  custody: CustodyWithCustodian | null;
+};
+
+export type AssetFromScanner = Asset & {
+  location: Pick<Location, "id" | "name"> | null;
+  custody: CustodyWithCustodian | null;
+};

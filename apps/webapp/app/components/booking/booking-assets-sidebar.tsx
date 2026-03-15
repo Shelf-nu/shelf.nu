@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { ReactNode } from "react";
-import type { Prisma } from "@shelf/database";
+import type { Booking } from "@shelf/database";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import {
@@ -16,45 +16,35 @@ import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import KitImage from "../kits/kit-image";
 
-type BookingWithAssets = Prisma.BookingGetPayload<{
-  include: {
-    assets: {
-      select: {
-        id: true;
-        title: true;
-        availableToBook: true;
-        custody: true;
-        kitId: true;
-        status: true;
-        mainImage: true;
-        thumbnailImage: true;
-        mainImageExpiration: true;
-        category: {
-          select: {
-            id: true;
-            name: true;
-            color: true;
-          };
-        };
-        kit: {
-          select: {
-            id: true;
-            name: true;
-            image: true;
-            imageExpiration: true;
-            category: {
-              select: {
-                id: true;
-                name: true;
-                color: true;
-              };
-            };
-          };
-        };
-      };
-    };
-  };
-}>;
+type BookingWithAssets = Booking & {
+  assets: Array<{
+    id: string;
+    title: string;
+    availableToBook: boolean;
+    custody: any;
+    kitId: string | null;
+    status: string;
+    mainImage: string | null;
+    thumbnailImage: string | null;
+    mainImageExpiration: Date | null;
+    category: {
+      id: string;
+      name: string;
+      color: string;
+    } | null;
+    kit: {
+      id: string;
+      name: string;
+      image: string | null;
+      imageExpiration: string | null;
+      category: {
+        id: string;
+        name: string;
+        color: string;
+      } | null;
+    } | null;
+  }>;
+};
 
 interface BookingAssetsSidebarProps {
   booking: BookingWithAssets;
