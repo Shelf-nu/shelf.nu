@@ -3296,7 +3296,7 @@ export async function bulkUpdateAssetLocation({
     }
 
     const newLocation = newLocationId
-      ? await db.location.findFirst({
+      ? await findFirst(db, "Location", {
           where: { id: newLocationId, organizationId },
         })
       : null;

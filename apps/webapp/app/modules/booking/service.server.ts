@@ -1881,166 +1881,166 @@ export async function partialCheckinBooking({
       }
     }
 
-    const updatedBooking = await db.$transaction(async (tx) => {
-      // Update the status of checked-in assets to AVAILABLE
-      await tx.asset.updateMany({
-        where: { id: { in: assetIds } },
-        data: { status: AssetStatus.AVAILABLE },
-      });
-
-      // Only update kit status for kits that are completely checked in
-      if (completeKitIds.length > 0) {
-        await tx.kit.updateMany({
-          where: { id: { in: completeKitIds } },
-          data: { status: KitStatus.AVAILABLE },
-        });
-      }
-
-      // Create partial check-in record for tracking
-      await tx.partialBookingCheckin.create({
-        data: {
-          bookingId: id,
-          checkedInById: userId,
-          assetIds,
-          checkinCount: assetIds.length,
-        },
-      });
-
-      // Create audit notes for each checked-in asset using createNotes
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
-      const noteContent = `${actor} checked in via partial check-in.`;
-      await createNotes({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetIds,
-      });
-
-      // BOOKING ACTIVITY LOG: Log partial check-in activity
-      // Get the kit and standalone asset data for consistent formatting
-      const assetsWithKitInfo = await tx.asset.findMany({
-        where: { id: { in: assetIds } },
-        select: {
-          id: true,
-          title: true,
-          kit: { select: { id: true, name: true } },
-        },
-      });
-
-      // Separate complete kits from individual assets
-      const completeKits: Array<{ id: string; name: string }> = [];
-      const standaloneAssets: Array<{ id: string; title: string }> = [];
-      const processedKitIds = new Set<string>();
-
-      for (const asset of assetsWithKitInfo) {
-        if (
-          asset.kit &&
-          completeKitIds.includes(asset.kit.id) &&
-          !processedKitIds.has(asset.kit.id)
-        ) {
-          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
-          processedKitIds.add(asset.kit.id);
-        } else if (!asset.kit) {
-          standaloneAssets.push({ id: asset.id, title: asset.title });
-        }
-      }
-
-      const hasKits = completeKits.length > 0;
-      const hasAssets = standaloneAssets.length > 0;
-
-      let itemsDescription = "";
-      if (hasKits && hasAssets) {
-        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
-        const assetContent = wrapAssetsWithDataForNote(
-          standaloneAssets,
-          "checked in"
-        );
-        itemsDescription = `${assetContent} and ${kitContent}`;
-      } else if (hasKits) {
-        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
-        itemsDescription = kitContent;
-      } else if (hasAssets) {
-        const assetContent = wrapAssetsWithDataForNote(
-          standaloneAssets,
-          "checked in"
-        );
-        itemsDescription = assetContent;
-      }
-
-      // Get the updated booking with all original assets first to calculate remaining count
-      const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
-        where: { id },
-        include: {
-          assets: true,
-          custodianUser: true,
-          custodianTeamMember: true,
-          _count: { select: { assets: true } },
-        },
-      });
-
-      const remainingCount =
-        updatedBookingForNote.assets.length - assetIds.length;
-      const isCompletingBooking = remainingCount === 0;
-
-      if (isCompletingBooking) {
-        // Update booking status to COMPLETE
-        const completedBooking = await tx.booking.update({
-          where: { id },
-          data: { status: BookingStatus.COMPLETE },
-          include: {
-            assets: true,
-            custodianUser: true,
-            custodianTeamMember: true,
-            _count: { select: { assets: true } },
-          },
-        });
-
-        // Create combined completion message
-        const fromStatusBadge = wrapBookingStatusForNote(
-          updatedBookingForNote.status,
-          completedBooking.custodianUserId || undefined
-        );
-        const toStatusBadge = wrapBookingStatusForNote(
-          BookingStatus.COMPLETE,
-          completedBooking.custodianUserId || undefined
-        );
-
-        await createSystemBookingNote({
-          bookingId: id,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
-        });
-
-        return {
-          booking: completedBooking,
-          checkedInAssetCount: assetIds.length,
-          remainingAssetCount: 0,
-          isComplete: true,
-        };
-      } else {
-        // Regular partial check-in
-        const remainingText = ` (Remaining: ${remainingCount})`;
-
-        await createSystemBookingNote({
-          bookingId: id,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
-        });
-
-        return {
-          booking: updatedBookingForNote,
-          checkedInAssetCount: assetIds.length,
-          remainingAssetCount: remainingCount,
-          isComplete: false,
-        };
-      }
+    // Sequential operations replacing db.$transaction
+    // Update the status of checked-in assets to AVAILABLE
+    await updateMany(db, "Asset", {
+      where: { id: { in: assetIds } },
+      data: { status: AssetStatus.AVAILABLE },
     });
+
+    // Only update kit status for kits that are completely checked in
+    if (completeKitIds.length > 0) {
+      await updateMany(db, "Kit", {
+        where: { id: { in: completeKitIds } },
+        data: { status: KitStatus.AVAILABLE },
+      });
+    }
+
+    // Create partial check-in record for tracking
+    await create(db, "PartialBookingCheckin", {
+      bookingId: id,
+      checkedInById: userId,
+      assetIds,
+      checkinCount: assetIds.length,
+    });
+
+    // Create audit notes for each checked-in asset using createNotes
+    const actor = wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    });
+    const noteContent = `${actor} checked in via partial check-in.`;
+    await createNotes({
+      content: noteContent,
+      type: "UPDATE",
+      userId,
+      assetIds,
+    });
+
+    // BOOKING ACTIVITY LOG: Log partial check-in activity
+    // Get the kit and standalone asset data for consistent formatting
+    const assetsWithKitInfo = await queryRaw<any>(
+      db,
+      sql`SELECT a."id", a."title", a."kitId", k."id" as "kit_id", k."name" as "kit_name"
+          FROM "Asset" a
+          LEFT JOIN "Kit" k ON k."id" = a."kitId"
+          WHERE a."id" = ANY(${assetIds}::text[])`
+    );
+    for (const asset of assetsWithKitInfo) {
+      asset.kit = asset.kit_id
+        ? { id: asset.kit_id, name: asset.kit_name }
+        : null;
+      delete asset.kit_id;
+      delete asset.kit_name;
+    }
+
+    // Separate complete kits from individual assets
+    const completeKits: Array<{ id: string; name: string }> = [];
+    const standaloneAssets: Array<{ id: string; title: string }> = [];
+    const processedKitIds = new Set<string>();
+
+    for (const asset of assetsWithKitInfo) {
+      if (
+        asset.kit &&
+        completeKitIds.includes(asset.kit.id) &&
+        !processedKitIds.has(asset.kit.id)
+      ) {
+        completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+        processedKitIds.add(asset.kit.id);
+      } else if (!asset.kit) {
+        standaloneAssets.push({ id: asset.id, title: asset.title });
+      }
+    }
+
+    const hasKitsPartial = completeKits.length > 0;
+    const hasAssetsPartial = standaloneAssets.length > 0;
+
+    let itemsDescription = "";
+    if (hasKitsPartial && hasAssetsPartial) {
+      const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
+      const assetContent = wrapAssetsWithDataForNote(
+        standaloneAssets,
+        "checked in"
+      );
+      itemsDescription = `${assetContent} and ${kitContent}`;
+    } else if (hasKitsPartial) {
+      const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
+      itemsDescription = kitContent;
+    } else if (hasAssetsPartial) {
+      const assetContent = wrapAssetsWithDataForNote(
+        standaloneAssets,
+        "checked in"
+      );
+      itemsDescription = assetContent;
+    }
+
+    // Get the updated booking with all original assets to calculate remaining count
+    const updatedBookingForNote = (await findUniqueOrThrow(db, "Booking", {
+      where: { id },
+    })) as any;
+    const bookingAssetsFull = await queryRaw<any>(
+      db,
+      sql`SELECT a.* FROM "Asset" a INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id" WHERE ab."B" = ${id}`
+    );
+    updatedBookingForNote.assets = bookingAssetsFull;
+    updatedBookingForNote._count = { assets: bookingAssetsFull.length };
+
+    const remainingCount =
+      updatedBookingForNote.assets.length - assetIds.length;
+    const isCompletingBooking = remainingCount === 0;
+
+    let updatedBooking: any;
+    if (isCompletingBooking) {
+      // Update booking status to COMPLETE
+      const completedBooking = (await update(db, "Booking", {
+        where: { id },
+        data: { status: BookingStatus.COMPLETE },
+      })) as any;
+      completedBooking.assets = updatedBookingForNote.assets;
+      completedBooking._count = updatedBookingForNote._count;
+
+      // Create combined completion message
+      const fromStatusBadge = wrapBookingStatusForNote(
+        updatedBookingForNote.status,
+        completedBooking.custodianUserId || undefined
+      );
+      const toStatusBadge = wrapBookingStatusForNote(
+        BookingStatus.COMPLETE,
+        completedBooking.custodianUserId || undefined
+      );
+
+      await createSystemBookingNote({
+        bookingId: id,
+        content: `${wrapUserLinkForNote(
+          user!
+        )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+      });
+
+      updatedBooking = {
+        booking: completedBooking,
+        checkedInAssetCount: assetIds.length,
+        remainingAssetCount: 0,
+        isComplete: true,
+      };
+    } else {
+      // Regular partial check-in
+      const remainingText = ` (Remaining: ${remainingCount})`;
+
+      await createSystemBookingNote({
+        bookingId: id,
+        content: `${wrapUserLinkForNote(
+          user!
+        )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
+      });
+
+      updatedBooking = {
+        booking: updatedBookingForNote,
+        checkedInAssetCount: assetIds.length,
+        remainingAssetCount: remainingCount,
+        isComplete: false,
+      };
+    }
 
     return updatedBooking;
   } catch (cause) {
