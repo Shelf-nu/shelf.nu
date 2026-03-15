@@ -1,6 +1,15 @@
 import type { Barcode, Organization, User, Asset, Kit } from "@shelf/database";
 import { BarcodeType } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  create,
+  createMany,
+  deleteMany,
+  findFirst,
+  findMany,
+  remove,
+  update,
+} from "~/database/query-helpers.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -57,18 +66,16 @@ export async function createBarcode({
       });
     }
 
-    const barcode = await db.barcode.create({
-      data: {
-        type,
-        value: normalizedValue, // Preserve case for ExternalQR, uppercase others
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
-    });
-    return barcode;
+    const barcode = await create(db, "Barcode", {
+      type,
+      value: normalizedValue, // Preserve case for ExternalQR, uppercase others
+      organizationId,
+      ...(assetId && { assetId }),
+      ...(kitId && { kitId }),
+    } as any);
+    return barcode as Barcode;
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
+    // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
     if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
@@ -134,20 +141,20 @@ export async function createBarcodes({
       }
     }
 
-    // Let Prisma handle unique constraint violations for performance
-
     // Use createMany for bulk insert performance
-    await db.barcode.createMany({
-      data: barcodes.map((barcode) => ({
+    await createMany(
+      db,
+      "Barcode",
+      barcodes.map((barcode) => ({
         type: barcode.type,
         value: normalizeBarcodeValue(barcode.type, barcode.value),
         organizationId,
         ...(assetId && { assetId }),
         ...(kitId && { kitId }),
-      })),
-    });
+      })) as any[]
+    );
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
+    // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
     if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
@@ -208,13 +215,13 @@ export async function updateBarcode({
       }
     }
 
-    const barcode = await db.barcode.update({
+    const barcode = await update(db, "Barcode", {
       where: { id, organizationId },
       data: updateData,
     });
-    return barcode;
+    return barcode as Barcode;
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
+    // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
     if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
@@ -250,9 +257,7 @@ export async function deleteBarcode({
   organizationId: Organization["id"];
 }): Promise<void> {
   try {
-    await db.barcode.delete({
-      where: { id, organizationId },
-    });
+    await remove(db, "Barcode", { id, organizationId });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -276,12 +281,10 @@ export async function deleteBarcodes({
   organizationId: Organization["id"];
 }): Promise<void> {
   try {
-    await db.barcode.deleteMany({
-      where: {
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
+    await deleteMany(db, "Barcode", {
+      organizationId,
+      ...(assetId && { assetId }),
+      ...(kitId && { kitId }),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -296,23 +299,16 @@ export async function deleteBarcodes({
 /**
  * Get barcode by value within organization
  */
-export async function getBarcodeByValue<
-  T = {
-    asset: boolean;
-    kit: boolean;
-  },
->({
+export async function getBarcodeByValue({
   value,
   organizationId,
-  include,
 }: {
   value: string;
   organizationId: Organization["id"];
-  include?: T;
 }): Promise<any> {
   try {
     // Try to find barcode with original case first (for ExternalQR), then uppercase (for other types)
-    const barcode = await db.barcode.findFirst({
+    const barcode = await findFirst(db, "Barcode", {
       where: {
         OR: [
           { value: value }, // Try original case first (ExternalQR)
@@ -320,10 +316,7 @@ export async function getBarcodeByValue<
         ],
         organizationId,
       },
-      include: include || {
-        asset: true,
-        kit: true,
-      },
+      select: "*, asset:Asset(*), kit:Kit(*)",
     });
     return barcode;
   } catch (cause) {
@@ -347,7 +340,7 @@ export async function getAssetBarcodes({
   organizationId: Organization["id"];
 }): Promise<Barcode[]> {
   try {
-    const barcodes = await db.barcode.findMany({
+    const barcodes = await findMany(db, "Barcode", {
       where: {
         assetId,
         organizationId,
@@ -356,7 +349,7 @@ export async function getAssetBarcodes({
         createdAt: "asc",
       },
     });
-    return barcodes;
+    return barcodes as Barcode[];
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -378,7 +371,7 @@ export async function getKitBarcodes({
   organizationId: Organization["id"];
 }): Promise<Barcode[]> {
   try {
-    const barcodes = await db.barcode.findMany({
+    const barcodes = await findMany(db, "Barcode", {
       where: {
         kitId,
         organizationId,
@@ -387,7 +380,7 @@ export async function getKitBarcodes({
         createdAt: "asc",
       },
     });
-    return barcodes;
+    return barcodes as Barcode[];
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -484,20 +477,17 @@ export async function validateBarcodeUniqueness(
   );
 
   const isEditing = !!currentItemId && !!relationshipType;
-  const existingBarcodes = await db.barcode.findMany({
+  const existingBarcodes = await findMany(db, "Barcode", {
     where: {
       value: { in: submittedValues },
       organizationId,
     },
-    include: {
-      asset: { select: { title: true } },
-      kit: { select: { name: true } },
-    },
+    select: "*, asset:Asset(title), kit:Kit(name)",
   });
 
   // Filter out the current item manually
   const filteredExistingBarcodes = isEditing
-    ? existingBarcodes.filter((barcode) => {
+    ? existingBarcodes.filter((barcode: any) => {
         if (relationshipType === "asset") {
           return barcode.assetId !== currentItemId;
         } else {
@@ -511,7 +501,7 @@ export async function validateBarcodeUniqueness(
     string,
     (typeof filteredExistingBarcodes)[0]
   >();
-  filteredExistingBarcodes.forEach((barcode) => {
+  filteredExistingBarcodes.forEach((barcode: any) => {
     existingValueMap.set(barcode.value, barcode);
   });
 
@@ -519,7 +509,7 @@ export async function validateBarcodeUniqueness(
   for (let i = 0; i < barcodes.length; i++) {
     const barcode = barcodes[i];
     const normalizedValue = normalizeBarcodeValue(barcode.type, barcode.value);
-    const existingBarcode = existingValueMap.get(normalizedValue);
+    const existingBarcode = existingValueMap.get(normalizedValue) as any;
 
     if (existingBarcode) {
       const itemName =
@@ -587,10 +577,8 @@ export async function updateBarcodes({
       }
     }
 
-    // Let Prisma handle unique constraint violations for performance
-
     // Get existing barcodes
-    const existingBarcodes = await db.barcode.findMany({
+    const existingBarcodes = await findMany(db, "Barcode", {
       where: {
         organizationId,
         ...(assetId && { assetId }),
@@ -608,55 +596,41 @@ export async function updateBarcodes({
       (existing) => !submittedIds.has(existing.id)
     );
 
-    const operations = [];
-
+    // Execute operations sequentially
     // Update existing barcodes
     for (const barcode of barcodesToUpdate) {
-      operations.push(
-        db.barcode.update({
-          where: {
-            id: barcode.id!,
-            organizationId, // Security: ensure the barcode belongs to this org
-          },
-          data: {
-            type: barcode.type,
-            value: normalizeBarcodeValue(barcode.type, barcode.value),
-          },
-        })
-      );
+      await update(db, "Barcode", {
+        where: {
+          id: barcode.id!,
+          organizationId, // Security: ensure the barcode belongs to this org
+        },
+        data: {
+          type: barcode.type,
+          value: normalizeBarcodeValue(barcode.type, barcode.value),
+        },
+      });
     }
 
     // Create new barcodes
     for (const barcode of barcodesToCreate) {
-      operations.push(
-        db.barcode.create({
-          data: {
-            type: barcode.type,
-            value: normalizeBarcodeValue(barcode.type, barcode.value),
-            organizationId,
-            ...(assetId && { assetId }),
-            ...(kitId && { kitId }),
-          },
-        })
-      );
+      await create(db, "Barcode", {
+        type: barcode.type,
+        value: normalizeBarcodeValue(barcode.type, barcode.value),
+        organizationId,
+        ...(assetId && { assetId }),
+        ...(kitId && { kitId }),
+      } as any);
     }
 
     // Delete removed barcodes
     if (barcodesToDelete.length > 0) {
-      operations.push(
-        db.barcode.deleteMany({
-          where: {
-            id: { in: barcodesToDelete.map((b) => b.id) },
-            organizationId, // Security: ensure we only delete from this org
-          },
-        })
-      );
+      await deleteMany(db, "Barcode", {
+        id: { in: barcodesToDelete.map((b) => b.id) },
+        organizationId, // Security: ensure we only delete from this org
+      });
     }
-
-    // Execute all operations in a transaction
-    await db.$transaction(operations);
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
+    // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
     if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
       const prismaError = cause as any;
@@ -828,24 +802,21 @@ export async function parseBarcodesFromImportData({
     }
 
     // Check existing barcodes in the current organization only
-    const existingBarcodes = await db.barcode.findMany({
+    const existingBarcodes = await findMany(db, "Barcode", {
       where: {
         value: { in: allBarcodeValues },
         organizationId, // Only check within current organization
       },
-      include: {
-        asset: { select: { title: true } },
-        kit: { select: { name: true } },
-      },
+      select: "*, asset:Asset(title), kit:Kit(name)",
     });
 
     // Check for barcodes already linked to assets or kits in this organization
     const linkedBarcodes = existingBarcodes.filter(
-      (barcode) => barcode.assetId || barcode.kitId
+      (barcode: any) => barcode.assetId || barcode.kitId
     );
 
     if (linkedBarcodes.length > 0) {
-      const linkedDetails = linkedBarcodes.map((barcode) => {
+      const linkedDetails = linkedBarcodes.map((barcode: any) => {
         const sources = barcodeAssetsMap.get(barcode.value);
         const linkedTo =
           barcode.asset?.title || barcode.kit?.name || "Unknown item";
@@ -866,8 +837,8 @@ export async function parseBarcodesFromImportData({
     // Create a map of existing orphaned barcodes that can be reused
     const orphanedBarcodeMap = new Map<string, string>();
     existingBarcodes
-      .filter((barcode) => !barcode.assetId && !barcode.kitId) // Only orphaned barcodes
-      .forEach((barcode) => {
+      .filter((barcode: any) => !barcode.assetId && !barcode.kitId) // Only orphaned barcodes
+      .forEach((barcode: any) => {
         orphanedBarcodeMap.set(barcode.value, barcode.id);
       });
 

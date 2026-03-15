@@ -1,4 +1,4 @@
-import type { Prisma } from "@shelf/database";
+import type { CustomField } from "@shelf/database";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, Link, useLoaderData } from "react-router";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -149,7 +149,8 @@ export default function CustomFieldsIndexPage() {
 function CustomFieldRow({
   item,
 }: {
-  item: Prisma.CustomFieldGetPayload<{ include: { categories: true } }> & {
+  item: CustomField & {
+    categories: { id: string; name: string; color: string }[];
     usageCount: number;
   };
 }) {

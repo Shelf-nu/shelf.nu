@@ -1,4 +1,3 @@
-import type { Prisma } from "@shelf/database";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -97,8 +96,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         auditSessionId: z.string().optional(),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
+      assetExtraInclude: Record<string, unknown> | undefined;
+      kitExtraInclude: Record<string, unknown> | undefined;
       auditSessionId?: string;
     };
 

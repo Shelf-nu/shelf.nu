@@ -1,4 +1,4 @@
-import type { Booking, TeamMember, User, Tag } from "@shelf/database";
+import type { Tag } from "@shelf/database";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 /** Includes needed for booking to have all data required for emails */
@@ -35,7 +35,7 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
       },
     },
   },
-;
+};
 
 /**
  * Type for assets as returned in reservation emails.
@@ -54,7 +54,7 @@ export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
   tags: TAG_WITH_COLOR_SELECT,
-} as Prisma.BookingInclude;
+};
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
@@ -84,20 +84,21 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       { createdAt: "asc" }, // Then by creation order as fallback
     ],
   },
-} satisfies Prisma.BookingInclude;
-
-/**
- * Type for a booking with assets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
- */
-type BookingWithAssets = Prisma.BookingGetPayload<{
-  include: typeof BOOKING_WITH_ASSETS_INCLUDE;
-}>;
+};
 
 /**
  * Type for assets as returned by BOOKING_WITH_ASSETS_INCLUDE
- * Inferred from the Prisma include to ensure type safety
  */
-export type BookingAsset = BookingWithAssets["assets"][number];
+export type BookingAsset = {
+  id: string;
+  title: string;
+  availableToBook: boolean;
+  status: string;
+  kitId: string | null;
+  valuation: number | null;
+  category: { id: string; name: string; color: string } | null;
+  kit: { name: string } | null;
+};
 
 /**
  * This enum represents the types of different events that can be scheduled for a booking using PgBoss

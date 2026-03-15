@@ -1,4 +1,4 @@
-import type { Prisma } from "@shelf/database";
+import type { TeamMember, User } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
@@ -20,11 +20,14 @@ const TEAM_MEMBER_INCLUDE = {
       profilePicture: true,
     },
   },
-} satisfies Prisma.TeamMemberInclude;
+};
 
-export type AuditTeamMember = Prisma.TeamMemberGetPayload<{
-  include: typeof TEAM_MEMBER_INCLUDE;
-}>;
+export type AuditTeamMember = TeamMember & {
+  user: Pick<
+    User,
+    "id" | "email" | "firstName" | "lastName" | "profilePicture"
+  > | null;
+};
 
 /**
  * API endpoint to fetch team members for audit assignment.

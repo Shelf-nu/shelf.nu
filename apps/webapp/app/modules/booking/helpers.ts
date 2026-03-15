@@ -1,18 +1,18 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@shelf/database";
+import { AssetStatus, BookingStatus } from "@shelf/database";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
 /**
- * Generates dynamic Prisma orderBy clause for booking assets
+ * Generates dynamic orderBy clause for booking assets
  * @param orderBy - The field to sort by (status, title, category, kit)
  * @param orderDirection - The sort direction (asc or desc)
- * @returns Array of Prisma orderBy inputs
+ * @returns Array of orderBy inputs
  */
 export function getBookingAssetsOrderBy(
   orderBy: string = "status",
   orderDirection: "asc" | "desc" = "desc"
-): Prisma.AssetOrderByWithRelationInput[] {
-  const orderByMap: Record<string, Prisma.AssetOrderByWithRelationInput[]> = {
+): Record<string, unknown>[] {
+  const orderByMap: Record<string, Record<string, unknown>[]> = {
     status: [{ status: orderDirection }, { createdAt: "asc" }],
     title: [{ title: orderDirection }],
     category: [{ category: { name: orderDirection } }],

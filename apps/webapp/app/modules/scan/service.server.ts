@@ -1,5 +1,11 @@
-import type { Prisma, Scan } from "@shelf/database";
+import type { Scan } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  count,
+  create,
+  findFirst,
+  update,
+} from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
@@ -30,7 +36,7 @@ export async function createScan(params: {
   } = params;
 
   try {
-    const data = {
+    const data: Record<string, unknown> = {
       userAgent,
       rawQrId: qrId,
       latitude,
@@ -38,35 +44,19 @@ export async function createScan(params: {
       manuallyGenerated,
     };
 
-    /** If user id is passed, connect to that user */
+    /** If user id is passed, flatten the connect to direct FK */
     if (userId && userId != "anonymous") {
-      Object.assign(data, {
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      });
+      data.userId = userId;
     }
 
     /** If we link it to that QR and also store the id in the rawQrId field
      * If rawQrId is passed, we store the id of the deleted QR as a string
-     *
      */
-
     if (!deleted) {
-      Object.assign(data, {
-        qr: {
-          connect: {
-            id: qrId,
-          },
-        },
-      });
+      data.qrId = qrId;
     }
 
-    const scan = await db.scan.create({
-      data,
-    });
+    const scan = await create(db, "Scan", data as any);
 
     await createScanNote({
       userId,
@@ -98,23 +88,16 @@ export async function updateScan(params: {
   const { id, userId, latitude = null, longitude = null } = params;
 
   try {
-    /** Delete the category id from the payload so we can use connect syntax from prisma */
-    const data = {
+    const data: Record<string, unknown> = {
       latitude,
       longitude,
     };
 
     if (userId) {
-      Object.assign(data, {
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      });
+      data.userId = userId;
     }
 
-    return await db.scan.update({
+    return await update(db, "Scan", {
       where: { id },
       data,
     });
@@ -131,18 +114,11 @@ export async function updateScan(params: {
 
 export async function getScanByQrId({ qrId }: { qrId: string }) {
   try {
-    return await db.scan.findFirst({
+    return await findFirst(db, "Scan", {
       where: { rawQrId: qrId },
       orderBy: { createdAt: "desc" },
-      include: {
-        user: {
-          include: {
-            userOrganizations: true,
-          },
-        },
-        qr: true,
-      },
-      take: 1,
+      select:
+        "*, user:User(*, userOrganizations:UserOrganization(*)), qr:Qr(*)",
     });
   } catch (cause) {
     throw new ShelfError({
@@ -180,11 +156,9 @@ export async function createScanNote({
         authenticatedUserId = userId;
 
         // Check if user belongs to the asset's organization
-        const userOrgCount = await db.userOrganization.count({
-          where: {
-            userId: authenticatedUserId,
-            organizationId: organizationId,
-          },
+        const userOrgCount = await count(db, "UserOrganization", {
+          userId: authenticatedUserId,
+          organizationId: organizationId,
         });
 
         hasAccess = userOrgCount > 0;
@@ -196,7 +170,7 @@ export async function createScanNote({
           select: {
             firstName: true,
             lastName: true,
-          } satisfies Prisma.UserSelect,
+          },
         });
         const actor = wrapUserLinkForNote({
           id: authenticatedUserId,

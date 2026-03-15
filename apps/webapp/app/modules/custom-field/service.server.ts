@@ -1,11 +1,20 @@
 import type {
   CustomField,
   Organization,
-  Prisma,
   User,
   UserOrganization,
 } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  count,
+  create,
+  createMany,
+  deleteMany,
+  findFirst,
+  findMany,
+  update,
+  updateMany,
+} from "~/database/query-helpers.server";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -39,40 +48,36 @@ export async function createCustomField({
 }: CustomFieldDraftPayload) {
   try {
     const [customField, assetIndexSettingsEntries] = await Promise.all([
-      db.customField.create({
-        data: {
-          name,
-          helpText,
-          type,
-          required,
-          active,
-          options,
-          organization: {
-            connect: {
-              id: organizationId,
-            },
-          },
-          createdBy: {
-            connect: {
-              id: userId,
-            },
-          },
-          categories: {
-            connect: categories.map((category) => ({ id: category })),
-          },
-        },
+      create(db, "CustomField", {
+        name,
+        helpText,
+        type,
+        required,
+        active,
+        options,
+        organizationId,
+        userId,
       }),
-      db.assetIndexSettings.findMany({
+      findMany(db, "AssetIndexSettings", {
         where: { organizationId },
       }),
     ]);
+
+    // Handle category connections separately via join table
+    if (categories.length > 0) {
+      const categoryConnections = categories.map((categoryId) => ({
+        customFieldId: customField.id,
+        categoryId,
+      }));
+      await createMany(db, "CategoryToCustomField", categoryConnections);
+    }
 
     /** We need to add it to the advanced index settings for each entry belonging to this organization */
     if (customField.active) {
       await Promise.all(
         assetIndexSettingsEntries.map(async (entry) => {
-          const columns = Array.from(entry.columns as Prisma.JsonArray);
-          const prevHighestPosition = (columns as Column[]).reduce(
+          const columns = Array.from(entry.columns as unknown as Column[]);
+          const prevHighestPosition = columns.reduce(
             (acc, col) => (col.position > acc ? col.position : acc),
             0
           );
@@ -83,9 +88,9 @@ export async function createCustomField({
             position: prevHighestPosition + 1,
           });
 
-          await db.assetIndexSettings.update({
+          await update(db, "AssetIndexSettings", {
             where: { id: entry.id, organizationId },
-            data: { columns },
+            data: { columns: columns as any },
           });
         })
       );
@@ -114,7 +119,7 @@ export async function getFilteredAndPaginatedCustomFields(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.CustomFieldWhereInput = {
+    const where: Record<string, unknown> = {
       organizationId,
       deletedAt: null,
     };
@@ -129,30 +134,32 @@ export async function getFilteredAndPaginatedCustomFields(params: {
 
     const [customFields, totalCustomFields, usageCounts] = await Promise.all([
       /** Get the items */
-      db.customField.findMany({
+      findMany(db, "CustomField", {
         skip,
         take,
         where,
         orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
-        include: { categories: true },
+        select: "*, categories:CategoryToCustomField(categoryId, Category(*))",
       }),
 
       /** Count them */
-      db.customField.count({ where }),
+      count(db, "CustomField", where),
 
       /**
        * Get usage counts for all custom fields in this organization
-       * Uses COUNT(DISTINCT "assetId") to ensure each asset is counted only once per custom field,
-       * preventing inflated counts if duplicate AssetCustomFieldValue records exist
+       * Uses RPC to run raw SQL via Supabase
        */
-      db.$queryRaw<Array<{ customFieldId: string; count: bigint }>>`SELECT
-          acfv."customFieldId",
-          COUNT(DISTINCT acfv."assetId")::int as count
-        FROM "AssetCustomFieldValue" acfv
-        INNER JOIN "CustomField" cf ON acfv."customFieldId" = cf.id
-        WHERE cf."organizationId" = ${organizationId}
-          AND cf."deletedAt" IS NULL
-        GROUP BY acfv."customFieldId"`,
+      db
+        .rpc("get_custom_field_usage_counts", {
+          p_organization_id: organizationId,
+        })
+        .then((result) => {
+          if (result.error) throw result.error;
+          return (result.data || []) as Array<{
+            customFieldId: string;
+            count: number;
+          }>;
+        }),
     ]);
 
     /** Create a map of custom field ID to usage count */
@@ -161,7 +168,7 @@ export async function getFilteredAndPaginatedCustomFields(params: {
     );
 
     /** Attach usage count to each custom field */
-    const customFieldsWithUsage = customFields.map((field) => ({
+    const customFieldsWithUsage = customFields.map((field: any) => ({
       ...field,
       usageCount: usageCountMap.get(field.id) || 0,
     }));
@@ -180,14 +187,7 @@ export async function getFilteredAndPaginatedCustomFields(params: {
   }
 }
 
-type CustomFieldWithInclude<T extends Prisma.CustomFieldInclude | undefined> =
-  T extends Prisma.CustomFieldInclude
-    ? Prisma.CustomFieldGetPayload<{ include: T }>
-    : CustomField;
-
-export async function getCustomField<
-  T extends Prisma.CustomFieldInclude | undefined,
->({
+export async function getCustomField({
   organizationId,
   id,
   userOrganizations,
@@ -197,25 +197,41 @@ export async function getCustomField<
   organizationId: Organization["id"];
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
-  include?: T;
+  include?: Record<string, unknown>;
 }) {
   try {
     const otherOrganizationIds = userOrganizations?.map(
       (org) => org.organizationId
     );
 
-    const customField = await db.customField.findFirstOrThrow({
-      where: {
-        deletedAt: null,
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
-      include: { ...include },
+    const where: Record<string, unknown> = {
+      deletedAt: null,
+      OR: [
+        { id, organizationId },
+        ...(userOrganizations?.length
+          ? [{ id, organizationId: { in: otherOrganizationIds } }]
+          : []),
+      ],
+    };
+
+    // Build select string based on include
+    let select = "*";
+    if (include) {
+      const joins: string[] = ["*"];
+      if ("categories" in include) {
+        joins.push("categories:CategoryToCustomField(categoryId, Category(*))");
+      }
+      select = joins.join(", ");
+    }
+
+    const customField = await findFirst(db, "CustomField", {
+      where,
+      select,
     });
+
+    if (!customField) {
+      throw { code: "PGRST116", message: "No rows found in CustomField" };
+    }
 
     /* User is trying to access customField in wrong organization. */
     if (
@@ -245,7 +261,7 @@ export async function getCustomField<
       });
     }
 
-    return customField as CustomFieldWithInclude<T>;
+    return customField;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -292,37 +308,45 @@ export async function updateCustomField(payload: {
     //dont ever update type
     //updating type would require changing all custom field values to that type
     //which might fail when changing to incompatible type hence need a careful definition
-    const data = {
+    const data: Record<string, unknown> = {
       name,
       helpText,
       required,
       active,
       options,
-    } satisfies Prisma.CustomFieldUpdateInput;
-    const hasCategories = categories && categories.length > 0;
-
-    Object.assign(data, {
-      categories: {
-        set: hasCategories // if categories are empty, remove all categories
-          ? categories.map((category) => ({ id: category }))
-          : [],
-      },
-    });
+    };
 
     /** Get the custom field. We need it in order to be able to update the asset index settings */
-    const customField = (await db.customField.findFirst({
+    const customField = (await findFirst(db, "CustomField", {
       where: { id, organizationId, deletedAt: null },
     })) as CustomField;
 
-    const updatedField = await db.customField.update({
+    const updatedField = await update(db, "CustomField", {
       where: { id },
-      data: data,
+      data,
     });
+
+    // Handle category relations via join table
+    const hasCategories = categories && categories.length > 0;
+
+    // Remove existing category connections
+    await deleteMany(db, "CategoryToCustomField", {
+      customFieldId: id,
+    });
+
+    // Add new category connections if any
+    if (hasCategories) {
+      const categoryConnections = categories.map((categoryId) => ({
+        customFieldId: id,
+        categoryId,
+      }));
+      await createMany(db, "CategoryToCustomField", categoryConnections);
+    }
 
     /** Updates the Asset */
     await updateAssetIndexSettingsAfterCfUpdate({
       oldField: customField,
-      newField: updatedField,
+      newField: updatedField as unknown as CustomField,
     });
 
     return updatedField;
@@ -339,7 +363,7 @@ export async function updateCustomField(payload: {
  * Soft deletes a custom field by setting its deletedAt timestamp and appending a Unix timestamp to the name.
  *
  * This operation:
- * 1. Appends Unix timestamp to the field name (e.g., "Serial Number" → "Serial Number_1234567890")
+ * 1. Appends Unix timestamp to the field name (e.g., "Serial Number" -> "Serial Number_1234567890")
  * 2. Sets deletedAt to current timestamp (soft delete)
  * 3. Immediately removes the column from all users' AssetIndexSettings
  * 4. Preserves all AssetCustomFieldValue records (no CASCADE deletion)
@@ -356,52 +380,48 @@ export async function softDeleteCustomField({
   organizationId,
 }: Pick<CustomField, "id"> & { organizationId: Organization["id"] }) {
   try {
-    const customField = await db.$transaction(
-      async (tx) => {
-        // 1. Verify the custom field exists, belongs to the organization, and is not already deleted
-        const existingCustomField = await tx.customField.findFirst({
-          where: { id, organizationId, deletedAt: null },
-        });
+    // Use RPC for the cascade soft delete operation
+    const { error } = await db.rpc("delete_custom_field_cascade", {
+      p_custom_field_id: id,
+      p_organization_id: organizationId,
+      p_custom_field_name: "",
+    });
 
-        if (!existingCustomField) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "The custom field you are trying to delete does not exist.",
-            additionalData: { id, organizationId },
-            label,
-            status: 404,
-            shouldBeCaptured: false,
-          });
-        }
+    // 1. Verify the custom field exists, belongs to the organization, and is not already deleted
+    const existingCustomField = await findFirst(db, "CustomField", {
+      where: { id, organizationId, deletedAt: null },
+    });
 
-        // 2. Soft delete the custom field by appending timestamp to name and setting deletedAt
-        // This frees up the original name for creating a new field
-        const timestamp = Math.floor(Date.now() / 1000);
-        const deletedField = await tx.customField.update({
-          where: { id },
-          data: {
-            name: `${existingCustomField.name}_${timestamp}`,
-            deletedAt: new Date(),
-          },
-        });
+    if (!existingCustomField) {
+      throw new ShelfError({
+        cause: null,
+        message: "The custom field you are trying to delete does not exist.",
+        additionalData: { id, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
-        // 3. Remove column from all users' AssetIndexSettings immediately
-        // This ensures consistency with deactivation behavior
-        await removeCustomFieldFromAssetIndexSettings({
-          customFieldName: existingCustomField.name,
-          organizationId,
-          prisma: tx,
-        });
-
-        return deletedField;
+    // 2. Soft delete the custom field by appending timestamp to name and setting deletedAt
+    // This frees up the original name for creating a new field
+    const timestamp = Math.floor(Date.now() / 1000);
+    const deletedField = await update(db, "CustomField", {
+      where: { id },
+      data: {
+        name: `${existingCustomField.name}_${timestamp}`,
+        deletedAt: new Date().toISOString(),
       },
-      {
-        timeout: 30000, // 30 second timeout for consistency
-      }
-    );
+    });
 
-    return customField;
+    // 3. Remove column from all users' AssetIndexSettings immediately
+    // This ensures consistency with deactivation behavior
+    await removeCustomFieldFromAssetIndexSettings({
+      customFieldName: existingCustomField.name,
+      organizationId,
+    });
+
+    return deletedField;
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -428,7 +448,7 @@ export async function upsertCustomField(
     const newOrUpdatedFields: CustomField[] = [];
 
     for (const def of definitions) {
-      let existingCustomField = await db.customField.findFirst({
+      let existingCustomField = await findFirst(db, "CustomField", {
         where: {
           name: {
             equals: def.name,
@@ -441,8 +461,8 @@ export async function upsertCustomField(
 
       if (!existingCustomField) {
         const newCustomField = await createCustomField(def);
-        customFields[def.name] = newCustomField;
-        newOrUpdatedFields.push(newCustomField);
+        customFields[def.name] = newCustomField as unknown as CustomField;
+        newOrUpdatedFields.push(newCustomField as unknown as CustomField);
       } else {
         if (existingCustomField.type !== def.type) {
           throw new ShelfError({
@@ -473,11 +493,14 @@ export async function upsertCustomField(
               options,
               organizationId: def.organizationId,
             });
-            existingCustomField = updatedCustomField;
-            newOrUpdatedFields.push(updatedCustomField);
+            existingCustomField =
+              updatedCustomField as unknown as typeof existingCustomField;
+            newOrUpdatedFields.push(
+              updatedCustomField as unknown as CustomField
+            );
           }
         }
-        customFields[def.name] = existingCustomField;
+        customFields[def.name] = existingCustomField as unknown as CustomField;
       }
     }
 
@@ -571,20 +594,6 @@ export async function createCustomFieldsIfNotExists({
  * @param params.includeAllCategories - When true, ignores category filtering and returns ALL active custom fields. Takes precedence over category param
  *
  * @returns Array of CustomField objects that are active and match the category filtering criteria
- *
- * @example
- * // Get all active custom fields for asset index or similar global contexts
- * const allCustomFields = await getActiveCustomFields({
- *   organizationId,
- *   includeAllCategories: true
- * });
- *
- * @example
- * // Get custom fields for a specific asset category plus uncategorized fields
- * const categoryCustomFields = await getActiveCustomFields({
- *   organizationId,
- *   category: assetCategoryId
- * });
  */
 export async function getActiveCustomFields({
   organizationId,
@@ -596,29 +605,26 @@ export async function getActiveCustomFields({
   includeAllCategories?: boolean;
 }) {
   try {
-    return await db.customField.findMany({
-      where: {
-        organizationId,
-        active: { equals: true },
-        deletedAt: null,
-        /**
-         * Category filtering logic:
-         * - If includeAllCategories: no category filtering
-         * - If category provided: get fields for that category + uncategorized
-         * - Otherwise: get only uncategorized fields
-         */
-        ...(includeAllCategories
-          ? {} // No category filtering
-          : typeof category === "string"
-            ? {
-                OR: [
-                  { categories: { none: {} } }, // Uncategorized fields
-                  { categories: { some: { id: category } } }, // Category-specific fields
-                ],
-              }
-            : { categories: { none: {} } }), // Only uncategorized fields
-      },
+    // When including all categories, no relation filtering needed
+    if (includeAllCategories) {
+      return await findMany(db, "CustomField", {
+        where: {
+          organizationId,
+          active: true,
+          deletedAt: null,
+        },
+      });
+    }
+
+    // For category-based filtering, use RPC since Supabase PostgREST
+    // doesn't support relation-based filtering like Prisma's none/some
+    const result = await db.rpc("get_active_custom_fields_by_category", {
+      p_organization_id: organizationId,
+      p_category_id: category || null,
     });
+
+    if (result.error) throw result.error;
+    return result.data || [];
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -636,8 +642,10 @@ export async function countActiveCustomFields({
   organizationId: string;
 }) {
   try {
-    return await db.customField.count({
-      where: { organizationId, active: true, deletedAt: null },
+    return await count(db, "CustomField", {
+      organizationId,
+      active: true,
+      deletedAt: null,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -664,19 +672,21 @@ export async function bulkActivateOrDeactivateCustomFields({
   try {
     const customFieldsIds = customFields.map((field) => field.id);
 
-    const updatedFields = await db.customField.updateMany({
+    const updatedFields = await updateMany(db, "CustomField", {
       where: { id: { in: customFieldsIds }, organizationId },
       data: { active },
     });
 
     /** Get the asset index settings for the organization */
-    const settings = await db.assetIndexSettings.findMany({
+    const settings = await findMany(db, "AssetIndexSettings", {
       where: { organizationId },
     });
 
     /** Update the asset index settings for each entry */
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
+      const columns = Array.from(
+        entry.columns as unknown as Column[]
+      ) as Column[];
 
       customFields.forEach((field) => {
         const oldField = field;
@@ -708,9 +718,9 @@ export async function bulkActivateOrDeactivateCustomFields({
         }
       });
 
-      return db.assetIndexSettings.update({
+      return update(db, "AssetIndexSettings", {
         where: { id: entry.id, organizationId },
-        data: { columns },
+        data: { columns: columns as any },
       });
     });
 

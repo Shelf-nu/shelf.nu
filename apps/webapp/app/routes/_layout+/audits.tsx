@@ -63,7 +63,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           customerId: true,
           firstName: true,
           lastName: true,
-        } satisfies Prisma.UserSelect,
+        },
       });
       const customerId = await getOrCreateCustomerId({
         ...user,
@@ -107,7 +107,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     const customerId = await getOrCreateCustomerId({

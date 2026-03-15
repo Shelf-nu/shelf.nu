@@ -78,17 +78,17 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         auditSessionId: z.string().optional(),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
+      assetExtraInclude: Record<string, unknown> | undefined;
+      kitExtraInclude: Record<string, unknown> | undefined;
       auditSessionId?: string;
     };
 
-    const assetInclude: Prisma.AssetInclude = {
+    const assetInclude: Record<string, unknown> = {
       ...ASSET_INCLUDE,
       ...(assetExtraInclude ?? {}),
     };
 
-    const kitInclude: Prisma.KitInclude = {
+    const kitInclude: Record<string, unknown> = {
       ...KIT_INCLUDE,
       ...(kitExtraInclude ?? {}),
     };
