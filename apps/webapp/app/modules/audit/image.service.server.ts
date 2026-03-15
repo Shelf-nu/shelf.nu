@@ -5,7 +5,7 @@ import type {
   Organization,
   User,
   Prisma,
-} from "@prisma/client";
+} from "@shelf/database";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {

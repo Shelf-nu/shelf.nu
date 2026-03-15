@@ -1,5 +1,5 @@
 import { useCallback, useRef, useEffect } from "react";
-import type { BarcodeType } from "@prisma/client";
+import type { BarcodeType } from "@shelf/database";
 import { tw } from "~/utils/tw";
 
 // Cached import - only loads bwip-js once but keeps it in separate chunk

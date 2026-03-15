@@ -1,4 +1,4 @@
-import type { Asset, Kit } from "@prisma/client";
+import type { Asset, Kit } from "@shelf/database";
 /** This function takes a QR and normalizes the related object data
  */
 export function normalizeQrData(qr: {

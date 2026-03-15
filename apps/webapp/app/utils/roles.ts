@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 
 const ROLE_RANK: Record<OrganizationRoles, number> = {
   [OrganizationRoles.OWNER]: 3,

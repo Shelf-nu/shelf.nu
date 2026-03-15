@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { ChevronDownIcon } from "lucide-react";
 import type {
   ActionFunctionArgs,

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { InviteStatuses } from "@prisma/client";
+import type { InviteStatuses } from "@shelf/database";
 import { MailIcon } from "lucide-react";
 import type {
   ActionFunctionArgs,

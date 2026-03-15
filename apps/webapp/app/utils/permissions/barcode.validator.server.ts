@@ -1,4 +1,4 @@
-import type { Organization } from "@prisma/client";
+import type { Organization } from "@shelf/database";
 import { ShelfError } from "../error";
 
 /**

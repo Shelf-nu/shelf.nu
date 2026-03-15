@@ -1,4 +1,4 @@
-import type { Asset, Barcode } from "@prisma/client";
+import type { Asset, Barcode } from "@shelf/database";
 import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { z } from "zod";

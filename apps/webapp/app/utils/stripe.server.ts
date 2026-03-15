@@ -1,4 +1,4 @@
-import type { Organization, User } from "@prisma/client";
+import type { Organization, User } from "@shelf/database";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";

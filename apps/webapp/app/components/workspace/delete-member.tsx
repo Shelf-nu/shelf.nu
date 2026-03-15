@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Prisma, TeamMember } from "@prisma/client";
+import type { Prisma, TeamMember } from "@shelf/database";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 

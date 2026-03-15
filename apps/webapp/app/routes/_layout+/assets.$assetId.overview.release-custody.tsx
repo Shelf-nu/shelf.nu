@@ -1,4 +1,4 @@
-import { OrganizationRoles, type Prisma } from "@prisma/client";
+import { OrganizationRoles, type Prisma } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";

@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 import { db } from "~/database/db.server";
 
 import {

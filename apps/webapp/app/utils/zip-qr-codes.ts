@@ -1,5 +1,5 @@
-import type { Qr } from "@prisma/client";
-import { ErrorCorrection } from "@prisma/client";
+import type { Qr } from "@shelf/database";
+import { ErrorCorrection } from "@shelf/database";
 import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { getQrBaseUrl } from "~/modules/qr/utils.server";

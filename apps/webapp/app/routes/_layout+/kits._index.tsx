@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import type { Kit, Location } from "@shelf/database";
+import { KitStatus, OrganizationRoles } from "@shelf/database";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -382,24 +382,31 @@ function ListContent({
   item,
   bulkActions,
 }: {
-  item: Prisma.KitGetPayload<{
-    include: MergeInclude<
-      typeof KITS_INCLUDE_FIELDS,
-      {
-        qrCodes: { select: { id: true } };
-        assets: {
-          select: { id: true; availableToBook: true; status: true };
-        };
-        category: true;
-        location: typeof LOCATION_WITH_HIERARCHY;
-      }
-    >;
-  }>;
+  item: Kit & {
+    qrCodes: { id: string }[];
+    assets: { id: string; availableToBook: boolean; status: string }[];
+    category: { id: string; name: string; color: string } | null;
+    location:
+      | (Location & { _count?: { children: number }; parent?: Location | null })
+      | null;
+    image: string | null;
+    imageExpiration: string | null;
+    _count: { assets: number };
+    custody?: {
+      custodian?: {
+        name: string;
+        user?: Record<string, unknown> | null;
+      } | null;
+    } | null;
+  };
   bulkActions?: ReactNode;
 }) {
-  const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
-    typeof LOCATION_WITH_HIERARCHY
-  > | null;
+  const locationWithHierarchy = item.location as
+    | (Location & {
+        _count?: { children: number };
+        parent?: Location | null;
+      })
+    | null;
 
   return (
     <>

@@ -3,7 +3,7 @@ import {
   TagUseFor,
   OrganizationRoles,
   type Prisma,
-} from "@prisma/client";
+} from "@shelf/database";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,

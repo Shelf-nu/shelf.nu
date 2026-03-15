@@ -1,4 +1,4 @@
-import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import { BookingStatus, AssetStatus, KitStatus } from "@shelf/database";
 import type {
   Booking,
   Prisma,
@@ -9,7 +9,7 @@ import type {
   UserOrganization,
   Tag,
   OrganizationRoles,
-} from "@prisma/client";
+} from "@shelf/database";
 import { addDays, isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";

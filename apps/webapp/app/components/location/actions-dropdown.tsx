@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Location } from "@prisma/client";
+import type { Location } from "@shelf/database";
 import {
   Popover,
   PopoverContent,

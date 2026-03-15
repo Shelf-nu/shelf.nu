@@ -1,4 +1,4 @@
-import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
+import type { BookingStatus, Tag as PrismaTag, User } from "@shelf/database";
 import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";

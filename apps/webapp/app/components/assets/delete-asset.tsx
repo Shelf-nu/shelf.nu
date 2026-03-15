@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { cloneElement, forwardRef } from "react";
-import type { Asset } from "@prisma/client";
+import type { Asset } from "@shelf/database";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 

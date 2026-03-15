@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 import { validateBarcodeValue } from "./validation";
 
 // @vitest-environment node

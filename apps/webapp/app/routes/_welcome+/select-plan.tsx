@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Currency, Prisma } from "@prisma/client";
+import type { Currency, Prisma } from "@shelf/database";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { useLoaderData, useNavigation } from "react-router";
 import { Form } from "~/components/custom-form";

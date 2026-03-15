@@ -3,8 +3,8 @@ import {
   OrganizationRoles,
   OrganizationType,
   Roles,
-} from "@prisma/client";
-import type { Organization, Prisma, TierId, User } from "@prisma/client";
+} from "@shelf/database";
+import type { Organization, Prisma, TierId, User } from "@shelf/database";
 import type Stripe from "stripe";
 
 import { db } from "~/database/db.server";

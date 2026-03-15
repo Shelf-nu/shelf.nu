@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";

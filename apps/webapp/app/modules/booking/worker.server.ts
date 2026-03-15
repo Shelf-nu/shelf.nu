@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";

@@ -1,4 +1,4 @@
-import { BookingStatus, KitStatus } from "@prisma/client";
+import { BookingStatus, KitStatus } from "@shelf/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 

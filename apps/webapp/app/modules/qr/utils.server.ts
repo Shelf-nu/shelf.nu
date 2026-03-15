@@ -1,4 +1,4 @@
-import type { Organization, Qr, User } from "@prisma/client";
+import type { Organization, Qr, User } from "@shelf/database";
 import QRCode, {
   type TypeNumber,
   type ErrorCorrectionLevel,

@@ -1,4 +1,4 @@
-import type { Tag } from "@prisma/client";
+import type { Tag } from "@shelf/database";
 import { useLoaderData } from "react-router";
 import FormRow from "~/components/forms/form-row";
 import MultiSelect from "~/components/multi-select/multi-select";

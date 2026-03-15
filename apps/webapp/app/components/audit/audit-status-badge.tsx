@@ -1,4 +1,4 @@
-import type { AuditStatus } from "@prisma/client";
+import type { AuditStatus } from "@shelf/database";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import { Badge } from "../shared/badge";
 

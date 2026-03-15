@@ -1,8 +1,8 @@
-import { AuditAssetStatus } from "@prisma/client";
-import { AuditStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
-import type { AuditAssignment, AuditSession } from "@prisma/client";
-import type { UserOrganization } from "@prisma/client";
+import { AuditAssetStatus } from "@shelf/database";
+import { AuditStatus } from "@shelf/database";
+import type { Prisma } from "@shelf/database";
+import type { AuditAssignment, AuditSession } from "@shelf/database";
+import type { UserOrganization } from "@shelf/database";
 import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";

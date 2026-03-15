@@ -1,5 +1,5 @@
-import type { Organization } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type { Organization } from "@shelf/database";
+import { OrganizationRoles } from "@shelf/database";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
 

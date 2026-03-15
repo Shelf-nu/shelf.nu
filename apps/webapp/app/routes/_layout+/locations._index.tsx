@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Location } from "@shelf/database";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
@@ -139,7 +139,11 @@ export default function LocationsIndexPage() {
 const ListItemContent = ({
   item,
 }: {
-  item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
+  item: Location & {
+    parent: (Location & { _count?: { children: number } }) | null;
+    _count: { children: number; assets: number; kits: number };
+    thumbnailUrl: string | null;
+  };
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">

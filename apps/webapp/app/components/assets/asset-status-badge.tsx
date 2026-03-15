@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import type { Booking } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import type { Booking } from "@shelf/database";
+import { AssetStatus } from "@shelf/database";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";

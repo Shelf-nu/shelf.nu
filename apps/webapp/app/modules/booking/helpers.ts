@@ -1,4 +1,4 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Prisma } from "@shelf/database";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 

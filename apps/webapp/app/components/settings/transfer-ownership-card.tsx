@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Roles } from "@prisma/client";
+import { Roles } from "@shelf/database";
 import { Form, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";

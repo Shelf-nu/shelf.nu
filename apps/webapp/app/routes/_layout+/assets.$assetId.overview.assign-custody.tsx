@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
+import { AssetStatus, BookingStatus, OrganizationRoles } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,

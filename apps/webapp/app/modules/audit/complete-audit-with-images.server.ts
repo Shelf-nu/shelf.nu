@@ -1,4 +1,4 @@
-import type { AuditSession, Organization, User } from "@prisma/client";
+import type { AuditSession, Organization, User } from "@shelf/database";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { completeAuditSession } from "~/modules/audit/service.server";
 import { getClientHint } from "~/utils/client-hints";

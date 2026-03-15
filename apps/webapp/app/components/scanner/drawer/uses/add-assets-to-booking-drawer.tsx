@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { AssetStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import { z } from "zod";

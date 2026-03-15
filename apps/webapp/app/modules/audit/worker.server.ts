@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { AuditStatus } from "@prisma/client";
+import { AuditStatus } from "@shelf/database";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";

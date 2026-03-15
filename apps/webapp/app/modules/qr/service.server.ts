@@ -1,15 +1,25 @@
-import {
-  type Asset,
-  type Organization,
-  type PrintBatch,
-  type Prisma,
-  type Qr,
-  type User,
-  type Kit,
-} from "@prisma/client";
+import type {
+  Asset,
+  Organization,
+  PrintBatch,
+  Qr,
+  User,
+  Kit,
+} from "@shelf/database";
 import type { TypeNumber, ErrorCorrectionLevel } from "qrcode-generator";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import {
+  count,
+  create,
+  createMany,
+  findFirst,
+  findMany,
+  findUnique,
+  findUniqueOrThrow,
+  update,
+  updateMany,
+} from "~/database/query-helpers.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -25,7 +35,7 @@ const label: ErrorLabel = "QR";
 
 export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
   try {
-    return await db.qr.findFirst({
+    return await findFirst(db, "Qr", {
       where: { assetId },
     });
   } catch (cause) {
@@ -41,7 +51,7 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
 
 export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
   try {
-    return await db.qr.findFirst({
+    return await findFirst(db, "Qr", {
       where: { kitId },
     });
   } catch (cause) {
@@ -55,22 +65,34 @@ export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
   }
 }
 
-type QrWithInclude<T extends Prisma.QrInclude | undefined> =
-  T extends Prisma.QrInclude ? Prisma.QrGetPayload<{ include: T }> : Qr;
-
-export async function getQr<T extends Prisma.QrInclude | undefined>({
+export async function getQr({
   id,
   include,
 }: Pick<Asset, "id"> & {
-  include?: T;
-}): Promise<QrWithInclude<T>> {
+  include?: Record<string, boolean>;
+}): Promise<any> {
   try {
-    const qr = await db.qr.findUniqueOrThrow({
+    // Build select string for Supabase join syntax based on include
+    let select = "*";
+    if (include) {
+      const joins = Object.entries(include)
+        .filter(([, v]) => v)
+        .map(([relation]) => {
+          const table = relation.charAt(0).toUpperCase() + relation.slice(1);
+          return `${relation}:${table}(*)`;
+        })
+        .join(", ");
+      if (joins) {
+        select = `*, ${joins}`;
+      }
+    }
+
+    const qr = await findUniqueOrThrow(db, "Qr", {
       where: { id },
-      include: { ...include },
+      select,
     });
 
-    return qr as QrWithInclude<T>;
+    return qr;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -86,9 +108,9 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
 }
 
 export async function getQrOrganizationLookup({ qrId }: { qrId: Qr["id"] }) {
-  const qr = await db.qr.findUnique({
+  const qr = await findUnique(db, "Qr", {
     where: { id: qrId },
-    select: { organizationId: true },
+    select: "organizationId",
   });
 
   if (!qr) {
@@ -114,41 +136,15 @@ export async function createQr({
   assetId?: Asset["id"];
   kitId?: Kit["id"];
 }) {
-  const data = {
+  const data: Record<string, unknown> = {
     id: id(),
-    ...(userId && {
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
-    }),
-    ...(assetId && {
-      asset: {
-        connect: {
-          id: assetId,
-        },
-      },
-    }),
-    ...(kitId && {
-      kit: {
-        connect: {
-          id: kitId,
-        },
-      },
-    }),
-    ...(organizationId && {
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    }),
+    ...(userId && { userId }),
+    ...(assetId && { assetId }),
+    ...(kitId && { kitId }),
+    ...(organizationId && { organizationId }),
   };
 
-  return db.qr.create({
-    data,
-  });
+  return create(db, "Qr", data as any);
 }
 
 /** Generates codes that are not attached to assets but attached to a certain org and user */
@@ -168,10 +164,7 @@ export async function generateOrphanedCodes({
       id: id(),
     }));
 
-    return await db.qr.createMany({
-      data: data,
-      skipDuplicates: true,
-    });
+    return await createMany(db, "Qr", data);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -196,10 +189,8 @@ export async function generateUnclaimedCodesForPrint({
      * We create an array of empty objects to create the amount of codes requested
      */
 
-    const batch = await db.printBatch.create({
-      data: {
-        name: batchName,
-      },
+    const batch = await create(db, "PrintBatch", {
+      name: batchName,
     });
 
     const data = Array.from({ length: amount }).map(() => ({
@@ -209,22 +200,13 @@ export async function generateUnclaimedCodesForPrint({
       id: id(),
     }));
 
-    await db.qr.createMany({
-      data,
-      skipDuplicates: true,
-    });
+    await createMany(db, "Qr", data);
 
-    return await db.qr.findMany({
+    return await findMany(db, "Qr", {
       where: {
-        batch: {
-          name: {
-            equals: batchName,
-          },
-        },
+        batchId: batch.id,
       },
-      include: {
-        batch: true,
-      },
+      select: "*, batch:PrintBatch(*)",
     });
   } catch (cause) {
     throw new ShelfError({
@@ -251,7 +233,7 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
   try {
     /** We have the case when someone could be linking a QR that doesnt belong to the current org */
     if (qrId) {
-      await db.qr.findUniqueOrThrow({
+      await findUniqueOrThrow(db, "Qr", {
         where: {
           id: qrId,
           organizationId,
@@ -330,7 +312,7 @@ async function getQrCodes({
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
     /** Default value of where. Takes the assets belonging to current user */
-    const where: Prisma.QrWhereInput = {};
+    const where: Record<string, unknown> = {};
 
     /** If the search string exists, add it to the where object
      */
@@ -342,54 +324,20 @@ async function getQrCodes({
     }
 
     if (batch) {
-      where.batchId =
-        batch === "No batch"
-          ? {
-              equals: null,
-            }
-          : batch;
+      where.batchId = batch === "No batch" ? null : batch;
     }
 
     const [qrCodes, totalQrCodes] = await Promise.all([
-      /** Get the users */
-      db.qr.findMany({
+      findMany(db, "Qr", {
         skip,
         take,
-        include: {
-          asset: {
-            select: {
-              id: true,
-              title: true,
-            },
-          },
-          kit: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          organization: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          batch: true,
-        },
         where,
         orderBy: { createdAt: "desc" },
+        select:
+          "*, asset:Asset(id, title), kit:Kit(id, name), organization:Organization(id, name), user:User(id, email, firstName, lastName), batch:PrintBatch(*)",
       }),
 
-      /** Count them */
-      db.qr.count({ where }),
+      count(db, "Qr", where),
     ]);
 
     return { qrCodes, totalQrCodes };
@@ -406,7 +354,7 @@ async function getQrCodes({
 /** Generates codes that are not attached to assets but attached to a certain org and user */
 export async function markBatchAsPrinted({ batch }: { batch: string }) {
   try {
-    const updatedBatch = await db.printBatch.update({
+    const updatedBatch = await update(db, "PrintBatch", {
       where: {
         id: batch,
       },
@@ -450,7 +398,7 @@ export async function claimQrCode({
       });
     }
 
-    return await db.qr.update({
+    return await update(db, "Qr", {
       where: {
         id,
       },
@@ -470,11 +418,7 @@ export async function claimQrCode({
 }
 
 interface QRCodeMapParams {
-  assets: Prisma.AssetGetPayload<{
-    include: {
-      qrCodes: true;
-    };
-  }>[];
+  assets: (Asset & { qrCodes: Qr[] })[];
   organizationId: string;
   userId: string;
   size: "small" | "medium" | "large" | "cable";
@@ -554,7 +498,7 @@ export async function parseQrCodesFromImportData({
       })
       .filter((asset) => asset !== null); // Filter out null values
 
-    const codes = await db.qr.findMany({
+    const codes = await findMany(db, "Qr", {
       where: {
         id: {
           in: qrCodePerAsset.map((asset) => asset?.qrId),
@@ -631,7 +575,7 @@ export async function parseQrCodesFromImportData({
     /** Check for codes that dont have org id. If they dont, update them to link them to current org */
     const unclaimedCodes = codes.filter((code) => !code.organizationId);
     if (unclaimedCodes.length) {
-      await db.qr.updateMany({
+      await updateMany(db, "Qr", {
         where: {
           id: {
             in: unclaimedCodes.map((code) => code.id),

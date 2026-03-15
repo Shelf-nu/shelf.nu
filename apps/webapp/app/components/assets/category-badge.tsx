@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "@shelf/database";
 import { Badge } from "../shared/badge";
 
 export function CategoryBadge({

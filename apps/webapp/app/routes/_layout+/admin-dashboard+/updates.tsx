@@ -1,4 +1,4 @@
-import { UpdateStatus } from "@prisma/client";
+import { UpdateStatus } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, Outlet, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";

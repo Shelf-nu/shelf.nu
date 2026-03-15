@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Location } from "@prisma/client";
+import type { Location } from "@shelf/database";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ListTree } from "lucide-react";
 import useApiQuery from "~/hooks/use-api-query";

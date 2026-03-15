@@ -1,4 +1,4 @@
-import { AssetStatus, BarcodeType, type Prisma } from "@prisma/client";
+import { AssetStatus, BarcodeType, type Prisma } from "@shelf/database";
 import type {
   MetaFunction,
   LoaderFunctionArgs,

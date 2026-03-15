@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import { z } from "zod";

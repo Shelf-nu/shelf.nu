@@ -1,4 +1,11 @@
-import type { Kit, Prisma, Barcode } from "@prisma/client";
+import type {
+  Kit,
+  Barcode,
+  Asset,
+  Category,
+  Location,
+  Tag,
+} from "@shelf/database";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 
@@ -70,7 +77,7 @@ export const KITS_INCLUDE_FIELDS = {
       },
     },
   },
-} satisfies Prisma.KitInclude;
+};
 
 /** Select used on the kit page for fetching the assets with minimal data */
 export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
@@ -93,6 +100,21 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
 };
 
 /** Type used for the list item component */
-export type ListItemForKitPage = Prisma.AssetGetPayload<{
-  select: typeof KIT_SELECT_FIELDS_FOR_LIST_ITEMS;
-}>;
+export type ListItemForKitPage = Pick<
+  Asset,
+  | "id"
+  | "title"
+  | "mainImage"
+  | "thumbnailImage"
+  | "mainImageExpiration"
+  | "status"
+  | "availableToBook"
+> & {
+  category: Pick<Category, "id" | "name" | "color"> | null;
+  location:
+    | (Pick<Location, "id" | "name" | "parentId"> & {
+        _count: { children: number };
+      })
+    | null;
+  tags: Pick<Tag, "id" | "name" | "color">[];
+};

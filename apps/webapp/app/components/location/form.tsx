@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { Location } from "@prisma/client";
+import type { Location } from "@shelf/database";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";

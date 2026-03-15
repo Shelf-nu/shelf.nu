@@ -1,4 +1,4 @@
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus } from "@shelf/database";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";

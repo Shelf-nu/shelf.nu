@@ -1,4 +1,4 @@
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationRoles, OrganizationType } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

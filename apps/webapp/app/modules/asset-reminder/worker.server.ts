@@ -1,4 +1,4 @@
-import type { Prisma, User } from "@prisma/client";
+import type { Prisma, User } from "@shelf/database";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";

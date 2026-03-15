@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,

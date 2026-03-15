@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
-import type { Update, UserUpdateRead } from "@prisma/client";
+import type { Update, UserUpdateRead } from "@shelf/database";
 import { ExternalLinkIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";

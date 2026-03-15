@@ -1,5 +1,5 @@
-import type { Asset } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import type { Asset } from "@shelf/database";
+import { AssetStatus } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 

@@ -1,24 +1,22 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "./types";
 
-export type ExtendedPrismaClient = ReturnType<typeof createDatabaseClient>;
+export type SupabaseDataClient = SupabaseClient<Database>;
 
 /**
- * Creates a new PrismaClient instance with custom extensions.
- * Each app should create its own singleton using this factory.
+ * Creates a typed Supabase client for data operations.
+ * Uses the service role key to bypass RLS (for server-side use only).
+ *
+ * This is distinct from the auth/storage Supabase client in the webapp.
  */
-export function createDatabaseClient(url?: string) {
-  const client = new PrismaClient(
-    url ? { datasourceUrl: url } : undefined
-  ).$extends({
-    model: {
-      $allModels: {
-        dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
-          const ctx = Prisma.getExtensionContext(this) as any;
-          return ctx.findMany(options);
-        },
-      },
+export function createSupabaseDataClient(
+  url: string,
+  serviceRoleKey: string
+): SupabaseDataClient {
+  return createClient<Database>(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
     },
   });
-
-  return client;
 }

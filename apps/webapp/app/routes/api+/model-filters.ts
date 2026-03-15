@@ -1,4 +1,4 @@
-import { TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@shelf/database";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";

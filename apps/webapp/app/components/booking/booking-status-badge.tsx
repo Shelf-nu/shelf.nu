@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { bookingStatusColorMap } from "~/utils/bookings";

@@ -1,4 +1,4 @@
-import { TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, redirectDocument, useLoaderData } from "react-router";

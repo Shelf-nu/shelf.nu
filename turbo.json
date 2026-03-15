@@ -5,12 +5,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [
-        "dist/**",
-        "build/**",
-        ".react-router/**",
-        "node_modules/.prisma/**"
-      ]
+      "outputs": ["dist/**", "build/**", ".react-router/**"]
     },
     "dev": {
       "dependsOn": ["^build"],
@@ -40,12 +35,8 @@
       "interactive": true,
       "persistent": true
     },
-    "db:generate": {
-      "cache": false
-    },
     "db:migrate": {
-      "cache": false,
-      "dependsOn": ["db:generate"]
+      "cache": false
     }
   }
 }

@@ -1,4 +1,4 @@
-import type { Kit } from "@prisma/client";
+import type { Kit } from "@shelf/database";
 import { tw } from "~/utils/tw";
 import RemoveKitFromLocation from "./remove-kit-from-location";
 import { VerticalDotsIcon } from "../icons/library";

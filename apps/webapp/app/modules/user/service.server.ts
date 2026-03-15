@@ -3,13 +3,13 @@ import type {
   TierId,
   User,
   UserOrganization,
-} from "@prisma/client";
+} from "@shelf/database";
 import {
   Prisma,
   Roles,
   OrganizationRoles,
   AssetIndexMode,
-} from "@prisma/client";
+} from "@shelf/database";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "react-router";

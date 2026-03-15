@@ -1,5 +1,5 @@
 import React from "react";
-import type { BookingStatus, Category, Kit } from "@prisma/client";
+import type { BookingStatus, Category, Kit } from "@shelf/database";
 import { ChevronDownIcon } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";

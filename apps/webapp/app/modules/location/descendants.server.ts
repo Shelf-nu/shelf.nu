@@ -1,7 +1,8 @@
-import type { Location, Organization } from "@prisma/client";
+import type { Location, Organization } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { rpc } from "~/database/transaction.server";
 
-type LocationDescendantIdRow = Pick<Location, "id" | "parentId">;
+type LocationDescendantIdRow = Pick<Location, "id">;
 
 export async function getLocationDescendantIds({
   organizationId,
@@ -12,28 +13,15 @@ export async function getLocationDescendantIds({
   locationId: Location["id"];
   includeSelf?: boolean;
 }): Promise<string[]> {
-  const rows = await db.$queryRaw<LocationDescendantIdRow[]>`
-    WITH RECURSIVE location_descendants AS (
-      SELECT
-        id,
-        "parentId",
-        "organizationId"
-      FROM "Location"
-      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l."parentId",
-        l."organizationId"
-      FROM "Location" l
-      INNER JOIN location_descendants ld ON ld.id = l."parentId"
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT id, "parentId"
-    FROM location_descendants
-  `;
+  const rows = (await rpc(db, "get_location_descendants", {
+    p_parent_id: locationId,
+  })) as Array<{ id: string; name: string; depth: number }>;
 
-  return rows
-    .filter((row) => includeSelf || row.id !== locationId)
-    .map((row) => row.id);
+  const ids = rows.map((row) => row.id);
+
+  if (includeSelf) {
+    return [locationId, ...ids];
+  }
+
+  return ids;
 }

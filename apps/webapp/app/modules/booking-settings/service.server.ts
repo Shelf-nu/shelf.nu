@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { update, upsert } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking Settings";
@@ -9,12 +9,10 @@ export async function getBookingSettingsForOrganization(
 ) {
   try {
     // First try to find existing working hours
-    const bookingSettings = await db.bookingSettings.upsert({
-      where: {
-        organizationId,
-      },
-      update: {},
-      create: {
+    const bookingSettings = await upsert(
+      db,
+      "BookingSettings",
+      {
         bufferStartTime: 0,
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
@@ -25,18 +23,8 @@ export async function getBookingSettingsForOrganization(
         requireExplicitCheckinForSelfService: false,
         organizationId,
       },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        tagsRequired: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
-    });
+      { onConflict: "organizationId" }
+    );
 
     return bookingSettings;
   } catch (cause) {
@@ -71,7 +59,7 @@ export async function updateBookingSettings({
   requireExplicitCheckinForSelfService?: boolean;
 }) {
   try {
-    const updateData: Prisma.BookingSettingsUpdateInput = {};
+    const updateData: Record<string, unknown> = {};
     if (bufferStartTime !== undefined)
       updateData.bufferStartTime = bufferStartTime;
     if (tagsRequired !== undefined) updateData.tagsRequired = tagsRequired;
@@ -91,20 +79,9 @@ export async function updateBookingSettings({
       updateData.requireExplicitCheckinForSelfService =
         requireExplicitCheckinForSelfService;
 
-    const bookingSettings = await db.bookingSettings.update({
+    const bookingSettings = await update(db, "BookingSettings", {
       where: { organizationId },
       data: updateData,
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
     });
 
     return bookingSettings;

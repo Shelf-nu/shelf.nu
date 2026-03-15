@@ -1,4 +1,4 @@
-import type { Prisma, User } from "@prisma/client";
+import type { User } from "@shelf/database";
 
 export interface UpdateUserPayload {
   id: User["id"];
@@ -27,4 +27,4 @@ export interface UpdateUserResponse {
 
 export const USER_STATIC_INCLUDE = {
   userOrganizations: true,
-} satisfies Prisma.UserInclude;
+};

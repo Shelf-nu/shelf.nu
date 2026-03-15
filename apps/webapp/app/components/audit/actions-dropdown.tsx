@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuditStatus } from "@prisma/client";
+import { AuditStatus } from "@shelf/database";
 import {
   Popover,
   PopoverContent,

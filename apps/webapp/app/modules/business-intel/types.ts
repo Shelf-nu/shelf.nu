@@ -1,4 +1,4 @@
-import type { UserBusinessIntel } from "@prisma/client";
+import type { UserBusinessIntel } from "@shelf/database";
 
 export interface CreateBusinessIntelPayload {
   userId: string;

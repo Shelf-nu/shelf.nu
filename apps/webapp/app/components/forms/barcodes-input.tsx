@@ -6,7 +6,7 @@ import {
   useEffect,
 } from "react";
 import type { CSSProperties } from "react";
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 import {
   Popover,
   PopoverTrigger,

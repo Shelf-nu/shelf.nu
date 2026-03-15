@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { Asset, Booking } from "@prisma/client";
+import type { Asset, Booking } from "@shelf/database";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";

@@ -1,4 +1,4 @@
-import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
+import { Roles, AssetIndexMode, OrganizationRoles } from "@shelf/database";
 
 import { matchRequestUrl, rest } from "msw";
 import { server } from "@mocks";

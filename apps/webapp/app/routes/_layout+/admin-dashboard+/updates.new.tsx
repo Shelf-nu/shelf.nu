@@ -1,4 +1,4 @@
-import { UpdateStatus, OrganizationRoles } from "@prisma/client";
+import { UpdateStatus, OrganizationRoles } from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
 import { z } from "zod";

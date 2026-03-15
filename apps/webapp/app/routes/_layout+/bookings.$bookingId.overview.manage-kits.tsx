@@ -4,7 +4,7 @@ import {
   BookingStatus,
   KitStatus,
   type Prisma,
-} from "@prisma/client";
+} from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   LinksFunction,

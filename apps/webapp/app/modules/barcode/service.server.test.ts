@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";

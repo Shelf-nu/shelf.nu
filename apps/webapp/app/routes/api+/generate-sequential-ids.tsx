@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { generateBulkSequentialIdsEfficient } from "~/modules/asset/sequential-id.server";
@@ -27,7 +26,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           where: { organizationId },
           select: { roles: true },
         },
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     const userRoles = user.userOrganizations[0]?.roles || [];

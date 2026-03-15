@@ -1,5 +1,3 @@
-import type { Prisma } from "@prisma/client";
-
 export const USER_WITH_SSO_DETAILS_SELECT = {
   id: true,
   email: true,
@@ -27,4 +25,4 @@ export const USER_WITH_SSO_DETAILS_SELECT = {
       },
     },
   },
-} satisfies Prisma.UserSelect;
+};

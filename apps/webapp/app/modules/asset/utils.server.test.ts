@@ -1,4 +1,4 @@
-import type { CustomFieldType } from "@prisma/client";
+import type { CustomFieldType } from "@shelf/database";
 import {
   compareCustomFieldValues,
   detectPotentialChanges,

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { Kit } from "@prisma/client";
+import type { Kit } from "@shelf/database";
 import { PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {

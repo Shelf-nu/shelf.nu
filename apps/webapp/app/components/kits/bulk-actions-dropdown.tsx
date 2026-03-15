@@ -1,4 +1,4 @@
-import type { AssetStatus } from "@prisma/client";
+import type { AssetStatus } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";

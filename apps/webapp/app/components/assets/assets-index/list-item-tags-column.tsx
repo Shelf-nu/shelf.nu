@@ -1,4 +1,4 @@
-import type { Tag } from "@prisma/client";
+import type { Tag } from "@shelf/database";
 import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { Tag as TagBadge } from "~/components/shared/tag";

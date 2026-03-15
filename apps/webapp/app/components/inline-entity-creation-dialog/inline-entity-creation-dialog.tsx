@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Category, Location } from "@prisma/client";
+import type { Category, Location } from "@shelf/database";
 import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { LocationForm } from "../location/form";

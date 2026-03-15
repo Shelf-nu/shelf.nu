@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
-import type { Location } from "@prisma/client";
+import type { Location } from "@shelf/database";
 import { atom, useAtom, useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";

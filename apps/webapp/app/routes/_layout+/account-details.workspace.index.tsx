@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { TierId } from "@prisma/client";
-import type { Organization } from "@prisma/client";
+import { TierId } from "@shelf/database";
+import type { Organization } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import type { MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";

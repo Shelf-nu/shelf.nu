@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 import { z } from "zod";
 
 // Barcode length constants for easy maintenance

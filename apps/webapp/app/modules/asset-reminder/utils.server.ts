@@ -1,4 +1,4 @@
-import type { AssetReminder } from "@prisma/client";
+import type { AssetReminder } from "@shelf/database";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import { z } from "zod";

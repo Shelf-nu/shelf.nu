@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {

@@ -8,7 +8,7 @@ import type {
   AuditImage,
   AuditNote,
   AuditAssetStatus,
-} from "@prisma/client";
+} from "@shelf/database";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getQrCodeMaps } from "../qr/service.server";

@@ -1,5 +1,3 @@
-import type { Prisma } from "@prisma/client";
-
 /** Includes needed for audit to have all data required for emails */
 export const AUDIT_INCLUDE_FOR_EMAIL = {
   createdBy: {
@@ -32,7 +30,7 @@ export const AUDIT_INCLUDE_FOR_EMAIL = {
   _count: {
     select: { assets: true },
   },
-} satisfies Prisma.AuditSessionInclude;
+};
 
 /**
  * This enum represents the types of different events that can be scheduled for an audit using PgBoss

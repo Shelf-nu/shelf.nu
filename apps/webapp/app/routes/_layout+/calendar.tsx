@@ -3,7 +3,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
-import { type BookingStatus, type Tag } from "@prisma/client";
+import { type BookingStatus, type Tag } from "@shelf/database";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, Link, useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";

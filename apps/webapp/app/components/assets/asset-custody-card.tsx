@@ -1,4 +1,4 @@
-import type { Booking, TeamMember, User } from "@prisma/client";
+import type { Booking, TeamMember, User } from "@shelf/database";
 import { Link } from "react-router";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {

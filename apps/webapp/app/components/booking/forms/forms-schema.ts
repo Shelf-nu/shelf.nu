@@ -1,5 +1,5 @@
-import type { BookingSettings } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import type { BookingSettings } from "@shelf/database";
+import { BookingStatus } from "@shelf/database";
 import { format, addHours, differenceInHours } from "date-fns";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";

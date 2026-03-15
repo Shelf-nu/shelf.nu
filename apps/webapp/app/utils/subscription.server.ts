@@ -1,5 +1,5 @@
-import type { Prisma, Organization } from "@prisma/client";
-import { OrganizationType } from "@prisma/client";
+import type { Prisma, Organization } from "@shelf/database";
+import { OrganizationType } from "@shelf/database";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";

@@ -1,6 +1,6 @@
 import type { ChangeEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus } from "@shelf/database";
 import {
   Popover,
   PopoverContent,

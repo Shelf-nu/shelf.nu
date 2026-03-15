@@ -1,4 +1,4 @@
-import type { Asset, Booking } from "@prisma/client";
+import type { Asset, Booking } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import { useNavigate } from "react-router";
 import { useZorm } from "react-zorm";

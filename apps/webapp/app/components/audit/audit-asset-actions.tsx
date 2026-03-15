@@ -1,6 +1,6 @@
 import type React from "react";
 import { useRef, useEffect } from "react";
-import type { AuditAsset } from "@prisma/client";
+import type { AuditAsset } from "@shelf/database";
 import { useSetAtom } from "jotai";
 import { ImagePlus, Loader, MessageSquarePlus } from "lucide-react";
 import { useFetcher } from "react-router";

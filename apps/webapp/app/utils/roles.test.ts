@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 import { describe, expect, it } from "vitest";
 import { isDemotion } from "./roles";
 

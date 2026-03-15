@@ -1,4 +1,4 @@
-import { TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@shelf/database";
 import { describe, vitest } from "vitest";
 import { USER_ID, ORGANIZATION_ID } from "@factories";
 import { db } from "~/database/db.server";

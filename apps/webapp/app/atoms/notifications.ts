@@ -1,4 +1,4 @@
-import type { User } from "@prisma/client";
+import type { User } from "@shelf/database";
 import { atom } from "jotai";
 import type { IconType } from "~/components/shared/icons-map";
 

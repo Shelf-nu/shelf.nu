@@ -1,4 +1,4 @@
-import type { AssetIndexSettings } from "@prisma/client";
+import type { AssetIndexSettings } from "@shelf/database";
 import { createCookie } from "react-router"; // or cloudflare/deno
 
 import type { Cookie } from "react-router";

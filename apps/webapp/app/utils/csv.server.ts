@@ -6,8 +6,8 @@ import type {
   Prisma,
   Tag,
   TeamMember,
-} from "@prisma/client";
-import { CustomFieldType } from "@prisma/client";
+} from "@shelf/database";
+import { CustomFieldType } from "@shelf/database";
 import {
   MaxFileSizeExceededError,
   parseFormData,

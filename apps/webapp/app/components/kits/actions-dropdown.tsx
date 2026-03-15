@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { MapPinIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";

@@ -13,7 +13,7 @@
  * 2. Create a migration to add the currency to the database
  */
 
-import type { Currency } from "@prisma/client";
+import type { Currency } from "@shelf/database";
 
 export interface CurrencyDefinition {
   /** ISO 4217 3-letter currency code */

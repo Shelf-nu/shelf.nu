@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import z from "zod";

@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
@@ -60,7 +59,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
     }
 
     /* If we are selecting all assets in list then we have to consider other filters  */
-    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+    const where: Record<string, unknown> = assetIds.includes(ALL_SELECTED_KEY)
       ? getAssetsWhereInput({
           organizationId,
           currentSearchParams: searchParams.toString(),

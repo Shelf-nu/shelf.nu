@@ -1,4 +1,4 @@
-import type { AssetReminder } from "@prisma/client";
+import type { AssetReminder } from "@shelf/database";
 import { isBefore } from "date-fns";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";

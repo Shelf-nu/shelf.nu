@@ -1,4 +1,4 @@
-import type { Asset, Category } from "@prisma/client";
+import type { Asset, Category } from "@shelf/database";
 import { useLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/home";
 import { ClickableTr } from "./clickable-tr";

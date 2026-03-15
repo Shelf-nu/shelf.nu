@@ -1,4 +1,4 @@
-import { InviteStatuses } from "@prisma/client";
+import { InviteStatuses } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   data,

@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
-import { TagUseFor } from "@prisma/client";
+import type { Booking, User, Tag } from "@shelf/database";
+import { TagUseFor } from "@shelf/database";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -367,49 +367,27 @@ export default function BookingsIndexPage({
 const ListBookingsContent = ({
   item,
 }: {
-  item: Prisma.BookingGetPayload<{
-    include: {
-      assets: {
-        select: {
-          id: true;
-          title: true;
-          availableToBook: true;
-          custody: true;
-          kitId: true;
-          status: true;
-          mainImage: true;
-          thumbnailImage: true;
-          mainImageExpiration: true;
-          category: {
-            select: {
-              id: true;
-              name: true;
-              color: true;
-            };
-          };
-          kit: {
-            select: {
-              id: true;
-              name: true;
-            };
-          };
-        };
-      };
-      creator: {
-        select: {
-          id: true;
-          firstName: true;
-          lastName: true;
-          profilePicture: true;
-        };
-      };
-      from: true;
-      to: true;
-      custodianUser: true;
-      custodianTeamMember: true;
-      tags: { select: { id: true; name: true; color: true } };
-    };
-  }>;
+  item: Booking & {
+    assets: {
+      id: string;
+      title: string;
+      availableToBook: boolean;
+      custody: unknown;
+      kitId: string | null;
+      status: string;
+      mainImage: string | null;
+      thumbnailImage: string | null;
+      mainImageExpiration: string | null;
+      category: { id: string; name: string; color: string } | null;
+      kit: { id: string; name: string } | null;
+    }[];
+    creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+    from: string | null;
+    to: string | null;
+    custodianUser: User | null;
+    custodianTeamMember: { name: string } | null;
+    tags: Pick<Tag, "id" | "name" | "color">[];
+  };
 }) => {
   const hasUnavaiableAssets =
     item.assets.some(

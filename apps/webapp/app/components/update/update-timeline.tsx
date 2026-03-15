@@ -1,5 +1,5 @@
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
-import type { Update, UserUpdateRead } from "@prisma/client";
+import type { Update, UserUpdateRead } from "@shelf/database";
 import { BellIcon } from "lucide-react";
 import { UpdateTimelineItem } from "./update-timeline-item";
 

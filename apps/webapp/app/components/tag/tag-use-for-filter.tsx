@@ -1,4 +1,4 @@
-import { TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@shelf/database";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import {

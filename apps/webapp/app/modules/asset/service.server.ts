@@ -13,7 +13,7 @@ import type {
   AssetIndexSettings,
   UserOrganization,
   BarcodeType,
-} from "@prisma/client";
+} from "@shelf/database";
 import {
   AssetStatus,
   BookingStatus,
@@ -21,7 +21,7 @@ import {
   KitStatus,
   Prisma,
   TagUseFor,
-} from "@prisma/client";
+} from "@shelf/database";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";

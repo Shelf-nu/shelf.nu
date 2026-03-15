@@ -8,7 +8,7 @@ import {
   OrganizationRoles,
   type UserBusinessIntel,
   type Prisma,
-} from "@prisma/client";
+} from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, useLoaderData, Link, useFetcher } from "react-router";
 

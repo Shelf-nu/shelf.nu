@@ -1,4 +1,4 @@
-import type { CustomField } from "@prisma/client";
+import type { CustomField } from "@shelf/database";
 import { useSearchParams } from "~/hooks/search-params";
 import type {
   Column,

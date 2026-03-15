@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 import { readBarcodes, type ReadResult } from "zxing-wasm/reader";
 import {
   validateBarcodeValue,

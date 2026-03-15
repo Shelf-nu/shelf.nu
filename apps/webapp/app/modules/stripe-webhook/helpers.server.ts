@@ -1,4 +1,4 @@
-import type { TierId } from "@prisma/client";
+import type { TierId } from "@shelf/database";
 import Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";

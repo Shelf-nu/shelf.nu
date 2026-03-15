@@ -1,4 +1,4 @@
-import type { Booking } from "@prisma/client";
+import type { Booking } from "@shelf/database";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 

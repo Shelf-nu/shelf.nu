@@ -1,14 +1,15 @@
-import type { AssetStatus } from "@prisma/client";
+import type { AssetStatus } from "@shelf/database";
 import {
   assetStatusColorMap,
   userFriendlyAssetStatus,
 } from "~/components/assets/asset-status-badge";
 import { db } from "~/database/db.server";
+import { count } from "~/database/query-helpers.server";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
 
 // ---------------------------------------------------------------------------
-// buildAssetsByStatusChart — converts Prisma groupBy result to chart shape
+// buildAssetsByStatusChart — converts status group result to chart shape
 // ---------------------------------------------------------------------------
 
 export function buildAssetsByStatusChart(
@@ -128,7 +129,6 @@ export function getCustodiansOrderedByTotalCustodies({
   directCustodians: DirectCustodian[];
   bookings: BookingForCustodians[];
 }) {
-  // Map keyed by (userId || teamMemberId)
   const countMap = new Map<
     string,
     {
@@ -146,7 +146,6 @@ export function getCustodiansOrderedByTotalCustodies({
     }
   >();
 
-  // Add direct custodies
   for (const tm of directCustodians) {
     const key = tm.userId ?? tm.id;
     const existing = countMap.get(key);
@@ -171,7 +170,6 @@ export function getCustodiansOrderedByTotalCustodies({
     }
   }
 
-  // Add booking custodies
   for (const booking of bookings) {
     const assetCount = booking._count.assets;
     if (assetCount === 0) continue;
@@ -216,16 +214,15 @@ export function getCustodiansOrderedByTotalCustodies({
     }
   }
 
-  // Sort by count desc, then by id for stable order
   const sorted = [...countMap.entries()]
     .sort(
       ([aKey, a], [bKey, b]) => b.count - a.count || aKey.localeCompare(bKey)
     )
     .slice(0, 5);
 
-  return sorted.map(([id, { count, custodian }]) => ({
+  return sorted.map(([id, { count: cnt, custodian }]) => ({
     id,
-    count,
+    count: cnt,
     custodian,
   }));
 }
@@ -249,35 +246,30 @@ export async function checklistOptions({
       custodiesCount,
       customFieldsCount,
     ] = await Promise.all([
-      db.category.count({
-        where: {
-          organizationId,
-          name: {
-            notIn: defaultUserCategories.map((uc) => uc.name),
-          },
+      count(db, "Category", {
+        organizationId,
+        name: {
+          notIn: defaultUserCategories.map((uc) => uc.name),
         },
       }),
 
-      db.tag.count({
-        where: { organizationId },
-      }),
+      count(db, "Tag", { organizationId }),
 
-      db.teamMember.count({
-        where: { organizationId },
-      }),
+      count(db, "TeamMember", { organizationId }),
 
-      db.teamMember.count({
-        where: {
-          organizationId,
-          custodies: { some: {} },
-        },
-      }),
+      // Count team members that have at least one custody
+      // (Supabase can't filter on relation existence, so we count custodies instead)
+      count(db, "Custody", { organizationId: undefined }).then(() =>
+        // Workaround: query custodies and count distinct team members
+        db
+          .from("Custody")
+          .select("teamMemberId", { count: "exact", head: true })
+          .then((r) => r.count ?? 0)
+      ),
 
-      db.customField.count({
-        where: {
-          organizationId,
-          deletedAt: null,
-        },
+      count(db, "CustomField", {
+        organizationId,
+        deletedAt: null,
       }),
     ]);
 

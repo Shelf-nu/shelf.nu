@@ -6,8 +6,8 @@ import type {
   UserOrganization,
   Asset,
   Kit,
-} from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+} from "@shelf/database";
+import { BookingStatus } from "@shelf/database";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";

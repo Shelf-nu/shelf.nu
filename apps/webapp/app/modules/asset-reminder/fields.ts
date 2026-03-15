@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 
 export const ASSET_REMINDER_INCLUDE_FIELDS = {
   asset: {

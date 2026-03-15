@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import { useLoaderData, useSubmit } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {

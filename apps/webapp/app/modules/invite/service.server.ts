@@ -4,8 +4,8 @@ import type {
   Prisma,
   TeamMember,
   User,
-} from "@prisma/client";
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+} from "@shelf/database";
+import { InviteStatuses, OrganizationRoles } from "@shelf/database";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";

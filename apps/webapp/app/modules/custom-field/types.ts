@@ -1,4 +1,4 @@
-import type { CustomField, Organization, User } from "@prisma/client";
+import type { CustomField, Organization, User } from "@shelf/database";
 
 export type CustomFieldDraftPayload = Pick<
   CustomField,

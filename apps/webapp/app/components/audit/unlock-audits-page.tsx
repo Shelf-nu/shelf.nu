@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Currency } from "@prisma/client";
+import type { Currency } from "@shelf/database";
 import {
   CheckCircle2Icon,
   ClipboardCheckIcon,

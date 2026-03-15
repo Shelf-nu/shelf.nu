@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

@@ -1,4 +1,4 @@
-import type { WorkingHoursOverride } from "@prisma/client";
+import type { WorkingHoursOverride } from "@shelf/database";
 import { tw } from "~/utils/tw";
 import { NewOverrideDialog } from "./override-dialog";
 import { OverridePreview } from "./override-preview";

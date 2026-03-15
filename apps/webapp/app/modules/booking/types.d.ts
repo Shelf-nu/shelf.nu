@@ -1,28 +1,32 @@
-import type { Booking, Prisma } from "@prisma/client";
+import type { Booking, Asset, TeamMember, User, Tag } from "@shelf/database";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { ClientHint } from "~/utils/client-hints";
 import type { ResponsePayload } from "~/utils/http.server";
-import type { MergeInclude } from "~/utils/utils";
-import type {
-  BOOKING_SCHEDULER_EVENTS_ENUM,
-  BOOKING_WITH_ASSETS_INCLUDE,
-} from "./constants";
+import type { BOOKING_SCHEDULER_EVENTS_ENUM } from "./constants";
 
 export type BookingWithExtraInclude<
-  T extends Prisma.BookingInclude | undefined,
-> = T extends Prisma.BookingInclude
-  ? Prisma.BookingGetPayload<{
-      include: MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
-    }>
-  : Prisma.BookingGetPayload<{ include: typeof BOOKING_WITH_ASSETS_INCLUDE }>;
+  T extends Record<string, unknown> | undefined = undefined,
+> = Booking & {
+  custodianTeamMember: TeamMember | null;
+  custodianUser: User | null;
+  tags: Pick<Tag, "id" | "name" | "color">[];
+  assets: {
+    id: string;
+    title: string;
+    availableToBook: boolean;
+    status: string;
+    kitId: string | null;
+    valuation: number | null;
+    category: { id: string; name: string; color: string } | null;
+    kit: { name: string } | null;
+  }[];
+} & (T extends Record<string, unknown> ? Record<string, unknown> : {});
 
-export type BookingWithIncludes = Prisma.BookingGetPayload<{
-  include: {
-    assets: true;
-    custodianTeamMember: true;
-    custodianUser: true;
-  };
-}>;
+export type BookingWithIncludes = Booking & {
+  assets: Asset[];
+  custodianTeamMember: TeamMember | null;
+  custodianUser: User | null;
+};
 
 export interface SchedulerData {
   id: string;
@@ -40,15 +44,11 @@ export type BookingUpdateIntent =
   | "archive"
   | "cancel";
 
-export type BookingWithCustodians = Prisma.BookingGetPayload<{
-  include: {
-    assets: true;
-    from: true;
-    to: true;
-    custodianUser: true;
-    custodianTeamMember: true;
-  };
-}>;
+export type BookingWithCustodians = Booking & {
+  assets: Asset[];
+  custodianUser: User | null;
+  custodianTeamMember: TeamMember | null;
+};
 
 /**
  * Base interface for booking loader response

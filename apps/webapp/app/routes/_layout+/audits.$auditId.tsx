@@ -1,4 +1,4 @@
-import { AuditStatus, OrganizationRoles } from "@prisma/client";
+import { AuditStatus, OrganizationRoles } from "@shelf/database";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,

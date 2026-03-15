@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Barcode } from "@prisma/client";
+import type { Barcode } from "@shelf/database";
 import { SearchIcon } from "lucide-react";
 import { tw } from "~/utils/tw";
 import { BarcodeDisplay } from "./barcode-display";

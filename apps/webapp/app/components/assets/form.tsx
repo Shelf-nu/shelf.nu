@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import type { Asset, Barcode, Qr } from "@prisma/client";
+import type { Asset, Barcode, Qr } from "@shelf/database";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import type { Tag } from "react-tag-autocomplete";

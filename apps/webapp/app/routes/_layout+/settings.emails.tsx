@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { OrganizationType } from "@prisma/client";
+import { OrganizationType } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

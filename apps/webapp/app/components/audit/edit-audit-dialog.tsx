@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { AuditStatus } from "@prisma/client";
+import type { AuditStatus } from "@shelf/database";
 import { AlertTriangleIcon } from "lucide-react";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";

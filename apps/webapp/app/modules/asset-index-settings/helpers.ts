@@ -1,4 +1,4 @@
-import { CustomFieldType } from "@prisma/client";
+import { CustomFieldType } from "@shelf/database";
 import { z } from "zod";
 
 export type Column = {

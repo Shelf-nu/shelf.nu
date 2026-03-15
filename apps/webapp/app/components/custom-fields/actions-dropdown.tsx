@@ -1,4 +1,4 @@
-import type { CustomField } from "@prisma/client";
+import type { CustomField } from "@shelf/database";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,

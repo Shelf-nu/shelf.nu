@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

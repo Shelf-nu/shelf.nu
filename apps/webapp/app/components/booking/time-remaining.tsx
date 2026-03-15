@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import { Clock } from "lucide-react";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 

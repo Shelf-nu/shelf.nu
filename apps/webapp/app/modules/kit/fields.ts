@@ -1,7 +1,5 @@
-import type { Prisma } from "@prisma/client";
-
 export const getKitOverviewFields = (canUseBarcodes: boolean = false) => {
-  const fields: Prisma.KitInclude = {
+  const fields: Record<string, unknown> = {
     assets: {
       select: {
         valuation: true,

@@ -1,4 +1,4 @@
-import { AssetIndexMode } from "@prisma/client";
+import { AssetIndexMode } from "@shelf/database";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {

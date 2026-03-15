@@ -1,11 +1,11 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import {
   AssetStatus,
   BookingStatus,
   KitStatus,
   NoteType,
   OrganizationRoles,
-} from "@prisma/client";
+} from "@shelf/database";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,

@@ -1,7 +1,7 @@
-import type { Asset, Kit, Prisma, ReportFound, User } from "@prisma/client";
+import type { Asset, Kit, ReportFound, User } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { create } from "~/database/query-helpers.server";
 import { sendEmail } from "~/emails/mail.server";
-import type { QR_SELECT_FOR_REPORT } from "~/routes/qr+/_public+/$qrId_.contact-owner";
 import { ShelfError } from "~/utils/error";
 import { normalizeQrData } from "~/utils/qr";
 
@@ -15,26 +15,11 @@ export async function createReport({
   kitId?: Kit["id"];
 }) {
   try {
-    return await db.reportFound.create({
-      data: {
-        email,
-        content,
-        ...(assetId && {
-          asset: {
-            connect: {
-              id: assetId,
-            },
-          },
-        }),
-
-        ...(kitId && {
-          kit: {
-            connect: {
-              id: kitId,
-            },
-          },
-        }),
-      },
+    return await create(db, "ReportFound", {
+      email,
+      content,
+      ...(assetId && { assetId }),
+      ...(kitId && { kitId }),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -56,9 +41,13 @@ export function sendReportEmails({
   ownerEmail: User["email"];
   message: ReportFound["content"];
   reporterEmail: ReportFound["email"];
-  qr: Prisma.QrGetPayload<{
-    select: typeof QR_SELECT_FOR_REPORT;
-  }>;
+  qr: {
+    id: string;
+    assetId?: string | null;
+    kitId?: string | null;
+    asset?: { id: string; title: string } | null;
+    kit?: { id: string; name: string } | null;
+  };
 }) {
   const { item, type, normalizedName } = normalizeQrData(qr);
   const isUnlinked = !qr.assetId && !qr.kitId;

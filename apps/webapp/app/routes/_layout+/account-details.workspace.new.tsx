@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
-import { Currency } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
+import { Currency } from "@shelf/database";
 import {
   MaxFileSizeExceededError,
   parseFormData,

@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { cloneElement, useState } from "react";
-import type { TeamMember } from "@prisma/client";
+import type { TeamMember } from "@shelf/database";
 import { CalendarRangeIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";

@@ -1,5 +1,4 @@
-import type { Prisma } from "@prisma/client";
-import { Roles } from "@prisma/client";
+import { Roles } from "@shelf/database";
 import { useAtom, useAtomValue } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import type {
@@ -109,7 +108,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             organization: { select: { id: true } },
           },
         },
-      } satisfies Prisma.UserSelect,
+      },
     });
 
     let subscription = null;

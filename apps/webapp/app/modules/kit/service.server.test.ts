@@ -3,7 +3,7 @@ import {
   KitStatus,
   AssetStatus,
   ErrorCorrection,
-} from "@prisma/client";
+} from "@shelf/database";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";

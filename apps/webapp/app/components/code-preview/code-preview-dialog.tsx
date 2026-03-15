@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactElement } from "react";
 import { cloneElement, useCallback, useMemo, useState } from "react";
-import type { Asset, Kit, BarcodeType } from "@prisma/client";
+import type { Asset, Kit, BarcodeType } from "@shelf/database";
 import useApiQuery from "~/hooks/use-api-query";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";

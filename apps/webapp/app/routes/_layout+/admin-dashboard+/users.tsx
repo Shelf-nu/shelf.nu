@@ -1,4 +1,4 @@
-import { TierId, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { TierId, OrganizationRoles, OrganizationType } from "@shelf/database";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useNavigate, useLoaderData } from "react-router";
 import type Stripe from "stripe";

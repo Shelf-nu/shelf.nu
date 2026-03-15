@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
 import type { CSSProperties, MouseEvent } from "react";
-import type { BarcodeType } from "@prisma/client";
+import type { BarcodeType } from "@shelf/database";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";

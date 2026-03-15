@@ -1,5 +1,5 @@
-import type { Asset, Booking, Currency } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import type { Asset, Booking, Currency } from "@shelf/database";
+import { BookingStatus } from "@shelf/database";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
 import { resolveTeamMemberName } from "./user";

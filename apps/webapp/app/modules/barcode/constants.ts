@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 
 export const BARCODE_TYPE_OPTIONS = [
   {

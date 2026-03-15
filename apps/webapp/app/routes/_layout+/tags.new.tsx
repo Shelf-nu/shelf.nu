@@ -1,4 +1,4 @@
-import { TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@shelf/database";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";

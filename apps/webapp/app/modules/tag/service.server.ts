@@ -1,13 +1,16 @@
-import type {
-  Organization,
-  Prisma,
-  Tag,
-  TeamMember,
-  User,
-} from "@prisma/client";
-import { TagUseFor } from "@prisma/client";
+import type { Organization, Tag, TeamMember, User } from "@shelf/database";
+import { TagUseFor } from "@shelf/database";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
+import {
+  count,
+  create,
+  deleteMany,
+  findFirst,
+  findMany,
+  findUniqueOrThrow,
+  update,
+} from "~/database/query-helpers.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
@@ -36,7 +39,7 @@ export async function getTags(params: {
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.TagWhereInput = { organizationId };
+    const where: Record<string, unknown> = { organizationId };
 
     /** If the search string exists, add it to the where object */
     if (search) {
@@ -51,16 +54,13 @@ export async function getTags(params: {
     }
 
     const [tags, totalTags] = await Promise.all([
-      /** Get the items */
-      db.tag.findMany({
+      findMany(db, "Tag", {
         skip,
         take,
         where,
         orderBy: { updatedAt: "desc" },
       }),
-
-      /** Count them */
-      db.tag.count({ where }),
+      count(db, "Tag", where),
     ]);
 
     return { tags, totalTags };
@@ -86,23 +86,13 @@ export async function createTag({
   useFor: TagUseFor[];
 }) {
   try {
-    return await db.tag.create({
-      data: {
-        name: loadash.trim(name),
-        description,
-        useFor,
-        color,
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-        organization: {
-          connect: {
-            id: organizationId,
-          },
-        },
-      },
+    return await create(db, "Tag", {
+      name: loadash.trim(name),
+      description,
+      useFor,
+      color,
+      userId,
+      organizationId,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Tag", {
@@ -119,9 +109,7 @@ export async function deleteTag({
   organizationId,
 }: Pick<Tag, "id"> & { organizationId: Organization["id"] }) {
   try {
-    return await db.tag.deleteMany({
-      where: { id, organizationId },
-    });
+    return await deleteMany(db, "Tag", { id, organizationId });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -163,7 +151,7 @@ export async function createTagsIfNotExists({
 
     // now we loop through the categories and check if they exist
     for (const tag of Object.keys(tags)) {
-      const existingTag = await db.tag.findFirst({
+      const existingTag = await findFirst(db, "Tag", {
         where: {
           name: { equals: tag, mode: "insensitive" },
           organizationId,
@@ -172,21 +160,11 @@ export async function createTagsIfNotExists({
 
       if (!existingTag) {
         // if the tag doesn't exist, we create a new one
-        const newTag = await db.tag.create({
-          data: {
-            name: tag as string,
-            color: getRandomColor(),
-            user: {
-              connect: {
-                id: userId,
-              },
-            },
-            organization: {
-              connect: {
-                id: organizationId,
-              },
-            },
-          },
+        const newTag = await create(db, "Tag", {
+          name: tag as string,
+          color: getRandomColor(),
+          userId,
+          organizationId,
         });
         tags[tag] = newTag.id;
       } else {
@@ -214,11 +192,8 @@ export async function getTag({
   organizationId,
 }: Pick<Tag, "id" | "organizationId">) {
   try {
-    return await db.tag.findUniqueOrThrow({
-      where: {
-        id,
-        organizationId,
-      },
+    return await findUniqueOrThrow(db, "Tag", {
+      where: { id, organizationId },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -243,18 +218,13 @@ export async function updateTag({
   useFor?: TagUseFor[];
 }) {
   try {
-    return await db.tag.update({
-      where: {
-        id,
-        organizationId,
-      },
+    return await update(db, "Tag", {
+      where: { id, organizationId },
       data: {
         name: loadash.trim(name),
         description,
         color,
-        useFor: {
-          set: useFor,
-        },
+        useFor,
       },
     });
   } catch (cause) {
@@ -275,11 +245,13 @@ export async function bulkDeleteTags({
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.tag.deleteMany({
-      where: tagIds.includes(ALL_SELECTED_KEY)
+    return await deleteMany(
+      db,
+      "Tag",
+      tagIds.includes(ALL_SELECTED_KEY)
         ? { organizationId }
-        : { id: { in: tagIds }, organizationId },
-    });
+        : { id: { in: tagIds }, organizationId }
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -299,7 +271,7 @@ export async function getTagsForBookingTagsFilter({
   organizationId: Organization["id"];
 }) {
   try {
-    const tags = await db.tag.findMany({
+    const tags = await findMany(db, "Tag", {
       where: {
         organizationId,
         OR: [

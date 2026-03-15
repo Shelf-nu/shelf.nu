@@ -4,7 +4,7 @@ import type {
   Prisma,
   User,
   UserOrganization,
-} from "@prisma/client";
+} from "@shelf/database";
 import { db } from "~/database/db.server";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";

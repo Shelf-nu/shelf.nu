@@ -1,6 +1,7 @@
-import { TierId } from "@prisma/client";
+import { TierId } from "@shelf/database";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
+import { findFirstOrThrow, update } from "~/database/query-helpers.server";
 import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";

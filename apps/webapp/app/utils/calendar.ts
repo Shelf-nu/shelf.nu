@@ -3,7 +3,7 @@ import type {
   EventClickArg,
   EventHoveringArg,
 } from "@fullcalendar/core";
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus } from "@shelf/database";
 import { getWeekStartingAndEndingDates } from "./date-fns";
 
 export function getStatusClasses(

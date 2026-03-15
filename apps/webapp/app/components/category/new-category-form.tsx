@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { Category } from "@prisma/client";
+import type { Category } from "@shelf/database";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { useDisabled } from "~/hooks/use-disabled";

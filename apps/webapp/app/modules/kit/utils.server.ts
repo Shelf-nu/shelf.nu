@@ -1,4 +1,4 @@
-import type { Kit, KitStatus, Prisma } from "@prisma/client";
+import type { Kit, KitStatus } from "@shelf/database";
 
 export function getKitsWhereInput({
   organizationId,
@@ -7,7 +7,7 @@ export function getKitsWhereInput({
   organizationId: Kit["organizationId"];
   currentSearchParams?: string | null;
 }) {
-  const where: Prisma.KitWhereInput = { organizationId };
+  const where: Record<string, unknown> = { organizationId };
 
   if (!currentSearchParams) {
     return where;

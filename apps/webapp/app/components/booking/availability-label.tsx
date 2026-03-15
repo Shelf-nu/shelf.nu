@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import type { Booking } from "@prisma/client";
-import { BookingStatus, KitStatus } from "@prisma/client";
+import type { Booking } from "@shelf/database";
+import { BookingStatus, KitStatus } from "@shelf/database";
 import { Link, useLoaderData } from "react-router";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";

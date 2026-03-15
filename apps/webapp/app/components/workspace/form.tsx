@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import type { Organization, Currency } from "@prisma/client";
+import type { Organization, Currency } from "@shelf/database";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";

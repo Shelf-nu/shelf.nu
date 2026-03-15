@@ -1,4 +1,4 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationRoles, OrganizationType } from "@shelf/database";
 import {
   MaxFileSizeExceededError,
   parseFormData,

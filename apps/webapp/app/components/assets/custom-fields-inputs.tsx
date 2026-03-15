@@ -1,6 +1,6 @@
 import type { ReactElement, KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CustomFieldType, Currency, CustomField } from "@prisma/client";
+import type { CustomFieldType, Currency, CustomField } from "@shelf/database";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,

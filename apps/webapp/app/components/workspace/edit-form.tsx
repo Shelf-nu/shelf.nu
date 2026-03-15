@@ -3,7 +3,7 @@ import {
   type Currency,
   OrganizationType,
   type QrIdDisplayPreference,
-} from "@prisma/client";
+} from "@shelf/database";
 import { useAtom, useAtomValue } from "jotai";
 import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";

@@ -1,4 +1,4 @@
-import type { AssetReminder, Prisma, TeamMember } from "@prisma/client";
+import type { AssetReminder, Prisma, TeamMember } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";

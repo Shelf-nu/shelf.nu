@@ -1,5 +1,5 @@
-import { InviteStatuses } from "@prisma/client";
-import type { Prisma, Organization, OrganizationRoles } from "@prisma/client";
+import { InviteStatuses } from "@shelf/database";
+import type { Prisma, Organization, OrganizationRoles } from "@shelf/database";
 
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";

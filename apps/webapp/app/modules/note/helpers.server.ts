@@ -1,4 +1,4 @@
-import type { Category, Currency, Prisma, User } from "@prisma/client";
+import type { Category, Currency, Prisma, User } from "@shelf/database";
 import type { LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
 
 import { formatCurrency } from "~/utils/currency";

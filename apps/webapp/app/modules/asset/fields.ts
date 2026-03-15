@@ -1,4 +1,4 @@
-import type { BookingStatus, Prisma } from "@prisma/client";
+import type { BookingStatus, Prisma } from "@shelf/database";
 
 export const LOCATION_WITH_HIERARCHY = {
   select: {

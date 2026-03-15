@@ -3,7 +3,7 @@ import {
   OrganizationRoles,
   type CustomField,
   type Prisma,
-} from "@prisma/client";
+} from "@shelf/database";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";

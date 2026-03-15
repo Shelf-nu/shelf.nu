@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,

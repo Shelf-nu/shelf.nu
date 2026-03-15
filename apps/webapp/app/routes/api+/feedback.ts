@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { type ActionFunctionArgs, data } from "react-router";
 import { sendFeedbackEmail } from "~/emails/feedback/feedback-email";
 import { feedbackSchema } from "~/modules/feedback/schema";
@@ -30,7 +29,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           lastName: true,
           username: true,
           email: true,
-        } satisfies Prisma.UserSelect,
+        },
       }),
       getSelectedOrganization({ userId, request }),
     ]);

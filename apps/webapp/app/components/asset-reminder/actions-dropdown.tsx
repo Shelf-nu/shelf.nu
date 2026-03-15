@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { PencilIcon } from "lucide-react";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

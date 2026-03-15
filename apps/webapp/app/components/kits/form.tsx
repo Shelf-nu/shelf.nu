@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { Barcode, Kit } from "@prisma/client";
+import type { Barcode, Kit } from "@shelf/database";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";

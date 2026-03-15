@@ -1,4 +1,4 @@
-import type { Organization, SsoDetails } from "@prisma/client";
+import type { Organization, SsoDetails } from "@shelf/database";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import {

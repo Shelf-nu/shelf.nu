@@ -1,29 +1,32 @@
-import { createDatabaseClient } from "@shelf/database";
-import type { ExtendedPrismaClient } from "@shelf/database";
+import { createSupabaseDataClient } from "@shelf/database";
+import type { SupabaseDataClient } from "@shelf/database";
 
 import { NODE_ENV } from "../utils/env";
 
-export type { ExtendedPrismaClient };
+export type { SupabaseDataClient };
 
-let db: ExtendedPrismaClient;
+let db: SupabaseDataClient;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __db__: ExtendedPrismaClient;
+  var __db__: SupabaseDataClient;
 }
 
-// this is needed because in development we don't want to restart
-// the server with every change, but we want to make sure we don't
-// create a new connection to the DB with every change either.
-// in production, we'll have a single connection to the DB.
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+// Singleton pattern: reuse the same client across hot reloads in development.
+// In production, a single instance is created once.
 if (NODE_ENV === "production") {
-  db = createDatabaseClient();
+  db = createSupabaseDataClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 } else {
   if (!global.__db__) {
-    global.__db__ = createDatabaseClient();
+    global.__db__ = createSupabaseDataClient(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY
+    );
   }
   db = global.__db__;
-  void db.$connect();
 }
 
 export { db };

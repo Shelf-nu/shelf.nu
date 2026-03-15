@@ -1,4 +1,4 @@
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus } from "@shelf/database";
 import { userFriendlyAssetStatus } from "~/components/assets/asset-status-badge";
 import { operatorsMap } from "~/components/assets/assets-index/advanced-filters/operator-selector";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";

@@ -1,4 +1,4 @@
-import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
+import type { Qr, Scan, User, UserOrganization } from "@shelf/database";
 import parser from "ua-parser-js";
 import { ShelfError } from "~/utils/error";
 

@@ -6,7 +6,7 @@ import type {
   Prisma,
   Kit,
   OrganizationRoles,
-} from "@prisma/client";
+} from "@shelf/database";
 import { db } from "~/database/db.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";

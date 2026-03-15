@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
-import type { QrIdDisplayPreference } from "@prisma/client";
+import type { QrIdDisplayPreference } from "@shelf/database";
 import {
   Popover,
   PopoverContent,

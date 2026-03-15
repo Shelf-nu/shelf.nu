@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import type { User } from "@prisma/client";
+import type { User } from "@shelf/database";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import type {
   LinksFunction,

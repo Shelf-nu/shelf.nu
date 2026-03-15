@@ -1,5 +1,5 @@
-import { Prisma } from "@prisma/client";
-import type { CustomFieldType } from "@prisma/client";
+import { Prisma } from "@shelf/database";
+import type { CustomFieldType } from "@shelf/database";
 
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { parseFilters } from "./filter-parsing";

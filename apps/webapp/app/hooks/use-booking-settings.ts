@@ -1,4 +1,4 @@
-import type { BookingSettings } from "@prisma/client";
+import type { BookingSettings } from "@shelf/database";
 import { useRouteLoaderData } from "react-router";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 

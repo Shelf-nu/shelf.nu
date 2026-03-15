@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookingStatus, type Booking } from "@prisma/client";
+import { BookingStatus, type Booking } from "@shelf/database";
 import { useDisabled } from "~/hooks/use-disabled";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";

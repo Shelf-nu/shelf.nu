@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { db } from "~/database/db.server";

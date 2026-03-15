@@ -1,4 +1,4 @@
-import type { Asset } from "@prisma/client";
+import type { Asset } from "@shelf/database";
 import { useNavigation } from "react-router";
 import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";

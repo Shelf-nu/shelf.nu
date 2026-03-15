@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CustomTierLimit, Prisma } from "@prisma/client";
+import type { CustomTierLimit, Prisma } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

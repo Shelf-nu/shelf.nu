@@ -1,5 +1,5 @@
-import { AssetStatus, BookingStatus } from "@prisma/client";
-import type { Asset, Booking, Organization, Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@shelf/database";
+import type { Asset, Booking, Organization, Prisma } from "@shelf/database";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import type { ErrorLabel } from "~/utils/error";

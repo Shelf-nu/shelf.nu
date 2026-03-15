@@ -4,7 +4,7 @@ import type {
   Location,
   Prisma,
   CustomFieldType,
-} from "@prisma/client";
+} from "@shelf/database";
 import _ from "lodash";
 import { z } from "zod";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";

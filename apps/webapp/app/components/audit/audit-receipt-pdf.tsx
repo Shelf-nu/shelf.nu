@@ -1,6 +1,6 @@
 import type React from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { AuditStatus, AuditAssetStatus } from "@prisma/client";
+import type { AuditStatus, AuditAssetStatus } from "@shelf/database";
 import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";

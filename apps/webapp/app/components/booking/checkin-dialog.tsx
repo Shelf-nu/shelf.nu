@@ -1,4 +1,4 @@
-import type { Booking } from "@prisma/client";
+import type { Booking } from "@shelf/database";
 import { Zap } from "lucide-react";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import { tw } from "~/utils/tw";

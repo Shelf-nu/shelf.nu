@@ -1,4 +1,4 @@
-import { KitStatus } from "@prisma/client";
+import { KitStatus } from "@shelf/database";
 import {
   data,
   type ActionFunctionArgs,

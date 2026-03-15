@@ -1,4 +1,4 @@
-import type { AuditAssetStatus } from "@prisma/client";
+import type { AuditAssetStatus } from "@shelf/database";
 
 export type AuditFilterType =
   | "ALL"

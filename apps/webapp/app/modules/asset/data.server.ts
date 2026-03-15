@@ -1,7 +1,7 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Kit } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type { AssetIndexSettings, Kit } from "@shelf/database";
+import { OrganizationRoles } from "@shelf/database";
 import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";

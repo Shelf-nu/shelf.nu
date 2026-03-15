@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { motion } from "framer-motion";
 import { useSetAtom } from "jotai";
 import type { ScanListItem } from "~/atoms/qr-scanner";

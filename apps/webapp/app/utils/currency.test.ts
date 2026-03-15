@@ -1,4 +1,4 @@
-import { Currency } from "@prisma/client";
+import { Currency } from "@shelf/database";
 import { describe, expect, it } from "vitest";
 import {
   CURRENCY_MAP,

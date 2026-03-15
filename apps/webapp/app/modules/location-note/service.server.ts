@@ -1,6 +1,12 @@
-import type { Location, LocationNote, Prisma, User } from "@prisma/client";
+import type { Location, LocationNote, User } from "@shelf/database";
 
 import { db } from "~/database/db.server";
+import {
+  create,
+  deleteMany,
+  findFirst,
+  findMany,
+} from "~/database/query-helpers.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -18,21 +24,11 @@ export async function createLocationNote({
   userId,
 }: CreateLocationNoteArgs) {
   try {
-    return await db.locationNote.create({
-      data: {
-        content,
-        type,
-        location: {
-          connect: { id: locationId },
-        },
-        ...(userId
-          ? {
-              user: {
-                connect: { id: userId },
-              },
-            }
-          : {}),
-      },
+    return await create(db, "LocationNote", {
+      content,
+      type,
+      locationId,
+      ...(userId ? { userId } : {}),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -50,21 +46,11 @@ export async function createSystemLocationNote({
   userId,
 }: Pick<LocationNote, "content" | "locationId"> & { userId?: string }) {
   try {
-    return await db.locationNote.create({
-      data: {
-        content,
-        type: "UPDATE",
-        location: {
-          connect: { id: locationId },
-        },
-        ...(userId
-          ? {
-              user: {
-                connect: { id: userId },
-              },
-            }
-          : {}),
-      },
+    return await create(db, "LocationNote", {
+      content,
+      type: "UPDATE",
+      locationId,
+      ...(userId ? { userId } : {}),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -83,9 +69,9 @@ export async function getLocationNotes({
   organizationId: Location["organizationId"];
 }) {
   try {
-    const location = await db.location.findFirst({
+    const location = await findFirst(db, "Location", {
       where: { id: locationId, organizationId },
-      select: { id: true },
+      select: "id",
     });
 
     if (!location) {
@@ -98,17 +84,10 @@ export async function getLocationNotes({
       });
     }
 
-    return await db.locationNote.findMany({
+    return await findMany(db, "LocationNote", {
       where: { locationId },
       orderBy: { createdAt: "desc" },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
+      select: "*, user:User(firstName, lastName)",
     });
   } catch (cause) {
     if (cause instanceof ShelfError) {
@@ -129,9 +108,7 @@ export async function deleteLocationNote({
   userId,
 }: Pick<LocationNote, "id"> & { userId: User["id"] }) {
   try {
-    return await db.locationNote.deleteMany({
-      where: { id, userId },
-    });
+    return await deleteMany(db, "LocationNote", { id, userId });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -142,6 +119,6 @@ export async function deleteLocationNote({
   }
 }
 
-export type LocationNoteWithUser = Prisma.LocationNoteGetPayload<{
-  include: { user: { select: { firstName: true; lastName: true } } };
-}>;
+export type LocationNoteWithUser = LocationNote & {
+  user: { firstName: string | null; lastName: string | null } | null;
+};

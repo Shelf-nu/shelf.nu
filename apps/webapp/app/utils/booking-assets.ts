@@ -1,4 +1,4 @@
-import { AssetStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@shelf/database";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 
 export type AssetWithStatus = {

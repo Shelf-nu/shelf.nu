@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { TrashIcon } from "lucide-react";
 import { Form, useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";

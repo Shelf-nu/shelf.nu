@@ -1,4 +1,4 @@
-import { UpdateStatus, OrganizationRoles } from "@prisma/client";
+import { UpdateStatus, OrganizationRoles } from "@shelf/database";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";

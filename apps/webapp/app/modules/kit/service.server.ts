@@ -10,14 +10,14 @@ import type {
   TeamMember,
   User,
   UserOrganization,
-} from "@prisma/client";
+} from "@shelf/database";
 import {
   AssetStatus,
   BookingStatus,
   ErrorCorrection,
   KitStatus,
   NoteType,
-} from "@prisma/client";
+} from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";

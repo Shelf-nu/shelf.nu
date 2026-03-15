@@ -1,4 +1,4 @@
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus } from "@shelf/database";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
 
 interface BookingStatusComponentProps {

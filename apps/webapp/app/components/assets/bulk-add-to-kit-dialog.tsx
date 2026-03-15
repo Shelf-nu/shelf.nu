@@ -1,4 +1,4 @@
-import type { Kit } from "@prisma/client";
+import type { Kit } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import z from "zod";

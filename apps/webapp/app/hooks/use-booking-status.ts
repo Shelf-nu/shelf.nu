@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 
 export function useBookingStatusHelpers(status: BookingStatus | undefined) {
   // Handle undefined case at the beginning

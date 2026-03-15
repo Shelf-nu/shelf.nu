@@ -1,4 +1,4 @@
-import type { Booking } from "@prisma/client";
+import type { Booking } from "@shelf/database";
 import { ChevronRightIcon, ListChecks } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "~/utils/tw";

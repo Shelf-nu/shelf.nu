@@ -1,4 +1,4 @@
-import type { Kit } from "@prisma/client";
+import type { Kit } from "@shelf/database";
 import { Form, useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useDisabled } from "~/hooks/use-disabled";

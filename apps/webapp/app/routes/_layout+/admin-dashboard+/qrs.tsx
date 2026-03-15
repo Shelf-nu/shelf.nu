@@ -1,4 +1,4 @@
-import type { PrintBatch, Prisma } from "@prisma/client";
+import type { PrintBatch, Prisma } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

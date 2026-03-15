@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { type ActionFunctionArgs, data } from "react-router";
 import sharp from "sharp";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
@@ -21,7 +20,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     assertIsPost(request);
 
     const user = await getUserByID(userId, {
-      select: { id: true, profilePicture: true } satisfies Prisma.UserSelect,
+      select: { id: true, profilePicture: true },
     });
 
     /** needed for deleting */

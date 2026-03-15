@@ -1,6 +1,6 @@
 import type { ImgHTMLAttributes } from "react";
 import { useEffect, useState } from "react";
-import type { Kit } from "@prisma/client";
+import type { Kit } from "@shelf/database";
 import { useFetcher } from "react-router";
 import type { action } from "~/routes/api+/kit.refresh-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";

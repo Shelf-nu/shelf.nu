@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Asset } from "@prisma/client";
+import type { Asset } from "@shelf/database";
 import type {
   MetaFunction,
   LoaderFunctionArgs,

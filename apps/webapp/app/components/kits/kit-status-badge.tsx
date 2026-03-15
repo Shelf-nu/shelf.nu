@@ -1,4 +1,4 @@
-import { KitStatus } from "@prisma/client";
+import { KitStatus } from "@shelf/database";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import type { ExtendedKitStatus } from "~/utils/booking-assets";
 import { Badge } from "../shared/badge";

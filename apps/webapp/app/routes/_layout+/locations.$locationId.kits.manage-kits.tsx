@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Prisma } from "@prisma/client";
-import { KitStatus } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
+import { KitStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { MapPin } from "lucide-react";
 import type {

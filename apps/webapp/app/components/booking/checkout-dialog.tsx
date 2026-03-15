@@ -1,4 +1,4 @@
-import type { Booking } from "@prisma/client";
+import type { Booking } from "@shelf/database";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { Category } from "@prisma/client";
+import type { Category } from "@shelf/database";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";

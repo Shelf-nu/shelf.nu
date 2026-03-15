@@ -1,4 +1,4 @@
-import type { BarcodeType } from "@prisma/client";
+import type { BarcodeType } from "@shelf/database";
 
 export interface BarcodeFormData {
   id?: string; // ID for existing barcodes

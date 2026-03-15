@@ -6,8 +6,8 @@ import type {
   Custody,
   Prisma,
   Tag,
-} from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+} from "@shelf/database";
+import { AssetStatus, BookingStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,

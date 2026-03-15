@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";

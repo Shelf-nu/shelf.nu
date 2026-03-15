@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { cloneElement, useCallback, useEffect, useState } from "react";
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 import { UserIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";

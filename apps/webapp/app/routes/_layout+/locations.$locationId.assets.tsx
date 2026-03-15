@@ -1,4 +1,4 @@
-import type { Asset, Category, Location, Tag } from "@prisma/client";
+import type { Asset, Category, Location, Tag } from "@shelf/database";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,

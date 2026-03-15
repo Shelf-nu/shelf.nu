@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CustomFieldType, type CustomField } from "@prisma/client";
+import { CustomFieldType, type CustomField } from "@shelf/database";
 import { useAtom } from "jotai";
 import { Link, useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Location } from "@prisma/client";
+import type { Location } from "@shelf/database";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
 

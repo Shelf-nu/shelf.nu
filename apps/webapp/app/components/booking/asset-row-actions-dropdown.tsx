@@ -1,4 +1,4 @@
-import type { Asset } from "@prisma/client";
+import type { Asset } from "@shelf/database";
 
 import { VerticalDotsIcon } from "~/components/icons/library";
 import {

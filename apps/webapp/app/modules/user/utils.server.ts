@@ -1,8 +1,8 @@
-import type { OrganizationRoles } from "@prisma/client";
+import type { OrganizationRoles } from "@shelf/database";
 import {
   InviteStatuses,
   OrganizationRoles as OrgRolesEnum,
-} from "@prisma/client";
+} from "@shelf/database";
 import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";

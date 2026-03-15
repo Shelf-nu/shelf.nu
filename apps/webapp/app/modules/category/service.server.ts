@@ -1,5 +1,14 @@
-import type { Category, Organization, Prisma, User } from "@prisma/client";
+import type { Category, Organization, User } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  count,
+  create,
+  deleteMany,
+  findFirst,
+  findFirstOrThrow,
+  findMany,
+  update,
+} from "~/database/query-helpers.server";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
@@ -19,22 +28,12 @@ export async function createCategory({
   userId: User["id"];
 }) {
   try {
-    return await db.category.create({
-      data: {
-        name: name.trim(),
-        description,
-        color,
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-        organization: {
-          connect: {
-            id: organizationId,
-          },
-        },
-      },
+    return await create(db, "Category", {
+      name: name.trim(),
+      description,
+      color,
+      userId,
+      organizationId,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Category", {
@@ -57,10 +56,8 @@ export async function getCategories(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.CategoryWhereInput = { organizationId };
+    const where: Record<string, unknown> = { organizationId };
 
-    /** If the search string exists, add it to the where object */
     if (search) {
       where.name = {
         contains: search,
@@ -69,21 +66,13 @@ export async function getCategories(params: {
     }
 
     const [categories, totalCategories] = await Promise.all([
-      /** Get the items */
-      db.category.findMany({
+      findMany(db, "Category", {
         skip,
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        include: {
-          _count: {
-            select: { assets: true },
-          },
-        },
       }),
-
-      /** Count them */
-      db.category.count({ where }),
+      count(db, "Category", where),
     ]);
 
     return { categories, totalCategories };
@@ -102,9 +91,7 @@ export async function deleteCategory({
   organizationId,
 }: Pick<Category, "id"> & { organizationId: Organization["id"] }) {
   try {
-    return await db.category.deleteMany({
-      where: { id, organizationId },
-    });
+    return await deleteMany(db, "Category", { id, organizationId });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -126,17 +113,15 @@ export async function createCategoriesIfNotExists({
   organizationId: Organization["id"];
 }): Promise<Record<string, Category["id"]>> {
   try {
-    // first we get all the categories from the assets and make then into an object where the category is the key and the value is an empty string
     const categories = new Map(
       data
         .filter((asset) => asset.category)
         .map((asset) => [asset.category, ""])
     );
 
-    // now we loop through the categories and check if they exist
     for (const [category, _] of categories) {
       const trimmedCategory = (category as string).trim();
-      const existingCategory = await db.category.findFirst({
+      const existingCategory = await findFirst(db, "Category", {
         where: {
           name: { equals: trimmedCategory, mode: "insensitive" },
           organizationId,
@@ -144,26 +129,14 @@ export async function createCategoriesIfNotExists({
       });
 
       if (!existingCategory) {
-        // if the category doesn't exist, we create a new one
-        const newCategory = await db.category.create({
-          data: {
-            name: trimmedCategory,
-            color: getRandomColor(),
-            user: {
-              connect: {
-                id: userId,
-              },
-            },
-            organization: {
-              connect: {
-                id: organizationId,
-              },
-            },
-          },
+        const newCategory = await create(db, "Category", {
+          name: trimmedCategory,
+          color: getRandomColor(),
+          userId,
+          organizationId,
         });
         categories.set(category, newCategory.id);
       } else {
-        // if the category exists, we just update the id
         categories.set(category, existingCategory.id);
       }
     }
@@ -176,7 +149,6 @@ export async function createCategoriesIfNotExists({
         "Something went wrong while creating categories. Seems like some of the category data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
-      /** No need to capture those. They are mostly related to malformed CSV data */
       shouldBeCaptured: false,
     });
   }
@@ -186,7 +158,7 @@ export async function getCategory({
   organizationId,
 }: Pick<Category, "id" | "organizationId">) {
   try {
-    return await db.category.findFirstOrThrow({
+    return await findFirstOrThrow(db, "Category", {
       where: { id, organizationId },
     });
   } catch (cause) {
@@ -209,11 +181,8 @@ export async function updateCategory({
   color,
 }: Pick<Category, "id" | "organizationId" | "description" | "name" | "color">) {
   try {
-    return await db.category.update({
-      where: {
-        id,
-        organizationId,
-      },
+    return await update(db, "Category", {
+      where: { id, organizationId },
       data: {
         name: name?.trim(),
         description,
@@ -235,11 +204,13 @@ export async function bulkDeleteCategories({
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.category.deleteMany({
-      where: categoryIds.includes(ALL_SELECTED_KEY)
+    return await deleteMany(
+      db,
+      "Category",
+      categoryIds.includes(ALL_SELECTED_KEY)
         ? { organizationId }
-        : { id: { in: categoryIds }, organizationId },
-    });
+        : { id: { in: categoryIds }, organizationId }
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,

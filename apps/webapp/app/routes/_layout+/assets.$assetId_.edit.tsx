@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { TagUseFor } from "@prisma/client";
+import { TagUseFor } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,

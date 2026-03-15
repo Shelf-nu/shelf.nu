@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { addAssetsToExistingBookingSchema } from "~/components/assets/assets-index/add-assets-to-existing-booking-dialog";
 import {
@@ -85,7 +84,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
-      } satisfies Prisma.UserSelect,
+      },
     });
     const booking = await updateBookingAssets({
       id,

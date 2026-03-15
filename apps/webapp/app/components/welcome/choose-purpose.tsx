@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Currency } from "@prisma/client";
+import type { Currency } from "@shelf/database";
 import { CheckIcon } from "lucide-react";
 import { useNavigation } from "react-router";
 import { Form } from "~/components/custom-form";

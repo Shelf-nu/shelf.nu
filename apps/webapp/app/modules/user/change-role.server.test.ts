@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 import { describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";

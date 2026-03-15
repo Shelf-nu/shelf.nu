@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,

@@ -1,7 +1,5 @@
-import type { Prisma } from "@prisma/client";
+import type { TeamMember, User } from "@shelf/database";
 
-export type TeamMemberWithUser = Prisma.TeamMemberGetPayload<{
-  include: {
-    user: true;
-  };
-}>;
+export type TeamMemberWithUser = TeamMember & {
+  user: User | null;
+};

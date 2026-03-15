@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
 import { useZorm } from "react-zorm";

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import type { BarcodeType } from "@prisma/client";
+import type { BarcodeType } from "@shelf/database";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Booking, TeamMember, User, Tag } from "@shelf/database";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 /** Includes needed for booking to have all data required for emails */
@@ -35,21 +35,16 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
       },
     },
   },
-} satisfies Prisma.BookingInclude;
-
-/**
- * Type for a booking with assets for reservation email, inferred from Prisma include
- */
-type BookingForReservationEmail = Prisma.BookingGetPayload<{
-  include: typeof BOOKING_INCLUDE_FOR_RESERVATION_EMAIL;
-}>;
+;
 
 /**
  * Type for assets as returned in reservation emails.
- * Inferred from the Prisma include to ensure type safety.
  */
-export type ReservationEmailAsset =
-  BookingForReservationEmail["assets"][number];
+export type ReservationEmailAsset = {
+  id: string;
+  title: string;
+  category: { name: string } | null;
+};
 
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;

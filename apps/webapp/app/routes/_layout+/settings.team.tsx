@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { data, Outlet, useLoaderData, useParams } from "react-router";
 import { ErrorContent } from "~/components/errors";

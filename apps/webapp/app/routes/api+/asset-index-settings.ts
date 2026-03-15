@@ -1,4 +1,4 @@
-import { AssetIndexMode } from "@prisma/client";
+import { AssetIndexMode } from "@shelf/database";
 import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";

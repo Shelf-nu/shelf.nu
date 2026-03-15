@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { AssetStatus } from "@prisma/client";
-import { CustomFieldType } from "@prisma/client";
+import type { AssetStatus } from "@shelf/database";
+import { CustomFieldType } from "@shelf/database";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,

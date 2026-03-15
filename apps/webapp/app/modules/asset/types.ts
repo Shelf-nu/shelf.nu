@@ -16,7 +16,7 @@ import type {
   BarcodeType,
   Barcode,
   TeamMember,
-} from "@prisma/client";
+} from "@shelf/database";
 import type { Return } from "@prisma/client/runtime/library";
 import type { assetIndexFields } from "./fields";
 

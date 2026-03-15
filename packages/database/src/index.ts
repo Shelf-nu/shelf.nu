@@ -1,7 +1,129 @@
-// Re-export the database client factory and types
-export { createDatabaseClient } from "./client";
-export type { ExtendedPrismaClient } from "./client";
+// =============================================================================
+// @shelf/database — public API
+// =============================================================================
 
-// Re-export all Prisma types and enums so consumers don't need @prisma/client directly
-export { Prisma, PrismaClient } from "@prisma/client";
-export type * from "@prisma/client";
+// Database client factory
+export { createSupabaseDataClient } from "./client";
+export type { SupabaseDataClient } from "./client";
+
+// Supabase Database type interface + convenience helpers
+export type { Database, Tables, Insertable, Updatable } from "./types";
+
+// Enum const objects (runtime values) and their type unions
+export {
+  AssetStatus,
+  AssetIndexMode,
+  TagUseFor,
+  NoteType,
+  ErrorCorrection,
+  BarcodeType,
+  Roles,
+  OrganizationType,
+  QrIdDisplayPreference,
+  OrganizationRoles,
+  CustomFieldType,
+  Currency,
+  InviteStatuses,
+  BookingStatus,
+  KitStatus,
+  UpdateStatus,
+  AuditStatus,
+  AuditAssetStatus,
+  AuditAssignmentRole,
+  PersonStatus,
+  SoftwareStatus,
+  LicenseStatus,
+  LicenseSource,
+  SyncSourceSystem,
+  SyncStatus,
+  ActivityAction,
+} from "./enums";
+
+// Re-export enum types (same names, but as types)
+export type {
+  AssetStatus,
+  AssetIndexMode,
+  TagUseFor,
+  NoteType,
+  ErrorCorrection,
+  BarcodeType,
+  Roles,
+  OrganizationType,
+  QrIdDisplayPreference,
+  OrganizationRoles,
+  CustomFieldType,
+  Currency,
+  InviteStatuses,
+  BookingStatus,
+  KitStatus,
+  UpdateStatus,
+  AuditStatus,
+  AuditAssetStatus,
+  AuditAssignmentRole,
+  PersonStatus,
+  SoftwareStatus,
+  LicenseStatus,
+  LicenseSource,
+  SyncSourceSystem,
+  SyncStatus,
+  ActivityAction,
+} from "./enums";
+
+// Model type aliases
+export type {
+  Asset,
+  AssetCustomFieldValue,
+  AssetFilterPreset,
+  AssetIndexSettings,
+  AssetReminder,
+  AuditAsset,
+  AuditAssignment,
+  AuditImage,
+  AuditNote,
+  AuditScan,
+  AuditSession,
+  Barcode,
+  Booking,
+  BookingNote,
+  BookingSettings,
+  Category,
+  CustomField,
+  Custody,
+  Image,
+  Invite,
+  Kit,
+  KitCustody,
+  Location,
+  LocationNote,
+  Note,
+  Organization,
+  PartialBookingCheckin,
+  PrintBatch,
+  Qr,
+  ReportFound,
+  Role,
+  RoleChangeLog,
+  Scan,
+  Tag,
+  TeamMember,
+  Update,
+  User,
+  UserContact,
+  UserOrganization,
+  UserUpdateRead,
+  WorkingHours,
+  WorkingHoursOverride,
+  AssetToTag,
+  AssetToBooking,
+  CategoryToCustomField,
+  TagToBooking,
+  AssetReminderToTeamMember,
+  Person,
+  Vendor,
+  SoftwareApplication,
+  LicenseAssignment,
+  Lease,
+  AssetSyncSource,
+  ActivityLog,
+  AssetStatusConfig,
+} from "./models";

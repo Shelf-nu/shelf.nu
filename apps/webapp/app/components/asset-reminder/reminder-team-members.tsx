@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@shelf/database";
 import { Link } from "react-router";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";

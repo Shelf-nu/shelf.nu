@@ -1,6 +1,4 @@
 import { createId } from "@paralleldrive/cuid2";
-import { Prisma } from "@prisma/client";
-import type { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { ValidationError } from "./http";
 
 /**
@@ -252,45 +250,69 @@ function isAbortError(cause: unknown) {
 }
 
 /**
- * This helper function is used to check if an error is an instance of `ShelfError` or an object that looks like an `ShelfError`.
+ * Supabase/PostgREST error shape returned in `{ error }` responses.
  */
-export function isNotFoundError(
-  cause: unknown
-): cause is PrismaClientKnownRequestError {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "code" in cause &&
-    cause.code === "P2025"
-  );
+interface SupabaseError {
+  code?: string;
+  message?: string;
+  details?: string;
 }
 
 /**
- * Prisma error codes that indicate transient/connection issues
- * rather than actual data problems.
+ * Checks if a Supabase error indicates "no rows found" (PostgREST 406 / PGRST116).
+ * Replaces the former Prisma P2025 check.
  */
-export const PRISMA_TRANSIENT_ERROR_CODES = new Set([
-  "P2024", // Timed out fetching a new connection from the connection pool
-  "P1001", // Can't reach database server
-  "P1002", // The database server was reached but timed out
-  "P1008", // Operations timed out
-  "P1017", // Server has closed the connection
+export function isNotFoundError(cause: unknown): cause is SupabaseError {
+  if (typeof cause !== "object" || cause === null) return false;
+
+  // PostgREST error code for "no rows returned"
+  if ("code" in cause && cause.code === "PGRST116") return true;
+
+  // Supabase JS sometimes surfaces the message instead of the code
+  if ("message" in cause && typeof (cause as any).message === "string") {
+    const msg = (cause as any).message.toLowerCase();
+    if (
+      msg.includes("no rows found") ||
+      msg.includes("json object requested, multiple (or no) rows returned")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Postgres/Supabase error codes that indicate transient/connection issues
+ * rather than actual data problems.
+ * Replaces former Prisma P2024/P1001/P1002/P1008/P1017 checks.
+ */
+export const TRANSIENT_ERROR_CODES = new Set([
+  "08000", // connection_exception
+  "08003", // connection_does_not_exist
+  "08006", // connection_failure
+  "53300", // too_many_connections
+  "57014", // query_cancelled (timeout)
+  "57P01", // admin_shutdown
+  "40001", // serialization_failure (retry-safe)
 ]);
 
 /**
- * Checks if an error is a Prisma transient/connection error
+ * Checks if an error is a transient database/connection error
  * that should NOT be reported as a domain-specific "not found" error.
  */
-export function isPrismaTransientError(cause: unknown): boolean {
+export function isTransientError(cause: unknown): boolean {
   if (typeof cause !== "object" || cause === null) return false;
   if ("code" in cause && typeof cause.code === "string") {
-    return PRISMA_TRANSIENT_ERROR_CODES.has(cause.code);
+    return TRANSIENT_ERROR_CODES.has(cause.code);
   }
   if (cause instanceof Error) {
     const msg = cause.message.toLowerCase();
     return (
-      msg.includes("timed out fetching a new connection") ||
-      msg.includes("can't reach database server")
+      msg.includes("connection") ||
+      msg.includes("too many connections") ||
+      msg.includes("timed out") ||
+      msg.includes("fetch failed")
     );
   }
   return false;
@@ -298,10 +320,10 @@ export function isPrismaTransientError(cause: unknown): boolean {
 
 /**
  * Walks the cause chain of an error to detect if a transient
- * Prisma error is buried inside ShelfError wrappers.
+ * database error is buried inside ShelfError wrappers.
  */
 function hasTransientCause(error: unknown): boolean {
-  if (isPrismaTransientError(error)) return true;
+  if (isTransientError(error)) return true;
   if (typeof error === "object" && error !== null && "cause" in error) {
     return hasTransientCause((error as { cause: unknown }).cause);
   }
@@ -336,7 +358,7 @@ export function makeShelfError(
 
   // Detect transient DB errors buried in ShelfError wrappers.
   // This prevents misleading messages like "User not found" when the
-  // real issue is a connection pool timeout (P2024).
+  // real issue is a connection pool timeout.
   if (hasTransientCause(cause)) {
     return new ShelfError({
       cause,
@@ -362,7 +384,7 @@ export function makeShelfError(
     });
   }
 
-  // 🤷‍♂️ We don't know what this error is, so we create a new default one.
+  // We don't know what this error is, so we create a new default one.
   return new ShelfError({
     cause,
     message: "Sorry, something went wrong.",
@@ -423,9 +445,10 @@ export function badRequest(
 }
 
 /**
- * Error for when a you could suspect a unique constraint violation.
+ * Error for when you could suspect a unique constraint violation.
+ * Detects Postgres error code 23505 (unique_violation).
  *
- * **By default, the error will not be captured if it is a constrain violation**
+ * **By default, the error will not be captured if it is a constraint violation**
  *
  * If you want to capture all errors, you can set the `shouldBeCaptured` option to `true`.
  */
@@ -438,37 +461,33 @@ export function maybeUniqueConstraintViolation(
   let shouldBeCaptured = false;
   const validationErrors = {} as ValidationError<any>;
 
-  if (
-    cause instanceof Prisma.PrismaClientKnownRequestError &&
-    cause.code === "P2002"
-  ) {
+  if (isUniqueConstraintViolation(cause)) {
     shouldBeCaptured = false;
 
-    // Extract the target field(s) from the Prisma error
-    const target = cause.meta?.target as string[] | undefined;
+    // Extract the constraint/detail from the Postgres error
+    const detail =
+      typeof cause === "object" && cause !== null && "details" in cause
+        ? String((cause as any).details)
+        : "";
 
-    // Filter out organizational fields and clean up function-wrapped fields
-    const relevantFields = target
-      ?.filter((field) => {
-        // Remove organizational/scoping fields
-        if (
-          field === "organizationId" ||
-          field === "userId" ||
-          field === "teamId"
-        ) {
-          return false;
-        }
-        return true;
-      })
-      .map((field) => {
-        // Clean up function-wrapped fields like 'lower(name)' -> 'name'
-        const match = field.match(/^[a-zA-Z_]+\(([^)]+)\)$/);
-        return match ? match[1] : field;
-      });
+    // Try to extract the field name from the detail string
+    // Postgres detail looks like: Key (name, "organizationId")=(foo, bar) already exists.
+    const fieldMatch = detail.match(/Key \(([^)]+)\)/);
+    const fields = fieldMatch
+      ? fieldMatch[1].split(",").map((f) => f.trim().replace(/"/g, ""))
+      : [];
 
-    const failedField = relevantFields?.[0] || "name"; // Get the first relevant field or default to "name"
+    // Filter out organizational fields
+    const relevantFields = fields.filter(
+      (field) =>
+        field !== "organizationId" &&
+        field !== "userId" &&
+        field !== "teamId" &&
+        field !== "organization_id"
+    );
 
-    // Generate dynamic message based on the actual failed field
+    const failedField = relevantFields[0] || "name";
+
     message = `${modelName} ${failedField} is already taken. Please choose a different ${failedField}.`;
     validationErrors[failedField] = { message };
   }
@@ -485,4 +504,16 @@ export function maybeUniqueConstraintViolation(
     },
     label: "DB constrain violation",
   });
+}
+
+/**
+ * Checks if a Supabase/Postgres error is a unique constraint violation (23505).
+ */
+function isUniqueConstraintViolation(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null) return false;
+  if ("code" in cause && cause.code === "23505") return true;
+  if ("message" in cause && typeof (cause as any).message === "string") {
+    return (cause as any).message.toLowerCase().includes("unique constraint");
+  }
+  return false;
 }

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
-import type { InviteStatuses, User } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type { InviteStatuses, User } from "@shelf/database";
+import { OrganizationRoles } from "@shelf/database";
 import { useFetcher } from "react-router";
 import {
   PenIcon,

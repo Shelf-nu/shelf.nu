@@ -1,5 +1,5 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { CustomField, CustomFieldType } from "@prisma/client";
+import type { CustomField, CustomFieldType } from "@shelf/database";
 import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";

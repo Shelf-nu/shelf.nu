@@ -1,4 +1,4 @@
-import type { User } from "@prisma/client";
+import type { User } from "@shelf/database";
 
 import { db } from "~/database/db.server";
 

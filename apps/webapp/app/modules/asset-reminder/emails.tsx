@@ -1,4 +1,4 @@
-import type { Asset, AssetReminder, User } from "@prisma/client";
+import type { Asset, AssetReminder, User } from "@shelf/database";
 import {
   Button,
   Column,

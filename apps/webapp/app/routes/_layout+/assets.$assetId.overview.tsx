@@ -1,5 +1,5 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@shelf/database";
 import type {
   MetaFunction,
   ActionFunctionArgs,

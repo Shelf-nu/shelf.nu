@@ -1,4 +1,4 @@
-import type { Prisma, WorkingHoursOverride } from "@prisma/client";
+import type { Prisma, WorkingHoursOverride } from "@shelf/database";
 
 // TypeScript types for JSON schedule
 export interface DaySchedule {

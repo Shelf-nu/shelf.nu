@@ -1,4 +1,4 @@
-import type { WorkingHoursOverride } from "@prisma/client";
+import type { WorkingHoursOverride } from "@shelf/database";
 import { TrashIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";

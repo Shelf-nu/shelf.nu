@@ -1,61 +1,108 @@
-import type {
-  CustomTierLimit,
-  Organization,
-  TierId,
-  TierLimit,
-  User,
-} from "@prisma/client";
+import type { Organization, User } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  findFirstOrThrow,
+  throwIfNotFound,
+  update,
+} from "~/database/query-helpers.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
 const label: ErrorLabel = "Tier";
 
+/** TierId enum values — mirrors the Prisma TierId enum */
+type TierId = "free" | "tier_1" | "tier_2" | "custom";
+
+/** Shape of the TierLimit table row */
+interface TierLimit {
+  id: TierId;
+  canImportAssets: boolean;
+  canExportAssets: boolean;
+  canImportNRM: boolean;
+  canHideShelfBranding: boolean;
+  maxCustomFields: number;
+  maxOrganizations: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Shape of the CustomTierLimit table row */
+interface CustomTierLimit {
+  id: string;
+  userId: string | null;
+  canImportAssets: boolean;
+  canExportAssets: boolean;
+  canImportNRM: boolean;
+  canHideShelfBranding: boolean;
+  maxCustomFields: number;
+  maxOrganizations: number;
+  isEnterprise: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type { TierId, TierLimit, CustomTierLimit };
+
 export async function getUserTierLimit(
   id: User["id"]
 ): Promise<TierLimit | CustomTierLimit> {
   try {
-    const { tier } = await db.user
-      .findUniqueOrThrow({
-        where: { id },
-        select: {
-          tier: {
-            include: { tierLimit: true },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "User tier not found. This seems like a bug. Please contact support.",
-          additionalData: { userId: id },
-          label,
-        });
+    const user = await findFirstOrThrow(db, "User", {
+      where: { id },
+      select: "tierId",
+    }).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message:
+          "User tier not found. This seems like a bug. Please contact support.",
+        additionalData: { userId: id },
+        label,
       });
+    });
+
+    const tierId = (user as unknown as { tierId: TierId }).tierId;
 
     /**
      * If the tier is custom, we fetch the custom tier limit and return it
      */
-    if (tier.id === "custom") {
-      const customLimit = (await db.customTierLimit
-        .findUniqueOrThrow({
-          where: { userId: id },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Failed to get custom tier limit. This seems like a bug. Please contact support.",
-            additionalData: { userId: id },
-            label,
-          });
-        })) as CustomTierLimit;
+    if (tierId === "custom") {
+      const result = await db
+        .from("CustomTierLimit" as any)
+        .select("*")
+        .eq("userId", id)
+        .single();
 
-      return customLimit;
+      if (result.error || !result.data) {
+        throw new ShelfError({
+          cause: result.error,
+          message:
+            "Failed to get custom tier limit. This seems like a bug. Please contact support.",
+          additionalData: { userId: id },
+          label,
+        });
+      }
+
+      return result.data as unknown as CustomTierLimit;
     }
 
-    return tier.tierLimit as TierLimit;
+    // Fetch the tier limit for the user's tier
+    const tierLimitResult = await db
+      .from("TierLimit" as any)
+      .select("*")
+      .eq("id", tierId)
+      .single();
+
+    if (tierLimitResult.error || !tierLimitResult.data) {
+      throw new ShelfError({
+        cause: tierLimitResult.error,
+        message:
+          "Tier limit not found. This seems like a bug. Please contact support.",
+        additionalData: { userId: id, tierId },
+        label,
+      });
+    }
+
+    return tierLimitResult.data as unknown as TierLimit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -68,28 +115,28 @@ export async function getUserTierLimit(
 
 export async function updateUserTierId(id: User["id"], tierId: TierId) {
   try {
-    return await db.user.update({
+    // Update the user's tierId
+    const updatedUser = await update(db, "User", {
       where: { id },
-      data: {
-        tierId,
-        /**
-         * If the user tier is being change to custom, we upsert CustomTierLimit
-         * The upsert will make sure that if there is no customTierLimit for that user its created
-         */
-        ...(tierId === "custom" && {
-          customTierLimit: {
-            upsert: {
-              create: {},
-              update: {},
-            },
-          },
-        }),
-      },
-      select: {
-        id: true,
-        tierId: true,
-      },
+      data: { tierId } as Record<string, unknown>,
     });
+
+    /**
+     * If the user tier is being changed to custom, we upsert CustomTierLimit.
+     * The upsert will make sure that if there is no customTierLimit for
+     * that user it's created.
+     */
+    if (tierId === "custom") {
+      const upsertResult = await db
+        .from("CustomTierLimit" as any)
+        .upsert({ userId: id } as any, { onConflict: "userId" })
+        .select("*")
+        .single();
+
+      throwIfNotFound(upsertResult);
+    }
+
+    return { id: updatedUser.id, tierId };
   } catch (cause) {
     throw new ShelfError({
       cause,

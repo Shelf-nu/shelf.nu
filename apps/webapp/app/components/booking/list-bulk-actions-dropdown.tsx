@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus } from "@shelf/database";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck } from "lucide-react";
 import { useLoaderData } from "react-router";

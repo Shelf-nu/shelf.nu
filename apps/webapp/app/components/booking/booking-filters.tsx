@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@shelf/database";
 import { ChevronRight } from "lucide-react";
 import { useMatches } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";

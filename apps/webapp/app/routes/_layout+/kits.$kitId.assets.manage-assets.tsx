@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { AssetStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@shelf/database";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircleIcon } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";

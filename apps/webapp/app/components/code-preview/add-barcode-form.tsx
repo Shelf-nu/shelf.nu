@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useState, useEffect, useMemo } from "react";
-import { BarcodeType } from "@prisma/client";
+import { BarcodeType } from "@shelf/database";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";

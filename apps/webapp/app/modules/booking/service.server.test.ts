@@ -3,7 +3,7 @@ import {
   AssetStatus,
   KitStatus,
   OrganizationRoles,
-} from "@prisma/client";
+} from "@shelf/database";
 
 import { db } from "~/database/db.server";
 import * as noteService from "~/modules/note/service.server";

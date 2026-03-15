@@ -1,5 +1,4 @@
-import type { AuditStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
+import type { AuditStatus, AuditSession, User } from "@shelf/database";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
@@ -174,9 +173,18 @@ export default function AuditsIndexPage() {
   );
 }
 
-type AuditListItem = Prisma.AuditSessionGetPayload<{
-  include: typeof AUDIT_LIST_INCLUDE;
-}>;
+type AuditListItem = AuditSession & {
+  createdBy: Pick<
+    User,
+    "firstName" | "lastName" | "email" | "profilePicture"
+  > | null;
+  assignments: {
+    user: Pick<
+      User,
+      "firstName" | "lastName" | "email" | "profilePicture"
+    > | null;
+  }[];
+};
 
 const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const { createdBy } = item;

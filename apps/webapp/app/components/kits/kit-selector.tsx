@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { Kit } from "@prisma/client";
+import type { Kit } from "@shelf/database";
 
 import {
   Popover,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { User } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type { User } from "@shelf/database";
+import { OrganizationRoles } from "@shelf/database";
 import {
   Popover,
   PopoverContent,

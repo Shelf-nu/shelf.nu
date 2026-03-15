@@ -1,20 +1,18 @@
 import { db } from "~/database/db.server";
+import { upsert } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
-import { USER_CONTACT_SELECT } from "./constants";
 
 const label = "User Contact";
 
 export async function getUserContactById(userId: string) {
   try {
     // Use upsert to ensure that we always have a user contact entry
-    const userContact = await db.userContact.upsert({
-      where: { userId },
-      update: {},
-      create: {
-        userId,
-      },
-      select: USER_CONTACT_SELECT,
-    });
+    const userContact = await upsert(
+      db,
+      "UserContact",
+      { userId },
+      { onConflict: "userId" }
+    );
     return userContact;
   } catch (cause) {
     throw new ShelfError({
@@ -41,14 +39,12 @@ export async function updateUserContact(payload: UpdateUserContactPayload) {
     const { userId, ...contactData } = payload;
 
     // Use upsert to create or update contact information
-    const userContact = await db.userContact.upsert({
-      where: { userId },
-      update: contactData,
-      create: {
-        userId,
-        ...contactData,
-      },
-    });
+    const userContact = await upsert(
+      db,
+      "UserContact",
+      { userId, ...contactData },
+      { onConflict: "userId" }
+    );
 
     return userContact;
   } catch (cause) {

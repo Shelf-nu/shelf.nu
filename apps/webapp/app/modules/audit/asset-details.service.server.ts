@@ -1,4 +1,4 @@
-import type { AuditNote, AuditAsset, User } from "@prisma/client";
+import type { AuditNote, AuditAsset, User } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 

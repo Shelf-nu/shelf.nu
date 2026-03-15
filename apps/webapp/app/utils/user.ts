@@ -1,4 +1,4 @@
-import type { User } from "@prisma/client";
+import type { User } from "@shelf/database";
 
 /** Generates a random username based on the email and 3 random numbers
  * @param email string

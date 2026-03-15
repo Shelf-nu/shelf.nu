@@ -1,5 +1,11 @@
-import type { Booking, BookingNote, User } from "@prisma/client";
+import type { Booking, BookingNote, User } from "@shelf/database";
 import { db } from "~/database/db.server";
+import {
+  create,
+  deleteMany,
+  findFirst,
+  findMany,
+} from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
@@ -52,25 +58,11 @@ export function createBookingNote({
   bookingId: Booking["id"];
 }) {
   try {
-    const data = {
+    return create(db, "BookingNote", {
       content,
       type: type || "COMMENT",
-      booking: {
-        connect: {
-          id: bookingId,
-        },
-      },
-      ...(userId && {
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      }),
-    };
-
-    return db.bookingNote.create({
-      data,
+      bookingId,
+      ...(userId ? { userId } : {}),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -131,14 +123,9 @@ export async function getBookingNotes({
 }) {
   try {
     // First verify the booking belongs to the organization
-    const booking = await db.booking.findFirst({
-      where: {
-        id: bookingId,
-        organizationId,
-      },
-      select: {
-        id: true,
-      },
+    const booking = await findFirst(db, "Booking", {
+      where: { id: bookingId, organizationId },
+      select: "id",
     });
 
     if (!booking) {
@@ -151,22 +138,10 @@ export async function getBookingNotes({
       });
     }
 
-    return await db.bookingNote.findMany({
-      where: {
-        bookingId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
+    return await findMany(db, "BookingNote", {
+      where: { bookingId },
+      orderBy: { createdAt: "desc" },
+      select: "*, user:User(id, firstName, lastName)",
     });
   } catch (cause) {
     if (cause instanceof ShelfError) {
@@ -198,9 +173,7 @@ export async function deleteBookingNote({
   userId,
 }: Pick<BookingNote, "id"> & { userId: User["id"] }) {
   try {
-    const result = await db.bookingNote.deleteMany({
-      where: { id, userId },
-    });
+    const result = await deleteMany(db, "BookingNote", { id, userId });
     return result;
   } catch (cause) {
     throw new ShelfError({

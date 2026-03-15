@@ -1,5 +1,5 @@
-import type { Organization, Prisma, TeamMember } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import type { Organization, Prisma, TeamMember } from "@shelf/database";
+import { BookingStatus } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";

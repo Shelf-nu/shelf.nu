@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BookingStatus, Tag } from "@prisma/client";
+import type { BookingStatus, Tag } from "@shelf/database";
 import { useAtom } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";

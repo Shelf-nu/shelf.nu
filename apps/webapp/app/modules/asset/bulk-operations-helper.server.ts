@@ -1,5 +1,5 @@
-import type { Asset, AssetIndexSettings } from "@prisma/client";
-import { Prisma } from "@prisma/client";
+import type { Asset, AssetIndexSettings } from "@shelf/database";
+import { Prisma } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
