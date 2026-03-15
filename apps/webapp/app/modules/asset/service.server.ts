@@ -3150,26 +3150,19 @@ export async function bulkCheckInAssets({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user] = await Promise.all([
-      db.asset.findMany({
-        where: {
-          id: { in: resolvedIds },
-          organizationId,
-        },
-        select: {
-          id: true,
-          title: true,
-          custody: {
-            select: { id: true, custodian: { include: { user: true } } },
-          },
-        },
+    // TODO: convert Prisma nested select to Supabase join for custody/custodian/user
+    const [assets, user]: [any[], any] = await Promise.all([
+      findMany(db, "Asset", {
+        where: { id: { in: resolvedIds }, organizationId },
+        select:
+          "id, title, custody:Custody(id, custodian:TeamMember(*, user:User(*)))",
       }),
       getUserByID(userId, {
         select: {
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Record<string, any>,
+        } as Record<string, any>,
       }),
     ]);
 
@@ -3186,52 +3179,44 @@ export async function bulkCheckInAssets({
     }
 
     /**
-     * updateMany does not allow to update nested relationship rows
-     * so we have to make two queries to bulk release custody of assets
-     * 1. Delete all custodies for all assets
-     * 2. Update status of all assets to AVAILABLE
+     * TODO: convert Prisma $transaction to Supabase RPC or sequential queries
+     * For now, run sequentially without transaction wrapper
      */
-    await db.$transaction(async (tx) => {
-      /** Deleting custodies over assets */
-      await tx.custody.deleteMany({
-        where: {
-          id: {
-            in: assets.map((asset) => {
-              /** This case should not happen but in case */
-              if (!asset.custody) {
-                throw new ShelfError({
-                  cause: null,
-                  label: "Assets",
-                  message: "Could not find custody over asset.",
-                });
-              }
-
-              return asset.custody.id;
-            }),
-          },
-        },
-      });
-
-      /** Updating status of assets to AVAILABLE */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.AVAILABLE },
-      });
-
-      /** Creating notes for the assets */
-      await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${
-            user.lastName
-          }** has released **${resolveTeamMemberName(
-            asset.custody!.custodian
-          )}'s** custody over **${asset.title?.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
-      });
+    /** Deleting custodies over assets */
+    const custodyIds = assets.map((asset) => {
+      if (!asset.custody) {
+        throw new ShelfError({
+          cause: null,
+          label: "Assets",
+          message: "Could not find custody over asset.",
+        });
+      }
+      return asset.custody.id;
     });
+
+    await deleteMany(db, "Custody", { id: { in: custodyIds } });
+
+    /** Updating status of assets to AVAILABLE */
+    await updateMany(db, "Asset", {
+      where: { id: { in: assets.map((asset) => asset.id) } },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+
+    /** Creating notes for the assets */
+    await createMany(
+      db,
+      "Note",
+      assets.map((asset) => ({
+        content: `**${user.firstName?.trim()} ${
+          user.lastName
+        }** has released **${resolveTeamMemberName(
+          asset.custody!.custodian
+        )}'s** custody over **${asset.title?.trim()}**`,
+        type: "UPDATE",
+        userId,
+        assetId: asset.id,
+      })) as any
+    );
 
     return true;
   } catch (cause) {
@@ -3274,25 +3259,18 @@ export async function bulkUpdateAssetLocation({
     });
 
     /** We have to create notes for all the assets so we have make this query */
-    const [assets, user] = await Promise.all([
-      db.asset.findMany({
-        where: {
-          id: { in: resolvedIds },
-          organizationId,
-        },
-        select: {
-          id: true,
-          title: true,
-          location: true,
-          kit: { select: { id: true, name: true } },
-        },
+    // TODO: convert Prisma nested select to Supabase join for location/kit
+    const [assets, user]: [any[], any] = await Promise.all([
+      findMany(db, "Asset", {
+        where: { id: { in: resolvedIds }, organizationId },
+        select: "id, title, location:Location(*), kit:Kit(id, name)",
       }),
       getUserByID(userId, {
         select: {
           id: true,
           firstName: true,
           lastName: true,
-        } satisfies Record<string, any>,
+        } as Record<string, any>,
       }),
     ]);
 

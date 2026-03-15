@@ -1767,26 +1767,32 @@ export async function partialCheckinBooking({
       } as const,
     });
     // First, validate the booking exists and get its current assets
-    const bookingFound = await db.booking
-      .findUniqueOrThrow({
+    let bookingFound: any;
+    try {
+      bookingFound = await findUniqueOrThrow(db, "Booking", {
         where: { id, organizationId },
-        include: { assets: { select: { id: true, kitId: true } } },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          status: 404,
-          label,
-          message:
-            "Booking not found, are you sure it exists in current workspace?",
-        });
       });
+      // Fetch assets for this booking
+      const bookingAssets = await queryRaw<any>(
+        db,
+        sql`SELECT a."id", a."kitId" FROM "Asset" a INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id" WHERE ab."B" = ${id}`
+      );
+      bookingFound.assets = bookingAssets;
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        status: 404,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace?",
+      });
+    }
 
     // Early exit: If we're checking in all remaining CHECKED_OUT assets, do a complete check-in instead
     // First, get the current status of all assets in the booking
-    const currentAssetStatuses = await db.asset.findMany({
-      where: { id: { in: bookingFound.assets.map((a) => a.id) } },
-      select: { id: true, status: true },
+    const currentAssetStatuses = await findMany(db, "Asset", {
+      where: { id: { in: bookingFound.assets.map((a: any) => a.id) } },
+      select: "id, status",
     });
 
     // Find assets that are still CHECKED_OUT (not yet checked in)
