@@ -54,6 +54,8 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
+import { queryRaw, sql, join } from "~/database/sql.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -261,17 +263,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         currentSearchParams: searchParams.toString(),
       });
 
-      const allAssets = await db.asset.findMany({
+      const allAssets = await findMany(db, "Asset", {
         where: assetsWhere,
-        select: { id: true },
+        select: "id",
       });
-      const bookingAssets = await db.asset.findMany({
-        where: {
-          id: { notIn: removedAssetIds },
-          bookings: { some: { id: bookingId } },
-        },
-        select: { id: true },
-      });
+      const bookingAssets = await queryRaw<{ id: string }>(
+        db,
+        sql`SELECT a."id" FROM "Asset" a
+          INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id"
+          WHERE ab."B" = ${bookingId}
+            AND a."id" NOT IN (${
+              removedAssetIds.length > 0
+                ? join(
+                    removedAssetIds.map((id) => sql`${id}`),
+                    ", "
+                  )
+                : sql`NULL`
+            })`
+      );
 
       /**
        * New assets that needs to be added are
@@ -294,26 +303,43 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       } satisfies Record<string, boolean>,
     });
 
-    const booking = await db.booking
-      .findUniqueOrThrow({
-        where: { id: bookingId, organizationId },
-        select: {
-          id: true,
-          status: true,
-          /** We need to get the original assets that were part of the booking before the update so we can compare */
-          assets: {
-            select: { id: true },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          label: "Booking",
-          message:
-            "Booking not found. Are you sure it exists in the current workspace.",
-        });
+    const [bookingRow] = await queryRaw<{
+      id: string;
+      status: string;
+    }>(
+      db,
+      sql`SELECT "id", "status" FROM "Booking"
+        WHERE "id" = ${bookingId} AND "organizationId" = ${organizationId}
+        LIMIT 1`
+    ).catch((cause) => {
+      throw new ShelfError({
+        cause,
+        label: "Booking",
+        message:
+          "Booking not found. Are you sure it exists in the current workspace.",
       });
+    });
+
+    if (!bookingRow) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message:
+          "Booking not found. Are you sure it exists in the current workspace.",
+      });
+    }
+
+    const bookingAssetRows = await queryRaw<{ id: string }>(
+      db,
+      sql`SELECT a."id" FROM "Asset" a
+        INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id"
+        WHERE ab."B" = ${bookingId}`
+    );
+
+    const booking = {
+      ...bookingRow,
+      assets: bookingAssetRows,
+    };
 
     /** Self service can only manage assets for bookings that are DRAFT */
     const cantManageAssetsAsBase =
@@ -349,12 +375,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       await getDetailedPartialCheckinData(bookingId);
 
     // Query to get potentially checked out assets
-    const potentiallyCheckedOutAssets = await db.asset.findMany({
+    const potentiallyCheckedOutAssets = await findMany(db, "Asset", {
       where: {
         id: { in: newAssetIds },
         status: AssetStatus.CHECKED_OUT,
       },
-      select: { id: true, title: true, status: true },
+      select: "id, title, status",
     });
 
     // Filter out assets that are partially checked in within this booking context using centralized helper
@@ -407,12 +433,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** If some assets were removed, we also need to handle those */
     if (removedAssetIds.length > 0) {
       // Get the removed assets with their titles for proper note generation
-      const removedAssets = await db.asset.findMany({
+      const removedAssets = await findMany(db, "Asset", {
         where: {
           id: { in: removedAssetIds },
           organizationId,
         },
-        select: { id: true, title: true },
+        select: "id, title",
       });
 
       await removeAssets({

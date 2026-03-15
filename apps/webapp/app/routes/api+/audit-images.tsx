@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -36,21 +37,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return data(payload({ images: [] }));
     }
 
-    const images = await db.auditImage.findMany({
+    const images = await findMany(db, "AuditImage", {
       where: {
         id: { in: imageIds },
         organizationId, // Ensure user can only see images from their organization
       },
-      select: {
-        id: true,
-        imageUrl: true,
-        thumbnailUrl: true,
-        description: true,
-        createdAt: true,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
+      select: "id, imageUrl, thumbnailUrl, description, createdAt",
+      orderBy: { createdAt: "asc" },
     });
 
     return data(payload({ images }));

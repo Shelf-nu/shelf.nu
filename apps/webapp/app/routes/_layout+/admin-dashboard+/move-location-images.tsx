@@ -7,6 +7,8 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { count as dbCount, update } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -35,8 +37,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     await requireAdmin(userId);
 
-    const locationWithImages = await db.location.count({
-      where: { image: { isNot: null } },
+    const locationWithImages = await dbCount(db, "Location", {
+      imageId: { not: null },
     });
 
     return payload({
@@ -324,15 +326,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     console.log(`Migration started: count=${count}, shouldFix=${shouldFix}`);
 
-    const locationWithImages = await db.location.findMany({
-      where: { image: { isNot: null } },
-      select: {
-        id: true,
-        organizationId: true,
-        image: true,
-      },
-      take: count,
-    });
+    const locationWithImages = await queryRaw<{
+      id: string;
+      organizationId: string;
+      image: { blob: string; contentType: string } | null;
+    }>(
+      db,
+      sql`
+        SELECT l."id", l."organizationId",
+               CASE WHEN i."id" IS NOT NULL
+                 THEN jsonb_build_object('blob', i."blob", 'contentType', i."contentType")
+                 ELSE NULL
+               END as "image"
+        FROM "Location" l
+        LEFT JOIN "Image" i ON i."id" = l."imageId"
+        WHERE l."imageId" IS NOT NULL
+        LIMIT ${count}
+      `
+    );
 
     if (locationWithImages.length === 0) {
       return payload({
@@ -481,7 +492,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           .from(PUBLIC_BUCKET)
           .getPublicUrl(thumbnailData.path);
 
-        await db.location.update({
+        await update(db, "Location", {
           where: { id: location.id },
           data: {
             imageUrl: publicUrl,
@@ -507,9 +518,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (movedLocationIds.length > 0) {
       await Promise.all(
         movedLocationIds.map((id) =>
-          db.location.update({
+          update(db, "Location", {
             where: { id },
-            data: { image: { disconnect: true } },
+            data: { imageId: null },
           })
         )
       );

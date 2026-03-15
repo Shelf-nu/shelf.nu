@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { findUnique, update } from "~/database/query-helpers.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import {
   getOrganizationTierLimit,
@@ -328,10 +329,10 @@ export const createStripeCustomer = async ({
         },
       });
 
-      await db.user.update({
+      await update(db, "User", {
         where: { id: userId },
         data: { customerId },
-        select: { id: true },
+        select: "id",
       });
 
       return customerId;
@@ -866,9 +867,9 @@ export async function getUserActiveSubscription(
   try {
     if (!stripe || !premiumIsEnabled) return null;
 
-    const user = await db.user.findUnique({
+    const user = await findUnique(db, "User", {
       where: { id: userId },
-      select: { customerId: true },
+      select: "customerId",
     });
 
     if (!user?.customerId) return null;
@@ -900,9 +901,9 @@ export async function getUserActiveSubscriptions(
   try {
     if (!stripe || !premiumIsEnabled) return [];
 
-    const user = await db.user.findUnique({
+    const user = await findUnique(db, "User", {
       where: { id: userId },
-      select: { customerId: true },
+      select: "customerId",
     });
 
     if (!user?.customerId) return [];
@@ -944,9 +945,9 @@ export async function getOwnerSubscriptionInfo(
       };
     }
 
-    const user = await db.user.findUnique({
+    const user = await findUnique(db, "User", {
       where: { id: ownerId },
-      select: { customerId: true, tierId: true },
+      select: "customerId, tierId",
     });
 
     if (!user?.customerId) {

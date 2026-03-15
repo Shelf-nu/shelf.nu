@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -66,9 +67,9 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         })
       : { id: { in: assetIds }, organizationId };
 
-    const assets = await db.asset.findMany({
+    const assets = await findMany(db, "asset", {
       where,
-      select: { id: true, title: true, createdAt: true, sequentialId: true },
+      select: "id, title, createdAt, sequentialId",
     });
 
     if (assets.length > 100) {

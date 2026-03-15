@@ -12,6 +12,7 @@ import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -99,12 +100,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
         /** We are going to get the user to make sure it exists and is confirmed
          * this will not allow the user to use the forgot password before they have confirmed their email
          */
-        const user = await db.user.findFirst({
+        const user = await findFirst(db, "User", {
           where: { email },
-          select: {
-            id: true,
-            sso: true,
-          },
+          select: "id, sso",
         });
 
         if (!user) {

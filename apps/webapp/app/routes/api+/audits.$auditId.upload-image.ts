@@ -2,6 +2,8 @@ import { data } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";

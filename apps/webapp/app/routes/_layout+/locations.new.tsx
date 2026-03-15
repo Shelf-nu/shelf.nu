@@ -13,6 +13,7 @@ import {
 } from "~/components/location/form";
 
 import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   createLocation,
@@ -119,14 +120,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     const locationWithImage =
-      (await db.location.findUnique({
+      (await findUnique(db, "Location", {
         where: { id: location.id, organizationId },
-        select: {
-          id: true,
-          name: true,
-          thumbnailUrl: true,
-          imageUrl: true,
-        },
+        select: "id, name, thumbnailUrl, imageUrl",
       })) ?? location;
 
     sendNotification({

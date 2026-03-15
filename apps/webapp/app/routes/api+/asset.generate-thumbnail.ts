@@ -2,6 +2,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
+import { findUnique, update } from "~/database/query-helpers.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
@@ -38,14 +39,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }));
 
     // Use findUnique with organization scoping to prevent cross-tenant access
-    const asset = await db.asset.findUnique({
+    const asset = await findUnique(db, "Asset", {
       where: { id: assetId, organizationId },
-      select: {
-        id: true,
-        mainImage: true,
-        thumbnailImage: true,
-        organizationId: true,
-      },
+      select: "id, mainImage, thumbnailImage, organizationId",
     });
 
     // If asset doesn't exist, return early with error information
@@ -82,16 +78,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           });
 
           // Update with the fresh URL
-          const updatedAsset = await db.asset.update({
+          const updatedAsset = await update(db, "Asset", {
             where: { id: assetId, organizationId },
             data: {
               thumbnailImage: refreshedThumbnailUrl,
               mainImageExpiration: oneDayFromNow(),
             },
-            select: {
-              id: true,
-              thumbnailImage: true,
-            },
+            select: "id, thumbnailImage",
           });
 
           return data(payload({ asset: updatedAsset }));
@@ -207,9 +200,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
 
     // Double-check the asset still exists before updating (in case it was deleted during processing)
-    const existsCheck = await db.asset.findUnique({
+    const existsCheck = await findUnique(db, "Asset", {
       where: { id: assetId, organizationId },
-      select: { id: true },
+      select: "id",
     });
 
     if (!existsCheck) {
@@ -231,16 +224,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     // Update the asset record with both the thumbnail and a fresh expiration
-    const updatedAsset = await db.asset.update({
+    const updatedAsset = await update(db, "Asset", {
       where: { id: assetId, organizationId },
       data: {
         thumbnailImage: thumbnailSignedUrl,
         mainImageExpiration: oneDayFromNow(),
       },
-      select: {
-        id: true,
-        thumbnailImage: true,
-      },
+      select: "id, thumbnailImage",
     });
 
     return data(payload({ asset: updatedAsset }));
@@ -249,12 +239,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     try {
       const assetId = url.searchParams.get("assetId");
       if (assetId && organizationId) {
-        const asset = await db.asset.findUnique({
+        const asset = await findUnique(db, "Asset", {
           where: { id: assetId, organizationId },
-          select: {
-            id: true,
-            thumbnailImage: true,
-          },
+          select: "id, thumbnailImage",
         });
 
         if (asset) {

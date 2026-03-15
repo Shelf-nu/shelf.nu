@@ -16,6 +16,7 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
+import { findMany, count } from "~/database/query-helpers.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -88,14 +89,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       ) as AllowedModelNames[];
       const [locationExcludedSelected, selectedLocation, totalLocations] =
         await Promise.all([
-          db.location.findMany({
+          findMany(db, "Location", {
             where: { organizationId, id: { not: locationSelected } },
             take: getAllEntries.includes("location") ? undefined : 12,
           }),
-          db.location.findMany({
+          findMany(db, "Location", {
             where: { organizationId, id: locationSelected },
           }),
-          db.location.count({ where: { organizationId } }),
+          count(db, "Location", { organizationId }),
         ]);
 
       locationsData = {

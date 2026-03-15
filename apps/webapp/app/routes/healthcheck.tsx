@@ -2,6 +2,7 @@
 import { data } from "react-router";
 
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 import { ShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 
@@ -9,8 +10,8 @@ export async function loader() {
   try {
     // if we can connect to the database and make a simple query
     // and make a HEAD request to ourselves, then we're good.
-    await db.user.findFirst({
-      select: { id: true },
+    await findFirst(db, "User", {
+      select: "id",
     });
     return data(payload({ status: "OK" }));
   } catch (cause) {

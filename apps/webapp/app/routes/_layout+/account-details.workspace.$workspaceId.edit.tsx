@@ -24,6 +24,7 @@ import {
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
+import { count, findUniqueOrThrow } from "~/database/query-helpers.server";
 import {
   getOrganizationAdmins,
   updateOrganization,
@@ -109,9 +110,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId: organization.id,
         organizations,
       }),
-      db.user.findUniqueOrThrow({
+      findUniqueOrThrow(db, "User", {
         where: { id: userId },
-        select: { tierId: true },
+        select: "tierId",
       }),
     ]);
 
@@ -130,12 +131,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     // Count owner's other team workspaces (for warning about tier downgrade)
-    const ownerOtherTeamWorkspacesCount = await db.organization.count({
-      where: {
-        userId: organization.userId,
-        type: OrganizationType.TEAM,
-        id: { not: organization.id },
-      },
+    const ownerOtherTeamWorkspacesCount = await count(db, "Organization", {
+      userId: organization.userId,
+      type: OrganizationType.TEAM,
+      id: { not: organization.id },
     });
 
     const header: HeaderData = {
@@ -224,9 +223,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId: organization.id,
         organizations,
       }),
-      db.user.findUniqueOrThrow({
+      findUniqueOrThrow(db, "User", {
         where: { id: userId },
-        select: { tierId: true },
+        select: "tierId",
       }),
     ]);
 

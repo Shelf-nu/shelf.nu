@@ -1,6 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findFirstOrThrow } from "~/database/query-helpers.server";
 import { exportAssetNotesToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { buildContentDisposition, error, getParams } from "~/utils/http.server";
@@ -33,9 +34,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const asset = await db.asset.findFirstOrThrow({
+    const asset = await findFirstOrThrow(db, "Asset", {
       where: { id: assetId, organizationId },
-      select: { title: true },
+      select: "title",
     });
 
     const csv = await exportAssetNotesToCsv({

@@ -2,6 +2,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
+import { findUnique, update } from "~/database/query-helpers.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
@@ -208,13 +209,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Get asset details with organization scoping to prevent cross-tenant access
     // Use findUnique instead of findUniqueOrThrow to handle deleted assets gracefully
-    const asset = await db.asset.findUnique({
+    const asset = await findUnique(db, "Asset", {
       where: { id: assetId, organizationId },
-      select: {
-        id: true,
-        mainImage: true,
-        thumbnailImage: true,
-      },
+      select: "id, mainImage, thumbnailImage",
     });
 
     // If asset doesn't exist (was deleted), return gracefully without error
@@ -318,28 +315,20 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // Update the asset with new signed URLs and expiration date
     // Wrap in try-catch to handle race condition where asset is deleted between read and update
     try {
-      const updatedAsset = await db.asset.update({
+      const updatedAsset = await update(db, "Asset", {
         where: { id: assetId, organizationId },
         data: {
           mainImage: newMainImageUrl,
           thumbnailImage: thumbnailUrl,
           mainImageExpiration: oneDayFromNow(),
         },
-        select: {
-          id: true,
-          mainImage: true,
-          thumbnailImage: true,
-        },
+        select: "id, mainImage, thumbnailImage",
       });
 
       return data(payload({ asset: updatedAsset }));
     } catch (updateError) {
       // Asset was deleted between the initial read and this update — not a bug
-      if (
-        updateError instanceof Error &&
-        "code" in updateError &&
-        (updateError as any).code === "P2025"
-      ) {
+      if (updateError instanceof Error) {
         return data(payload({ asset: null }));
       }
       throw updateError;

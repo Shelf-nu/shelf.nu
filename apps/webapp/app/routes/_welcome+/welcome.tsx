@@ -7,6 +7,7 @@ import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { ChoosePurpose } from "~/components/welcome/choose-purpose";
 import { db } from "~/database/db.server";
+import { findUnique, update } from "~/database/query-helpers.server";
 import { sendAuditTrialWelcomeEmail } from "~/emails/stripe/audit-trial-welcome";
 import {
   createAuditAddonTrialSubscription,
@@ -42,9 +43,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
         userId,
         orgType: "PERSONAL",
       });
-      const orgData = await db.organization.findUnique({
+      const orgData = await findUnique(db, "Organization", {
         where: { id: personalOrg.id },
-        select: { usedAuditTrial: true },
+        select: "usedAuditTrial",
       });
       usedAuditTrial = orgData?.usedAuditTrial ?? false;
     } catch {
@@ -107,14 +108,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     // Enable audits on the personal org
-    await db.organization.update({
+    await update(db, "Organization", {
       where: { id: personalOrg.id },
       data: {
         auditsEnabled: true,
         usedAuditTrial: true,
         auditsEnabledAt: new Date(),
       },
-      select: { id: true },
+      select: "id",
     });
 
     // Send welcome email

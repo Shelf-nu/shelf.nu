@@ -3,6 +3,7 @@ import { z } from "zod";
 import { BulkActivateCustomFieldSchema } from "~/components/custom-fields/bulk-activate-dialog";
 import { BulkDeactivateCustomFieldSchema } from "~/components/custom-fields/bulk-deactivate-dialog";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { bulkActivateOrDeactivateCustomFields } from "~/modules/custom-field/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -57,7 +58,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkActivateCustomFieldSchema
         );
 
-        const newActivatingFields = await db.customField.findMany({
+        const newActivatingFields = await findMany(db, "customField", {
           where: customFieldIds.includes(ALL_SELECTED_KEY)
             ? { organizationId, deletedAt: null }
             : { id: { in: customFieldIds }, deletedAt: null },
@@ -91,7 +92,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           formData,
           BulkDeactivateCustomFieldSchema
         );
-        const newActivatingFields = await db.customField.findMany({
+        const newActivatingFields = await findMany(db, "customField", {
           where: customFieldIds.includes(ALL_SELECTED_KEY)
             ? { organizationId, deletedAt: null }
             : { id: { in: customFieldIds }, deletedAt: null },

@@ -28,6 +28,7 @@ import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
@@ -171,16 +172,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           })
         : Promise.resolve(null), // ADMIN users reuse teamMembersData
 
-      db.tag.findMany({
-        where: {
-          organizationId,
-          OR: [
-            { useFor: { isEmpty: true } },
-            { useFor: { has: TagUseFor.BOOKING } },
-          ],
-        },
-        orderBy: { name: "asc" },
-      }),
+      queryRaw<{ id: string; name: string; color: string | null }>(
+        db,
+        sql`SELECT "id", "name", "color" FROM "Tag"
+          WHERE "organizationId" = ${organizationId}
+            AND ("useFor" = '{}' OR ${TagUseFor.BOOKING} = ANY("useFor"))
+          ORDER BY "name" ASC`
+      ),
     ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);

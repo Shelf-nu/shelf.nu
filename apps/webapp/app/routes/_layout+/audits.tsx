@@ -8,6 +8,7 @@ import { z } from "zod";
 import { UnlockAuditsPage } from "~/components/audit/unlock-audits-page";
 import { ErrorContent } from "~/components/errors";
 import { db } from "~/database/db.server";
+import { update } from "~/database/query-helpers.server";
 import { sendAuditTrialWelcomeEmail } from "~/emails/stripe/audit-trial-welcome";
 import {
   createAuditAddonCheckoutSession,
@@ -133,14 +134,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
 
       // Set flags immediately on the organization (webhook also fires as backup)
-      await db.organization.update({
+      await update(db, "Organization", {
         where: { id: organizationId },
         data: {
           auditsEnabled: true,
           usedAuditTrial: true,
           auditsEnabledAt: new Date(),
         },
-        select: { id: true },
+        select: "id",
       });
 
       void sendAuditTrialWelcomeEmail({

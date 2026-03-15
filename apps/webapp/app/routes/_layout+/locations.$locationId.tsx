@@ -25,6 +25,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
+import { update } from "~/database/query-helpers.server";
 import {
   deleteLocation,
   getLocation,
@@ -109,7 +110,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       mapData = await geolocate(location.address);
       if (mapData) {
         // Update the database with the geocoded coordinates
-        await db.location.update({
+        await update(db, "Location", {
           where: { id: location.id },
           data: {
             latitude: mapData.lat,

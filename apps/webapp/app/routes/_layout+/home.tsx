@@ -21,6 +21,8 @@ import UpcomingReminders from "~/components/home/upcoming-reminders";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
+import { count, findFirst } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
 import { getBookings } from "~/modules/booking/service.server";
 
@@ -63,15 +65,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Fetch all data in parallel — targeted queries instead of loading all assets
     const [
       // 1a. Aggregated asset stats
-      assetAggregation,
+      aggResult,
       valueKnownAssets,
       // 1b. Assets by status
-      statusGroups,
+      statusGroupRows,
       // 1c. Monthly growth data
       monthlyRows,
-      baselineCount,
+      baselineResult,
       // 1d. Top custodians (direct custody)
-      directCustodians,
+      directCustodianRows,
       // 1d. Bookings for custodian merge (ongoing + overdue)
       { bookings: ongoingAndOverdueBookings },
       // Upcoming bookings
@@ -81,79 +83,91 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // Active/ongoing bookings
       { bookings: activeBookings },
       // 1e. Newest 5 assets
-      newAssets,
+      newAssetRows,
       // Upcoming reminders
       upcomingReminders,
       // Announcement
       announcement,
       // KPI counts
       teamMembersCount,
-      locationDistribution,
+      locationDistRows,
       locationsCount,
       categoriesCount,
       // Cookie
       cookieResult,
     ] = await Promise.all([
       // 1a. Asset count + total valuation
-      db.asset
-        .aggregate({
-          where: { organizationId },
-          _count: { _all: true },
-          _sum: { valuation: true },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to load asset aggregation",
-            additionalData: { userId, organizationId },
-            label: "Dashboard",
-          });
-        }),
+      queryRaw<{ count: number; total_valuation: number }>(
+        db,
+        sql`SELECT COUNT(*)::int as "count", COALESCE(SUM("valuation"), 0) as "total_valuation"
+            FROM "Asset"
+            WHERE "organizationId" = ${organizationId}`
+      ).catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load asset aggregation",
+          additionalData: { userId, organizationId },
+          label: "Dashboard",
+        });
+      }),
 
       // 1a. Count of assets with known valuation
-      db.asset.count({
-        where: { organizationId, valuation: { not: null } },
-      }),
+      count(db, "Asset", { organizationId, valuation: { not: null } }),
 
       // 1b. Assets grouped by status
-      db.asset.groupBy({
-        by: ["status"],
-        where: { organizationId },
-        _count: { _all: true },
-      }),
+      queryRaw<{ status: string; count: number }>(
+        db,
+        sql`SELECT "status", COUNT(*)::int as "count"
+            FROM "Asset"
+            WHERE "organizationId" = ${organizationId}
+            GROUP BY "status"`
+      ),
 
       // 1c. Monthly asset creation counts (last 12 months)
-      db.$queryRaw<{ month_start: Date; assets_created: number }[]>`
-        SELECT date_trunc('month', "createdAt") AS month_start,
+      queryRaw<{ month_start: Date; assets_created: number }>(
+        db,
+        sql`SELECT date_trunc('month', "createdAt") AS month_start,
                COUNT(*)::int AS assets_created
-        FROM "Asset"
-        WHERE "organizationId" = ${organizationId}
-          AND "createdAt" >= ${twelveMonthsAgo}
-        GROUP BY 1
-        ORDER BY 1`,
+          FROM "Asset"
+          WHERE "organizationId" = ${organizationId}
+            AND "createdAt" >= ${twelveMonthsAgo}
+          GROUP BY 1
+          ORDER BY 1`
+      ),
 
       // 1c. Baseline count (assets before the 12-month window)
-      db.asset.count({
-        where: { organizationId, createdAt: { lt: twelveMonthsAgo } },
-      }),
+      queryRaw<{ count: number }>(
+        db,
+        sql`SELECT COUNT(*)::int as "count"
+            FROM "Asset"
+            WHERE "organizationId" = ${organizationId}
+              AND "createdAt" < ${twelveMonthsAgo}`
+      ),
 
       // 1d. Team members with direct custody counts
-      db.teamMember.findMany({
-        where: { organizationId, custodies: { some: {} } },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              profilePicture: true,
-              email: true,
-            },
-          },
-          _count: { select: { custodies: true } },
-        },
-        orderBy: { custodies: { _count: "desc" } },
-        take: 20,
-      }),
+      queryRaw<{
+        id: string;
+        name: string;
+        userId: string | null;
+        firstName: string | null;
+        lastName: string | null;
+        profilePicture: string | null;
+        email: string | null;
+        custodyCount: number;
+      }>(
+        db,
+        sql`SELECT tm."id", tm."name", tm."userId",
+               u."firstName", u."lastName", u."profilePicture", u."email",
+               COUNT(c."id")::int as "custodyCount"
+          FROM "TeamMember" tm
+          LEFT JOIN "User" u ON u."id" = tm."userId"
+          INNER JOIN "Custody" c ON c."teamMemberId" = tm."id"
+          WHERE tm."organizationId" = ${organizationId}
+          GROUP BY tm."id", tm."name", tm."userId",
+                   u."firstName", u."lastName", u."profilePicture", u."email"
+          ORDER BY "custodyCount" DESC
+          LIMIT 20`
+      ),
 
       // 1d. Ongoing + overdue bookings for custodian merge
       getBookings({
@@ -215,83 +229,122 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // 1e. Newest 5 assets
-      db.asset
-        .findMany({
-          where: { organizationId },
-          orderBy: { createdAt: "desc" },
-          take: 5,
-          include: { category: true },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to load newest assets",
-            additionalData: { userId, organizationId },
-            label: "Dashboard",
-          });
-        }),
+      queryRaw<{
+        id: string;
+        title: string;
+        mainImage: string | null;
+        mainImageExpiration: string | null;
+        status: string;
+        createdAt: string;
+        categoryId: string | null;
+        categoryName: string | null;
+        categoryColor: string | null;
+      }>(
+        db,
+        sql`SELECT a."id", a."title", a."mainImage", a."mainImageExpiration",
+               a."status", a."createdAt",
+               c."id" as "categoryId", c."name" as "categoryName",
+               c."color" as "categoryColor"
+          FROM "Asset" a
+          LEFT JOIN "Category" c ON c."id" = a."categoryId"
+          WHERE a."organizationId" = ${organizationId}
+          ORDER BY a."createdAt" DESC
+          LIMIT 5`
+      ).catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load newest assets",
+          additionalData: { userId, organizationId },
+          label: "Dashboard",
+        });
+      }),
 
       // Upcoming reminders
       getUpcomingRemindersForHomePage({ organizationId }),
 
       // Announcement
-      db.announcement
-        .findFirst({
-          where: { published: true },
-          orderBy: { createdAt: "desc" },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to load announcement",
-            additionalData: { userId, organizationId },
-            label: "Dashboard",
-          });
-        }),
+      findFirst(db, "Announcement", {
+        where: { published: true },
+        orderBy: { createdAt: "desc" },
+      }).catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load announcement",
+          additionalData: { userId, organizationId },
+          label: "Dashboard",
+        });
+      }),
 
       // KPI: team members
-      db.teamMember.count({
-        where: { organizationId, deletedAt: null },
-      }),
+      count(db, "TeamMember", { organizationId, deletedAt: null }),
 
       // Location distribution (top 5)
-      db.location
-        .findMany({
-          where: { organizationId },
-          select: {
-            id: true,
-            name: true,
-            _count: { select: { assets: true } },
-          },
-          orderBy: { assets: { _count: "desc" } },
-          take: 5,
-        })
-        .then((locs) =>
-          locs
-            .filter((l) => l._count.assets > 0)
-            .map((l) => ({
-              locationId: l.id,
-              locationName: l.name,
-              assetCount: l._count.assets,
-            }))
-        ),
+      queryRaw<{
+        locationId: string;
+        locationName: string;
+        assetCount: number;
+      }>(
+        db,
+        sql`SELECT l."id" as "locationId", l."name" as "locationName",
+               COUNT(a."id")::int as "assetCount"
+          FROM "Location" l
+          INNER JOIN "Asset" a ON a."locationId" = l."id"
+          WHERE l."organizationId" = ${organizationId}
+          GROUP BY l."id", l."name"
+          ORDER BY "assetCount" DESC
+          LIMIT 5`
+      ),
 
       // KPI: total locations
-      db.location.count({
-        where: { organizationId },
-      }),
+      count(db, "Location", { organizationId }),
 
       // KPI: total categories
-      db.category.count({
-        where: { organizationId },
-      }),
+      count(db, "Category", { organizationId }),
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
     ]);
 
-    const totalAssets = assetAggregation._count._all;
-    const totalValuation = assetAggregation._sum.valuation ?? 0;
+    const totalAssets = aggResult[0]?.count ?? 0;
+    const totalValuation = aggResult[0]?.total_valuation ?? 0;
+    const baselineCount = baselineResult[0]?.count ?? 0;
+
+    // Map status group rows to expected shape
+    const statusGroups = statusGroupRows.map((r) => ({
+      status: r.status,
+      _count: { _all: r.count },
+    }));
+
+    // Map direct custodian rows to expected shape
+    const directCustodians = directCustodianRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      userId: r.userId,
+      user: r.userId
+        ? {
+            firstName: r.firstName,
+            lastName: r.lastName,
+            profilePicture: r.profilePicture,
+            email: r.email ?? "",
+          }
+        : null,
+      _count: { custodies: r.custodyCount },
+    }));
+
+    // Map newest asset rows to expected shape with nested category
+    const newAssets = newAssetRows.map((r) => ({
+      ...r,
+      category: r.categoryId
+        ? {
+            id: r.categoryId,
+            name: r.categoryName,
+            color: r.categoryColor,
+          }
+        : null,
+    }));
+
+    // Location distribution already in correct shape from queryRaw
+    const locationDistribution = locationDistRows;
 
     const header: HeaderData = {
       title: "Home",

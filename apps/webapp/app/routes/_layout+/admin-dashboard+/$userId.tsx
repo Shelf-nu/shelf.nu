@@ -24,6 +24,11 @@ import { Table, Td, Th, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import {
+  findUniqueOrThrow,
+  update,
+  upsert,
+} from "~/database/query-helpers.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
@@ -268,9 +273,9 @@ export const action = async ({
         );
 
         // Get current tier before updating
-        const currentUser = await db.user.findUniqueOrThrow({
+        const currentUser = await findUniqueOrThrow(db, "User", {
           where: { id: shelfUserId },
-          select: { tierId: true },
+          select: "tierId",
         });
 
         const user = await updateUserTierId(shelfUserId, tierId);
@@ -301,18 +306,16 @@ export const action = async ({
           })
         );
 
-        await db.customTierLimit.upsert({
-          where: { userId: shelfUserId },
-          create: {
+        await upsert(
+          db,
+          "CustomTierLimit",
+          {
             userId: shelfUserId,
             maxOrganizations,
             isEnterprise,
           },
-          update: {
-            maxOrganizations,
-            isEnterprise,
-          },
-        });
+          { onConflict: "userId" }
+        );
 
         break;
       }
@@ -353,10 +356,10 @@ export const action = async ({
           })
         );
 
-        await db.user.update({
+        await update(db, "User", {
           where: { id: shelfUserId },
           data: { skipSubscriptionCheck },
-          select: { id: true },
+          select: "id",
         });
 
         sendNotification({
@@ -378,10 +381,10 @@ export const action = async ({
           })
         );
 
-        await db.user.update({
+        await update(db, "User", {
           where: { id: shelfUserId },
           data: { [fieldName]: fieldValue },
-          select: { id: true },
+          select: "id",
         });
 
         sendNotification({

@@ -23,6 +23,12 @@ import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
+import {
+  findUnique,
+  findUniqueOrThrow,
+  findMany,
+} from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
@@ -141,16 +147,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
         },
       }),
-      db.tag.findMany({
-        where: {
-          organizationId,
-          OR: [
-            { useFor: { isEmpty: true } },
-            { useFor: { has: TagUseFor.BOOKING } },
-          ],
-        },
-        orderBy: { name: "asc" },
-      }),
+      queryRaw<{
+        id: string;
+        name: string;
+        color: string | null;
+        organizationId: string;
+        useFor: string[];
+        createdAt: string;
+        updatedAt: string;
+      }>(
+        db,
+        sql`SELECT * FROM "Tag" WHERE "organizationId" = ${organizationId} AND (array_length("useFor", 1) IS NULL OR ${TagUseFor.BOOKING} = ANY("useFor")) ORDER BY "name" ASC`
+      ),
     ]);
     // DEPRECATED for now
     //  * if the booking is ongoing and there is no status param, we need to set it to
@@ -297,59 +305,190 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
 
       /**
-       * Get detailed asset information with bookings for the paginated assets
+       * Get detailed asset information with bookings for the paginated assets.
+       * Uses multiple queryRaw calls to replicate the Prisma include behavior.
        */
-      db.asset.findMany({
-        where: {
-          id: { in: assetIdsToFetch },
-        },
-        include: {
-          category: true,
-          custody: true,
-          tags: TAG_WITH_COLOR_SELECT,
-          kit: true,
-          bookings: {
-            where: {
-              ...(booking.from && booking.to
-                ? {
-                    OR: [
-                      // Rule 1: RESERVED bookings always conflict
-                      {
-                        status: "RESERVED",
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                      // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
-                      {
-                        status: { in: ["ONGOING", "OVERDUE"] },
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                    ],
-                  }
-                : {}),
-            },
-          },
-        },
-      }),
+      (async () => {
+        if (assetIdsToFetch.length === 0) return [];
+
+        // Fetch base asset data with category, custody, and kit via joins
+        const assets = await queryRaw<{
+          id: string;
+          title: string;
+          description: string | null;
+          status: string;
+          mainImage: string | null;
+          mainImageExpiration: string | null;
+          organizationId: string;
+          kitId: string | null;
+          categoryId: string | null;
+          availableToBook: boolean;
+          createdAt: string;
+          updatedAt: string;
+          // Category fields (prefixed)
+          cat_id: string | null;
+          cat_name: string | null;
+          cat_description: string | null;
+          cat_color: string | null;
+          cat_organizationId: string | null;
+          cat_createdAt: string | null;
+          cat_updatedAt: string | null;
+          // Kit fields (prefixed)
+          kit_id: string | null;
+          kit_name: string | null;
+          kit_description: string | null;
+          kit_status: string | null;
+          kit_image: string | null;
+          kit_imageExpiration: string | null;
+          kit_organizationId: string | null;
+          kit_categoryId: string | null;
+          kit_createdAt: string | null;
+          kit_updatedAt: string | null;
+          // Custody fields
+          custody_id: string | null;
+          custody_assetId: string | null;
+          custody_custodianId: string | null;
+          custody_createdAt: string | null;
+          custody_updatedAt: string | null;
+        }>(
+          db,
+          sql`SELECT a.*,
+            c."id" as "cat_id", c."name" as "cat_name", c."description" as "cat_description",
+            c."color" as "cat_color", c."organizationId" as "cat_organizationId",
+            c."createdAt" as "cat_createdAt", c."updatedAt" as "cat_updatedAt",
+            k."id" as "kit_id", k."name" as "kit_name", k."description" as "kit_description",
+            k."status" as "kit_status", k."image" as "kit_image", k."imageExpiration" as "kit_imageExpiration",
+            k."organizationId" as "kit_organizationId", k."categoryId" as "kit_categoryId",
+            k."createdAt" as "kit_createdAt", k."updatedAt" as "kit_updatedAt",
+            cu."id" as "custody_id", cu."assetId" as "custody_assetId",
+            cu."custodianId" as "custody_custodianId",
+            cu."createdAt" as "custody_createdAt", cu."updatedAt" as "custody_updatedAt"
+          FROM "Asset" a
+          LEFT JOIN "Category" c ON a."categoryId" = c."id"
+          LEFT JOIN "Kit" k ON a."kitId" = k."id"
+          LEFT JOIN "Custody" cu ON cu."assetId" = a."id"
+          WHERE a."id" = ANY(${assetIdsToFetch}::text[])`
+        );
+
+        // Fetch tags for these assets
+        const tagRows = await queryRaw<{
+          assetId: string;
+          tagId: string;
+          tag_id: string;
+          tag_name: string;
+          tag_color: string | null;
+        }>(
+          db,
+          sql`SELECT at."A" as "assetId", at."B" as "tagId",
+            t."id" as "tag_id", t."name" as "tag_name", t."color" as "tag_color"
+          FROM "_AssetToTag" at
+          JOIN "Tag" t ON at."B" = t."id"
+          WHERE at."A" = ANY(${assetIdsToFetch}::text[])`
+        );
+
+        // Build tag map: assetId -> tags[]
+        const tagMap = new Map<
+          string,
+          { id: string; name: string; color: string | null }[]
+        >();
+        for (const row of tagRows) {
+          const tags = tagMap.get(row.assetId) || [];
+          tags.push({
+            id: row.tag_id,
+            name: row.tag_name,
+            color: row.tag_color,
+          });
+          tagMap.set(row.assetId, tags);
+        }
+
+        // Fetch conflicting bookings for these assets (if booking has date range)
+        let bookingMap = new Map<string, any[]>();
+        if (booking.from && booking.to) {
+          const conflictingBookings = await queryRaw<{
+            assetId: string;
+            id: string;
+            name: string;
+            status: string;
+            from: string | null;
+            to: string | null;
+          }>(
+            db,
+            sql`SELECT ab."A" as "assetId", b."id", b."name", b."status", b."from", b."to"
+            FROM "_AssetToBooking" ab
+            JOIN "Booking" b ON ab."B" = b."id"
+            WHERE ab."A" = ANY(${assetIdsToFetch}::text[])
+              AND b."id" != ${booking.id}
+              AND b."status" IN ('RESERVED', 'ONGOING', 'OVERDUE')
+              AND (
+                (b."from" <= ${booking.to} AND b."to" >= ${booking.from})
+                OR (b."from" >= ${booking.from} AND b."to" <= ${booking.to})
+              )`
+          );
+          for (const row of conflictingBookings) {
+            const bookings = bookingMap.get(row.assetId) || [];
+            bookings.push({
+              id: row.id,
+              name: row.name,
+              status: row.status,
+              from: row.from,
+              to: row.to,
+            });
+            bookingMap.set(row.assetId, bookings);
+          }
+        }
+
+        // Assemble the result in the same shape as the Prisma include
+        return assets.map((a) => ({
+          id: a.id,
+          title: a.title,
+          description: a.description,
+          status: a.status,
+          mainImage: a.mainImage,
+          mainImageExpiration: a.mainImageExpiration,
+          organizationId: a.organizationId,
+          kitId: a.kitId,
+          categoryId: a.categoryId,
+          availableToBook: a.availableToBook,
+          createdAt: a.createdAt,
+          updatedAt: a.updatedAt,
+          category: a.cat_id
+            ? {
+                id: a.cat_id,
+                name: a.cat_name,
+                description: a.cat_description,
+                color: a.cat_color,
+                organizationId: a.cat_organizationId,
+                createdAt: a.cat_createdAt,
+                updatedAt: a.cat_updatedAt,
+              }
+            : null,
+          kit: a.kit_id
+            ? {
+                id: a.kit_id,
+                name: a.kit_name,
+                description: a.kit_description,
+                status: a.kit_status,
+                image: a.kit_image,
+                imageExpiration: a.kit_imageExpiration,
+                organizationId: a.kit_organizationId,
+                categoryId: a.kit_categoryId,
+                createdAt: a.kit_createdAt,
+                updatedAt: a.kit_updatedAt,
+              }
+            : null,
+          custody: a.custody_id
+            ? {
+                id: a.custody_id,
+                assetId: a.custody_assetId,
+                custodianId: a.custody_custodianId,
+                createdAt: a.custody_createdAt,
+                updatedAt: a.custody_updatedAt,
+              }
+            : null,
+          tags: tagMap.get(a.id) || [],
+          bookings: bookingMap.get(a.id) || [],
+        }));
+      })(),
 
       /** Calculate booking flags considering all assets */
       getBookingFlags({
@@ -360,25 +499,54 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
 
       /** Get kit details for the kits in the current page */
-      db.kit.findMany({
-        where: {
-          id: {
-            in: paginatedItems
-              .filter((item) => item.type === "kit")
-              .map((item) => item.id),
-          },
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              color: true,
-            },
-          },
-          _count: { select: { assets: true } },
-        },
-      }),
+      (async () => {
+        const kitIds = paginatedItems
+          .filter((item) => item.type === "kit")
+          .map((item) => item.id);
+        if (kitIds.length === 0) return [];
+
+        const rows = await queryRaw<{
+          id: string;
+          name: string;
+          description: string | null;
+          status: string;
+          image: string | null;
+          imageExpiration: string | null;
+          organizationId: string;
+          categoryId: string | null;
+          createdAt: string;
+          updatedAt: string;
+          cat_id: string | null;
+          cat_name: string | null;
+          cat_color: string | null;
+          assetCount: number;
+        }>(
+          db,
+          sql`SELECT k.*,
+            c."id" as "cat_id", c."name" as "cat_name", c."color" as "cat_color",
+            (SELECT COUNT(*)::int FROM "Asset" a WHERE a."kitId" = k."id") as "assetCount"
+          FROM "Kit" k
+          LEFT JOIN "Category" c ON k."categoryId" = c."id"
+          WHERE k."id" = ANY(${kitIds}::text[])`
+        );
+
+        return rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          status: r.status,
+          image: r.image,
+          imageExpiration: r.imageExpiration,
+          organizationId: r.organizationId,
+          categoryId: r.categoryId,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          category: r.cat_id
+            ? { id: r.cat_id, name: r.cat_name, color: r.cat_color }
+            : null,
+          _count: { assets: r.assetCount },
+        }));
+      })(),
     ]);
 
     // Create maps for easy lookup
@@ -420,13 +588,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // For progress calculation, we need the TOTAL number of assets in the booking,
     // not the filtered count from booking.assets (which may be filtered by status)
     // So we need to get the unfiltered asset count
-    const totalBookingAssets = await db.asset.count({
-      where: {
-        bookings: {
-          some: { id: booking.id },
-        },
-      },
-    });
+    const [{ count: totalBookingAssets }] = await queryRaw<{ count: number }>(
+      db,
+      sql`SELECT COUNT(*)::int as "count" FROM "Asset" a JOIN "_AssetToBooking" ab ON ab."A" = a."id" WHERE ab."B" = ${booking.id}`
+    );
 
     const partialCheckinProgress = calculatePartialCheckinProgress(
       totalBookingAssets,
@@ -660,9 +825,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     // Form data is already extracted above and will be reused
-    const basicBookingInfo = await db.booking.findUniqueOrThrow({
+    const basicBookingInfo = await findUniqueOrThrow(db, "Booking", {
       where: { id },
-      select: { id: true, status: true, from: true, to: true },
+      select: "id, status, from, to",
     });
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
@@ -918,9 +1083,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         // Get the asset data for proper note generation
-        const asset = await db.asset.findUnique({
+        const asset = await findUnique(db, "Asset", {
           where: { id: assetId, organizationId },
-          select: { id: true, title: true },
+          select: "id, title",
         });
 
         const b = await removeAssets({
@@ -1015,14 +1180,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { userId, id, organizationId, role },
         });
 
-        const kit = await db.kit.findUniqueOrThrow({
-          where: { id: kitId, organizationId },
-          select: {
-            id: true,
-            name: true,
-            assets: { select: { id: true } },
-          },
-        });
+        const kitRows = await queryRaw<{
+          id: string;
+          name: string;
+          assetId: string | null;
+        }>(
+          db,
+          sql`SELECT k."id", k."name", a."id" as "assetId"
+          FROM "Kit" k
+          LEFT JOIN "Asset" a ON a."kitId" = k."id"
+          WHERE k."id" = ${kitId} AND k."organizationId" = ${organizationId}`
+        );
+        if (kitRows.length === 0) {
+          throw { code: "PGRST116", message: "No rows found in Kit" };
+        }
+        const kit = {
+          id: kitRows[0].id,
+          name: kitRows[0].name,
+          assets: kitRows
+            .filter((r) => r.assetId !== null)
+            .map((r) => ({ id: r.assetId! })),
+        };
 
         const b = await removeAssets({
           booking: { id, assetIds: kit.assets.map((a) => a.id) },
@@ -1120,15 +1298,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * From frontend, we get both assetIds and kitIds,
          * here we are separating them and excluding assets that belong to kits
          * */
-        const assets = await db.asset.findMany({
+        const assets = await findMany(db, "Asset", {
           where: { id: { in: assetOrKitIds } },
-          select: { id: true, title: true },
+          select: "id, title",
         });
 
-        const kits = await db.kit.findMany({
-          where: { id: { in: assetOrKitIds } },
-          select: { id: true, name: true, assets: { select: { id: true } } },
-        });
+        const kits = await (async () => {
+          const kitRows = await queryRaw<{
+            id: string;
+            name: string;
+            assetId: string | null;
+          }>(
+            db,
+            sql`SELECT k."id", k."name", a."id" as "assetId"
+            FROM "Kit" k
+            LEFT JOIN "Asset" a ON a."kitId" = k."id"
+            WHERE k."id" = ANY(${assetOrKitIds}::text[])`
+          );
+          // Group rows by kit
+          const kitMap = new Map<
+            string,
+            { id: string; name: string; assets: { id: string }[] }
+          >();
+          for (const row of kitRows) {
+            if (!kitMap.has(row.id)) {
+              kitMap.set(row.id, { id: row.id, name: row.name, assets: [] });
+            }
+            if (row.assetId) {
+              kitMap.get(row.id)!.assets.push({ id: row.assetId });
+            }
+          }
+          return Array.from(kitMap.values());
+        })();
 
         // Get asset IDs that belong to the selected kits
         const kitAssetIds = kits.flatMap((kit) =>

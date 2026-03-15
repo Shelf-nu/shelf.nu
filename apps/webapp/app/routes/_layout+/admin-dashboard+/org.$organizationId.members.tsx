@@ -5,6 +5,7 @@ import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -26,27 +27,29 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   try {
     await requireAdmin(userId);
 
-    const members = await db.user.findMany({
-      where: {
-        userOrganizations: { some: { organizationId } },
-      },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        sso: true,
-        createdAt: true,
-        userOrganizations: {
-          where: {
-            organizationId,
-          },
-          select: {
-            roles: true,
-          },
-        },
-      },
-    });
+    const memberRows = await queryRaw<{
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+      sso: boolean;
+      createdAt: string;
+      roles: string[];
+    }>(
+      db,
+      sql`
+        SELECT u."id", u."firstName", u."lastName", u."email", u."sso", u."createdAt",
+               uo."roles"
+        FROM "User" u
+        JOIN "UserOrganization" uo ON uo."userId" = u."id"
+        WHERE uo."organizationId" = ${organizationId}
+      `
+    );
+
+    const members = memberRows.map((m) => ({
+      ...m,
+      userOrganizations: [{ roles: m.roles }],
+    }));
 
     return payload({ members });
   } catch (cause) {

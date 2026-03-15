@@ -1,6 +1,7 @@
 import type { User } from "@shelf/database";
 
 import { db } from "~/database/db.server";
+import { findFirst } from "~/database/query-helpers.server";
 
 /**
  * Basic user name type for notes
@@ -19,9 +20,9 @@ export function createLoadUserForNotes(userId: User["id"]) {
 
   return async (): Promise<BasicUserName> => {
     if (!cachedUser) {
-      cachedUser = (await db.user.findFirst({
+      cachedUser = (await findFirst(db, "User", {
         where: { id: userId },
-        select: { firstName: true, lastName: true },
+        select: "firstName, lastName",
       })) ?? { firstName: null, lastName: null };
     }
 

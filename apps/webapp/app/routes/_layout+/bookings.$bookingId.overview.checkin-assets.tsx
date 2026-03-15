@@ -15,6 +15,7 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
@@ -99,13 +100,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Calculate partial check-in progress
     // For progress calculation, we need the TOTAL number of assets in the booking,
     // not the filtered count from booking.assets (which may be filtered by status)
-    const totalBookingAssets = await db.asset.count({
-      where: {
-        bookings: {
-          some: { id: booking.id },
-        },
-      },
-    });
+    const [{ count: totalBookingAssets }] = await queryRaw<{ count: number }>(
+      db,
+      sql`SELECT COUNT(*)::int AS count FROM "Asset" a
+        INNER JOIN "_AssetToBooking" ab ON ab."A" = a."id"
+        WHERE ab."B" = ${booking.id}`
+    );
 
     const partialCheckinProgress = calculatePartialCheckinProgress(
       totalBookingAssets,

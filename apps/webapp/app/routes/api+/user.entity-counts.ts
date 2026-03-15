@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { count } from "~/database/query-helpers.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -40,32 +41,24 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       assetReminders,
       images,
     ] = await Promise.all([
-      db.asset.count({
-        where: { userId: targetUserId, organizationId },
+      count(db, "asset", { userId: targetUserId, organizationId }),
+      count(db, "category", { userId: targetUserId, organizationId }),
+      count(db, "tag", { userId: targetUserId, organizationId }),
+      count(db, "location", { userId: targetUserId, organizationId }),
+      count(db, "customField", {
+        userId: targetUserId,
+        organizationId,
+        deletedAt: null,
       }),
-      db.category.count({
-        where: { userId: targetUserId, organizationId },
+      count(db, "booking", { creatorId: targetUserId, organizationId }),
+      count(db, "kit", { createdById: targetUserId, organizationId }),
+      count(db, "assetReminder", {
+        createdById: targetUserId,
+        organizationId,
       }),
-      db.tag.count({
-        where: { userId: targetUserId, organizationId },
-      }),
-      db.location.count({
-        where: { userId: targetUserId, organizationId },
-      }),
-      db.customField.count({
-        where: { userId: targetUserId, organizationId, deletedAt: null },
-      }),
-      db.booking.count({
-        where: { creatorId: targetUserId, organizationId },
-      }),
-      db.kit.count({
-        where: { createdById: targetUserId, organizationId },
-      }),
-      db.assetReminder.count({
-        where: { createdById: targetUserId, organizationId },
-      }),
-      db.image.count({
-        where: { userId: targetUserId, ownerOrgId: organizationId },
+      count(db, "image", {
+        userId: targetUserId,
+        ownerOrgId: organizationId,
       }),
     ]);
 

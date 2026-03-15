@@ -21,6 +21,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { db } from "~/database/db.server";
+import { findUnique, create, update } from "~/database/query-helpers.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import {
@@ -210,25 +211,28 @@ export const action = async ({
           })
         );
 
-        await db.organization.update({
+        // Check if organization already has ssoDetails
+        const org = await findUnique(db, "Organization", {
           where: { id: organizationId },
-          data: {
-            ssoDetails: {
-              upsert: {
-                create: {
-                  domain,
-                  adminGroupId,
-                  selfServiceGroupId,
-                },
-                update: {
-                  domain,
-                  adminGroupId,
-                  selfServiceGroupId,
-                },
-              },
-            },
-          },
+          select: "id, ssoDetailsId",
         });
+
+        if (org?.ssoDetailsId) {
+          // Update existing SsoDetails
+          await update(db, "SsoDetails", {
+            where: { id: org.ssoDetailsId },
+            data: { domain, adminGroupId, selfServiceGroupId },
+          });
+        } else {
+          // Create new SsoDetails and link to organization
+          const ssoDetails = await create(db, "SsoDetails", {
+            data: { domain, adminGroupId, selfServiceGroupId },
+          });
+          await update(db, "Organization", {
+            where: { id: organizationId },
+            data: { ssoDetailsId: ssoDetails.id },
+          });
+        }
 
         return payload({ message: "SSO details updated" });
       }

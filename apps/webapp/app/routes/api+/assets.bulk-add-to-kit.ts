@@ -6,6 +6,7 @@ import {
 } from "react-router";
 import { BulkAddToKitSchema } from "~/components/assets/bulk-add-to-kit-dialog";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -30,15 +31,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const kits = await db.kit.findMany({
+    const kits = await findMany(db, "kit", {
       where: {
         organizationId,
         status: { not: KitStatus.CHECKED_OUT },
       },
-      select: {
-        id: true,
-        name: true,
-      },
+      select: "id, name",
     });
 
     return data(payload({ kits }));

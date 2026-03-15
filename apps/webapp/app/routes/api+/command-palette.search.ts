@@ -2,6 +2,8 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
+import { queryRaw, sql, join, type SqlFragment } from "~/database/sql.server";
 import { getAssets } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -15,6 +17,68 @@ import { requirePermission } from "~/utils/roles.server";
 const querySchema = z.object({
   q: z.string().trim().max(100).optional(),
 });
+
+/**
+ * Builds ILIKE search condition using raw SQL for column references.
+ * This avoids issues with parameterizing column names.
+ */
+function buildSearchWhere(
+  searchTerms: string[],
+  columns: { name: string; alias?: string }[]
+): SqlFragment {
+  if (searchTerms.length === 0) return sql`TRUE`;
+
+  const termFragments = searchTerms.map((term) => {
+    const colFragments = columns.map((col) => {
+      const colRef = col.alias ? `${col.alias}."${col.name}"` : `"${col.name}"`;
+      return new SqlFragment(`${colRef} ILIKE $1`, ["%" + term + "%"]);
+    });
+    return sql`(${join(colFragments, " OR ")})`;
+  });
+
+  return join(termFragments, " OR ");
+}
+
+// Type for kit queryRaw results
+interface KitRow {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  assetCount: number;
+}
+
+// Type for booking queryRaw results
+interface BookingRow {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  from: string | null;
+  to: string | null;
+  custodianUserFirstName: string | null;
+  custodianUserLastName: string | null;
+  custodianTeamMemberName: string | null;
+}
+
+// Type for location queryRaw results
+interface LocationRow {
+  id: string;
+  name: string;
+  description: string | null;
+  address: string | null;
+  assetCount: number;
+}
+
+// Type for team member queryRaw results
+interface TeamMemberRow {
+  id: string;
+  name: string;
+  userId: string | null;
+  userEmail: string | null;
+  userFirstName: string | null;
+  userLastName: string | null;
+}
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -63,90 +127,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchTerms = terms.length > 0 ? terms : [query];
 
-    // Helper function to create search conditions for text fields
-    const createTextSearchConditions = (term: string, fields: string[]) =>
-      fields.map((field) => ({
-        [field]: { contains: term, mode: "insensitive" as const },
-      }));
-
-    // Kit search conditions
-    const kitSearchConditions: Record<string, any>[] = searchTerms.map(
-      (term) => ({
-        OR: [
-          ...createTextSearchConditions(term, ["name", "description"]),
-          { id: { contains: term, mode: "insensitive" as const } },
-        ],
-      })
-    );
-
-    // Booking search conditions
-    const bookingSearchConditions: Record<string, any>[] = searchTerms.map(
-      (term) => ({
-        OR: [
-          ...createTextSearchConditions(term, ["name", "description"]),
-          { id: { contains: term, mode: "insensitive" as const } },
-        ],
-      })
-    );
-
-    // Location search conditions
-    const locationSearchConditions: Record<string, any>[] = searchTerms.map(
-      (term) => ({
-        OR: [
-          ...createTextSearchConditions(term, [
-            "name",
-            "description",
-            "address",
-          ]),
-          { id: { contains: term, mode: "insensitive" as const } },
-        ],
-      })
-    );
-
-    // Team member search conditions
-    const teamMemberSearchConditions: Record<string, any>[] = searchTerms.map(
-      (term) => ({
-        OR: [
-          { name: { contains: term, mode: "insensitive" as const } },
-          { id: { contains: term, mode: "insensitive" as const } },
-          {
-            user: {
-              OR: [
-                {
-                  firstName: {
-                    contains: term,
-                    mode: "insensitive" as const,
-                  },
-                },
-                {
-                  lastName: {
-                    contains: term,
-                    mode: "insensitive" as const,
-                  },
-                },
-                {
-                  email: {
-                    contains: term,
-                    mode: "insensitive" as const,
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      })
-    );
-
-    // Audit search conditions
-    const auditSearchConditions: Record<string, any>[] = searchTerms.map(
-      (term) => ({
-        OR: [
-          ...createTextSearchConditions(term, ["name", "description"]),
-          { id: { contains: term, mode: "insensitive" as const } },
-        ],
-      })
-    );
-
     // Check if this is a personal workspace - they don't have bookings or team members
     const isPersonalWorkspace = isPersonalOrg(currentOrganization);
 
@@ -160,61 +140,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
     const hasAuditPermission = true;
 
-    // Prepare where clauses for other entities
-
-    const kitWhere: Record<string, any> = {
-      organizationId,
-      ...(kitSearchConditions.length ? { OR: kitSearchConditions } : {}),
-    };
-
-    const bookingWhere: Record<string, any> = {
-      organizationId,
-      ...(bookingSearchConditions.length
-        ? { OR: bookingSearchConditions }
-        : {}),
-      // BASE and SELF_SERVICE users can only see their own bookings unless org settings allow otherwise
-      ...(canSeeAllBookings ? {} : { custodianUserId: userId }),
-    };
-
-    const locationWhere: Record<string, any> = {
-      organizationId,
-      ...(locationSearchConditions.length
-        ? { OR: locationSearchConditions }
-        : {}),
-    };
-
-    const teamMemberWhere: Record<string, any> = {
-      organizationId,
-      deletedAt: null,
-      ...(teamMemberSearchConditions.length
-        ? { OR: teamMemberSearchConditions }
-        : {}),
-      // BASE and SELF_SERVICE users can only see team members they have custody access to
-      ...(canSeeAllCustody
-        ? {}
-        : {
-            OR: [
-              // Team members they have assets in custody from
-              {
-                custodies: {
-                  some: {
-                    custodian: { userId },
-                  },
-                },
-              },
-              // Team members they have kits in custody from
-              {
-                kitCustodies: {
-                  some: {
-                    custodian: { userId },
-                  },
-                },
-              },
-              // Their own team member record
-              { userId },
-            ],
-          }),
-    };
+    // Build audit search where clause for findMany helper
+    const auditSearchConditions = searchTerms.map((term) => ({
+      OR: [
+        { name: { contains: term, mode: "insensitive" as const } },
+        { description: { contains: term, mode: "insensitive" as const } },
+        { id: { contains: term, mode: "insensitive" as const } },
+      ],
+    }));
 
     const auditWhere: Record<string, any> = {
       organizationId,
@@ -229,6 +162,34 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           }
         : {}),
     };
+
+    // Build SQL search conditions for queryRaw calls
+    const kitSearchWhere = buildSearchWhere(searchTerms, [
+      { name: "name", alias: "k" },
+      { name: "description", alias: "k" },
+      { name: "id", alias: "k" },
+    ]);
+
+    const bookingSearchWhere = buildSearchWhere(searchTerms, [
+      { name: "name", alias: "b" },
+      { name: "description", alias: "b" },
+      { name: "id", alias: "b" },
+    ]);
+
+    const locationSearchWhere = buildSearchWhere(searchTerms, [
+      { name: "name", alias: "l" },
+      { name: "description", alias: "l" },
+      { name: "address", alias: "l" },
+      { name: "id", alias: "l" },
+    ]);
+
+    const teamMemberSearchWhere = buildSearchWhere(searchTerms, [
+      { name: "name", alias: "tm" },
+      { name: "id", alias: "tm" },
+      { name: "firstName", alias: "u" },
+      { name: "lastName", alias: "u" },
+      { name: "email", alias: "u" },
+    ]);
 
     // Execute parallel searches
     const [assetResults, audits, kits, bookings, locations, teamMembers] =
@@ -248,77 +209,115 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
         }),
 
-        // Audits (permission-gated)
+        // Audits (permission-gated) — simple select, uses findMany helper
         hasAuditPermission
-          ? db.auditSession.findMany({
+          ? findMany(db, "AuditSession", {
               where: auditWhere,
+              select: "id, name, description, status, dueDate",
+              orderBy: { updatedAt: "desc" },
               take: 6,
-              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-              select: {
-                id: true,
-                name: true,
-                description: true,
-                status: true,
-                dueDate: true,
-              },
             })
           : Promise.resolve([]),
 
-        // Kits (permission-gated)
+        // Kits (permission-gated) — needs asset count via LEFT JOIN
         hasKitPermission
-          ? db.kit.findMany({
-              where: kitWhere,
-              take: 6,
-              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-              include: {
-                _count: { select: { assets: true } },
-              },
-            })
+          ? queryRaw<KitRow>(
+              db,
+              sql`
+              SELECT k."id", k."name", k."description", k."status",
+                     COUNT(a."id")::int AS "assetCount"
+              FROM "Kit" k
+              LEFT JOIN "Asset" a ON a."kitId" = k."id"
+              WHERE k."organizationId" = ${organizationId}
+                AND (${kitSearchWhere})
+              GROUP BY k."id"
+              ORDER BY k."updatedAt" DESC, k."name" ASC
+              LIMIT 6
+            `
+            )
           : Promise.resolve([]),
 
-        // Bookings (permission-gated)
+        // Bookings (permission-gated) — needs custodian user/team member via JOINs
         hasBookingPermission
-          ? db.booking.findMany({
-              where: bookingWhere,
-              take: 6,
-              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-              include: {
-                custodianUser: {
-                  select: { firstName: true, lastName: true, email: true },
-                },
-                custodianTeamMember: { select: { name: true } },
-              },
-            })
+          ? queryRaw<BookingRow>(
+              db,
+              sql`
+              SELECT b."id", b."name", b."description", b."status",
+                     b."from", b."to",
+                     cu."firstName" AS "custodianUserFirstName",
+                     cu."lastName" AS "custodianUserLastName",
+                     ctm."name" AS "custodianTeamMemberName"
+              FROM "Booking" b
+              LEFT JOIN "User" cu ON cu."id" = b."custodianUserId"
+              LEFT JOIN "TeamMember" ctm ON ctm."id" = b."custodianTeamMemberId"
+              WHERE b."organizationId" = ${organizationId}
+                AND (${bookingSearchWhere})
+                ${
+                  canSeeAllBookings
+                    ? sql``
+                    : sql`AND b."custodianUserId" = ${userId}`
+                }
+              ORDER BY b."updatedAt" DESC, b."name" ASC
+              LIMIT 6
+            `
+            )
           : Promise.resolve([]),
 
-        // Locations (permission-gated)
+        // Locations (permission-gated) — needs asset count via LEFT JOIN
         hasLocationPermission
-          ? db.location.findMany({
-              where: locationWhere,
-              take: 6,
-              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-              include: {
-                _count: { select: { assets: true } },
-              },
-            })
+          ? queryRaw<LocationRow>(
+              db,
+              sql`
+              SELECT l."id", l."name", l."description", l."address",
+                     COUNT(a."id")::int AS "assetCount"
+              FROM "Location" l
+              LEFT JOIN "Asset" a ON a."locationId" = l."id"
+              WHERE l."organizationId" = ${organizationId}
+                AND (${locationSearchWhere})
+              GROUP BY l."id"
+              ORDER BY l."updatedAt" DESC, l."name" ASC
+              LIMIT 6
+            `
+            )
           : Promise.resolve([]),
 
-        // Team members (permission-gated)
+        // Team members (permission-gated) — needs user info + complex custody filter
         hasTeamMemberPermission
-          ? db.teamMember.findMany({
-              where: teamMemberWhere,
-              take: 8,
-              orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
-              include: {
-                user: {
-                  select: {
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                  },
-                },
-              },
-            })
+          ? queryRaw<TeamMemberRow>(
+              db,
+              sql`
+              SELECT tm."id", tm."name", tm."userId",
+                     u."email" AS "userEmail",
+                     u."firstName" AS "userFirstName",
+                     u."lastName" AS "userLastName"
+              FROM "TeamMember" tm
+              LEFT JOIN "User" u ON u."id" = tm."userId"
+              WHERE tm."organizationId" = ${organizationId}
+                AND tm."deletedAt" IS NULL
+                AND (${teamMemberSearchWhere})
+                ${
+                  canSeeAllCustody
+                    ? sql``
+                    : sql`AND (
+                    EXISTS (
+                      SELECT 1 FROM "Custody" c
+                      JOIN "TeamMember" cust ON cust."id" = c."teamMemberId"
+                      WHERE c."teamMemberId" = tm."id"
+                        AND cust."userId" = ${userId}
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM "KitCustody" kc
+                      JOIN "TeamMember" cust2 ON cust2."id" = kc."custodianId"
+                      WHERE kc."custodianId" = tm."id"
+                        AND cust2."userId" = ${userId}
+                    )
+                    OR tm."userId" = ${userId}
+                  )`
+                }
+              ORDER BY tm."updatedAt" DESC, tm."name" ASC
+              LIMIT 8
+            `
+            )
           : Promise.resolve([]),
       ]);
 
@@ -352,44 +351,46 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               })
               .filter(Boolean) ?? [],
         })),
-        audits: audits.map((audit) => ({
+        audits: audits.map((audit: any) => ({
           id: audit.id,
           name: audit.name,
           description: audit.description || null,
           status: audit.status,
-          dueDate: audit.dueDate?.toISOString() || null,
+          dueDate: audit.dueDate ? new Date(audit.dueDate).toISOString() : null,
         })),
-        kits: kits.map((kit) => ({
+        kits: kits.map((kit: KitRow) => ({
           id: kit.id,
           name: kit.name,
           description: kit.description || null,
           status: kit.status,
-          assetCount: kit._count?.assets || 0,
+          assetCount: kit.assetCount || 0,
         })),
-        bookings: bookings.map((booking) => ({
+        bookings: bookings.map((booking: BookingRow) => ({
           id: booking.id,
           name: booking.name,
           description: booking.description || null,
           status: booking.status,
-          custodianName: booking.custodianUser
-            ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`.trim()
-            : booking.custodianTeamMember?.name || null,
-          from: booking.from?.toISOString() || null,
-          to: booking.to?.toISOString() || null,
+          custodianName: booking.custodianUserFirstName
+            ? `${booking.custodianUserFirstName} ${
+                booking.custodianUserLastName || ""
+              }`.trim()
+            : booking.custodianTeamMemberName || null,
+          from: booking.from ? new Date(booking.from).toISOString() : null,
+          to: booking.to ? new Date(booking.to).toISOString() : null,
         })),
-        locations: locations.map((location) => ({
+        locations: locations.map((location: LocationRow) => ({
           id: location.id,
           name: location.name,
           description: location.description || null,
           address: location.address || null,
-          assetCount: location._count?.assets || 0,
+          assetCount: location.assetCount || 0,
         })),
-        teamMembers: teamMembers.map((member) => ({
+        teamMembers: teamMembers.map((member: TeamMemberRow) => ({
           id: member.id,
           name: member.name,
-          email: member.user?.email || null,
-          firstName: member.user?.firstName || null,
-          lastName: member.user?.lastName || null,
+          email: member.userEmail || null,
+          firstName: member.userFirstName || null,
+          lastName: member.userLastName || null,
           userId: member.userId,
         })),
       })

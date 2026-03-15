@@ -3,6 +3,7 @@ import { data, redirect } from "react-router";
 import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
 import {
   createLocationNote,
   deleteLocationNote,
@@ -129,9 +130,9 @@ async function assertLocationBelongsToOrganization({
   locationId: string;
   organizationId: string;
 }) {
-  const location = await db.location.findUnique({
+  const location = await findUnique(db, "Location", {
     where: { id: locationId },
-    select: { organizationId: true },
+    select: "organizationId",
   });
 
   if (!location || location.organizationId !== organizationId) {

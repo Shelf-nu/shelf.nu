@@ -22,6 +22,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
+import { create, update } from "~/database/query-helpers.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
@@ -246,17 +247,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Update custody for all assets
     await Promise.all(
-      kit.assets.map((asset) =>
-        db.asset.update({
+      kit.assets.map(async (asset) => {
+        await update(db, "Asset", {
           where: { id: asset.id, organizationId },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-            custody: {
-              create: { custodian: { connect: { id: custodianId } } },
-            },
-          },
-        })
-      )
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+        await create(db, "Custody", {
+          assetId: asset.id,
+          teamMemberId: custodianId,
+        });
+      })
     );
 
     // Create notes for all assets using markdoc wrappers

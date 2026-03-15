@@ -27,6 +27,7 @@ import {
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
+import { count, findUniqueOrThrow } from "~/database/query-helpers.server";
 import {
   getOrganizationAdmins,
   transferOwnership,
@@ -135,12 +136,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user.tierId === "tier_1");
 
     // Count owner's other team workspaces (for warning about tier downgrade)
-    const ownerOtherTeamWorkspacesCount = await db.organization.count({
-      where: {
-        userId: currentOrganization.userId,
-        type: OrganizationType.TEAM,
-        id: { not: currentOrganization.id },
-      },
+    const ownerOtherTeamWorkspacesCount = await count(db, "Organization", {
+      userId: currentOrganization.userId,
+      type: OrganizationType.TEAM,
+      id: { not: currentOrganization.id },
     });
 
     return payload({
@@ -191,9 +190,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         organizationId,
         organizations,
       }),
-      db.user.findUniqueOrThrow({
+      findUniqueOrThrow(db, "User", {
         where: { id: userId },
-        select: { tierId: true },
+        select: "tierId",
       }),
     ]);
 

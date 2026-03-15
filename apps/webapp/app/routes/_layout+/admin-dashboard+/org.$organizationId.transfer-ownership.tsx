@@ -11,6 +11,7 @@ import TransferOwnershipCard, {
   TransferOwnershipSchema,
 } from "~/components/settings/transfer-ownership-card";
 import { db } from "~/database/db.server";
+import { count } from "~/database/query-helpers.server";
 import {
   getOrganizationAdmins,
   getOrganizationById,
@@ -53,12 +54,10 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     );
 
     // Count owner's other team workspaces (for warning about tier downgrade)
-    const ownerOtherTeamWorkspacesCount = await db.organization.count({
-      where: {
-        userId: organization.userId,
-        type: OrganizationType.TEAM,
-        id: { not: organizationId },
-      },
+    const ownerOtherTeamWorkspacesCount = await count(db, "Organization", {
+      userId: organization.userId,
+      type: OrganizationType.TEAM,
+      id: { not: organizationId },
     });
 
     return payload({

@@ -2,6 +2,8 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findFirst, count } from "~/database/query-helpers.server";
+import { queryRaw, sql } from "~/database/sql.server";
 import { getQr } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -96,15 +98,29 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const sequentialId = parseSequentialId(qrId);
 
     if (sequentialId) {
-      const asset = await db.asset.findFirst({
-        where: {
-          organizationId,
-          sequentialId,
-        },
-        include: assetInclude,
-      });
+      const assetRows = await queryRaw<Record<string, any>>(
+        db,
+        sql`
+          SELECT a.*,
+                 l."id" as "location_id", l."name" as "location_name",
+                 cu."id" as "custody_id", cu."teamMemberId" as "custody_teamMemberId",
+                 tm."name" as "custodian_name",
+                 u2."firstName" as "custodian_firstName",
+                 u2."lastName" as "custodian_lastName",
+                 u2."profilePicture" as "custodian_profilePicture"
+          FROM "Asset" a
+          LEFT JOIN "Location" l ON l."id" = a."locationId"
+          LEFT JOIN "Custody" cu ON cu."assetId" = a."id"
+          LEFT JOIN "TeamMember" tm ON tm."id" = cu."teamMemberId"
+          LEFT JOIN "User" u2 ON u2."id" = tm."userId"
+          WHERE a."organizationId" = ${organizationId}
+            AND a."sequentialId" = ${sequentialId}
+          LIMIT 1
+        `
+      );
 
-      if (!asset) {
+      const assetRow = assetRows[0];
+      if (!assetRow) {
         throw new ShelfError({
           cause: null,
           message:
@@ -116,33 +132,44 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         });
       }
 
+      // Shape the asset to match the expected include structure
+      const asset = {
+        ...assetRow,
+        location: assetRow.location_id
+          ? { id: assetRow.location_id, name: assetRow.location_name }
+          : null,
+        custody: assetRow.custody_id
+          ? {
+              id: assetRow.custody_id,
+              teamMemberId: assetRow.custody_teamMemberId,
+              custodian: {
+                name: assetRow.custodian_name,
+                user: assetRow.custodian_firstName
+                  ? {
+                      firstName: assetRow.custodian_firstName,
+                      lastName: assetRow.custodian_lastName,
+                      profilePicture: assetRow.custodian_profilePicture,
+                    }
+                  : null,
+              },
+            }
+          : null,
+      };
+
       // If audit session ID provided, fetch the auditAssetId and counts
       let auditAssetId: string | undefined;
       let auditNotesCount = 0;
       let auditImagesCount = 0;
       if (auditSessionId && asset.id) {
-        const auditAsset = await db.auditAsset.findFirst({
-          where: {
-            auditSessionId,
-            assetId: asset.id,
-          },
-          select: { id: true },
+        const auditAsset = await findFirst(db, "AuditAsset", {
+          where: { auditSessionId, assetId: asset.id },
+          select: "id",
         });
         auditAssetId = auditAsset?.id;
         if (auditAssetId) {
           const [notesCount, imagesCount] = await Promise.all([
-            db.auditNote.count({
-              where: {
-                auditSessionId,
-                auditAssetId,
-              },
-            }),
-            db.auditImage.count({
-              where: {
-                auditSessionId,
-                auditAssetId,
-              },
-            }),
+            count(db, "AuditNote", { auditSessionId, auditAssetId }),
+            count(db, "AuditImage", { auditSessionId, auditAssetId }),
           ]);
           auditNotesCount = notesCount;
           auditImagesCount = imagesCount;
@@ -201,28 +228,15 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     let auditNotesCount = 0;
     let auditImagesCount = 0;
     if (auditSessionId && qr.asset?.id) {
-      const auditAsset = await db.auditAsset.findFirst({
-        where: {
-          auditSessionId,
-          assetId: qr.asset.id,
-        },
-        select: { id: true },
+      const auditAsset = await findFirst(db, "AuditAsset", {
+        where: { auditSessionId, assetId: qr.asset.id },
+        select: "id",
       });
       auditAssetId = auditAsset?.id;
       if (auditAssetId) {
         const [notesCount, imagesCount] = await Promise.all([
-          db.auditNote.count({
-            where: {
-              auditSessionId,
-              auditAssetId,
-            },
-          }),
-          db.auditImage.count({
-            where: {
-              auditSessionId,
-              auditAssetId,
-            },
-          }),
+          count(db, "AuditNote", { auditSessionId, auditAssetId }),
+          count(db, "AuditImage", { auditSessionId, auditAssetId }),
         ]);
         auditNotesCount = notesCount;
         auditImagesCount = imagesCount;

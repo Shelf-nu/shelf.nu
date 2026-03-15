@@ -1,6 +1,7 @@
 import type { Organization, SsoDetails } from "@shelf/database";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
 import {
   deleteAuthAccount,
   getAuthUserById,
@@ -232,9 +233,9 @@ export async function checkDomainSSOStatus(
  */
 export async function doesSSOUserExist(email: string): Promise<boolean> {
   try {
-    const user = await db.user.findUnique({
+    const user = await findUnique(db, "User", {
       where: { email: email.toLowerCase() },
-      select: { sso: true },
+      select: "sso",
     });
 
     return user?.sso || false;

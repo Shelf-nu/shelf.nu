@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { findMany } from "~/database/query-helpers.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -36,16 +37,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return data(payload({ assets: [] }));
     }
 
-    const assets = await db.asset.findMany({
+    const assets = await findMany(db, "asset", {
       where: {
         id: { in: assetIds },
-        organizationId, // Ensure user can only see assets from their organization
+        organizationId,
       },
-      select: {
-        id: true,
-        title: true,
-        mainImage: true,
-      },
+      select: "id, title, mainImage",
       orderBy: {
         title: "asc",
       },

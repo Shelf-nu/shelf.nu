@@ -25,6 +25,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { remove, update } from "~/database/query-helpers.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -293,13 +294,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * If kit was in custody then we have to make the asset available
          */
         if (kit.custody?.custodianId) {
-          await db.asset.update({
+          await update(db, "Asset", {
             where: { id: assetId, organizationId },
-            data: {
-              status: AssetStatus.AVAILABLE,
-              custody: { delete: true },
-            },
+            data: { status: AssetStatus.AVAILABLE },
           });
+          await remove(db, "Custody", { assetId });
         }
 
         const actor = wrapUserLinkForNote({

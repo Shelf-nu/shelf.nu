@@ -3,6 +3,7 @@ import { data, redirect } from "react-router";
 import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
+import { findUnique } from "~/database/query-helpers.server";
 import { createNote, deleteNote } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -44,9 +45,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // Validate that the asset belongs to the user's organization
-    const asset = await db.asset.findUnique({
+    const asset = await findUnique(db, "Asset", {
       where: { id: assetId, organizationId },
-      select: { id: true },
+      select: "id",
     });
 
     if (!asset) {
