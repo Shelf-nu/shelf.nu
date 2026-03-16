@@ -1,0 +1,30 @@
+appId: com.shelf.companion
+name: "Audits - List Loads"
+tags:
+  - audits
+  - smoke
+
+---
+# Test: Audits list screen loads correctly
+# Verifies filter pills and audit cards with progress bars
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Audits via Quick Action (index: 0 = quick action row)
+- tapOn:
+    text: "Audits"
+    index: 0
+
+# Use tapOn on page title for reliable tree refresh
+- tapOn:
+    text: "Audits"
+
+# Verify audits screen filter pills (a11y: "Filter: {name}")
+- assertVisible: "Filter: Active.*"
+- assertVisible: "Filter: Completed"
+
+- takeScreenshot: audits-list-loaded

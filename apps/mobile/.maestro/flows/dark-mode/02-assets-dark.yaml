@@ -1,0 +1,40 @@
+appId: com.shelf.companion
+name: "Dark Mode - Assets Screen"
+tags:
+  - dark-mode
+  - visual
+
+---
+# Test: Assets screen in dark mode
+# Captures screenshots for visual regression review
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Switch to dark theme via Settings
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "APPEARANCE"
+    timeout: 8000
+- tapOn: "Theme: Dark"
+
+# Navigate to Assets tab
+- tapOn: "Assets"
+
+# Wait for Assets screen to load
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+- takeScreenshot: dark-mode-assets-list
+
+# Open an asset detail via deep link (optional — asset may not exist)
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+- tapOn:
+    text: "Status"
+    optional: true
+
+- takeScreenshot: dark-mode-asset-detail

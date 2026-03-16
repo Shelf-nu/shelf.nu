@@ -1,0 +1,32 @@
+appId: com.shelf.companion
+name: "Scanner - Home Scan Code Quick Action"
+tags:
+  - scanner
+  - barcode
+
+---
+# Test: Home screen "Scan Code" quick action navigates to scanner
+# Verifies the renamed quick action (was "Scan QR", now "Scan Code")
+# still correctly navigates to the scanner tab.
+
+- runFlow: ../../shared/login.yaml
+
+# Verify the Home screen loaded
+- assertVisible: "Home"
+
+# The quick action should say "Scan Code" (updated from "Scan QR")
+- assertVisible: "Scan Code"
+
+# Tap the quick action
+- tapOn: "Scan Code"
+
+# Handle camera permission
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Verify we navigated to the scanner (tab should be highlighted)
+- assertVisible:
+    text: "Scan"
+
+- takeScreenshot: home-scan-code-quick-action

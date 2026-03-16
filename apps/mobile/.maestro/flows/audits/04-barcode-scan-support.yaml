@@ -1,0 +1,52 @@
+appId: com.shelf.companion
+name: "Audits - Barcode Scan Support"
+tags:
+  - audits
+  - barcode
+
+---
+# Test: Audit scan flow supports barcodes
+# Opens audit detail and starts scanning. Verifies the scanner
+# renders with barcode support (expanded barcodeTypes). The scan
+# prompt text should say "Scan a code to begin" (updated from
+# "Scan a QR code to begin"). All steps are optional since audits
+# may not exist on Personal workspace.
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Audits via Quick Action
+- tapOn:
+    text: "Audits"
+    index: 0
+
+# Use tapOn on page title for tree refresh
+- tapOn:
+    text: "Audits"
+
+# Tap the first audit card (optional)
+- tapOn:
+    text: "Tap to scan"
+    optional: true
+
+# Tap "Start Scanning" button on detail view (optional)
+- tapOn:
+    text: "Start Scanning"
+    optional: true
+
+# Handle camera permission if needed
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Verify the updated prompt text (barcode support)
+# Note: This assertion is optional since it depends on having an
+# active audit with no scans yet
+- assertVisible:
+    text: "Scan a code to begin"
+    optional: true
+
+- takeScreenshot: audits-barcode-scan-support

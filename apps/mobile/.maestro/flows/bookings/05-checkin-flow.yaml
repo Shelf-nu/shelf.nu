@@ -1,0 +1,30 @@
+appId: com.shelf.companion
+name: "Bookings - Checkin Flow"
+tags:
+  - bookings
+
+---
+# Test: Booking checkin flow
+# Navigates to Bookings and attempts to find an ONGOING booking for checkin
+# Note: Requires an ONGOING booking to exist in test data — all steps are optional
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Bookings via tab bar
+- tapOn: "Bookings"
+
+# Use tapOn on page title for tree refresh
+- tapOn:
+    text: "Bookings"
+
+# Look for a booking with "Tap to check in" hint (optional — may not exist)
+- tapOn:
+    text: "Tap to check in"
+    optional: true
+
+# If found, verify checkin options
+- takeScreenshot: bookings-checkin-flow

@@ -1,0 +1,25 @@
+appId: com.shelf.companion
+---
+# Shared logout flow — navigates to Settings and signs out
+# Note: The tapOn commands here provide tree refreshes between steps
+
+- tapOn: "Settings"
+
+# Wait for Settings screen to load
+- extendedWaitUntil:
+    visible: "APPEARANCE"
+    timeout: 8000
+
+# Tap Sign Out (a11y label: "Sign out of your account")
+- tapOn: "Sign out of your account"
+
+# Confirm sign-out alert (second "Sign Out" = the alert button)
+- tapOn:
+    text: "Sign Out"
+    index: 1
+
+# Wait for login screen to appear — use id selector for reliability
+- extendedWaitUntil:
+    visible:
+      id: "email-input"
+    timeout: 10000

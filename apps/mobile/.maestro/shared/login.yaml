@@ -1,0 +1,68 @@
+appId: com.shelf.companion
+---
+# Shared login flow — used as initFlow by every test
+# Clears app state, launches, connects to dev server, and signs in
+# User: nbonev@duck.com (Admin/Owner of Team WS)
+#
+# IMPORTANT: Run `xcrun simctl keychain booted reset` before this flow
+# to clear SecureStore auth tokens (clearState only clears AsyncStorage).
+#
+# NOTE: The Shelf webapp must be running on localhost:3000 for API data
+# to load. Auth works via Supabase directly (no webapp needed).
+
+- clearState
+- clearKeychain
+- launchApp
+
+# Dismiss any pending deep link alerts from previous test runs
+- tapOn:
+    text: "Cancel"
+    optional: true
+
+# Expo dev client launcher — tap the dev server to load the app
+- assertVisible: "http://localhost:8081"
+- tapOn: "http://localhost:8081"
+
+# Dismiss Expo developer menu overlays if they appear
+# First launch after clearState shows a "Continue" welcome dialog
+# which opens the full dev tools bottom sheet. Dismiss both.
+- tapOn:
+    text: "Continue"
+    optional: true
+# Swipe down to dismiss the dev tools bottom sheet
+- swipe:
+    direction: DOWN
+    duration: 500
+
+# Wait for Metro to bundle the JS and render the login screen
+# After clearState + keychain reset, app always shows login screen
+- extendedWaitUntil:
+    visible:
+      id: "email-input"
+    timeout: 120000
+
+# Enter email
+- tapOn:
+    id: "email-input"
+- inputText: ${SHELF_TEST_EMAIL}
+
+# Enter password — note: returnKeyType="go" may trigger auto-submit
+- tapOn:
+    id: "password-input"
+- inputText: ${SHELF_TEST_PASSWORD}
+
+# Dismiss keyboard and sign in (optional — login may already fire via onSubmitEditing)
+- hideKeyboard
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Wait for main app to load — tab bar text "Home" becomes visible
+# This confirms auth succeeded and the main app rendered
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 30000
+
+# Navigate to Home tab and wait briefly for it to settle
+- tapOn: "Home"
+- waitForAnimationToEnd

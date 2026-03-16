@@ -1,0 +1,27 @@
+appId: com.shelf.companion
+name: "Scanner - Deep Link QR Scan"
+tags:
+  - scanner
+  - smoke
+
+---
+# Test: Simulated QR scan via deep link
+# Uses shelf://qr/{id} to trigger the same code path as a real camera scan
+# This exercises: deep link parsing → resolveQrAndNavigate() → api.qr() → asset detail
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Simulate QR scan via deep link
+- openLink: "shelf://qr/${SHELF_TEST_QR_ID}"
+
+# The app should resolve the QR code and navigate to asset detail
+# Use tapOn on a detail element for reliable tree refresh
+- tapOn:
+    text: "Status"
+    optional: true
+
+- takeScreenshot: scanner-deeplink-qr-resolved

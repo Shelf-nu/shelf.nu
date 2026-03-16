@@ -1,0 +1,40 @@
+appId: com.shelf.companion
+name: "Assets - Search and Filter"
+tags:
+  - assets
+
+---
+# Test: Asset search and filter pills
+# Verifies debounced search and filter pill toggling
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Assets tab
+- tapOn: "Assets"
+
+# Wait for Assets screen to load
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+# Test search functionality — tap the search bar
+- tapOn: "Search assets..."
+- inputText: "test"
+
+# Dismiss keyboard by pressing back
+- back
+- takeScreenshot: assets-search-results
+
+# Test filter pills (a11y labels: "Filter: {name}")
+# Note: Filter pills are in a horizontal scroll — tapping later pills
+# may scroll "All" off-screen, so test Available first then reset
+- tapOn: "Filter: Available.*"
+- takeScreenshot: assets-filter-available
+
+# Reset to All before testing further (Available is near All, so it should be visible)
+- tapOn: "Filter: All.*"
+- takeScreenshot: assets-filter-all
