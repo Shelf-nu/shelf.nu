@@ -3070,12 +3070,17 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
 /**
  * Refreshes expired signed URLs for asset images server-side.
  * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
+ *
+ * Only refreshes existing thumbnail URLs — does not generate missing
+ * thumbnails, as that requires downloading + re-uploading images
+ * which is too expensive for a batch operation.
  */
 export async function refreshExpiredAssetImages<
   T extends {
     id: string;
     mainImage: string | null;
     mainImageExpiration: Date | null;
+    thumbnailImage?: string | null;
   },
 >(assets: T[]): Promise<T[]> {
   const now = new Date();
@@ -3088,44 +3093,123 @@ export async function refreshExpiredAssetImages<
 
   if (expiredAssets.length === 0) return assets;
 
-  const refreshResults = await Promise.allSettled(
-    expiredAssets.map(async (asset) => {
-      const storagePath = extractStoragePath(asset.mainImage!, "assets");
-      if (!storagePath) return null;
+  const BATCH_SIZE = 10;
+  /** Short backoff to prevent retry storms when refresh fails */
+  const BACKOFF_SECONDS = 30;
 
-      const newSignedUrl = await createSignedUrl({
-        filename: storagePath,
+  const refreshAsset = async (asset: (typeof expiredAssets)[number]) => {
+    try {
+      const mainImagePath = extractStoragePath(asset.mainImage!, "assets");
+      if (!mainImagePath) return null;
+
+      const newMainImageUrl = await createSignedUrl({
+        filename: mainImagePath,
         bucketName: "assets",
       });
 
+      // Refresh thumbnail if present
+      let newThumbnailUrl: string | null = null;
+      if (asset.thumbnailImage) {
+        const thumbnailPath = extractStoragePath(
+          asset.thumbnailImage,
+          "assets"
+        );
+        if (thumbnailPath) {
+          newThumbnailUrl = await createSignedUrl({
+            filename: thumbnailPath,
+            bucketName: "assets",
+          });
+        }
+      }
+
       const newExpiration = oneDayFromNow();
+
+      const updateData: {
+        mainImage: string;
+        mainImageExpiration: Date;
+        thumbnailImage?: string;
+      } = {
+        mainImage: newMainImageUrl,
+        mainImageExpiration: newExpiration,
+      };
+
+      if (newThumbnailUrl) {
+        updateData.thumbnailImage = newThumbnailUrl;
+      }
 
       await db.asset.update({
         where: { id: asset.id },
-        data: {
-          mainImage: newSignedUrl,
-          mainImageExpiration: newExpiration,
-        },
+        data: updateData,
       });
 
       return {
         id: asset.id,
-        mainImage: newSignedUrl,
+        mainImage: newMainImageUrl,
         mainImageExpiration: newExpiration,
+        ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
       };
-    })
-  );
+    } catch (error) {
+      Logger.error(
+        new ShelfError({
+          cause: error,
+          message: `Failed to refresh expired image URLs for asset ${asset.id}`,
+          additionalData: { assetId: asset.id },
+          label: "Assets",
+          shouldBeCaptured: true,
+        })
+      );
+
+      // Bump expiration to prevent retry storm on next page load
+      try {
+        const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
+        await db.asset.update({
+          where: { id: asset.id },
+          data: { mainImageExpiration: backoffExpiration },
+        });
+      } catch {
+        // If even the backoff update fails, just move on
+      }
+      throw error;
+    }
+  };
+
+  const refreshResults: PromiseSettledResult<{
+    id: string;
+    mainImage: string;
+    mainImageExpiration: Date;
+    thumbnailImage?: string;
+  } | null>[] = [];
+
+  for (let i = 0; i < expiredAssets.length; i += BATCH_SIZE) {
+    const batch = expiredAssets.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batch.map((asset) => refreshAsset(asset))
+    );
+    refreshResults.push(...batchResults);
+  }
 
   const refreshedMap = new Map<
     string,
-    { mainImage: string; mainImageExpiration: Date }
+    {
+      mainImage: string;
+      mainImageExpiration: Date;
+      thumbnailImage?: string;
+    }
   >();
   for (const result of refreshResults) {
     if (result.status === "fulfilled" && result.value) {
-      refreshedMap.set(result.value.id, {
+      const entry: {
+        mainImage: string;
+        mainImageExpiration: Date;
+        thumbnailImage?: string;
+      } = {
         mainImage: result.value.mainImage,
         mainImageExpiration: result.value.mainImageExpiration,
-      });
+      };
+      if (result.value.thumbnailImage) {
+        entry.thumbnailImage = result.value.thumbnailImage;
+      }
+      refreshedMap.set(result.value.id, entry);
     }
   }
 

@@ -14,9 +14,11 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -211,8 +213,16 @@ export async function simpleModeLoader({
   // Refresh expired image signed URLs server-side to prevent N+1 client calls
   try {
     assets = await refreshExpiredAssetImages(assets);
-  } catch {
-    // Best-effort: if refresh fails, return assets with existing URLs
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to batch refresh expired asset images",
+        label: "Assets",
+        additionalData: { assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
   }
 
   const header: HeaderData = {
@@ -463,8 +473,16 @@ export async function advancedModeLoader({
   let refreshedAssets = assets;
   try {
     refreshedAssets = await refreshExpiredAssetImages(assets);
-  } catch {
-    // Best-effort: if refresh fails, use assets with existing URLs
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to batch refresh expired asset images",
+        label: "Assets",
+        additionalData: { assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
   }
 
   const header: HeaderData = {
