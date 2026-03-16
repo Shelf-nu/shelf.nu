@@ -1,6 +1,8 @@
 import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -246,13 +248,17 @@ export async function deleteBarcode({
   id,
   organizationId,
 }: {
-  id: Barcode["id"];
-  organizationId: Organization["id"];
+  id: string;
+  organizationId: string;
 }): Promise<void> {
   try {
-    await db.barcode.delete({
-      where: { id, organizationId },
-    });
+    const { error } = await sbDb
+      .from("Barcode")
+      .delete()
+      .eq("id", id)
+      .eq("organizationId", organizationId);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -271,18 +277,22 @@ export async function deleteBarcodes({
   kitId,
   organizationId,
 }: {
-  assetId?: Asset["id"];
-  kitId?: Kit["id"];
-  organizationId: Organization["id"];
+  assetId?: string;
+  kitId?: string;
+  organizationId: string;
 }): Promise<void> {
   try {
-    await db.barcode.deleteMany({
-      where: {
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
-    });
+    let query = sbDb
+      .from("Barcode")
+      .delete()
+      .eq("organizationId", organizationId);
+
+    if (assetId) query = query.eq("assetId", assetId);
+    if (kitId) query = query.eq("kitId", kitId);
+
+    const { error } = await query;
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -343,20 +353,20 @@ export async function getAssetBarcodes({
   assetId,
   organizationId,
 }: {
-  assetId: Asset["id"];
-  organizationId: Organization["id"];
-}): Promise<Barcode[]> {
+  assetId: string;
+  organizationId: string;
+}): Promise<Sb.BarcodeRow[]> {
   try {
-    const barcodes = await db.barcode.findMany({
-      where: {
-        assetId,
-        organizationId,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-    });
-    return barcodes;
+    const { data, error } = await sbDb
+      .from("Barcode")
+      .select("*")
+      .eq("assetId", assetId)
+      .eq("organizationId", organizationId)
+      .order("createdAt", { ascending: true });
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -374,20 +384,20 @@ export async function getKitBarcodes({
   kitId,
   organizationId,
 }: {
-  kitId: Kit["id"];
-  organizationId: Organization["id"];
-}): Promise<Barcode[]> {
+  kitId: string;
+  organizationId: string;
+}): Promise<Sb.BarcodeRow[]> {
   try {
-    const barcodes = await db.barcode.findMany({
-      where: {
-        kitId,
-        organizationId,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-    });
-    return barcodes;
+    const { data, error } = await sbDb
+      .from("Barcode")
+      .select("*")
+      .eq("kitId", kitId)
+      .eq("organizationId", organizationId)
+      .order("createdAt", { ascending: true });
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
