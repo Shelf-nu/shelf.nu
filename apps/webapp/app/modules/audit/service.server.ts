@@ -95,6 +95,7 @@ export type AuditExpectedAsset = {
   auditImagesCount?: number;
   mainImage?: string | null;
   thumbnailImage?: string | null;
+  locationName?: string | null;
 };
 
 export type CreateAuditSessionResult = {
@@ -181,6 +182,8 @@ export type AuditScanData = {
   auditNotesCount: number;
   /** Number of images on this audit asset */
   auditImagesCount: number;
+  /** Asset location name for display */
+  assetLocationName: string | null;
 };
 
 export async function createAuditSession(
@@ -589,6 +592,11 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                location: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
             _count: {
@@ -653,6 +661,7 @@ export async function getAuditSessionDetails({
         auditImagesCount: auditAsset._count?.images ?? 0,
         mainImage: auditAsset.asset?.mainImage ?? null,
         thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+        locationName: auditAsset.asset?.location?.name ?? null,
       }));
 
     return {
@@ -1201,6 +1210,11 @@ export async function getAuditScans({
           select: {
             id: true,
             title: true,
+            location: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
         auditAsset: {
@@ -1284,6 +1298,7 @@ export async function getAuditScans({
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
+        assetLocationName: scan.asset?.location?.name ?? null,
       };
     });
   } catch (cause) {
