@@ -83,9 +83,8 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
     );
   }, [audits, searchQuery]);
 
-  const selectedAuditName = audits.find(
-    (audit) => audit.id === selectedAudit
-  )?.name;
+  const selectedAuditName = audits.find((audit) => audit.id === selectedAudit)
+    ?.name;
 
   const handleSearch = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
@@ -221,8 +220,8 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                 {isLoading
                   ? "Loading audits..."
                   : searchQuery
-                    ? "No audits found"
-                    : "No pending audits found"}
+                  ? "No audits found"
+                  : "No pending audits found"}
               </div>
             )}
           </PopoverContent>

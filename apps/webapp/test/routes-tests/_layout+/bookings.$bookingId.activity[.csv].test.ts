@@ -58,8 +58,9 @@ const dbMock = db as unknown as {
 };
 
 beforeAll(async () => {
-  ({ loader } =
-    await import("~/routes/_layout+/bookings.$bookingId.activity[.csv]"));
+  ({ loader } = await import(
+    "~/routes/_layout+/bookings.$bookingId.activity[.csv]"
+  ));
 });
 
 describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => {

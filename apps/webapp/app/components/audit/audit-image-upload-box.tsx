@@ -93,8 +93,8 @@ export function AuditImageUploadBox({
       currentSelectedCount !== undefined
         ? currentSelectedCount
         : totalCountFromParent !== undefined
-          ? totalCountFromParent
-          : currentCount;
+        ? totalCountFromParent
+        : currentCount;
     const canAdd = effectiveCount < maxCount;
     if (input && canAdd && !disabled) {
       input.click();

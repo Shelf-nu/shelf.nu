@@ -9,8 +9,9 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 const { db } = await import("~/database/db.server");
-const { removeCustomFieldFromAssetIndexSettings } =
-  await import("./service.server");
+const { removeCustomFieldFromAssetIndexSettings } = await import(
+  "./service.server"
+);
 
 const executeRawMock = vi.mocked(db.$executeRaw);
 

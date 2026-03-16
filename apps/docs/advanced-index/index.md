@@ -28,16 +28,19 @@ The Advanced Index is built using:
 ### User Guides
 
 1. [Advanced Filtering Guide](./advanced-filtering-guide.md)
+
    - Comprehensive guide to using the filtering system
    - Detailed explanations of operators for each field type
    - Examples and best practices
 
 2. [Advanced Sorting Guide](./advanced-sorting-guide.md)
+
    - How to use single and multi-field sorting
    - Practical sorting strategies
    - Common sorting scenarios
 
 3. [Natural Sorting Explanation](./natural-sorting-explanation.md)
+
    - Understanding natural sort order
    - Comparison with traditional sorting
    - Benefits for medical device management
@@ -51,12 +54,14 @@ The Advanced Index is built using:
 ### Technical Documentation
 
 1. **Components**
+
    - `advanced-asset-columns.tsx`: Column definitions and rendering
    - `advanced-asset-row.tsx`: Row component implementation
    - `advanced-filters/`: Filter-related components
    - `advanced-table-header.tsx`: Table header implementation
 
 2. **Services**
+
    - `query.server.ts`: Raw query implementations
    - `service.server.ts`: Business logic and data processing
    - `types.ts`: TypeScript type definitions
@@ -69,15 +74,18 @@ The Advanced Index is built using:
 ## Getting Started
 
 1. **Access Advanced Mode**
+
    - Switch to advanced mode from the asset index page
    - Note: Advanced mode requires appropriate permissions
 
 2. **Configure Columns**
+
    - Use the column configuration menu to select visible columns
    - Drag and drop to reorder columns
    - Custom fields will appear at the end of the column list
 
 3. **Set Up Filters**
+
    - Click the filter button to add filters
    - Multiple filters can be combined
    - Use different operators based on field types
@@ -90,11 +98,13 @@ The Advanced Index is built using:
 ## Common Use Cases
 
 1. **Maintenance Planning**
+
    - Filter by maintenance due dates
    - Sort by priority and location
    - Group by department
 
 2. **Inventory Audit**
+
    - Filter by categories and value ranges
    - Sort by acquisition date
    - Group by location
@@ -107,11 +117,13 @@ The Advanced Index is built using:
 ## Best Practices
 
 1. **Performance**
+
    - Start with broad filters before adding specific ones
    - Use exact matches when possible
    - Combine filters effectively
 
 2. **Organization**
+
    - Use consistent naming conventions
    - Maintain accurate custom field data
    - Regular cleanup of unused filters

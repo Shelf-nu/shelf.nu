@@ -59,8 +59,8 @@ function ConditionalActionsDropdown() {
     !selectedAssets.length
       ? ""
       : allSelected
-        ? "(All)"
-        : `(${selectedAssets.length})`
+      ? "(All)"
+      : `(${selectedAssets.length})`
   }`;
 
   const disabledReason = useMemo(() => {

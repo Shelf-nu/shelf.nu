@@ -238,8 +238,8 @@ function Item({
       planTier === "tier_2"
         ? "Team plan"
         : planTier === "tier_1"
-          ? "Plus plan"
-          : productName;
+        ? "Plus plan"
+        : productName;
 
     const arr: (string | ReactNode)[] = [
       displayName,

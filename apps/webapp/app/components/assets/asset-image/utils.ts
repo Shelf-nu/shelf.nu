@@ -5,7 +5,7 @@ export function hasMainImage(asset: {
   mainImage?: unknown;
 }): asset is { mainImage: string } {
   return (
-    (typeof "mainImage") in asset &&
+    typeof "mainImage" in asset &&
     asset.mainImage === "string" &&
     asset.mainImage.length > 0
   );
