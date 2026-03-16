@@ -1,4 +1,5 @@
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import { ShelfError } from "~/utils/error";
 
@@ -28,9 +29,15 @@ async function assertPresetOwnership({
   organizationId: string;
   ownerId: string;
 }) {
-  const preset = await db.assetFilterPreset.findFirst({
-    where: { id, organizationId, ownerId },
-  });
+  const { data: preset, error } = await sbDb
+    .from("AssetFilterPreset")
+    .select("*")
+    .eq("id", id)
+    .eq("organizationId", organizationId)
+    .eq("ownerId", ownerId)
+    .maybeSingle();
+
+  if (error) throw error;
 
   if (!preset) {
     throw new ShelfError({
@@ -47,17 +54,24 @@ async function assertPresetOwnership({
 /**
  * List all filter presets for a user within an organization
  */
-export function listPresetsForUser({
+export async function listPresetsForUser({
   organizationId,
   ownerId,
 }: {
   organizationId: string;
   ownerId: string;
 }) {
-  return db.assetFilterPreset.findMany({
-    where: { organizationId, ownerId },
-    orderBy: [{ starred: "desc" }, { name: "asc" }],
-  });
+  const { data, error } = await sbDb
+    .from("AssetFilterPreset")
+    .select("*")
+    .eq("organizationId", organizationId)
+    .eq("ownerId", ownerId)
+    .order("starred", { ascending: false })
+    .order("name", { ascending: true });
+
+  if (error) throw error;
+
+  return data;
 }
 
 /**
@@ -203,7 +217,9 @@ export async function deletePreset({
 }) {
   await assertPresetOwnership({ id, organizationId, ownerId });
 
-  return db.assetFilterPreset.delete({ where: { id } });
+  const { error } = await sbDb.from("AssetFilterPreset").delete().eq("id", id);
+
+  if (error) throw error;
 }
 /** End of deletePreset function */
 
@@ -223,9 +239,15 @@ export async function togglePresetStar({
 }) {
   await assertPresetOwnership({ id, organizationId, ownerId });
 
-  return db.assetFilterPreset.update({
-    where: { id },
-    data: { starred },
-  });
+  const { data, error } = await sbDb
+    .from("AssetFilterPreset")
+    .update({ starred })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return data;
 }
 /** End of togglePresetStar function */
