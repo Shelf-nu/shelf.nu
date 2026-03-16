@@ -1,6 +1,6 @@
-import type { TierId } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import Stripe from "stripe";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import { unpaidInvoiceAdminText } from "~/emails/stripe/unpaid-invoice";
 import {
@@ -17,11 +17,11 @@ export type WebhookUser = {
   email: string;
   firstName: string | null;
   lastName: string | null;
-  tierId: TierId;
+  tierId: Sb.TierId;
   warnForNoPaymentMethod: boolean;
 };
 
-export const subscriptionTiersPriority: Record<TierId, number> = {
+export const subscriptionTiersPriority: Record<Sb.TierId, number> = {
   free: 0,
   tier_1: 1, // plus
   tier_2: 2, // team
@@ -214,27 +214,21 @@ export async function constructVerifiedWebhookEvent(request: Request): Promise<{
     });
   }
 
-  const user = await db.user
-    .findFirstOrThrow({
-      where: { customerId },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        tierId: true,
-        warnForNoPaymentMethod: true,
-      },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "No user found",
-        additionalData: { customerId },
-        label: "Stripe webhook",
-        status: 500,
-      });
+  const { data: user, error: userError } = await sbDb
+    .from("User")
+    .select("id, email, firstName, lastName, tierId, warnForNoPaymentMethod")
+    .eq("customerId", customerId)
+    .single();
+
+  if (userError || !user) {
+    throw new ShelfError({
+      cause: userError,
+      message: "No user found",
+      additionalData: { customerId },
+      label: "Stripe webhook",
+      status: 500,
     });
+  }
 
   // Custom install users — no processing needed
   const customInstallUsers = (CUSTOM_INSTALL_CUSTOMERS ?? "").split(",");

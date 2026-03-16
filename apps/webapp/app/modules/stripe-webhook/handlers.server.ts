@@ -1,6 +1,6 @@
-import { TierId } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import type Stripe from "stripe";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
@@ -31,6 +31,32 @@ import {
 } from "./helpers.server";
 
 const OK = () => new Response(null, { status: 200 });
+
+/** Helper to update a user by their Stripe customerId */
+async function updateUserByCustomerId(
+  customerId: string,
+  data: Record<string, unknown>,
+  context: { event: Stripe.Event; extraData?: Record<string, unknown> }
+) {
+  const { error } = await sbDb
+    .from("User")
+    .update(data)
+    .eq("customerId", customerId);
+
+  if (error) {
+    throw new ShelfError({
+      cause: error,
+      message: "Failed to update user",
+      additionalData: {
+        customerId,
+        event: context.event,
+        ...context.extraData,
+      },
+      label: "Stripe webhook",
+      status: 500,
+    });
+  }
+}
 
 // ─── Checkout ──────────────────────────────────────────────
 
@@ -77,21 +103,7 @@ export async function handleCheckoutCompleted(
     return OK();
   }
 
-  await db.user
-    .update({
-      where: { customerId },
-      data: { tierId: tierId as TierId },
-      select: { id: true },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to update user tier",
-        additionalData: { customerId, tierId, event },
-        label: "Stripe webhook",
-        status: 500,
-      });
-    });
+  await updateUserByCustomerId(customerId, { tierId }, { event });
 
   return OK();
 }
@@ -130,63 +142,31 @@ export async function handleSubscriptionCreated(
     !!subscription.trial_end && !!subscription.trial_start;
 
   if (isTrialSubscription && !isTransferredSubscription) {
-    const trialUser = await db.user
-      .update({
-        where: { customerId },
-        data: {
-          tierId: tierId as TierId,
-          usedFreeTrial: true,
-        },
-        select: { email: true, firstName: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to update user tier",
-          additionalData: { customerId, tierId, event },
-          label: "Stripe webhook",
-          status: 500,
-        });
-      });
+    await updateUserByCustomerId(
+      customerId,
+      { tierId, usedFreeTrial: true },
+      { event }
+    );
 
-    void sendTeamTrialWelcomeEmail({
-      email: trialUser.email,
-      firstName: trialUser.firstName,
-    });
+    // Fetch user email/name for welcome email
+    const { data: trialUser } = await sbDb
+      .from("User")
+      .select("email, firstName")
+      .eq("customerId", customerId)
+      .single();
+
+    if (trialUser) {
+      void sendTeamTrialWelcomeEmail({
+        email: trialUser.email,
+        firstName: trialUser.firstName,
+      });
+    }
   } else if (isTransferredSubscription) {
     // Transferred subscription: update tier but skip welcome emails
     // and don't set usedFreeTrial (already handled in transferOwnership)
-    await db.user
-      .update({
-        where: { customerId },
-        data: { tierId: tierId as TierId },
-        select: { id: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to update user tier",
-          additionalData: { customerId, tierId, event },
-          label: "Stripe webhook",
-          status: 500,
-        });
-      });
+    await updateUserByCustomerId(customerId, { tierId }, { event });
   } else {
-    await db.user
-      .update({
-        where: { customerId },
-        data: { tierId: tierId as TierId },
-        select: { id: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to update user tier",
-          additionalData: { customerId, tierId, event },
-          label: "Stripe webhook",
-          status: 500,
-        });
-      });
+    await updateUserByCustomerId(customerId, { tierId }, { event });
 
     const { emailsToNotify, customerName } = await getCustomerNotificationData({
       customerId,
@@ -235,7 +215,7 @@ export async function handleSubscriptionPaused(
   }
 
   const pausedSubscriptionIsHigherOrEqualTier = isHigherOrEqualTier(
-    tierId as TierId,
+    tierId as Sb.TierId,
     user.tierId
   );
 
@@ -243,24 +223,10 @@ export async function handleSubscriptionPaused(
     subscription.status === "paused" &&
     pausedSubscriptionIsHigherOrEqualTier
   ) {
-    await db.user
-      .update({
-        where: { customerId },
-        data: { tierId: "free" },
-        select: { id: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to update user tier",
-          additionalData: { customerId, tierId, event },
-          label: "Stripe webhook",
-          status: 500,
-        });
-      });
+    await updateUserByCustomerId(customerId, { tierId: "free" }, { event });
 
     // Only reset branding when downgrading from Plus (tier_1) to Free
-    if (user.tierId === TierId.tier_1) {
+    if (user.tierId === "tier_1") {
       await resetPersonalWorkspaceBranding(user.id);
     }
   }
@@ -297,26 +263,12 @@ export async function handleSubscriptionUpdated(
   }
 
   const newSubscriptionIsHigherTier = isHigherTier(
-    tierId as TierId,
+    tierId as Sb.TierId,
     user.tierId
   );
 
   if (subscription.status === "active" && newSubscriptionIsHigherTier) {
-    await db.user
-      .update({
-        where: { customerId },
-        data: { tierId: tierId as TierId },
-        select: { id: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to update user tier",
-          additionalData: { customerId, tierId, event },
-          label: "Stripe webhook",
-          status: 500,
-        });
-      });
+    await updateUserByCustomerId(customerId, { tierId }, { event });
   }
 
   return OK();
@@ -351,29 +303,15 @@ export async function handleSubscriptionDeleted(
   }
 
   const deletedSubscriptionIsHigherOrEqualTier = isHigherOrEqualTier(
-    tierId as TierId,
+    tierId as Sb.TierId,
     user.tierId
   );
 
   if (deletedSubscriptionIsHigherOrEqualTier) {
-    await db.user
-      .update({
-        where: { customerId },
-        data: { tierId: TierId.free },
-        select: { id: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Failed to delete user subscription",
-          additionalData: { customerId, event },
-          label: "Stripe webhook",
-          status: 500,
-        });
-      });
+    await updateUserByCustomerId(customerId, { tierId: "free" }, { event });
 
     // Only reset branding when downgrading from Plus (tier_1) to Free
-    if (user.tierId === TierId.tier_1) {
+    if (user.tierId === "tier_1") {
       await resetPersonalWorkspaceBranding(user.id);
     }
   }
@@ -390,21 +328,11 @@ export async function handleInvoicePaymentFailed(
 ) {
   const failedInvoice = event.data.object as Stripe.Invoice;
 
-  await db.user
-    .update({
-      where: { customerId },
-      data: { hasUnpaidInvoice: true },
-      select: { id: true },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to update unpaid invoice flag",
-        additionalData: { customerId, event },
-        label: "Stripe webhook",
-        status: 500,
-      });
-    });
+  await updateUserByCustomerId(
+    customerId,
+    { hasUnpaidInvoice: true },
+    { event }
+  );
 
   // If user was warned about missing payment method and payment fails,
   // pause the subscription immediately instead of waiting for Stripe's retry logic.
@@ -464,21 +392,11 @@ export async function handleInvoicePaid(
 
   // Clear unpaid invoice flag and missing payment method warning
   // (paying an invoice proves they have a working payment method)
-  await db.user
-    .update({
-      where: { customerId },
-      data: { hasUnpaidInvoice: false, warnForNoPaymentMethod: false },
-      select: { id: true },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to update unpaid invoice flag",
-        additionalData: { customerId, event },
-        label: "Stripe webhook",
-        status: 500,
-      });
-    });
+  await updateUserByCustomerId(
+    customerId,
+    { hasUnpaidInvoice: false, warnForNoPaymentMethod: false },
+    { event }
+  );
 
   /**
    * Safety net: Update user tier when a subscription invoice is paid.
@@ -512,32 +430,17 @@ export async function handleInvoicePaid(
         ) {
           const organizationId = subscription?.metadata?.organizationId;
           if (organizationId) {
-            await db.organization.update({
-              where: { id: organizationId },
-              data: { auditsEnabled: true },
-              select: { id: true },
-            });
+            await sbDb
+              .from("Organization")
+              .update({ auditsEnabled: true })
+              .eq("id", organizationId);
           }
         }
 
         // Update tier for non-addon products
         if (tierId && productType !== "addon") {
-          if (isHigherOrEqualTier(tierId as TierId, user.tierId)) {
-            await db.user
-              .update({
-                where: { customerId },
-                data: { tierId: tierId as TierId },
-                select: { id: true },
-              })
-              .catch((cause) => {
-                throw new ShelfError({
-                  cause,
-                  message: "Failed to update user tier from paid invoice",
-                  additionalData: { customerId, tierId, event },
-                  label: "Stripe webhook",
-                  status: 500,
-                });
-              });
+          if (isHigherOrEqualTier(tierId as Sb.TierId, user.tierId)) {
+            await updateUserByCustomerId(customerId, { tierId }, { event });
           }
         }
       }
@@ -566,21 +469,11 @@ export async function handleInvoiceResolved(
 ) {
   const resolvedInvoice = event.data.object as Stripe.Invoice;
 
-  await db.user
-    .update({
-      where: { customerId },
-      data: { hasUnpaidInvoice: false },
-      select: { id: true },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to update unpaid invoice flag",
-        additionalData: { customerId, event },
-        label: "Stripe webhook",
-        status: 500,
-      });
-    });
+  await updateUserByCustomerId(
+    customerId,
+    { hasUnpaidInvoice: false },
+    { event }
+  );
 
   sendAdminInvoiceEmail({
     user,
@@ -602,21 +495,11 @@ export async function handleInvoiceOverdue(
   const overdueInvoice = event.data.object as Stripe.Invoice;
 
   // Mark user as having unpaid invoice
-  await db.user
-    .update({
-      where: { customerId },
-      data: { hasUnpaidInvoice: true },
-      select: { id: true },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to update unpaid invoice flag",
-        additionalData: { customerId, event },
-        label: "Stripe webhook",
-        status: 500,
-      });
-    });
+  await updateUserByCustomerId(
+    customerId,
+    { hasUnpaidInvoice: true },
+    { event }
+  );
 
   sendAdminInvoiceEmail({
     user,
@@ -660,25 +543,11 @@ export async function handleInvoiceOverdue(
 
     // Only downgrade for non-addon subscription products with a tier
     if (tierId && productType !== "addon") {
-      if (isHigherOrEqualTier(tierId as TierId, user.tierId)) {
-        await db.user
-          .update({
-            where: { customerId },
-            data: { tierId: TierId.free },
-            select: { id: true },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to downgrade user tier for overdue invoice",
-              additionalData: { customerId, tierId, event },
-              label: "Stripe webhook",
-              status: 500,
-            });
-          });
+      if (isHigherOrEqualTier(tierId as Sb.TierId, user.tierId)) {
+        await updateUserByCustomerId(customerId, { tierId: "free" }, { event });
 
         // Reset branding when downgrading from Plus (tier_1) to Free
-        if (user.tierId === TierId.tier_1) {
+        if (user.tierId === "tier_1") {
           await resetPersonalWorkspaceBranding(user.id);
         }
       }
@@ -743,21 +612,11 @@ export async function handlePaymentMethodAttached(
   customerId: string
 ) {
   // Clear the warning flag when user adds a payment method
-  await db.user
-    .update({
-      where: { customerId },
-      data: { warnForNoPaymentMethod: false },
-      select: { id: true },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to clear missing payment method warning",
-        additionalData: { customerId, event: _event },
-        label: "Stripe webhook",
-        status: 500,
-      });
-    });
+  await updateUserByCustomerId(
+    customerId,
+    { warnForNoPaymentMethod: false },
+    { event: _event }
+  );
 
   return OK();
 }
@@ -780,21 +639,11 @@ export async function handlePaymentMethodDetached(
     const activeSubscription = getCustomerActiveSubscription({ customer });
 
     if (activeSubscription) {
-      await db.user
-        .update({
-          where: { customerId },
-          data: { warnForNoPaymentMethod: true },
-          select: { id: true },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to set missing payment method warning",
-            additionalData: { customerId, event: _event },
-            label: "Stripe webhook",
-            status: 500,
-          });
-        });
+      await updateUserByCustomerId(
+        customerId,
+        { warnForNoPaymentMethod: true },
+        { event: _event }
+      );
     }
   }
 
