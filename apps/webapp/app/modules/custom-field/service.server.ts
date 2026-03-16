@@ -6,6 +6,7 @@ import type {
   UserOrganization,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -145,14 +146,17 @@ export async function getFilteredAndPaginatedCustomFields(params: {
        * Uses COUNT(DISTINCT "assetId") to ensure each asset is counted only once per custom field,
        * preventing inflated counts if duplicate AssetCustomFieldValue records exist
        */
-      db.$queryRaw<Array<{ customFieldId: string; count: bigint }>>`SELECT
-          acfv."customFieldId",
-          COUNT(DISTINCT acfv."assetId")::int as count
-        FROM "AssetCustomFieldValue" acfv
-        INNER JOIN "CustomField" cf ON acfv."customFieldId" = cf.id
-        WHERE cf."organizationId" = ${organizationId}
-          AND cf."deletedAt" IS NULL
-        GROUP BY acfv."customFieldId"`,
+      sbDb
+        .rpc("get_custom_field_usage_counts", {
+          organization_id: organizationId,
+        })
+        .then(({ data, error }) => {
+          if (error) throw error;
+          return (data ?? []) as Array<{
+            customFieldId: string;
+            count: number;
+          }>;
+        }),
     ]);
 
     /** Create a map of custom field ID to usage count */
@@ -391,7 +395,6 @@ export async function softDeleteCustomField({
         await removeCustomFieldFromAssetIndexSettings({
           customFieldName: existingCustomField.name,
           organizationId,
-          prisma: tx,
         });
 
         return deletedField;

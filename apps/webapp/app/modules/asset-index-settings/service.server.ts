@@ -341,31 +341,19 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
 export async function removeCustomFieldFromAssetIndexSettings({
   customFieldName,
   organizationId,
-  prisma,
 }: {
   customFieldName: string;
   organizationId: string;
-  prisma?: Pick<Prisma.TransactionClient, "$executeRaw">;
 }) {
-  const client = prisma ?? db;
-
   try {
     const columnName = `cf_${customFieldName}`;
 
-    await client.$executeRaw`
-      UPDATE "AssetIndexSettings" AS ais
-      SET "columns" = (
-        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-        FROM jsonb_array_elements(ais."columns") elem
-        WHERE elem->>'name' <> ${columnName}
-      )
-      WHERE ais."organizationId" = ${organizationId}
-        AND EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements(ais."columns") elem
-          WHERE elem->>'name' = ${columnName}
-        );
-    `;
+    const { error } = await sbDb.rpc("remove_custom_field_from_asset_index", {
+      column_name: columnName,
+      organization_id: organizationId,
+    });
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,

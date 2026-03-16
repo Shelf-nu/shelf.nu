@@ -1362,12 +1362,11 @@ export async function revokeAccessToOrganization({
     // Uses raw SQL to avoid bumping updatedAt. No-op if already different.
     // Best-effort: don't block revocation if cleanup fails.
     try {
-      await db.$executeRaw`
-        UPDATE "User"
-        SET "lastSelectedOrganizationId" = NULL
-        WHERE "id" = ${userId}
-          AND "lastSelectedOrganizationId" = ${organizationId}
-      `;
+      const { error: cleanupRpcError } = await sbDb.rpc(
+        "clear_user_last_selected_org",
+        { user_id: userId, organization_id: organizationId }
+      );
+      if (cleanupRpcError) throw cleanupRpcError;
     } catch (cleanupError) {
       Logger.warn(
         "Failed to clear lastSelectedOrganizationId during access revocation",

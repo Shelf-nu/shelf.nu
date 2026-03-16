@@ -60,7 +60,10 @@ export function isAddonSubscription({
 }
 
 /** Returns true if `newTier` is strictly higher than `currentTier` */
-export function isHigherTier(newTier: TierId, currentTier: TierId): boolean {
+export function isHigherTier(
+  newTier: Sb.TierId,
+  currentTier: Sb.TierId
+): boolean {
   return (
     subscriptionTiersPriority[newTier] > subscriptionTiersPriority[currentTier]
   );
@@ -68,8 +71,8 @@ export function isHigherTier(newTier: TierId, currentTier: TierId): boolean {
 
 /** Returns true if `newTier` is higher than or equal to `currentTier` */
 export function isHigherOrEqualTier(
-  newTier: TierId,
-  currentTier: TierId
+  newTier: Sb.TierId,
+  currentTier: Sb.TierId
 ): boolean {
   return (
     subscriptionTiersPriority[newTier] >= subscriptionTiersPriority[currentTier]

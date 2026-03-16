@@ -5,7 +5,6 @@ import {
 } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
@@ -58,18 +57,20 @@ export async function confirmExistingAuthAccount(
   password: string
 ) {
   try {
-    const result = await db.$queryRaw<{ id: string }[]>`
-      SELECT id FROM auth.users
-      WHERE email = ${email.toLowerCase()}
-      LIMIT 1
-    `;
+    const { data: result, error: rpcError } = await sbDb.rpc(
+      "find_auth_user_by_email",
+      { user_email: email }
+    );
 
-    if (result.length === 0) {
+    if (rpcError) throw rpcError;
+
+    const authUsers = result as { id: string }[];
+    if (!authUsers || authUsers.length === 0) {
       return null;
     }
 
     const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
-      result[0].id,
+      authUsers[0].id,
       {
         email_confirm: true,
         password,
@@ -414,17 +415,13 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 
 export async function validateSession(token: string) {
   try {
-    // const t0 = performance.now();
-    const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
-      SELECT id, revoked FROM auth.refresh_tokens 
-      WHERE token = ${token} 
-      AND revoked = false
-      LIMIT 1 
-    `;
-    // const t1 = performance.now();
+    const { data, error: rpcError } = await sbDb.rpc("validate_refresh_token", {
+      refresh_token: token,
+    });
 
-    // eslint-disable-next-line no-console
-    // console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
+    if (rpcError) throw rpcError;
+
+    const result = (data ?? []) as { id: string; revoked: boolean }[];
 
     if (result.length === 0) {
       //logging for debug

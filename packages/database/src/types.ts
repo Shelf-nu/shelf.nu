@@ -215,7 +215,7 @@ export type Currency =
 // Table Row types  (what you get back from a SELECT)
 // ---------------------------------------------------------------------------
 
-export interface TierLimitRow {
+export type TierLimitRow = {
   id: TierId;
   canImportAssets: boolean;
   canExportAssets: boolean;
@@ -225,24 +225,24 @@ export interface TierLimitRow {
   maxOrganizations: number;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface TierRow {
+export type TierRow = {
   id: TierId;
   name: string;
   tierLimitId: TierId | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface RoleRow {
+export type RoleRow = {
   id: string;
   name: Roles;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface SsoDetailsRow {
+export type SsoDetailsRow = {
   id: string;
   domain: string;
   baseUserGroupId: string | null;
@@ -250,9 +250,9 @@ export interface SsoDetailsRow {
   adminGroupId: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UserRow {
+export type UserRow = {
   id: string;
   email: string;
   username: string;
@@ -273,9 +273,9 @@ export interface UserRow {
   deletedAt: string | null;
   tierId: TierId;
   referralSource: string | null;
-}
+};
 
-export interface ImageRow {
+export type ImageRow = {
   id: string;
   contentType: string;
   altText: string | null;
@@ -284,9 +284,9 @@ export interface ImageRow {
   updatedAt: string;
   ownerOrgId: string;
   userId: string;
-}
+};
 
-export interface OrganizationRow {
+export type OrganizationRow = {
   id: string;
   name: string;
   type: OrganizationType;
@@ -311,9 +311,9 @@ export interface OrganizationRow {
   customEmailFooter: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UserContactRow {
+export type UserContactRow = {
   id: string;
   phone: string | null;
   street: string | null;
@@ -324,9 +324,9 @@ export interface UserContactRow {
   userId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UserBusinessIntelRow {
+export type UserBusinessIntelRow = {
   id: string;
   howDidYouHearAboutUs: string | null;
   jobTitle: string | null;
@@ -338,9 +338,9 @@ export interface UserBusinessIntelRow {
   userId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface CustomTierLimitRow {
+export type CustomTierLimitRow = {
   id: string;
   userId: string | null;
   canImportAssets: boolean;
@@ -352,18 +352,18 @@ export interface CustomTierLimitRow {
   isEnterprise: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UserOrganizationRow {
+export type UserOrganizationRow = {
   id: string;
   userId: string;
   organizationId: string;
   roles: OrganizationRoles[];
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface LocationRow {
+export type LocationRow = {
   id: string;
   name: string;
   description: string | null;
@@ -378,9 +378,9 @@ export interface LocationRow {
   parentId: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface CategoryRow {
+export type CategoryRow = {
   id: string;
   name: string;
   description: string | null;
@@ -389,9 +389,9 @@ export interface CategoryRow {
   updatedAt: string;
   userId: string;
   organizationId: string;
-}
+};
 
-export interface TagRow {
+export type TagRow = {
   id: string;
   name: string;
   description: string | null;
@@ -401,9 +401,9 @@ export interface TagRow {
   organizationId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AssetRow {
+export type AssetRow = {
   id: string;
   title: string;
   description: string | null;
@@ -421,9 +421,9 @@ export interface AssetRow {
   categoryId: string | null;
   locationId: string | null;
   kitId: string | null;
-}
+};
 
-export interface KitRow {
+export type KitRow = {
   id: string;
   name: string;
   description: string | null;
@@ -436,9 +436,9 @@ export interface KitRow {
   locationId: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface TeamMemberRow {
+export type TeamMemberRow = {
   id: string;
   name: string;
   organizationId: string;
@@ -446,25 +446,25 @@ export interface TeamMemberRow {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
-}
+};
 
-export interface CustodyRow {
+export type CustodyRow = {
   id: string;
   teamMemberId: string;
   assetId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface KitCustodyRow {
+export type KitCustodyRow = {
   id: string;
   custodianId: string;
   kitId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AssetFilterPresetRow {
+export type AssetFilterPresetRow = {
   id: string;
   organizationId: string;
   ownerId: string;
@@ -473,9 +473,9 @@ export interface AssetFilterPresetRow {
   starred: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AssetIndexSettingsRow {
+export type AssetIndexSettingsRow = {
   id: string;
   userId: string;
   organizationId: string;
@@ -485,9 +485,9 @@ export interface AssetIndexSettingsRow {
   showAssetImage: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AssetReminderRow {
+export type AssetReminderRow = {
   id: string;
   name: string;
   message: string;
@@ -498,17 +498,17 @@ export interface AssetReminderRow {
   createdById: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface PrintBatchRow {
+export type PrintBatchRow = {
   id: string;
   name: string;
   printed: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface QrRow {
+export type QrRow = {
   id: string;
   version: number;
   errorCorrection: ErrorCorrection;
@@ -519,9 +519,9 @@ export interface QrRow {
   batchId: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface BarcodeRow {
+export type BarcodeRow = {
   id: string;
   value: string;
   type: BarcodeType;
@@ -530,9 +530,9 @@ export interface BarcodeRow {
   organizationId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface ScanRow {
+export type ScanRow = {
   id: string;
   latitude: string | null;
   longitude: string | null;
@@ -543,9 +543,9 @@ export interface ScanRow {
   manuallyGenerated: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface NoteRow {
+export type NoteRow = {
   id: string;
   content: string;
   type: NoteType;
@@ -553,9 +553,9 @@ export interface NoteRow {
   updatedAt: string;
   userId: string | null;
   assetId: string;
-}
+};
 
-export interface LocationNoteRow {
+export type LocationNoteRow = {
   id: string;
   content: string;
   type: NoteType;
@@ -563,9 +563,9 @@ export interface LocationNoteRow {
   updatedAt: string;
   userId: string | null;
   locationId: string;
-}
+};
 
-export interface ReportFoundRow {
+export type ReportFoundRow = {
   id: string;
   email: string;
   content: string;
@@ -573,9 +573,9 @@ export interface ReportFoundRow {
   updatedAt: string;
   assetId: string | null;
   kitId: string | null;
-}
+};
 
-export interface InviteRow {
+export type InviteRow = {
   id: string;
   inviterId: string;
   organizationId: string;
@@ -589,9 +589,9 @@ export interface InviteRow {
   expiresAt: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface BookingRow {
+export type BookingRow = {
   id: string;
   name: string;
   status: BookingStatus;
@@ -609,9 +609,9 @@ export interface BookingRow {
   originalTo: string | null;
   autoArchivedAt: string | null;
   cancellationReason: string | null;
-}
+};
 
-export interface BookingNoteRow {
+export type BookingNoteRow = {
   id: string;
   content: string;
   type: NoteType;
@@ -619,9 +619,9 @@ export interface BookingNoteRow {
   updatedAt: string;
   userId: string | null;
   bookingId: string;
-}
+};
 
-export interface BookingSettingsRow {
+export type BookingSettingsRow = {
   id: string;
   bufferStartTime: number;
   tagsRequired: boolean;
@@ -634,9 +634,9 @@ export interface BookingSettingsRow {
   organizationId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface PartialBookingCheckinRow {
+export type PartialBookingCheckinRow = {
   id: string;
   assetIds: string[];
   checkinCount: number;
@@ -645,18 +645,18 @@ export interface PartialBookingCheckinRow {
   checkedInById: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface WorkingHoursRow {
+export type WorkingHoursRow = {
   id: string;
   enabled: boolean;
   weeklySchedule: unknown; // jsonb
   organizationId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface WorkingHoursOverrideRow {
+export type WorkingHoursOverrideRow = {
   id: string;
   date: string;
   isOpen: boolean;
@@ -666,9 +666,9 @@ export interface WorkingHoursOverrideRow {
   workingHoursId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface CustomFieldRow {
+export type CustomFieldRow = {
   id: string;
   name: string;
   helpText: string | null;
@@ -681,18 +681,18 @@ export interface CustomFieldRow {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
-}
+};
 
-export interface AssetCustomFieldValueRow {
+export type AssetCustomFieldValueRow = {
   id: string;
   value: unknown; // jsonb
   assetId: string;
   customFieldId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AuditSessionRow {
+export type AuditSessionRow = {
   id: string;
   name: string;
   description: string | null;
@@ -712,18 +712,18 @@ export interface AuditSessionRow {
   organizationId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AuditAssignmentRow {
+export type AuditAssignmentRow = {
   id: string;
   auditSessionId: string;
   userId: string;
   role: AuditAssignmentRole | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AuditAssetRow {
+export type AuditAssetRow = {
   id: string;
   auditSessionId: string;
   assetId: string;
@@ -734,9 +734,9 @@ export interface AuditAssetRow {
   metadata: unknown | null; // jsonb
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AuditScanRow {
+export type AuditScanRow = {
   id: string;
   auditSessionId: string;
   auditAssetId: string | null;
@@ -746,9 +746,9 @@ export interface AuditScanRow {
   metadata: unknown | null; // jsonb
   scannedAt: string;
   createdAt: string;
-}
+};
 
-export interface AuditNoteRow {
+export type AuditNoteRow = {
   id: string;
   content: string;
   type: NoteType;
@@ -757,9 +757,9 @@ export interface AuditNoteRow {
   userId: string | null;
   auditSessionId: string;
   auditAssetId: string | null;
-}
+};
 
-export interface AuditImageRow {
+export type AuditImageRow = {
   id: string;
   imageUrl: string;
   thumbnailUrl: string | null;
@@ -770,9 +770,9 @@ export interface AuditImageRow {
   organizationId: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface AnnouncementRow {
+export type AnnouncementRow = {
   id: string;
   name: string;
   content: string;
@@ -781,9 +781,9 @@ export interface AnnouncementRow {
   published: boolean;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UpdateRow {
+export type UpdateRow = {
   id: string;
   title: string;
   content: string;
@@ -797,16 +797,16 @@ export interface UpdateRow {
   createdById: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface UserUpdateReadRow {
+export type UserUpdateReadRow = {
   id: string;
   userId: string;
   updateId: string;
   readAt: string;
-}
+};
 
-export interface RoleChangeLogRow {
+export type RoleChangeLogRow = {
   id: string;
   previousRole: OrganizationRoles;
   newRole: OrganizationRoles;
@@ -814,263 +814,303 @@ export interface RoleChangeLogRow {
   userId: string;
   changedById: string;
   organizationId: string;
-}
+};
 
 // ---------------------------------------------------------------------------
 // Insert types  (what you pass to an INSERT — omits server-defaulted fields)
 // ---------------------------------------------------------------------------
 
-export type TierLimitInsert = Partial<Omit<TierLimitRow, "id">> &
-  Pick<TierLimitRow, "id">;
+/**
+ * Flattens intersection types (`A & B`) into a single mapped object type.
+ * Required so Supabase's type system can verify Insert types extend
+ * `Record<string, unknown>` (TypeScript can't prove that for raw `&` types).
+ */
+type Flatten<T> = { [K in keyof T]: T[K] };
 
-export type TierInsert = Partial<Omit<TierRow, "id" | "name">> &
-  Pick<TierRow, "id" | "name">;
+export type TierLimitInsert = Flatten<
+  Partial<Omit<TierLimitRow, "id">> & Pick<TierLimitRow, "id">
+>;
+
+export type TierInsert = Flatten<
+  Partial<Omit<TierRow, "id" | "name">> & Pick<TierRow, "id" | "name">
+>;
 
 export type RoleInsert = Partial<RoleRow>;
 
-export type SsoDetailsInsert = Partial<Omit<SsoDetailsRow, "domain">> &
-  Pick<SsoDetailsRow, "domain">;
+export type SsoDetailsInsert = Flatten<
+  Partial<Omit<SsoDetailsRow, "domain">> & Pick<SsoDetailsRow, "domain">
+>;
 
-export type UserInsert = Partial<Omit<UserRow, "email">> &
-  Pick<UserRow, "email">;
+export type UserInsert = Flatten<
+  Partial<Omit<UserRow, "email">> & Pick<UserRow, "email">
+>;
 
-export type ImageInsert = Partial<
-  Omit<ImageRow, "contentType" | "blob" | "ownerOrgId" | "userId">
-> &
-  Pick<ImageRow, "contentType" | "blob" | "ownerOrgId" | "userId">;
+export type ImageInsert = Flatten<
+  Partial<Omit<ImageRow, "contentType" | "blob" | "ownerOrgId" | "userId">> &
+    Pick<ImageRow, "contentType" | "blob" | "ownerOrgId" | "userId">
+>;
 
-export type OrganizationInsert = Partial<Omit<OrganizationRow, "userId">> &
-  Pick<OrganizationRow, "userId">;
+export type OrganizationInsert = Flatten<
+  Partial<Omit<OrganizationRow, "userId">> & Pick<OrganizationRow, "userId">
+>;
 
-export type UserContactInsert = Partial<Omit<UserContactRow, "userId">> &
-  Pick<UserContactRow, "userId">;
+export type UserContactInsert = Flatten<
+  Partial<Omit<UserContactRow, "userId">> & Pick<UserContactRow, "userId">
+>;
 
-export type UserBusinessIntelInsert = Partial<
-  Omit<UserBusinessIntelRow, "userId">
-> &
-  Pick<UserBusinessIntelRow, "userId">;
+export type UserBusinessIntelInsert = Flatten<
+  Partial<Omit<UserBusinessIntelRow, "userId">> &
+    Pick<UserBusinessIntelRow, "userId">
+>;
 
 export type CustomTierLimitInsert = Partial<CustomTierLimitRow>;
 
-export type UserOrganizationInsert = Partial<
-  Omit<UserOrganizationRow, "userId" | "organizationId">
-> &
-  Pick<UserOrganizationRow, "userId" | "organizationId">;
+export type UserOrganizationInsert = Flatten<
+  Partial<Omit<UserOrganizationRow, "userId" | "organizationId">> &
+    Pick<UserOrganizationRow, "userId" | "organizationId">
+>;
 
-export type LocationInsert = Partial<
-  Omit<LocationRow, "name" | "userId" | "organizationId">
-> &
-  Pick<LocationRow, "name" | "userId" | "organizationId">;
+export type LocationInsert = Flatten<
+  Partial<Omit<LocationRow, "name" | "userId" | "organizationId">> &
+    Pick<LocationRow, "name" | "userId" | "organizationId">
+>;
 
-export type CategoryInsert = Partial<
-  Omit<CategoryRow, "name" | "color" | "userId" | "organizationId">
-> &
-  Pick<CategoryRow, "name" | "color" | "userId" | "organizationId">;
+export type CategoryInsert = Flatten<
+  Partial<Omit<CategoryRow, "name" | "color" | "userId" | "organizationId">> &
+    Pick<CategoryRow, "name" | "color" | "userId" | "organizationId">
+>;
 
-export type TagInsert = Partial<
-  Omit<TagRow, "name" | "userId" | "organizationId">
-> &
-  Pick<TagRow, "name" | "userId" | "organizationId">;
+export type TagInsert = Flatten<
+  Partial<Omit<TagRow, "name" | "userId" | "organizationId">> &
+    Pick<TagRow, "name" | "userId" | "organizationId">
+>;
 
-export type AssetInsert = Partial<
-  Omit<AssetRow, "title" | "userId" | "organizationId">
-> &
-  Pick<AssetRow, "title" | "userId" | "organizationId">;
+export type AssetInsert = Flatten<
+  Partial<Omit<AssetRow, "title" | "userId" | "organizationId">> &
+    Pick<AssetRow, "title" | "userId" | "organizationId">
+>;
 
-export type KitInsert = Partial<
-  Omit<KitRow, "name" | "organizationId" | "createdById">
-> &
-  Pick<KitRow, "name" | "organizationId" | "createdById">;
+export type KitInsert = Flatten<
+  Partial<Omit<KitRow, "name" | "organizationId" | "createdById">> &
+    Pick<KitRow, "name" | "organizationId" | "createdById">
+>;
 
-export type TeamMemberInsert = Partial<
-  Omit<TeamMemberRow, "name" | "organizationId">
-> &
-  Pick<TeamMemberRow, "name" | "organizationId">;
+export type TeamMemberInsert = Flatten<
+  Partial<Omit<TeamMemberRow, "name" | "organizationId">> &
+    Pick<TeamMemberRow, "name" | "organizationId">
+>;
 
-export type CustodyInsert = Partial<
-  Omit<CustodyRow, "teamMemberId" | "assetId">
-> &
-  Pick<CustodyRow, "teamMemberId" | "assetId">;
+export type CustodyInsert = Flatten<
+  Partial<Omit<CustodyRow, "teamMemberId" | "assetId">> &
+    Pick<CustodyRow, "teamMemberId" | "assetId">
+>;
 
-export type KitCustodyInsert = Partial<
-  Omit<KitCustodyRow, "custodianId" | "kitId">
-> &
-  Pick<KitCustodyRow, "custodianId" | "kitId">;
+export type KitCustodyInsert = Flatten<
+  Partial<Omit<KitCustodyRow, "custodianId" | "kitId">> &
+    Pick<KitCustodyRow, "custodianId" | "kitId">
+>;
 
-export type AssetFilterPresetInsert = Partial<
-  Omit<AssetFilterPresetRow, "organizationId" | "ownerId" | "name" | "query">
-> &
-  Pick<AssetFilterPresetRow, "organizationId" | "ownerId" | "name" | "query">;
+export type AssetFilterPresetInsert = Flatten<
+  Partial<
+    Omit<AssetFilterPresetRow, "organizationId" | "ownerId" | "name" | "query">
+  > &
+    Pick<AssetFilterPresetRow, "organizationId" | "ownerId" | "name" | "query">
+>;
 
-export type AssetIndexSettingsInsert = Partial<
-  Omit<AssetIndexSettingsRow, "userId" | "organizationId">
-> &
-  Pick<AssetIndexSettingsRow, "userId" | "organizationId">;
+export type AssetIndexSettingsInsert = Flatten<
+  Partial<Omit<AssetIndexSettingsRow, "userId" | "organizationId">> &
+    Pick<AssetIndexSettingsRow, "userId" | "organizationId">
+>;
 
-export type AssetReminderInsert = Partial<
-  Omit<
-    AssetReminderRow,
-    | "name"
-    | "message"
-    | "alertDateTime"
-    | "organizationId"
-    | "assetId"
-    | "createdById"
-  >
-> &
-  Pick<
-    AssetReminderRow,
-    | "name"
-    | "message"
-    | "alertDateTime"
-    | "organizationId"
-    | "assetId"
-    | "createdById"
-  >;
+export type AssetReminderInsert = Flatten<
+  Partial<
+    Omit<
+      AssetReminderRow,
+      | "name"
+      | "message"
+      | "alertDateTime"
+      | "organizationId"
+      | "assetId"
+      | "createdById"
+    >
+  > &
+    Pick<
+      AssetReminderRow,
+      | "name"
+      | "message"
+      | "alertDateTime"
+      | "organizationId"
+      | "assetId"
+      | "createdById"
+    >
+>;
 
-export type PrintBatchInsert = Partial<Omit<PrintBatchRow, "name">> &
-  Pick<PrintBatchRow, "name">;
+export type PrintBatchInsert = Flatten<
+  Partial<Omit<PrintBatchRow, "name">> & Pick<PrintBatchRow, "name">
+>;
 
 export type QrInsert = Partial<QrRow>;
 
-export type BarcodeInsert = Partial<
-  Omit<BarcodeRow, "value" | "organizationId">
-> &
-  Pick<BarcodeRow, "value" | "organizationId">;
+export type BarcodeInsert = Flatten<
+  Partial<Omit<BarcodeRow, "value" | "organizationId">> &
+    Pick<BarcodeRow, "value" | "organizationId">
+>;
 
-export type ScanInsert = Partial<Omit<ScanRow, "rawQrId">> &
-  Pick<ScanRow, "rawQrId">;
+export type ScanInsert = Flatten<
+  Partial<Omit<ScanRow, "rawQrId">> & Pick<ScanRow, "rawQrId">
+>;
 
-export type NoteInsert = Partial<Omit<NoteRow, "content" | "assetId">> &
-  Pick<NoteRow, "content" | "assetId">;
+export type NoteInsert = Flatten<
+  Partial<Omit<NoteRow, "content" | "assetId">> &
+    Pick<NoteRow, "content" | "assetId">
+>;
 
-export type LocationNoteInsert = Partial<
-  Omit<LocationNoteRow, "content" | "locationId">
-> &
-  Pick<LocationNoteRow, "content" | "locationId">;
+export type LocationNoteInsert = Flatten<
+  Partial<Omit<LocationNoteRow, "content" | "locationId">> &
+    Pick<LocationNoteRow, "content" | "locationId">
+>;
 
-export type ReportFoundInsert = Partial<
-  Omit<ReportFoundRow, "email" | "content">
-> &
-  Pick<ReportFoundRow, "email" | "content">;
+export type ReportFoundInsert = Flatten<
+  Partial<Omit<ReportFoundRow, "email" | "content">> &
+    Pick<ReportFoundRow, "email" | "content">
+>;
 
-export type InviteInsert = Partial<
-  Omit<
-    InviteRow,
-    | "inviterId"
-    | "organizationId"
-    | "teamMemberId"
-    | "inviteeEmail"
-    | "inviteCode"
-    | "expiresAt"
-  >
-> &
-  Pick<
-    InviteRow,
-    | "inviterId"
-    | "organizationId"
-    | "teamMemberId"
-    | "inviteeEmail"
-    | "inviteCode"
-    | "expiresAt"
-  >;
+export type InviteInsert = Flatten<
+  Partial<
+    Omit<
+      InviteRow,
+      | "inviterId"
+      | "organizationId"
+      | "teamMemberId"
+      | "inviteeEmail"
+      | "inviteCode"
+      | "expiresAt"
+    >
+  > &
+    Pick<
+      InviteRow,
+      | "inviterId"
+      | "organizationId"
+      | "teamMemberId"
+      | "inviteeEmail"
+      | "inviteCode"
+      | "expiresAt"
+    >
+>;
 
-export type BookingInsert = Partial<
-  Omit<BookingRow, "name" | "creatorId" | "organizationId" | "from" | "to">
-> &
-  Pick<BookingRow, "name" | "creatorId" | "organizationId" | "from" | "to">;
+export type BookingInsert = Flatten<
+  Partial<
+    Omit<BookingRow, "name" | "creatorId" | "organizationId" | "from" | "to">
+  > &
+    Pick<BookingRow, "name" | "creatorId" | "organizationId" | "from" | "to">
+>;
 
-export type BookingNoteInsert = Partial<
-  Omit<BookingNoteRow, "content" | "bookingId">
-> &
-  Pick<BookingNoteRow, "content" | "bookingId">;
+export type BookingNoteInsert = Flatten<
+  Partial<Omit<BookingNoteRow, "content" | "bookingId">> &
+    Pick<BookingNoteRow, "content" | "bookingId">
+>;
 
-export type BookingSettingsInsert = Partial<
-  Omit<BookingSettingsRow, "organizationId">
-> &
-  Pick<BookingSettingsRow, "organizationId">;
+export type BookingSettingsInsert = Flatten<
+  Partial<Omit<BookingSettingsRow, "organizationId">> &
+    Pick<BookingSettingsRow, "organizationId">
+>;
 
-export type PartialBookingCheckinInsert = Partial<
-  Omit<PartialBookingCheckinRow, "checkinCount" | "bookingId" | "checkedInById">
-> &
-  Pick<
-    PartialBookingCheckinRow,
-    "checkinCount" | "bookingId" | "checkedInById"
-  >;
+export type PartialBookingCheckinInsert = Flatten<
+  Partial<
+    Omit<
+      PartialBookingCheckinRow,
+      "checkinCount" | "bookingId" | "checkedInById"
+    >
+  > &
+    Pick<
+      PartialBookingCheckinRow,
+      "checkinCount" | "bookingId" | "checkedInById"
+    >
+>;
 
-export type WorkingHoursInsert = Partial<
-  Omit<WorkingHoursRow, "organizationId">
-> &
-  Pick<WorkingHoursRow, "organizationId">;
+export type WorkingHoursInsert = Flatten<
+  Partial<Omit<WorkingHoursRow, "organizationId">> &
+    Pick<WorkingHoursRow, "organizationId">
+>;
 
-export type WorkingHoursOverrideInsert = Partial<
-  Omit<WorkingHoursOverrideRow, "date" | "workingHoursId">
-> &
-  Pick<WorkingHoursOverrideRow, "date" | "workingHoursId">;
+export type WorkingHoursOverrideInsert = Flatten<
+  Partial<Omit<WorkingHoursOverrideRow, "date" | "workingHoursId">> &
+    Pick<WorkingHoursOverrideRow, "date" | "workingHoursId">
+>;
 
-export type CustomFieldInsert = Partial<
-  Omit<CustomFieldRow, "name" | "organizationId" | "userId">
-> &
-  Pick<CustomFieldRow, "name" | "organizationId" | "userId">;
+export type CustomFieldInsert = Flatten<
+  Partial<Omit<CustomFieldRow, "name" | "organizationId" | "userId">> &
+    Pick<CustomFieldRow, "name" | "organizationId" | "userId">
+>;
 
-export type AssetCustomFieldValueInsert = Partial<
-  Omit<AssetCustomFieldValueRow, "value" | "assetId" | "customFieldId">
-> &
-  Pick<AssetCustomFieldValueRow, "value" | "assetId" | "customFieldId">;
+export type AssetCustomFieldValueInsert = Flatten<
+  Partial<
+    Omit<AssetCustomFieldValueRow, "value" | "assetId" | "customFieldId">
+  > &
+    Pick<AssetCustomFieldValueRow, "value" | "assetId" | "customFieldId">
+>;
 
-export type AuditSessionInsert = Partial<
-  Omit<AuditSessionRow, "name" | "createdById" | "organizationId">
-> &
-  Pick<AuditSessionRow, "name" | "createdById" | "organizationId">;
+export type AuditSessionInsert = Flatten<
+  Partial<Omit<AuditSessionRow, "name" | "createdById" | "organizationId">> &
+    Pick<AuditSessionRow, "name" | "createdById" | "organizationId">
+>;
 
-export type AuditAssignmentInsert = Partial<
-  Omit<AuditAssignmentRow, "auditSessionId" | "userId">
-> &
-  Pick<AuditAssignmentRow, "auditSessionId" | "userId">;
+export type AuditAssignmentInsert = Flatten<
+  Partial<Omit<AuditAssignmentRow, "auditSessionId" | "userId">> &
+    Pick<AuditAssignmentRow, "auditSessionId" | "userId">
+>;
 
-export type AuditAssetInsert = Partial<
-  Omit<AuditAssetRow, "auditSessionId" | "assetId">
-> &
-  Pick<AuditAssetRow, "auditSessionId" | "assetId">;
+export type AuditAssetInsert = Flatten<
+  Partial<Omit<AuditAssetRow, "auditSessionId" | "assetId">> &
+    Pick<AuditAssetRow, "auditSessionId" | "assetId">
+>;
 
-export type AuditScanInsert = Partial<Omit<AuditScanRow, "auditSessionId">> &
-  Pick<AuditScanRow, "auditSessionId">;
+export type AuditScanInsert = Flatten<
+  Partial<Omit<AuditScanRow, "auditSessionId">> &
+    Pick<AuditScanRow, "auditSessionId">
+>;
 
-export type AuditNoteInsert = Partial<
-  Omit<AuditNoteRow, "content" | "auditSessionId">
-> &
-  Pick<AuditNoteRow, "content" | "auditSessionId">;
+export type AuditNoteInsert = Flatten<
+  Partial<Omit<AuditNoteRow, "content" | "auditSessionId">> &
+    Pick<AuditNoteRow, "content" | "auditSessionId">
+>;
 
-export type AuditImageInsert = Partial<
-  Omit<AuditImageRow, "imageUrl" | "auditSessionId" | "organizationId">
-> &
-  Pick<AuditImageRow, "imageUrl" | "auditSessionId" | "organizationId">;
+export type AuditImageInsert = Flatten<
+  Partial<
+    Omit<AuditImageRow, "imageUrl" | "auditSessionId" | "organizationId">
+  > &
+    Pick<AuditImageRow, "imageUrl" | "auditSessionId" | "organizationId">
+>;
 
-export type AnnouncementInsert = Partial<
-  Omit<AnnouncementRow, "name" | "content">
-> &
-  Pick<AnnouncementRow, "name" | "content">;
+export type AnnouncementInsert = Flatten<
+  Partial<Omit<AnnouncementRow, "name" | "content">> &
+    Pick<AnnouncementRow, "name" | "content">
+>;
 
-export type UpdateInsert = Partial<
-  Omit<UpdateRow, "title" | "content" | "publishDate" | "createdById">
-> &
-  Pick<UpdateRow, "title" | "content" | "publishDate" | "createdById">;
+export type UpdateInsert = Flatten<
+  Partial<
+    Omit<UpdateRow, "title" | "content" | "publishDate" | "createdById">
+  > &
+    Pick<UpdateRow, "title" | "content" | "publishDate" | "createdById">
+>;
 
-export type UserUpdateReadInsert = Partial<
-  Omit<UserUpdateReadRow, "userId" | "updateId">
-> &
-  Pick<UserUpdateReadRow, "userId" | "updateId">;
+export type UserUpdateReadInsert = Flatten<
+  Partial<Omit<UserUpdateReadRow, "userId" | "updateId">> &
+    Pick<UserUpdateReadRow, "userId" | "updateId">
+>;
 
-export type RoleChangeLogInsert = Partial<
-  Omit<
-    RoleChangeLogRow,
-    "previousRole" | "newRole" | "userId" | "changedById" | "organizationId"
-  >
-> &
-  Pick<
-    RoleChangeLogRow,
-    "previousRole" | "newRole" | "userId" | "changedById" | "organizationId"
-  >;
+export type RoleChangeLogInsert = Flatten<
+  Partial<
+    Omit<
+      RoleChangeLogRow,
+      "previousRole" | "newRole" | "userId" | "changedById" | "organizationId"
+    >
+  > &
+    Pick<
+      RoleChangeLogRow,
+      "previousRole" | "newRole" | "userId" | "changedById" | "organizationId"
+    >
+>;
 
 // ---------------------------------------------------------------------------
 // Update types  (all fields optional except id is used as filter)
@@ -1129,7 +1169,7 @@ export type RoleChangeLogUpdate = Partial<RoleChangeLogRow>;
 // Supabase-compatible Database type definition
 // ---------------------------------------------------------------------------
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       TierLimit: {
@@ -1461,7 +1501,91 @@ export interface Database {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      create_asset_sequence_for_org: {
+        Args: { org_id: string };
+        Returns: undefined;
+      };
+      get_next_sequential_id: {
+        Args: { org_id: string; prefix?: string };
+        Returns: string;
+      };
+      reset_asset_sequence_for_org: {
+        Args: { org_id: string };
+        Returns: undefined;
+      };
+      get_current_sequence_value: {
+        Args: { org_id: string };
+        Returns: number | null;
+      };
+      get_max_sequential_id_number: {
+        Args: { org_id: string; prefix?: string };
+        Returns: number;
+      };
+      get_assets_without_sequential_id: {
+        Args: { org_id: string };
+        Returns: { id: string }[];
+      };
+      batch_update_sequential_ids: {
+        Args: { asset_ids: string[]; sequential_ids: string[] };
+        Returns: number;
+      };
+      set_asset_sequence_value: {
+        Args: { org_id: string; new_value: number };
+        Returns: undefined;
+      };
+      generate_bulk_sequential_ids: {
+        Args: { org_id: string; prefix?: string };
+        Returns: number;
+      };
+      estimate_next_sequential_id: {
+        Args: { org_id: string; prefix?: string };
+        Returns: string;
+      };
+      get_location_hierarchy: {
+        Args: { location_id: string; organization_id: string };
+        Returns: {
+          id: string;
+          name: string;
+          parentId: string | null;
+          depth: number;
+        }[];
+      };
+      get_location_descendants: {
+        Args: { location_id: string; organization_id: string };
+        Returns: {
+          id: string;
+          name: string;
+          parentId: string | null;
+        }[];
+      };
+      get_location_descendant_ids: {
+        Args: { location_id: string; organization_id: string };
+        Returns: { id: string; parentId: string | null }[];
+      };
+      get_location_subtree_depth: {
+        Args: { location_id: string; organization_id: string };
+        Returns: number;
+      };
+      find_auth_user_by_email: {
+        Args: { user_email: string };
+        Returns: { id: string }[];
+      };
+      validate_refresh_token: {
+        Args: { refresh_token: string };
+        Returns: { id: string; revoked: boolean }[];
+      };
+      get_custom_field_usage_counts: {
+        Args: { organization_id: string };
+        Returns: { customFieldId: string; count: number }[];
+      };
+      clear_user_last_selected_org: {
+        Args: { user_id: string; organization_id: string };
+        Returns: undefined;
+      };
+      remove_custom_field_from_asset_index: {
+        Args: { column_name: string; organization_id: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       AssetStatus: AssetStatus;
@@ -1489,4 +1613,4 @@ export interface Database {
       [_ in never]: never;
     };
   };
-}
+};
