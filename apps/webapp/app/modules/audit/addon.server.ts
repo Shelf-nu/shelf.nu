@@ -1,7 +1,7 @@
 import type { User } from "@prisma/client";
 import type Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
@@ -239,15 +239,16 @@ export async function linkAuditAddonToOrganization({
     });
 
     // Enable audits on the organization
-    await db.organization.update({
-      where: { id: organizationId },
-      data: {
+    const { error: orgError } = await sbDb
+      .from("Organization")
+      .update({
         auditsEnabled: true,
-        auditsEnabledAt: new Date(),
+        auditsEnabledAt: new Date().toISOString(),
         ...(isTrialing && { usedAuditTrial: true }),
-      },
-      select: { id: true },
-    });
+      })
+      .eq("id", organizationId);
+
+    if (orgError) throw orgError;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -333,36 +334,39 @@ export async function handleAuditAddonWebhook({
       const isTransferredSubscription =
         !!subscription?.metadata?.transferred_from_subscription;
 
-      await db.organization.update({
-        where: { id: organizationId },
-        data: {
+      const { error: createError } = await sbDb
+        .from("Organization")
+        .update({
           auditsEnabled: true,
-          auditsEnabledAt: new Date(),
+          auditsEnabledAt: new Date().toISOString(),
           ...(isTrialSubscription &&
             !isTransferredSubscription && { usedAuditTrial: true }),
-        },
-        select: { id: true },
-      });
+        })
+        .eq("id", organizationId);
+
+      if (createError) throw createError;
       break;
     }
     case "customer.subscription.updated": {
       const isActive =
         subscription?.status === "active" ||
         subscription?.status === "trialing";
-      await db.organization.update({
-        where: { id: organizationId },
-        data: { auditsEnabled: isActive },
-        select: { id: true },
-      });
+      const { error: updateError } = await sbDb
+        .from("Organization")
+        .update({ auditsEnabled: isActive })
+        .eq("id", organizationId);
+
+      if (updateError) throw updateError;
       break;
     }
     case "customer.subscription.paused":
     case "customer.subscription.deleted": {
-      await db.organization.update({
-        where: { id: organizationId },
-        data: { auditsEnabled: false },
-        select: { id: true },
-      });
+      const { error: deleteError } = await sbDb
+        .from("Organization")
+        .update({ auditsEnabled: false })
+        .eq("id", organizationId);
+
+      if (deleteError) throw deleteError;
       break;
     }
     // trial_will_end: no action needed, user still has access

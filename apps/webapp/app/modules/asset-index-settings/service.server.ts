@@ -7,6 +7,7 @@ import {
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import type { Column, ColumnLabelKey } from "./helpers";
 import {
@@ -210,12 +211,17 @@ export async function changeMode({
   mode: AssetIndexMode;
 }) {
   try {
-    const updatedAssetIndexSettings = await db.assetIndexSettings.update({
-      where: { userId_organizationId: { userId, organizationId } },
-      data: { mode },
-    });
+    const { data, error } = await sbDb
+      .from("AssetIndexSettings")
+      .update({ mode })
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
 
-    return updatedAssetIndexSettings;
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -239,12 +245,17 @@ export async function updateColumns({
   columns: Column[];
 }) {
   try {
-    const updatedAssetIndexSettings = await db.assetIndexSettings.update({
-      where: { userId_organizationId: { userId, organizationId } },
-      data: { columns },
-    });
+    const { data, error } = await sbDb
+      .from("AssetIndexSettings")
+      .update({ columns: columns as unknown as Record<string, unknown>[] })
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
 
-    return updatedAssetIndexSettings;
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
