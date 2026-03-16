@@ -3068,6 +3068,38 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
 }
 
 /**
+ * Checks if an error indicates the storage object was not found.
+ * Walks both additionalData and the cause chain to handle
+ * Supabase StorageApiError wrapped by ShelfError.
+ */
+export function isStorageObjectNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  if (
+    "additionalData" in error &&
+    error.additionalData &&
+    typeof error.additionalData === "object" &&
+    "errorMessage" in error.additionalData &&
+    typeof error.additionalData.errorMessage === "string" &&
+    error.additionalData.errorMessage.toLowerCase().includes("object not found")
+  ) {
+    return true;
+  }
+
+  if ("cause" in error && error.cause) {
+    if (
+      error.cause instanceof Error &&
+      error.cause.message.toLowerCase().includes("object not found")
+    ) {
+      return true;
+    }
+    return isStorageObjectNotFound(error.cause);
+  }
+
+  return false;
+}
+
+/**
  * Refreshes expired signed URLs for asset images server-side.
  * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
  *
@@ -3078,6 +3110,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
 export async function refreshExpiredAssetImages<
   T extends {
     id: string;
+    organizationId: string;
     mainImage: string | null;
     mainImageExpiration: Date | null;
     thumbnailImage?: string | null;
@@ -3097,10 +3130,26 @@ export async function refreshExpiredAssetImages<
   /** Short backoff to prevent retry storms when refresh fails */
   const BACKOFF_SECONDS = 30;
 
+  const applyBackoff = async (asset: (typeof expiredAssets)[number]) => {
+    try {
+      const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
+      await db.asset.update({
+        where: { id: asset.id, organizationId: asset.organizationId },
+        data: { mainImageExpiration: backoffExpiration },
+      });
+    } catch {
+      // If even the backoff update fails, just move on
+    }
+  };
+
   const refreshAsset = async (asset: (typeof expiredAssets)[number]) => {
     try {
       const mainImagePath = extractStoragePath(asset.mainImage!, "assets");
-      if (!mainImagePath) return null;
+      if (!mainImagePath) {
+        // Can't extract path — apply backoff to avoid retrying every load
+        await applyBackoff(asset);
+        return null;
+      }
 
       const newMainImageUrl = await createSignedUrl({
         filename: mainImagePath,
@@ -3138,7 +3187,7 @@ export async function refreshExpiredAssetImages<
       }
 
       await db.asset.update({
-        where: { id: asset.id },
+        where: { id: asset.id, organizationId: asset.organizationId },
         data: updateData,
       });
 
@@ -3149,6 +3198,23 @@ export async function refreshExpiredAssetImages<
         ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
       };
     } catch (error) {
+      // Asset deleted between query and update — not an error
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2025"
+      ) {
+        return null;
+      }
+
+      // File deleted from storage — expected, not a bug
+      if (isStorageObjectNotFound(error)) {
+        Logger.info(
+          `Image file not found in storage for asset ${asset.id}, applying backoff`
+        );
+        await applyBackoff(asset);
+        return null;
+      }
+
       Logger.error(
         new ShelfError({
           cause: error,
@@ -3159,16 +3225,7 @@ export async function refreshExpiredAssetImages<
         })
       );
 
-      // Bump expiration to prevent retry storm on next page load
-      try {
-        const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
-        await db.asset.update({
-          where: { id: asset.id },
-          data: { mainImageExpiration: backoffExpiration },
-        });
-      } catch {
-        // If even the backoff update fails, just move on
-      }
+      await applyBackoff(asset);
       throw error;
     }
   };
