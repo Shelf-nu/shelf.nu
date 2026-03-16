@@ -86,6 +86,7 @@ export function InstallPwaPromptModal() {
 
               {promptInstall && (
                 <Button
+                  type="button"
                   width="full"
                   variant="primary"
                   className="mb-3"

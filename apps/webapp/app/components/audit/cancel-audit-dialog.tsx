@@ -52,7 +52,7 @@ export function CancelAuditDialog({
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary" disabled={disabled}>
+              <Button type="button" variant="secondary" disabled={disabled}>
                 Close
               </Button>
             </AlertDialogCancel>

@@ -144,6 +144,42 @@ The rule triggers when:
 3. The `where` clause doesn't include a `deletedAt` filter
 4. **Ternary operators**: Both branches of a ternary expression are checked independently
 
+### `require-button-type`
+
+**Purpose**: Enforce explicit `type` prop on all `<Button>` components rendering as native buttons.
+
+**Problem**: The HTML spec defaults `<button>` to `type="submit"`, which can cause accidental form submissions when a button is inside a `<form>` without an explicit type.
+
+**Solution**: This rule requires every `<Button>` to have an explicit `type` prop (`"button"`, `"submit"`, or `"reset"`) unless it renders as a non-button element.
+
+#### Examples
+
+❌ **Bad** (will cause ESLint error):
+
+```tsx
+<Button onClick={handler}>Cancel</Button>
+<Button variant="secondary">Close</Button>
+```
+
+✅ **Good** (passes ESLint):
+
+```tsx
+<Button type="button" onClick={handler}>Cancel</Button>
+<Button type="submit" disabled={disabled}>Save</Button>
+<Button to="/home">Home</Button>           // Link button, no type needed
+<Button as="a" href="mailto:...">Email</Button>  // Anchor element, no type needed
+```
+
+#### When does the rule skip checking?
+
+The rule does NOT flag:
+
+1. **Link buttons**: `<Button to="...">` (renders as `<Link>`, not `<button>`)
+2. **Custom elements**: `<Button as="a">`, `<Button as="span">` (not a native button)
+3. **Custom components**: `<Button as={SomeComponent}>` (not a native button)
+4. **Spread props**: `<Button {...props}>` (can't statically verify)
+5. **React Email buttons**: `Button` imported from `@react-email/components` (different component)
+
 ## Development
 
 To add new rules:

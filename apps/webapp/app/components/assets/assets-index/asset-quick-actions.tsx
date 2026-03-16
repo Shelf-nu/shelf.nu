@@ -60,6 +60,7 @@ export default function AssetQuickActions({
         }}
         trigger={
           <Button
+            type="button"
             size="sm"
             variant="secondary"
             className={"p-2"}
@@ -101,6 +102,7 @@ export default function AssetQuickActions({
           asset={asset}
           trigger={
             <Button
+              type="button"
               size="sm"
               variant="secondary"
               className={"p-2"}

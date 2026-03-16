@@ -36,6 +36,7 @@ export default function BulkRemoveAssetAndKitDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -44,6 +45,7 @@ export default function BulkRemoveAssetAndKitDialog() {
               Cancel
             </Button>
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

@@ -3042,8 +3042,8 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
             };
           }
 
-          /** This should not happen as there shouldn't be a case when asset is CHECKED_OUT but has no custodian */
-          Logger.error(
+          /** Data integrity edge case: asset is CHECKED_OUT but booking has no custodian assigned */
+          Logger.warn(
             new ShelfError({
               cause: null,
               message: "Couldn't find custodian for asset",

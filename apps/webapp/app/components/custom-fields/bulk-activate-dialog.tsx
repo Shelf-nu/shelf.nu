@@ -42,6 +42,7 @@ export default function BulkActivateDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}

@@ -64,6 +64,7 @@ const ConditionalActionsDropdown = () => {
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             data-test-id="assetActionsButton"
             className="asset-actions hidden sm:flex"
@@ -76,6 +77,7 @@ const ConditionalActionsDropdown = () => {
 
         {/* using custom trigger on mobile which only opens popover to avoid conflicts with overlay */}
         <Button
+          type="button"
           variant="secondary"
           data-test-id="assetActionsButton"
           className="asset-actions sm:hidden"
@@ -210,6 +212,7 @@ const ConditionalActionsDropdown = () => {
                 </div>
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
+                    type="button"
                     role="button"
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
@@ -228,6 +231,7 @@ const ConditionalActionsDropdown = () => {
                 <When truthy={isAdministratorOrOwner}>
                   <div className="border-b px-0 py-1 md:p-0">
                     <Button
+                      type="button"
                       role="button"
                       variant="link"
                       className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
@@ -281,6 +285,7 @@ const ConditionalActionsDropdown = () => {
                     asset={asset}
                     trigger={
                       <Button
+                        type="button"
                         variant="link"
                         data-test-id="deleteAssetButton"
                         icon="trash"
@@ -297,6 +302,7 @@ const ConditionalActionsDropdown = () => {
                 </div>
                 <div className="border-t p-4 md:hidden md:p-0">
                   <Button
+                    type="button"
                     role="button"
                     variant="secondary"
                     className="flex items-center justify-center text-gray-700 hover:text-gray-700 "

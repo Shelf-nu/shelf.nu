@@ -190,6 +190,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       method="post"
       action={action}
       className="edit-booking-form"
+      id="edit-booking-form"
     >
       {/* Render the actions on top only when the form is in edit mode */}
       {canSeeActions ? (
@@ -271,6 +272,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
               <CheckoutDialog
                 portalContainer={zo.form}
+                formId="edit-booking-form"
                 booking={{ id, name: name!, from: new Date(startDate!) }}
                 disabled={
                   disabled ||

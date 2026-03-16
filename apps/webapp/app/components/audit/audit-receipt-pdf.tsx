@@ -92,7 +92,9 @@ export const AuditReceiptPDF = ({
             <p>You can preview the receipt and then download the PDF.</p>
             {!isFetchingReceipt && (
               <div className="mt-4">
-                <Button onClick={handlePrint}>Download PDF</Button>
+                <Button type="button" onClick={handlePrint}>
+                  Download PDF
+                </Button>
               </div>
             )}
           </div>
@@ -128,7 +130,7 @@ export const AuditReceiptPDF = ({
             )}
           </div>
           <div className="flex justify-end gap-3 py-4">
-            <Button variant="secondary" onClick={onClose}>
+            <Button type="button" variant="secondary" onClick={onClose}>
               Close
             </Button>
           </div>

@@ -170,6 +170,7 @@ export default function UserInvitesSetting() {
           <InviteUserDialog
             trigger={
               <Button
+                type="button"
                 variant="primary"
                 className="mt-2 w-full md:mt-0 md:w-max"
               >
