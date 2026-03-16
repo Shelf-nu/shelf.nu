@@ -1,4 +1,5 @@
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import type {
@@ -16,20 +17,23 @@ export async function createBusinessIntel(
   payload: CreateBusinessIntelPayload
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("UserBusinessIntel")
+      .insert({
         userId: payload.userId,
-        howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
-        jobTitle: payload.jobTitle,
-        teamSize: payload.teamSize,
-        companyName: payload.companyName,
-        primaryUseCase: payload.primaryUseCase,
-        currentSolution: payload.currentSolution,
-        timeline: payload.timeline,
-      },
-    });
+        howDidYouHearAboutUs: payload.howDidYouHearAboutUs ?? null,
+        jobTitle: payload.jobTitle ?? null,
+        teamSize: payload.teamSize ?? null,
+        companyName: payload.companyName ?? null,
+        primaryUseCase: payload.primaryUseCase ?? null,
+        currentSolution: payload.currentSolution ?? null,
+        timeline: payload.timeline ?? null,
+      })
+      .select()
+      .single();
 
-    return businessIntel;
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -50,20 +54,28 @@ export async function updateBusinessIntel(
   payload: UpdateBusinessIntelPayload
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.update({
-      where: { userId },
-      data: {
-        howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
-        jobTitle: payload.jobTitle,
-        teamSize: payload.teamSize,
-        companyName: payload.companyName,
-        primaryUseCase: payload.primaryUseCase,
-        currentSolution: payload.currentSolution,
-        timeline: payload.timeline,
-      },
-    });
+    const updateData: Record<string, unknown> = {};
+    if (payload.howDidYouHearAboutUs !== undefined)
+      updateData.howDidYouHearAboutUs = payload.howDidYouHearAboutUs;
+    if (payload.jobTitle !== undefined) updateData.jobTitle = payload.jobTitle;
+    if (payload.teamSize !== undefined) updateData.teamSize = payload.teamSize;
+    if (payload.companyName !== undefined)
+      updateData.companyName = payload.companyName;
+    if (payload.primaryUseCase !== undefined)
+      updateData.primaryUseCase = payload.primaryUseCase;
+    if (payload.currentSolution !== undefined)
+      updateData.currentSolution = payload.currentSolution;
+    if (payload.timeline !== undefined) updateData.timeline = payload.timeline;
 
-    return businessIntel;
+    const { data, error } = await sbDb
+      .from("UserBusinessIntel")
+      .update(updateData as Sb.UserBusinessIntelUpdate)
+      .eq("userId", userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -84,30 +96,26 @@ export async function upsertBusinessIntel(
   payload: CreateBusinessIntelPayload
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.upsert({
-      where: { userId: payload.userId },
-      create: {
-        userId: payload.userId,
-        howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
-        jobTitle: payload.jobTitle,
-        teamSize: payload.teamSize,
-        companyName: payload.companyName,
-        primaryUseCase: payload.primaryUseCase,
-        currentSolution: payload.currentSolution,
-        timeline: payload.timeline,
-      },
-      update: {
-        howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
-        jobTitle: payload.jobTitle,
-        teamSize: payload.teamSize,
-        companyName: payload.companyName,
-        primaryUseCase: payload.primaryUseCase,
-        currentSolution: payload.currentSolution,
-        timeline: payload.timeline,
-      },
-    });
+    const { data, error } = await sbDb
+      .from("UserBusinessIntel")
+      .upsert(
+        {
+          userId: payload.userId,
+          howDidYouHearAboutUs: payload.howDidYouHearAboutUs ?? null,
+          jobTitle: payload.jobTitle ?? null,
+          teamSize: payload.teamSize ?? null,
+          companyName: payload.companyName ?? null,
+          primaryUseCase: payload.primaryUseCase ?? null,
+          currentSolution: payload.currentSolution ?? null,
+          timeline: payload.timeline ?? null,
+        },
+        { onConflict: "userId" }
+      )
+      .select()
+      .single();
 
-    return businessIntel;
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -127,11 +135,14 @@ export async function getBusinessIntelByUserId(
   userId: string
 ): Promise<UserBusinessIntel | null> {
   try {
-    const businessIntel = await db.userBusinessIntel.findUnique({
-      where: { userId },
-    });
+    const { data, error } = await sbDb
+      .from("UserBusinessIntel")
+      .select("*")
+      .eq("userId", userId)
+      .maybeSingle();
 
-    return businessIntel;
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -150,11 +161,15 @@ export async function deleteBusinessIntel(
   userId: string
 ): Promise<UserBusinessIntel> {
   try {
-    const businessIntel = await db.userBusinessIntel.delete({
-      where: { userId },
-    });
+    const { data, error } = await sbDb
+      .from("UserBusinessIntel")
+      .delete()
+      .eq("userId", userId)
+      .select()
+      .single();
 
-    return businessIntel;
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,

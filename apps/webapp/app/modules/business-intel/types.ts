@@ -1,4 +1,4 @@
-import type { UserBusinessIntel } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 
 export interface CreateBusinessIntelPayload {
   userId: string;
@@ -21,4 +21,4 @@ export interface UpdateBusinessIntelPayload {
   timeline?: string | null;
 }
 
-export type { UserBusinessIntel };
+export type UserBusinessIntel = Sb.UserBusinessIntelRow;
