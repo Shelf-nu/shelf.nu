@@ -1136,272 +1136,332 @@ export interface Database {
         Row: TierLimitRow;
         Insert: TierLimitInsert;
         Update: TierLimitUpdate;
+        Relationships: [];
       };
       Tier: {
         Row: TierRow;
         Insert: TierInsert;
         Update: TierUpdate;
+        Relationships: [];
       };
       Role: {
         Row: RoleRow;
         Insert: RoleInsert;
         Update: RoleUpdate;
+        Relationships: [];
       };
       SsoDetails: {
         Row: SsoDetailsRow;
         Insert: SsoDetailsInsert;
         Update: SsoDetailsUpdate;
+        Relationships: [];
       };
       User: {
         Row: UserRow;
         Insert: UserInsert;
         Update: UserUpdate;
+        Relationships: [];
       };
       Image: {
         Row: ImageRow;
         Insert: ImageInsert;
         Update: ImageUpdate;
+        Relationships: [];
       };
       Organization: {
         Row: OrganizationRow;
         Insert: OrganizationInsert;
         Update: OrganizationUpdate;
+        Relationships: [];
       };
       UserContact: {
         Row: UserContactRow;
         Insert: UserContactInsert;
         Update: UserContactUpdate;
+        Relationships: [];
       };
       UserBusinessIntel: {
         Row: UserBusinessIntelRow;
         Insert: UserBusinessIntelInsert;
         Update: UserBusinessIntelUpdate;
+        Relationships: [];
       };
       CustomTierLimit: {
         Row: CustomTierLimitRow;
         Insert: CustomTierLimitInsert;
         Update: CustomTierLimitUpdate;
+        Relationships: [];
       };
       UserOrganization: {
         Row: UserOrganizationRow;
         Insert: UserOrganizationInsert;
         Update: UserOrganizationUpdate;
+        Relationships: [];
       };
       Location: {
         Row: LocationRow;
         Insert: LocationInsert;
         Update: LocationUpdate;
+        Relationships: [];
       };
       Category: {
         Row: CategoryRow;
         Insert: CategoryInsert;
         Update: CategoryUpdate;
+        Relationships: [];
       };
       Tag: {
         Row: TagRow;
         Insert: TagInsert;
         Update: TagUpdate;
+        Relationships: [];
       };
       Asset: {
         Row: AssetRow;
         Insert: AssetInsert;
         Update: AssetUpdate;
+        Relationships: [];
       };
       Kit: {
         Row: KitRow;
         Insert: KitInsert;
         Update: KitUpdate;
+        Relationships: [];
       };
       TeamMember: {
         Row: TeamMemberRow;
         Insert: TeamMemberInsert;
         Update: TeamMemberUpdate;
+        Relationships: [];
       };
       Custody: {
         Row: CustodyRow;
         Insert: CustodyInsert;
         Update: CustodyUpdate;
+        Relationships: [];
       };
       KitCustody: {
         Row: KitCustodyRow;
         Insert: KitCustodyInsert;
         Update: KitCustodyUpdate;
+        Relationships: [];
       };
       _AssetToTag: {
         Row: { A: string; B: string };
         Insert: { A: string; B: string };
         Update: Partial<{ A: string; B: string }>;
+        Relationships: [];
       };
       AssetFilterPreset: {
         Row: AssetFilterPresetRow;
         Insert: AssetFilterPresetInsert;
         Update: AssetFilterPresetUpdate;
+        Relationships: [];
       };
       AssetIndexSettings: {
         Row: AssetIndexSettingsRow;
         Insert: AssetIndexSettingsInsert;
         Update: AssetIndexSettingsUpdate;
+        Relationships: [];
       };
       AssetReminder: {
         Row: AssetReminderRow;
         Insert: AssetReminderInsert;
         Update: AssetReminderUpdate;
+        Relationships: [];
       };
       _AssetReminderToTeamMember: {
         Row: { A: string; B: string };
         Insert: { A: string; B: string };
         Update: Partial<{ A: string; B: string }>;
+        Relationships: [];
       };
       PrintBatch: {
         Row: PrintBatchRow;
         Insert: PrintBatchInsert;
         Update: PrintBatchUpdate;
+        Relationships: [];
       };
       Qr: {
         Row: QrRow;
         Insert: QrInsert;
         Update: QrUpdate;
+        Relationships: [];
       };
       Barcode: {
         Row: BarcodeRow;
         Insert: BarcodeInsert;
         Update: BarcodeUpdate;
+        Relationships: [];
       };
       Scan: {
         Row: ScanRow;
         Insert: ScanInsert;
         Update: ScanUpdate;
+        Relationships: [];
       };
       Note: {
         Row: NoteRow;
         Insert: NoteInsert;
         Update: NoteUpdate;
+        Relationships: [];
       };
       LocationNote: {
         Row: LocationNoteRow;
         Insert: LocationNoteInsert;
         Update: LocationNoteUpdate;
+        Relationships: [];
       };
       ReportFound: {
         Row: ReportFoundRow;
         Insert: ReportFoundInsert;
         Update: ReportFoundUpdate;
+        Relationships: [];
       };
       Invite: {
         Row: InviteRow;
         Insert: InviteInsert;
         Update: InviteUpdate;
+        Relationships: [];
       };
       Booking: {
         Row: BookingRow;
         Insert: BookingInsert;
         Update: BookingUpdate;
+        Relationships: [];
       };
       _AssetToBooking: {
         Row: { A: string; B: string };
         Insert: { A: string; B: string };
         Update: Partial<{ A: string; B: string }>;
+        Relationships: [];
       };
       _BookingToTag: {
         Row: { A: string; B: string };
         Insert: { A: string; B: string };
         Update: Partial<{ A: string; B: string }>;
+        Relationships: [];
       };
       BookingNote: {
         Row: BookingNoteRow;
         Insert: BookingNoteInsert;
         Update: BookingNoteUpdate;
+        Relationships: [];
       };
       BookingSettings: {
         Row: BookingSettingsRow;
         Insert: BookingSettingsInsert;
         Update: BookingSettingsUpdate;
+        Relationships: [];
       };
       PartialBookingCheckin: {
         Row: PartialBookingCheckinRow;
         Insert: PartialBookingCheckinInsert;
         Update: PartialBookingCheckinUpdate;
+        Relationships: [];
       };
       WorkingHours: {
         Row: WorkingHoursRow;
         Insert: WorkingHoursInsert;
         Update: WorkingHoursUpdate;
+        Relationships: [];
       };
       WorkingHoursOverride: {
         Row: WorkingHoursOverrideRow;
         Insert: WorkingHoursOverrideInsert;
         Update: WorkingHoursOverrideUpdate;
+        Relationships: [];
       };
       CustomField: {
         Row: CustomFieldRow;
         Insert: CustomFieldInsert;
         Update: CustomFieldUpdate;
+        Relationships: [];
       };
       AssetCustomFieldValue: {
         Row: AssetCustomFieldValueRow;
         Insert: AssetCustomFieldValueInsert;
         Update: AssetCustomFieldValueUpdate;
+        Relationships: [];
       };
       _CategoryToCustomField: {
         Row: { A: string; B: string };
         Insert: { A: string; B: string };
         Update: Partial<{ A: string; B: string }>;
+        Relationships: [];
       };
       AuditSession: {
         Row: AuditSessionRow;
         Insert: AuditSessionInsert;
         Update: AuditSessionUpdate;
+        Relationships: [];
       };
       AuditAssignment: {
         Row: AuditAssignmentRow;
         Insert: AuditAssignmentInsert;
         Update: AuditAssignmentUpdate;
+        Relationships: [];
       };
       AuditAsset: {
         Row: AuditAssetRow;
         Insert: AuditAssetInsert;
         Update: AuditAssetUpdate;
+        Relationships: [];
       };
       AuditScan: {
         Row: AuditScanRow;
         Insert: AuditScanInsert;
         Update: AuditScanUpdate;
+        Relationships: [];
       };
       AuditNote: {
         Row: AuditNoteRow;
         Insert: AuditNoteInsert;
         Update: AuditNoteUpdate;
+        Relationships: [];
       };
       AuditImage: {
         Row: AuditImageRow;
         Insert: AuditImageInsert;
         Update: AuditImageUpdate;
+        Relationships: [];
       };
       Announcement: {
         Row: AnnouncementRow;
         Insert: AnnouncementInsert;
         Update: AnnouncementUpdate;
+        Relationships: [];
       };
       Update: {
         Row: UpdateRow;
         Insert: UpdateInsert;
         Update: UpdateUpdate;
+        Relationships: [];
       };
       UserUpdateRead: {
         Row: UserUpdateReadRow;
         Insert: UserUpdateReadInsert;
         Update: UserUpdateReadUpdate;
+        Relationships: [];
       };
       _RoleToUser: {
         Row: { A: string; B: string };
         Insert: { A: string; B: string };
         Update: Partial<{ A: string; B: string }>;
+        Relationships: [];
       };
       RoleChangeLog: {
         Row: RoleChangeLogRow;
         Insert: RoleChangeLogInsert;
         Update: RoleChangeLogUpdate;
+        Relationships: [];
       };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
     };
     Enums: {
       AssetStatus: AssetStatus;
@@ -1424,6 +1484,9 @@ export interface Database {
       AuditAssetStatus: AuditAssetStatus;
       AuditAssignmentRole: AuditAssignmentRole;
       Currency: Currency;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
     };
   };
 }

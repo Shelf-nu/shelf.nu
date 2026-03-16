@@ -1,15 +1,6 @@
-import type {
-  Asset,
-  AuditSession,
-  Category,
-  Currency,
-  Kit,
-  Note,
-  Prisma,
-  Tag,
-  User,
-} from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { Prisma } from "@prisma/client";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import {
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
@@ -32,7 +23,7 @@ import {
 
 const label = "Note";
 
-export type TagSummary = Pick<Tag, "id" | "name">;
+export type TagSummary = Pick<Sb.TagRow, "id" | "name">;
 
 /** Creates a singular note */
 export async function createNote({
@@ -40,30 +31,26 @@ export async function createNote({
   type,
   userId,
   assetId,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetId: Asset["id"];
+}: {
+  content: string;
+  type?: Sb.NoteType;
+  userId: string;
+  assetId: string;
 }) {
   try {
-    const data = {
-      content,
-      type: type || "COMMENT",
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
-      asset: {
-        connect: {
-          id: assetId,
-        },
-      },
-    };
+    const { data, error } = await sbDb
+      .from("Note")
+      .insert({
+        content,
+        type: type || "COMMENT",
+        userId,
+        assetId,
+      })
+      .select()
+      .single();
 
-    return await db.note.create({
-      data,
-    });
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -80,22 +67,26 @@ export async function createNotes({
   type,
   userId,
   assetIds,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetIds: Asset["id"][];
+}: {
+  content: string;
+  type?: Sb.NoteType;
+  userId: string;
+  assetIds: string[];
 }) {
   try {
-    const data = assetIds.map((id) => ({
+    const rows = assetIds.map((id) => ({
       content,
-      type: type || "COMMENT",
+      type: type || ("COMMENT" as Sb.NoteType),
       userId,
       assetId: id,
     }));
 
-    return await db.note.createMany({
-      data,
-    });
+    const { error, count } = await sbDb
+      .from("Note")
+      .insert(rows, { count: "exact" });
+
+    if (error) throw error;
+    return { count };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -109,11 +100,19 @@ export async function createNotes({
 export async function deleteNote({
   id,
   userId,
-}: Pick<Note, "id"> & { userId: User["id"] }) {
+}: {
+  id: string;
+  userId: string;
+}) {
   try {
-    return await db.note.deleteMany({
-      where: { id, userId },
-    });
+    const { error, count } = await sbDb
+      .from("Note")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("userId", userId);
+
+    if (error) throw error;
+    return { count };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -130,29 +129,34 @@ export async function createBulkKitChangeNotes({
   userId,
   kit,
 }: {
-  newlyAddedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
-  removedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
-  userId: User["id"];
-  kit: Kit;
+  newlyAddedAssets: {
+    id: string;
+    title: string;
+    kit: { id: string; name: string } | null;
+  }[];
+  removedAssets: {
+    id: string;
+    title: string;
+    kit: { id: string; name: string } | null;
+  }[];
+  userId: string;
+  kit: { id: string; name: string };
 }) {
   try {
-    const user = await db.user
-      .findFirstOrThrow({
-        where: { id: userId },
-        select: { firstName: true, lastName: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "User not found",
-          additionalData: { userId },
-          label,
-        });
+    const { data: user, error } = await sbDb
+      .from("User")
+      .select("firstName, lastName")
+      .eq("id", userId)
+      .single();
+
+    if (error) {
+      throw new ShelfError({
+        cause: error,
+        message: "User not found",
+        additionalData: { userId },
+        label,
       });
+    }
 
     for (const asset of [...newlyAddedAssets, ...removedAssets]) {
       const isAssetRemoved = removedAssets.some((a) => a.id === asset.id);
@@ -195,12 +199,12 @@ export async function createKitChangeNote({
   userId,
   isRemoving,
 }: {
-  currentKit: Pick<Kit, "id" | "name"> | null;
-  newKit: Pick<Kit, "id" | "name"> | null;
+  currentKit: { id: string; name: string } | null;
+  newKit: { id: string; name: string } | null;
   firstName: string;
   lastName: string;
-  assetId: Asset["id"];
-  userId: User["id"];
+  assetId: string;
+  userId: string;
   isRemoving: boolean;
 }) {
   try {
@@ -274,8 +278,8 @@ export async function createTagChangeNoteIfNeeded({
   currentTags,
   loadUserForNotes,
 }: {
-  assetId: Asset["id"];
-  userId: User["id"];
+  assetId: string;
+  userId: string;
   previousTags: TagSummary[];
   currentTags: TagSummary[];
   loadUserForNotes: () => Promise<BasicUserName>;
@@ -347,8 +351,8 @@ export async function createAssetNameChangeNote({
   newName,
   loadUserForNotes,
 }: {
-  assetId: Asset["id"];
-  userId: User["id"];
+  assetId: string;
+  userId: string;
   previousName?: string | null;
   newName?: string | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -382,8 +386,8 @@ export async function createAssetDescriptionChangeNote({
   newDescription,
   loadUserForNotes,
 }: {
-  assetId: Asset["id"];
-  userId: User["id"];
+  assetId: string;
+  userId: string;
   previousDescription?: string | null;
   newDescription?: string | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -417,10 +421,10 @@ export async function createAssetCategoryChangeNote({
   newCategory,
   loadUserForNotes,
 }: {
-  assetId: Asset["id"];
-  userId: User["id"];
-  previousCategory?: Pick<Category, "id" | "name" | "color"> | null;
-  newCategory?: Pick<Category, "id" | "name" | "color"> | null;
+  assetId: string;
+  userId: string;
+  previousCategory?: { id: string; name: string; color: string } | null;
+  newCategory?: { id: string; name: string; color: string } | null;
   loadUserForNotes: LoadUserForNotesFn;
 }) {
   const userLink = await resolveUserLink({ userId, loadUserForNotes });
@@ -454,11 +458,11 @@ export async function createAssetValuationChangeNote({
   locale,
   loadUserForNotes,
 }: {
-  assetId: Asset["id"];
-  userId: User["id"];
+  assetId: string;
+  userId: string;
   previousValuation?: Prisma.Decimal | number | null;
   newValuation?: Prisma.Decimal | number | null;
-  currency: Currency;
+  currency: Sb.Currency;
   locale: string;
   loadUserForNotes: LoadUserForNotesFn;
 }) {
@@ -491,15 +495,16 @@ export async function createAssetNotesForAuditAddition({
   userId,
   audit,
 }: {
-  assetIds: Asset["id"][];
-  userId: User["id"];
-  audit: Pick<AuditSession, "id" | "name">;
+  assetIds: string[];
+  userId: string;
+  audit: { id: string; name: string };
 }) {
   try {
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { id: true, firstName: true, lastName: true },
-    });
+    const { data: user } = await sbDb
+      .from("User")
+      .select("id, firstName, lastName")
+      .eq("id", userId)
+      .maybeSingle();
 
     if (!user || assetIds.length === 0) return;
 
@@ -541,15 +546,16 @@ export async function createAssetNotesForAuditRemoval({
   userId,
   audit,
 }: {
-  assetIds: Asset["id"][];
-  userId: User["id"];
-  audit: Pick<AuditSession, "id" | "name">;
+  assetIds: string[];
+  userId: string;
+  audit: { id: string; name: string };
 }) {
   try {
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { id: true, firstName: true, lastName: true },
-    });
+    const { data: user } = await sbDb
+      .from("User")
+      .select("id, firstName, lastName")
+      .eq("id", userId)
+      .maybeSingle();
 
     if (!user || assetIds.length === 0) return;
 
