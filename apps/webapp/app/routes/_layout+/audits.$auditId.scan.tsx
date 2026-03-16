@@ -369,6 +369,7 @@ export default function AuditSessionRoute() {
             auditImagesCount: asset.auditImagesCount ?? 0,
             mainImage: asset.mainImage,
             thumbnailImage: asset.thumbnailImage,
+            locationName: asset.locationName,
           }) as AuditScannedItem
       ),
     [expectedAssets]

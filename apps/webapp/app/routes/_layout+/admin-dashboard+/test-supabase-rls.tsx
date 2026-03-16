@@ -91,6 +91,7 @@ export default function SecurityTest() {
       <p>Testing anonymous access to 'User' table...</p>
 
       <Button
+        type="button"
         onClick={testAccess}
         disabled={loading}
         className={"my-4 font-mono"}

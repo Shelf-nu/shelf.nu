@@ -93,6 +93,7 @@ function BulkUpdateDialogTrigger({
   function ClickMe({ disabled }: { disabled?: boolean }) {
     return (
       <Button
+        type="button"
         variant="link"
         className={tw(
           "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"

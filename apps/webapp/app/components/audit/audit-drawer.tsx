@@ -165,6 +165,9 @@ export function AuditDrawer({
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
   const removeScanFetcher = useFetcher();
 
+  // Show location when the audit is not already scoped to a specific location
+  const showLocation = contextLabel.toLowerCase() !== "location";
+
   const expectedAssetIds = useMemo(
     () => new Set(expectedAssets.map((asset) => asset.id)),
     [expectedAssets]
@@ -421,6 +424,11 @@ export function AuditDrawer({
                   {"title" in data ? data.title : data.name}
                 </span>
               </Button>
+              {showLocation && data.location?.name && (
+                <span className="text-xs text-gray-500">
+                  {data.location.name}
+                </span>
+              )}
               <div className="flex flex-wrap items-center gap-1">
                 <span className={assetTypeBadgeClass}>
                   {item.type === "asset" ? "asset" : "kit"}
@@ -472,6 +480,11 @@ export function AuditDrawer({
                   {asset.name}
                 </span>
               </Button>
+              {showLocation && asset.locationName && (
+                <span className="text-xs text-gray-500">
+                  {asset.locationName}
+                </span>
+              )}
               <div className="flex flex-wrap items-center gap-1">
                 <span className={assetTypeBadgeClass}>asset</span>
                 <AvailabilityBadge

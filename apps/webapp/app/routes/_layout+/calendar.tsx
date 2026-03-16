@@ -243,7 +243,11 @@ export default function Calendar() {
     <>
       <Header hidePageDescription>
         <CreateBookingDialog
-          trigger={<Button aria-label="new booking">New booking</Button>}
+          trigger={
+            <Button type="button" aria-label="new booking">
+              New booking
+            </Button>
+          }
         />
       </Header>
 

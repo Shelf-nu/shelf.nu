@@ -292,6 +292,7 @@ export default function BulkPartialCheckinDialog({
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}

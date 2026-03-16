@@ -82,6 +82,7 @@ export default function BulkAssignCustodyDialog() {
 
           <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}

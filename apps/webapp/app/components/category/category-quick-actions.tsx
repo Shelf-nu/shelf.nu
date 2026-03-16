@@ -57,6 +57,7 @@ export default function CategoryQuickActions({
           category={category}
           trigger={
             <Button
+              type="button"
               size="sm"
               variant="secondary"
               className={"p-2"}

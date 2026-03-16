@@ -146,6 +146,7 @@ export function OperatorSelector({
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="secondary"
           title={operatorsMap[operator][1]}
           className="w-[62px] font-normal"

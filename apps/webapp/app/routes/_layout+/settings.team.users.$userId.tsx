@@ -174,7 +174,12 @@ export default function UserPage() {
             inviteStatus={user?.teamMembers?.[0]?.receivedInvites?.[0]?.status}
             isSSO={user.sso}
             customTrigger={(disabled) => (
-              <Button variant="secondary" width="full" disabled={disabled}>
+              <Button
+                type="button"
+                variant="secondary"
+                width="full"
+                disabled={disabled}
+              >
                 Actions
               </Button>
             )}

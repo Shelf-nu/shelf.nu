@@ -725,7 +725,12 @@ function ClearFilterButton() {
   };
 
   return (
-    <Button variant="link-gray" className="text-sm " onClick={handleClick}>
+    <Button
+      type="button"
+      variant="link-gray"
+      className="text-sm "
+      onClick={handleClick}
+    >
       View all
     </Button>
   );

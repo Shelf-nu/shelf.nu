@@ -202,7 +202,9 @@ export function AdvancedIndexColumn({
           }}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-              <Button variant="link-gray">{item.qrId}</Button>
+              <Button type="button" variant="link-gray">
+                {item.qrId}
+              </Button>
             </Td>
           }
         />
@@ -544,7 +546,9 @@ function BarcodeColumn({
         selectedBarcodeId={barcode.id}
         trigger={
           <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-            <Button variant="link-gray">{barcode.value}</Button>
+            <Button type="button" variant="link-gray">
+              {barcode.value}
+            </Button>
           </Td>
         }
       />
@@ -565,7 +569,11 @@ function BarcodeColumn({
               type: "asset",
             }}
             selectedBarcodeId={barcode.id}
-            trigger={<Button variant="link-gray">{barcode.value}</Button>}
+            trigger={
+              <Button type="button" variant="link-gray">
+                {barcode.value}
+              </Button>
+            }
           />
           {index < barcodes.length - 1 && (
             <span className="text-gray-600">, </span>
@@ -596,7 +604,7 @@ function UpcomingBookingsColumn({
     <Td>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="link-gray">
+          <Button type="button" variant="link-gray">
             {bookings.length > 1
               ? `${bookings.length} upcoming bookings`
               : "1 upcoming booking"}

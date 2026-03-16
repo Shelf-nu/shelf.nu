@@ -98,6 +98,7 @@ export function SaveFilterButton({
   return (
     <>
       <Button
+        type="button"
         variant="secondary"
         className="text-[14px] font-medium"
         size="xs"

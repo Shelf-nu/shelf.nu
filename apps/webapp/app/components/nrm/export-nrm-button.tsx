@@ -54,6 +54,7 @@ export function ExportNrmButton() {
 
   return (
     <Button
+      type="button"
       variant="secondary"
       className="w-max"
       disabled={

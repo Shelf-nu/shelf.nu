@@ -41,6 +41,7 @@ export default function BulkCancelDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -49,6 +50,7 @@ export default function BulkCancelDialog() {
               Cancel
             </Button>
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

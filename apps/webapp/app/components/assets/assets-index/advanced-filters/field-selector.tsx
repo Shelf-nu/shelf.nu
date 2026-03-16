@@ -105,6 +105,7 @@ export function FieldSelector({
     <Popover>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="secondary"
           className="w-[150px] justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
         >

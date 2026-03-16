@@ -77,7 +77,7 @@ export default function CheckoutDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button disabled={disabled} variant="secondary">
+            <Button type="button" disabled={disabled} variant="secondary">
               Cancel
             </Button>
           </AlertDialogCancel>

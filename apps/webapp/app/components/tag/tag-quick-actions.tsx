@@ -57,6 +57,7 @@ export default function TagQuickActions({
           tag={tag}
           trigger={
             <Button
+              type="button"
               size="sm"
               variant="secondary"
               className={"p-2"}

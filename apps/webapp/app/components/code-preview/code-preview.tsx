@@ -277,6 +277,7 @@ export const CodePreview = ({
           </select>
           <When truthy={!isBaseOrSelfService}>
             <Button
+              type="button"
               icon="plus"
               variant="secondary"
               size="sm"
@@ -328,6 +329,7 @@ export const CodePreview = ({
       <When truthy={!hideButton && !!selectedCode}>
         <div className="mt-8 flex w-full items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
           <Button
+            type="button"
             icon="download"
             onClick={downloadCode}
             download={fileName}
@@ -338,6 +340,7 @@ export const CodePreview = ({
             Download
           </Button>
           <Button
+            type="button"
             icon="print"
             variant="secondary"
             className="w-full"

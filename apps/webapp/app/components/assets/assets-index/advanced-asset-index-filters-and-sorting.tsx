@@ -194,6 +194,7 @@ function AdvancedFilter() {
       >
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             className={getTriggerClasses(isPopoverOpen, initialFilters.length)}
             icon="filter"
@@ -320,6 +321,7 @@ function AdvancedFilter() {
                         )}
 
                         <Button
+                          type="button"
                           variant="block-link-gray"
                           className="mt-[5px] shrink-0 text-[10px] font-normal text-gray-600"
                           icon="x"
@@ -340,6 +342,7 @@ function AdvancedFilter() {
             <div className="flex items-center justify-between px-4 py-3">
               <div>
                 <Button
+                  type="button"
                   variant="secondary"
                   className="text-[14px] font-medium"
                   size="xs"
@@ -370,6 +373,7 @@ function AdvancedFilter() {
               <div className="ml-8 flex items-center justify-between gap-2">
                 {filters.length > 0 && (
                   <Button
+                    type="button"
                     variant="block-link"
                     size="xs"
                     className="mt-0 whitespace-nowrap text-[14px]"
@@ -382,6 +386,7 @@ function AdvancedFilter() {
                 <SaveFilterButton hasUnappliedFilters={hasUnappliedChanges} />
 
                 <Button
+                  type="button"
                   variant="secondary"
                   className="whitespace-nowrap text-[14px] font-medium"
                   size="xs"
@@ -497,6 +502,7 @@ function AdvancedSorting() {
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="secondary"
           className={getTriggerClasses(isPopoverOpen, initialSorts.length)}
           icon="sort"
@@ -567,6 +573,7 @@ function AdvancedSorting() {
                           />
                         </div>
                         <Button
+                          type="button"
                           variant="block-link-gray"
                           className="mt-[2px] text-[10px] font-normal text-gray-600"
                           icon="x"
@@ -587,6 +594,7 @@ function AdvancedSorting() {
             <div className="flex items-center justify-between gap-4">
               {sorts.length > 0 && (
                 <Button
+                  type="button"
                   variant="block-link"
                   size="xs"
                   className="mt-0 text-[14px]"
@@ -597,6 +605,7 @@ function AdvancedSorting() {
               )}
 
               <Button
+                type="button"
                 variant="secondary"
                 className="text-[14px] font-medium"
                 size="xs"
@@ -715,6 +724,7 @@ function PickAColumnToSortBy({
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="block-link-gray"
           className="text-[14px] font-normal text-gray-600"
           disabled={

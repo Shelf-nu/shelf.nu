@@ -88,6 +88,7 @@ export const Dialog = ({
           >
             {title}
             <Button
+              type="button"
               onClick={onClose}
               variant="link"
               className={"mt-2 leading-none text-gray-500 md:right-6"}

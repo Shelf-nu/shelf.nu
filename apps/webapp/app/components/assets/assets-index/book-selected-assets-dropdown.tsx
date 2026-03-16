@@ -30,11 +30,13 @@ export default function BookSelectedAssetsDropdown() {
   const isHydrated = useHydrated();
 
   if (!isHydrated) {
-    <Button variant="secondary">
-      <span className="flex items-center gap-2">
-        Book <ChevronRightIcon className="chev size-4" />
-      </span>
-    </Button>;
+    return (
+      <Button type="button" variant="secondary">
+        <span className="flex items-center gap-2">
+          Book <ChevronRightIcon className="chev size-4" />
+        </span>
+      </Button>
+    );
   }
 
   return <ConditionalActionsDropdown />;
@@ -146,7 +148,7 @@ function ConditionalActionsDropdown() {
           }}
           asChild
         >
-          <Button disabled={disabledReason}>
+          <Button type="button" disabled={disabledReason}>
             <span className="flex items-center gap-2">
               {buttonTitle} <ChevronRightIcon className="chev size-4" />
             </span>
@@ -155,6 +157,7 @@ function ConditionalActionsDropdown() {
 
         {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
+          type="button"
           className="flex-1 sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabledReason}

@@ -82,6 +82,7 @@ export function SequentialIdMigrationModal({
             {state === "error" && (
               <div className="mt-3">
                 <Button
+                  type="button"
                   onClick={() => window.location.reload()}
                   size="sm"
                   variant="secondary"
@@ -94,7 +95,11 @@ export function SequentialIdMigrationModal({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button variant="secondary" disabled={state !== "completed"}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={state !== "completed"}
+            >
               Close
             </Button>
           </AlertDialogCancel>

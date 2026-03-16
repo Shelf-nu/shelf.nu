@@ -107,7 +107,11 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
           onClick={() => setOpen(!open)}
           asChild
         >
-          <Button variant="secondary" aria-label="Actions Trigger">
+          <Button
+            type="button"
+            variant="secondary"
+            aria-label="Actions Trigger"
+          >
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
             </span>
@@ -116,6 +120,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
+          type="button"
           variant="secondary"
           className="actions-dropdown sm:hidden"
           width="full"
@@ -202,6 +207,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
             >
               <DropdownMenuItem className="border-b px-4 py-1 md:p-0">
                 <Button
+                  type="button"
                   variant="link"
                   className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                   width="full"
@@ -241,6 +247,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
               <DropdownMenuItem className="px-4 py-1 md:p-0">
                 <Button
+                  type="button"
                   role="button"
                   variant="link"
                   className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"

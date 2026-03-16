@@ -34,6 +34,7 @@ export const DeleteLocation = ({ location, trigger }: DeleteLocationProps) => {
       <AlertDialogTrigger asChild>
         {trigger ?? (
           <Button
+            type="button"
             variant="link"
             data-test-id="deleteAssetButton"
             icon="trash"
@@ -68,7 +69,9 @@ export const DeleteLocation = ({ location, trigger }: DeleteLocationProps) => {
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
+              <Button type="button" variant="secondary">
+                Cancel
+              </Button>
             </AlertDialogCancel>
 
             <Form method="delete" action={`/locations/${location.id}`}>

@@ -63,6 +63,7 @@ export default function KitQuickActions({
           }}
           trigger={
             <Button
+              type="button"
               size="sm"
               variant="secondary"
               className="p-2"
@@ -86,6 +87,7 @@ export default function KitQuickActions({
           kit={kit}
           trigger={
             <Button
+              type="button"
               size="sm"
               variant="secondary"
               className={"p-2"}

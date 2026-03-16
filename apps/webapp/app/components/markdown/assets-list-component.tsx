@@ -75,6 +75,7 @@ export function AssetsListComponent({
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="link"
           className="h-auto p-0 text-black underline hover:text-primary"
         >
