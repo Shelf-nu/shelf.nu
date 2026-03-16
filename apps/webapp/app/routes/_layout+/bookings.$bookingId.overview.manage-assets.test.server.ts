@@ -209,9 +209,8 @@ describe("manage-assets route validation", () => {
 
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should succeed without validation since no new assets
       await expect(
@@ -271,9 +270,8 @@ describe("manage-assets route validation", () => {
       // Mock that asset is partially checked in (available for other bookings)
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(true);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should succeed because asset is partially checked in within booking context
       await expect(
@@ -315,9 +313,8 @@ describe("manage-assets route validation", () => {
       // Mock that asset is NOT partially checked in (truly checked out)
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should return error response because asset is truly checked out
       const response = await actionFunction(
@@ -341,9 +338,8 @@ describe("manage-assets route validation", () => {
 
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should succeed because asset status is AVAILABLE
       await expect(
@@ -387,9 +383,8 @@ describe("manage-assets route validation", () => {
       vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should succeed because DRAFT bookings allow checked out assets
       await expect(
@@ -428,9 +423,8 @@ describe("manage-assets route validation", () => {
       vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should return error response because ONGOING booking validates checked out assets
       const response = await actionFunction(
@@ -470,9 +464,8 @@ describe("manage-assets route validation", () => {
       vi.mocked(db.asset.findMany).mockResolvedValue(mockAssets);
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       // Should return error response because OVERDUE booking validates checked out assets
       const response = await actionFunction(
@@ -528,9 +521,8 @@ describe("manage-assets route validation", () => {
       );
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(true);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       await actionFunction(
         createActionArgs({
@@ -558,9 +550,8 @@ describe("manage-assets route validation", () => {
 
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       await actionFunction(
         createActionArgs({
@@ -596,9 +587,8 @@ describe("manage-assets route validation", () => {
 
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       await actionFunction(
         createActionArgs({
@@ -627,9 +617,8 @@ describe("manage-assets route validation", () => {
 
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
 
-      const { action: actionFunction } = await import(
-        "./bookings.$bookingId.overview.manage-assets"
-      );
+      const { action: actionFunction } =
+        await import("./bookings.$bookingId.overview.manage-assets");
 
       await actionFunction(
         createActionArgs({

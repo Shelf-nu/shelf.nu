@@ -1259,9 +1259,9 @@ export async function updateAsset({
 
     const trackedFieldUpdates = Boolean(
       typeof title !== "undefined" ||
-        typeof description !== "undefined" ||
-        typeof categoryId !== "undefined" ||
-        typeof valuation !== "undefined"
+      typeof description !== "undefined" ||
+      typeof categoryId !== "undefined" ||
+      typeof valuation !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({

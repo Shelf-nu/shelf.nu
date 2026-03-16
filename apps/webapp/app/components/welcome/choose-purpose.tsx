@@ -91,7 +91,7 @@ export function ChoosePurpose({
   const ctaLabel =
     selectedPlan === "personal" && wantsAudits
       ? "Start with Audit trial"
-      : selectedDetails?.ctaLabel ?? "Start using Shelf";
+      : (selectedDetails?.ctaLabel ?? "Start using Shelf");
 
   // Determine href for team flow (pass withAudits param)
   const teamHref = wantsAudits
@@ -103,7 +103,7 @@ export function ChoosePurpose({
   const isPersonalWithAudits = selectedPlan === "personal" && wantsAudits;
 
   const ctaHref =
-    selectedPlan === "team" ? teamHref : selectedDetails?.href ?? "/assets";
+    selectedPlan === "team" ? teamHref : (selectedDetails?.href ?? "/assets");
 
   return (
     <>
