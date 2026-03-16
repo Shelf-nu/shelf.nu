@@ -11,6 +11,14 @@
     "./client": {
       "types": "./src/client.ts",
       "default": "./src/client.ts"
+    },
+    "./supabase": {
+      "types": "./src/supabase-client.ts",
+      "default": "./src/supabase-client.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "default": "./src/types.ts"
     }
   },
   "scripts": {
@@ -26,7 +34,8 @@
     "db:reset:staging": "dotenv -e ../../.env.staging -- prisma migrate reset"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.2"
+    "@prisma/client": "^6.19.2",
+    "@supabase/supabase-js": "^2.98.0"
   },
   "devDependencies": {
     "@shelf/typescript-config": "workspace:*",
