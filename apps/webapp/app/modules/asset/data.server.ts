@@ -1,11 +1,12 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Kit } from "@prisma/client";
+import type { Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -53,7 +54,7 @@ interface Props {
   role: OrganizationRoles;
   currentOrganization: OrganizationFromUser;
   user: { firstName: string | null };
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }
 
 const searchFieldTooltipText = `

@@ -1,11 +1,6 @@
-import {
-  AssetIndexMode,
-  OrganizationRoles,
-  type CustomField,
-  type Prisma,
-} from "@prisma/client";
-import type { ITXClientDenyList } from "@prisma/client/runtime/library";
-import type { ExtendedPrismaClient } from "~/database/db.server";
+import type { CustomField, AssetIndexMode } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
@@ -19,21 +14,27 @@ import {
 import { getOrganizationById } from "../organization/service.server";
 
 /**
+ * Re-export the Supabase row type so consumers can reference it without
+ * importing directly from `@shelf/database`.
+ */
+export type { AssetIndexSettingsRow } from "@shelf/database/types";
+
+/**
  * Derive the default asset index mode for a given organization role.
  * BASE and SELF_SERVICE should remain in simple mode; elevated roles default to advanced.
  */
 function getDefaultModeForRole(
   role?: OrganizationRoles | null
-): AssetIndexMode {
+): Sb.AssetIndexMode {
   if (
     !role ||
     role === OrganizationRoles.BASE ||
     role === OrganizationRoles.SELF_SERVICE
   ) {
-    return AssetIndexMode.SIMPLE;
+    return "SIMPLE";
   }
 
-  return AssetIndexMode.ADVANCED;
+  return "ADVANCED";
 }
 
 const label: ErrorLabel = "Asset Index Settings";
@@ -43,18 +44,13 @@ export async function createUserAssetIndexSettings({
   organizationId,
   canUseBarcodes = false,
   role,
-  tx,
 }: {
   userId: string;
   organizationId: string;
   canUseBarcodes?: boolean;
   /** User's role to determine default mode */
   role?: OrganizationRoles;
-  /** Optionally receive a transaction when the settingsd need to be created together with other entries */
-  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
-  const _db = tx || db;
-
   try {
     const org = await getOrganizationById(organizationId, {
       customFields: {
@@ -89,16 +85,20 @@ export async function createUserAssetIndexSettings({
     // Align initial mode based on the user's role
     const defaultMode = getDefaultModeForRole(role);
 
-    const settings = await _db.assetIndexSettings.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("AssetIndexSettings")
+      .insert({
         userId,
         organizationId,
         mode: defaultMode,
-        columns,
-      },
-    });
+        columns: columns as unknown as Record<string, unknown>[],
+      })
+      .select()
+      .single();
 
-    return settings;
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -123,9 +123,14 @@ export async function getAssetIndexSettings({
   role?: OrganizationRoles;
 }) {
   try {
-    const assetIndexSettings = await db.assetIndexSettings.findFirst({
-      where: { userId, organizationId },
-    });
+    const { data: assetIndexSettings, error } = await sbDb
+      .from("AssetIndexSettings")
+      .select()
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (error) throw error;
 
     /** Create new settings if none exist */
     if (!assetIndexSettings) {
@@ -165,37 +170,42 @@ export async function ensureAssetIndexModeForRole({
   userId,
   organizationId,
   role,
-  tx,
 }: {
   userId: string;
   organizationId: string;
   role?: OrganizationRoles | null;
-  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
-  const client = tx || db;
   const desiredMode = getDefaultModeForRole(role);
 
-  let settings = await client.assetIndexSettings.findUnique({
-    where: { userId_organizationId: { userId, organizationId } },
-  });
+  const { data: settings, error } = await sbDb
+    .from("AssetIndexSettings")
+    .select()
+    .eq("userId", userId)
+    .eq("organizationId", organizationId)
+    .maybeSingle();
+
+  if (error) throw error;
 
   if (!settings) {
     return createUserAssetIndexSettings({
       userId,
       organizationId,
       role: role ?? undefined,
-      tx: client,
     });
   }
 
-  if (
-    desiredMode === AssetIndexMode.ADVANCED &&
-    settings.mode !== AssetIndexMode.ADVANCED
-  ) {
-    settings = await client.assetIndexSettings.update({
-      where: { userId_organizationId: { userId, organizationId } },
-      data: { mode: AssetIndexMode.ADVANCED },
-    });
+  if (desiredMode === "ADVANCED" && settings.mode !== "ADVANCED") {
+    const { data: updated, error: updateError } = await sbDb
+      .from("AssetIndexSettings")
+      .update({ mode: "ADVANCED" as Sb.AssetIndexMode })
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    return updated;
   }
 
   return settings;
@@ -280,12 +290,15 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
   newField: CustomField;
 }) {
   try {
-    const settings = await db.assetIndexSettings.findMany({
-      where: { organizationId: newField.organizationId },
-    });
+    const { data: settings, error } = await sbDb
+      .from("AssetIndexSettings")
+      .select()
+      .eq("organizationId", newField.organizationId);
 
-    const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
+    if (error) throw error;
+
+    const updates = (settings ?? []).map((entry) => {
+      const columns = (entry.columns as Column[]) ?? [];
       const cfIndex = columns.findIndex(
         (col) => col?.name === `cf_${oldField.name}`
       );
@@ -315,10 +328,12 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
         columns.splice(cfIndex, 1);
       }
 
-      return db.assetIndexSettings.update({
-        where: { id: entry.id },
-        data: { columns },
-      });
+      return sbDb
+        .from("AssetIndexSettings")
+        .update({
+          columns: columns as unknown as Record<string, unknown>[],
+        })
+        .eq("id", entry.id);
     });
 
     await Promise.all(updates.filter(Boolean));
@@ -380,12 +395,15 @@ export async function updateAssetIndexSettingsWithNewCustomFields({
 }) {
   try {
     // Get all asset index settings for the organization
-    const settings = await db.assetIndexSettings.findMany({
-      where: { organizationId },
-    });
+    const { data: settings, error } = await sbDb
+      .from("AssetIndexSettings")
+      .select()
+      .eq("organizationId", organizationId);
+
+    if (error) throw error;
 
     // For each user's settings, update their columns
-    const updates = settings.map((setting) => {
+    const updates = (settings ?? []).map((setting) => {
       const columns = setting.columns as Column[];
 
       // Get the highest current position
@@ -405,12 +423,15 @@ export async function updateAssetIndexSettingsWithNewCustomFields({
           !newCustomFields.some((field) => `cf_${field.name}` === col.name)
       );
 
-      return db.assetIndexSettings.update({
-        where: { id: setting.id },
-        data: {
-          columns: [...existingColumns, ...newColumns],
-        },
-      });
+      return sbDb
+        .from("AssetIndexSettings")
+        .update({
+          columns: [...existingColumns, ...newColumns] as unknown as Record<
+            string,
+            unknown
+          >[],
+        })
+        .eq("id", setting.id);
     });
 
     await Promise.all(updates);
@@ -527,7 +548,7 @@ async function validateColumns({
 
     // Only query DB if we found invalid custom fields
     if (hasInvalidCustomFields) {
-      // Fetch custom fields data only when needed
+      // Fetch custom fields data only when needed (still uses Prisma — separate module)
       const customFields = await db.customField.findMany({
         where: {
           organizationId,

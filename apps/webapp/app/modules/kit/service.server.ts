@@ -1,6 +1,5 @@
 import type {
   Asset,
-  AssetIndexSettings,
   Barcode,
   Booking,
   Kit,
@@ -22,6 +21,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -2356,7 +2356,7 @@ export async function bulkRemoveAssetsFromKits({
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     const user = await getUserByID(userId, {

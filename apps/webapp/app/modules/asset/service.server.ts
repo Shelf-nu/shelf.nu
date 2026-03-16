@@ -10,7 +10,6 @@ import type {
   TeamMember,
   Booking,
   Kit,
-  AssetIndexSettings,
   UserOrganization,
   BarcodeType,
 } from "@prisma/client";
@@ -31,6 +30,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -827,7 +827,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
@@ -3136,7 +3136,7 @@ export async function bulkDeleteAssets({
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3212,7 +3212,7 @@ export async function bulkCheckOutAssets({
   custodianName: TeamMember["name"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3339,7 +3339,7 @@ export async function bulkCheckInAssets({
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3465,7 +3465,7 @@ export async function bulkUpdateAssetLocation({
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3665,7 +3665,7 @@ export async function bulkUpdateAssetCategory({
   organizationId: Asset["organizationId"];
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3713,7 +3713,7 @@ export async function bulkAssignAssetTags({
   tagsIds: string[];
   currentSearchParams?: string | null;
   remove: boolean;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3814,7 +3814,7 @@ export async function bulkMarkAvailability({
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)

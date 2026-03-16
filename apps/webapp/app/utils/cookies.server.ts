@@ -1,4 +1,3 @@
-import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "react-router"; // or cloudflare/deno
 
 import type { Cookie } from "react-router";
@@ -9,6 +8,7 @@ import type {
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import { getCurrentSearchParams } from "./http.server";
 
 // find cookie by name from request headers
@@ -217,7 +217,7 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
 export async function getAdvancedFiltersFromRequest(
   request: Request,
   organizationId: string,
-  settings: AssetIndexSettings
+  settings: AssetIndexSettingsRow
 ): Promise<{
   filters: string | undefined;
   serializedCookie: string | undefined;

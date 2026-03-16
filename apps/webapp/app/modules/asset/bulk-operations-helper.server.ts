@@ -1,6 +1,7 @@
-import type { Asset, AssetIndexSettings } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
@@ -32,7 +33,7 @@ async function getAdvancedFilteredAssetIds({
 }: {
   organizationId: string;
   filters: string;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
   availableToBookOnly?: boolean;
 }): Promise<string[]> {
   try {
@@ -128,7 +129,7 @@ export async function resolveAssetIdsForBulkOperation({
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
