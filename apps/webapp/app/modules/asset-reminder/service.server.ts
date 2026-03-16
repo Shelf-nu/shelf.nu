@@ -1,5 +1,6 @@
 import type { AssetReminder, Prisma, TeamMember } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -295,9 +296,15 @@ export async function deleteAssetReminder({
   organizationId,
 }: Pick<AssetReminder, "id" | "organizationId">) {
   try {
-    const deletedReminder = await db.assetReminder.delete({
-      where: { id, organizationId },
-    });
+    const { data: deletedReminder, error } = await sbDb
+      .from("AssetReminder")
+      .delete()
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await cancelAssetReminderScheduler(deletedReminder);
 
@@ -305,8 +312,8 @@ export async function deleteAssetReminder({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: isNotFoundError(cause)
-        ? "Reminder not found or you are viewing in wrong organization."
+      message: isLikeShelfError(cause)
+        ? cause.message
         : "Something went wrong while deleting reminder.",
       label,
     });

@@ -6,6 +6,7 @@ import {
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
@@ -241,10 +242,11 @@ export async function signInWithSSO(domain: string) {
  * @throws ShelfError if user exists and is SSO-only
  */
 async function validateNonSSOUser(email: string) {
-  const user = await db.user.findUnique({
-    where: { email: email.toLowerCase() },
-    select: { sso: true },
-  });
+  const { data: user } = await sbDb
+    .from("User")
+    .select("sso")
+    .eq("email", email.toLowerCase())
+    .maybeSingle();
 
   if (user?.sso) {
     throw new ShelfError({
@@ -319,12 +321,11 @@ export async function updateAccountPassword(
   accessToken?: string | undefined
 ) {
   try {
-    const user = await db.user.findFirst({
-      where: { id },
-      select: {
-        sso: true,
-      },
-    });
+    const { data: user } = await sbDb
+      .from("User")
+      .select("sso")
+      .eq("id", id)
+      .maybeSingle();
     if (user?.sso) {
       throw new ShelfError({
         cause: null,

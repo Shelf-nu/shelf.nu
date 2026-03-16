@@ -14,6 +14,7 @@ import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
@@ -442,16 +443,11 @@ export async function checkUserAndInviteMatch({
   const { userId } = authSession;
 
   /** We get the user, selecting only the email */
-  const user = await db.user
-    .findFirst({
-      where: {
-        id: userId,
-      },
-      select: {
-        email: true,
-      },
-    })
-    .catch(() => null);
+  const { data: user } = await sbDb
+    .from("User")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle();
 
   if (user?.email !== invite?.inviteeEmail) {
     throw new ShelfError({

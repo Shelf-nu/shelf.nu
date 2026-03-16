@@ -18,6 +18,7 @@ import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 
 import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -165,7 +166,15 @@ export async function getUserWithContact<T extends Prisma.UserInclude>(
 
 export async function findUserByEmail(email: User["email"]) {
   try {
-    return await db.user.findUnique({ where: { email: email.toLowerCase() } });
+    const { data, error } = await sbDb
+      .from("User")
+      .select("*")
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
