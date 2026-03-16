@@ -1,6 +1,4 @@
-import type { User } from "@prisma/client";
-
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 
 /**
  * Minimal user name shape used when composing note content.
@@ -18,15 +16,18 @@ export type LoadUserForNotesFn = () => Promise<BasicUserName>;
 /**
  * Creates a memoized loader that fetches the note author's name on demand.
  */
-export function createLoadUserForNotes(userId: User["id"]): LoadUserForNotesFn {
+export function createLoadUserForNotes(userId: string): LoadUserForNotesFn {
   let cachedUser: BasicUserName | null = null;
 
   return async () => {
     if (!cachedUser) {
-      cachedUser = (await db.user.findFirst({
-        where: { id: userId },
-        select: { firstName: true, lastName: true },
-      })) ?? { firstName: null, lastName: null };
+      const { data } = await sbDb
+        .from("User")
+        .select("firstName, lastName")
+        .eq("id", userId)
+        .maybeSingle();
+
+      cachedUser = data ?? { firstName: null, lastName: null };
     }
 
     return cachedUser;
