@@ -91,19 +91,18 @@ export async function getExistingActiveInvite({
   inviteeEmail,
 }: Pick<Invite, "inviteeEmail" | "organizationId">) {
   try {
-    return await db.invite.findFirst({
-      where: {
-        organizationId,
-        inviteeEmail,
-        OR: [
-          //invite is either not rejected or not expired
-          {
-            status: { notIn: ["REJECTED"] }, //should we allow reinvite if user rejects?
-          },
-          { expiresAt: { gt: new Date() } },
-        ],
-      },
-    });
+    const { data, error } = await sbDb
+      .from("Invite")
+      .select()
+      .eq("organizationId", organizationId)
+      .eq("inviteeEmail", inviteeEmail)
+      .or(`status.neq.REJECTED,expiresAt.gt.${new Date().toISOString()}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,

@@ -1,7 +1,6 @@
 import type { CustomField, AssetIndexMode } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import type { Sb } from "@shelf/database";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import type { Column, ColumnLabelKey } from "./helpers";
@@ -548,18 +547,15 @@ async function validateColumns({
 
     // Only query DB if we found invalid custom fields
     if (hasInvalidCustomFields) {
-      // Fetch custom fields data only when needed (still uses Prisma — separate module)
-      const customFields = await db.customField.findMany({
-        where: {
-          organizationId,
-          active: true,
-          deletedAt: null,
-        },
-        select: {
-          name: true,
-          type: true,
-        },
-      });
+      // Fetch custom fields data only when needed
+      const { data: customFields, error: cfError } = await sbDb
+        .from("CustomField")
+        .select("name, type")
+        .eq("organizationId", organizationId)
+        .eq("active", true)
+        .is("deletedAt", null);
+
+      if (cfError) throw cfError;
 
       const customFieldsMap = new Map(
         customFields.map((cf) => [cf.name, cf.type])

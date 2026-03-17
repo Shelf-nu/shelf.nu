@@ -1,7 +1,7 @@
 import { AssetIndexMode } from "@prisma/client";
 import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import type {
   Column,
   ColumnLabelKey,
@@ -121,10 +121,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           })
         );
 
-        await db.assetIndexSettings.update({
-          where: { userId_organizationId: { userId, organizationId } },
-          data: { freezeColumn },
-        });
+        const { error: freezeError } = await sbDb
+          .from("AssetIndexSettings")
+          .update({ freezeColumn })
+          .eq("userId", userId)
+          .eq("organizationId", organizationId);
+
+        if (freezeError) throw freezeError;
 
         return data(payload({ success: true }));
       }
@@ -137,10 +140,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           })
         );
 
-        await db.assetIndexSettings.update({
-          where: { userId_organizationId: { userId, organizationId } },
-          data: { showAssetImage },
-        });
+        const { error: showImageError } = await sbDb
+          .from("AssetIndexSettings")
+          .update({ showAssetImage })
+          .eq("userId", userId)
+          .eq("organizationId", organizationId);
+
+        if (showImageError) throw showImageError;
 
         return data(payload({ success: true }));
       }

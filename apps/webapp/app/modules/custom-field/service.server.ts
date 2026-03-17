@@ -39,7 +39,7 @@ export async function createCustomField({
   categories = [],
 }: CustomFieldDraftPayload) {
   try {
-    const [customField, assetIndexSettingsEntries] = await Promise.all([
+    const [customField, settingsResult] = await Promise.all([
       db.customField.create({
         data: {
           name,
@@ -63,17 +63,20 @@ export async function createCustomField({
           },
         },
       }),
-      db.assetIndexSettings.findMany({
-        where: { organizationId },
-      }),
+      sbDb
+        .from("AssetIndexSettings")
+        .select()
+        .eq("organizationId", organizationId),
     ]);
+
+    if (settingsResult.error) throw settingsResult.error;
 
     /** We need to add it to the advanced index settings for each entry belonging to this organization */
     if (customField.active) {
       await Promise.all(
-        assetIndexSettingsEntries.map(async (entry) => {
-          const columns = Array.from(entry.columns as Prisma.JsonArray);
-          const prevHighestPosition = (columns as Column[]).reduce(
+        (settingsResult.data ?? []).map(async (entry) => {
+          const columns = (entry.columns as Column[]) ?? [];
+          const prevHighestPosition = columns.reduce(
             (acc, col) => (col.position > acc ? col.position : acc),
             0
           );
@@ -84,10 +87,15 @@ export async function createCustomField({
             position: prevHighestPosition + 1,
           });
 
-          await db.assetIndexSettings.update({
-            where: { id: entry.id, organizationId },
-            data: { columns },
-          });
+          const { error: updateError } = await sbDb
+            .from("AssetIndexSettings")
+            .update({
+              columns: columns as unknown as Record<string, unknown>[],
+            })
+            .eq("id", entry.id)
+            .eq("organizationId", organizationId);
+
+          if (updateError) throw updateError;
         })
       );
     }
@@ -639,9 +647,16 @@ export async function countActiveCustomFields({
   organizationId: string;
 }) {
   try {
-    return await db.customField.count({
-      where: { organizationId, active: true, deletedAt: null },
-    });
+    const { count, error } = await sbDb
+      .from("CustomField")
+      .select("*", { count: "exact", head: true })
+      .eq("organizationId", organizationId)
+      .eq("active", true)
+      .is("deletedAt", null);
+
+    if (error) throw error;
+
+    return count ?? 0;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -673,13 +688,16 @@ export async function bulkActivateOrDeactivateCustomFields({
     });
 
     /** Get the asset index settings for the organization */
-    const settings = await db.assetIndexSettings.findMany({
-      where: { organizationId },
-    });
+    const { data: settings, error: settingsError } = await sbDb
+      .from("AssetIndexSettings")
+      .select()
+      .eq("organizationId", organizationId);
+
+    if (settingsError) throw settingsError;
 
     /** Update the asset index settings for each entry */
-    const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
+    const updates = (settings ?? []).map((entry) => {
+      const columns = (entry.columns as Column[]) ?? [];
 
       customFields.forEach((field) => {
         const oldField = field;
@@ -711,10 +729,13 @@ export async function bulkActivateOrDeactivateCustomFields({
         }
       });
 
-      return db.assetIndexSettings.update({
-        where: { id: entry.id, organizationId },
-        data: { columns },
-      });
+      return sbDb
+        .from("AssetIndexSettings")
+        .update({
+          columns: columns as unknown as Record<string, unknown>[],
+        })
+        .eq("id", entry.id)
+        .eq("organizationId", organizationId);
     });
 
     await Promise.all(updates.filter(Boolean));
