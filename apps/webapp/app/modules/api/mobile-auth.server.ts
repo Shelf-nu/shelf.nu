@@ -1,6 +1,11 @@
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
+import {
+  type PermissionAction,
+  type PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { validatePermission } from "~/utils/permissions/permission.validator.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -141,4 +146,29 @@ export async function requireOrganizationAccess(
   }
 
   return orgId;
+}
+
+/**
+ * Enforces RBAC permission checks for mobile API routes.
+ *
+ * Uses the same Role2PermissionMap as the webapp to ensure mobile
+ * and web have identical authorization rules.
+ */
+export async function requireMobilePermission({
+  userId,
+  organizationId,
+  entity,
+  action,
+}: {
+  userId: string;
+  organizationId: string;
+  entity: PermissionEntity;
+  action: PermissionAction;
+}) {
+  await validatePermission({
+    userId,
+    organizationId,
+    entity,
+    action,
+  });
 }

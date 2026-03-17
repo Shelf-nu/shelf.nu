@@ -252,7 +252,7 @@ export default function CreateAssetScreen() {
     const assetId = data.asset.id;
 
     // Fire image upload in the background (performance-first)
-    if (imageUri && currentOrg) {
+    if (imageUri) {
       api
         .updateImage(currentOrg.id, assetId, imageUri, imageMimeType)
         .then(({ error: uploadErr }) => {

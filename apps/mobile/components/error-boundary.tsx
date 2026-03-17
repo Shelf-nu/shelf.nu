@@ -13,7 +13,6 @@ type Props = {
 
 type State = {
   hasError: boolean;
-  errorMessage: string | null;
 };
 
 /**
@@ -23,10 +22,10 @@ type State = {
 export class ErrorBoundary extends React.Component<Props, State> {
   static contextType = ThemeContext;
 
-  state: State = { hasError: false, errorMessage: null };
+  state: State = { hasError: false };
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, errorMessage: error.message };
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error) {
@@ -39,7 +38,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   private handleRetry = () => {
-    this.setState({ hasError: false, errorMessage: null });
+    this.setState({ hasError: false });
   };
 
   render() {

@@ -51,7 +51,6 @@ import React from "react";
 
 const scanKeyExtractor = (item: ScannedItem) => item.assetId;
 const remainingKeyExtractor = (item: RemainingAsset) => item.id;
-const SCREEN_HEIGHT = Dimensions.get("window").height;
 const SCAN_COOLDOWN_MS = 3_000;
 const INACTIVITY_TIMEOUT_MS = 30_000;
 const TOAST_DURATION_MS = 1_500;

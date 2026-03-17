@@ -4,7 +4,6 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
 } from "react-native";
@@ -45,7 +44,7 @@ export default function HomeScreen() {
 function HomeContent() {
   const router = useRouter();
   const { currentOrg, isLoading: orgLoading, userProfile } = useOrg();
-  const { colors, statusBadge, bookingStatusBadge } = useTheme();
+  const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);

@@ -3,11 +3,16 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { createNote } from "~/modules/note/service.server";
 import { makeShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * POST /api/mobile/asset/update-location
@@ -19,6 +24,13 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
 
     const body = await request.json();
     const { assetId, locationId } = z
@@ -35,11 +47,24 @@ export async function action({ request }: ActionFunctionArgs) {
         id: true,
         title: true,
         location: { select: { id: true, name: true } },
+        kit: { select: { id: true, name: true } },
       },
     });
 
     if (!asset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
+    }
+
+    // Prevent location update if asset belongs to a kit
+    if (asset.kit) {
+      return data(
+        {
+          error: {
+            message: `This asset's location is managed by its parent kit "${asset.kit.name}". Please update the kit's location instead.`,
+          },
+        },
+        { status: 400 }
+      );
     }
 
     // Verify location exists and belongs to org
