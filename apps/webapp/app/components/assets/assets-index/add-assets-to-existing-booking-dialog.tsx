@@ -138,7 +138,7 @@ export default function AddAssetsToExistingBookingDialog() {
                     <div className="mt-4">
                       <p>Already added assets are : </p>
                       <ul className="mb-2 list-inside list-disc">
-                        {fetcherErrorAdditionalData?.alreadyAddedAssets.map(
+                        {fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
                           (asset: Pick<Asset, "id" | "title">) => (
                             <li key={asset.id}>{asset.title}</li>
                           )

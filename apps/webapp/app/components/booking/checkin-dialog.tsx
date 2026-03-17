@@ -25,6 +25,8 @@ type CheckinDialogProps = {
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
+  /** Form ID for explicit form association when buttons render in a portal */
+  formId?: string;
 
   /** Callback to close parent dropdown/menu */
   onClose?: () => void;
@@ -40,6 +42,7 @@ export default function CheckinDialog({
   disabled,
   booking,
   portalContainer,
+  formId,
   label = "Check-in",
   variant = "default",
   specificAssetIds,
@@ -52,6 +55,7 @@ export default function CheckinDialog({
         type="submit"
         name="intent"
         value="checkIn"
+        form={formId}
         className={tw(
           "whitespace-nowrap",
           variant === "dropdown"
@@ -147,7 +151,7 @@ export default function CheckinDialog({
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value="checkIn" />
+          <input type="hidden" name="intent" value="checkIn" form={formId} />
 
           {/* Pass specific asset IDs for enhanced completion messaging */}
           {specificAssetIds?.map((assetId) => (
@@ -156,6 +160,7 @@ export default function CheckinDialog({
               type="hidden"
               name="specificAssetIds[]"
               value={assetId}
+              form={formId}
             />
           ))}
 
@@ -163,6 +168,7 @@ export default function CheckinDialog({
             disabled={disabled}
             className="flex-1"
             type="submit"
+            form={formId}
             variant={currentTimeIsBeforeFrom ? "primary" : "secondary"}
             name="checkinIntentChoice"
             value={CheckinIntentEnum["without-adjusted-date"]}
@@ -175,6 +181,7 @@ export default function CheckinDialog({
               className="flex-1"
               width={"full"}
               type="submit"
+              form={formId}
               name="checkinIntentChoice"
               value={CheckinIntentEnum["with-adjusted-date"]}
             >
