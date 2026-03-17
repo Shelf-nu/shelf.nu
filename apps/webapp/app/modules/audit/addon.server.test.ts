@@ -368,6 +368,38 @@ describe("linkAuditAddonToOrganization", () => {
     expect(updateData).not.toHaveProperty("usedAuditTrial");
   });
 
+  it("skips subscriptions already linked to another organization", async () => {
+    const linkedSub = {
+      id: "sub_linked",
+      status: "active",
+      metadata: { organizationId: "org_other" },
+      items: { data: [{ price: { product: "prod_audit" } }] },
+    };
+    const unlinkedSub = {
+      id: "sub_unlinked",
+      status: "active",
+      metadata: {},
+      items: { data: [{ price: { product: "prod_audit" } }] },
+    };
+    mockStripe.subscriptions.list.mockResolvedValue({
+      data: [linkedSub, unlinkedSub],
+    });
+    mockStripe.products.retrieve.mockResolvedValue({
+      metadata: { product_type: "addon", addon_type: "audits" },
+    });
+    mockStripe.subscriptions.update.mockResolvedValue({});
+    mockOrgUpdate.mockResolvedValue({ id: "org_456" });
+
+    await linkAuditAddonToOrganization(linkParams);
+
+    expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_unlinked",
+      expect.objectContaining({
+        metadata: expect.objectContaining({ organizationId: "org_456" }),
+      })
+    );
+  });
+
   it("throws when no audit subscription found", async () => {
     mockStripe.subscriptions.list.mockResolvedValue({ data: [] });
 

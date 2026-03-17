@@ -194,10 +194,13 @@ export async function linkBarcodeAddonToOrganization({
       status: "all",
     });
 
-    // Check each active/trialing subscription's items by retrieving products
+    // Check each active/trialing subscription's items by retrieving products.
+    // Skip subscriptions already linked to an organization to avoid
+    // accidentally overwriting another org's linkage.
     let barcodeSubscription: Stripe.Subscription | undefined;
     for (const sub of subscriptions.data) {
       if (sub.status !== "active" && sub.status !== "trialing") continue;
+      if (sub.metadata?.organizationId) continue;
 
       for (const item of sub.items.data) {
         const productId =

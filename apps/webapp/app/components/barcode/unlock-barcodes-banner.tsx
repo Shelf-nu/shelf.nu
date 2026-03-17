@@ -115,7 +115,7 @@ function UnlockBarcodesModalContent({
       ) : null}
 
       <AlertDialogCancel asChild>
-        <Button variant="secondary" width="full">
+        <Button type="button" variant="secondary" width="full">
           Close
         </Button>
       </AlertDialogCancel>
@@ -146,6 +146,7 @@ export function UnlockBarcodesModal({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
+          type="button"
           variant={triggerVariant}
           size={triggerSize}
           icon={triggerIcon}
@@ -162,7 +163,6 @@ export function UnlockBarcodesModal({
 /** Inline banner with "Learn more" that opens the unlock modal */
 export function UnlockBarcodesBanner() {
   const { isOwner } = useUserRoleHelper();
-  const state = useBarcodeAddonState();
 
   if (!isOwner) {
     return (
@@ -178,6 +178,13 @@ export function UnlockBarcodesBanner() {
     );
   }
 
+  return <OwnerBarcodesBanner />;
+}
+
+/** Owner-only banner that loads prices and shows the unlock modal */
+function OwnerBarcodesBanner() {
+  const state = useBarcodeAddonState();
+
   return (
     <div className="rounded border border-gray-200 bg-gray-50 p-4">
       <h4 className="text-sm font-semibold text-gray-900">
@@ -189,7 +196,7 @@ export function UnlockBarcodesBanner() {
       </p>
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="secondary" className="mt-3">
+          <Button type="button" variant="secondary" className="mt-3">
             Learn more
           </Button>
         </AlertDialogTrigger>
