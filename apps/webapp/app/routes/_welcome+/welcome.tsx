@@ -94,10 +94,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       throw new Error("Invalid intent");
     }
 
-    // Get the personal org
-    const personalOrg = await getOrganizationByUserId({
-      userId,
-      orgType: "PERSONAL",
+    // Get the personal org with trial flags to prevent duplicate trials
+    const personalOrg = await db.organization.findFirstOrThrow({
+      where: { owner: { is: { id: userId } }, type: "PERSONAL" },
+      select: {
+        id: true,
+        usedAuditTrial: true,
+        usedBarcodeTrial: true,
+      },
     });
 
     const user = await getUserByID(userId, {
@@ -112,8 +116,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const customerId = await getOrCreateCustomerId(user);
 
-    // Create audit trial if selected
-    if (auditPriceId) {
+    // Create audit trial if selected (skip if already used)
+    if (auditPriceId && !personalOrg.usedAuditTrial) {
       const { hasPaymentMethod } = await createAuditAddonTrialSubscription({
         customerId,
         priceId: auditPriceId,
@@ -138,8 +142,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    // Create barcode trial if selected
-    if (barcodePriceId) {
+    // Create barcode trial if selected (skip if already used)
+    if (barcodePriceId && !personalOrg.usedBarcodeTrial) {
       const { hasPaymentMethod } = await createBarcodeAddonTrialSubscription({
         customerId,
         priceId: barcodePriceId,
