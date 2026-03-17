@@ -96,8 +96,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
           );
         }
 
+        let formData: FormData;
+        try {
+          formData = await request.formData();
+        } catch (cause) {
+          return data(
+            error(
+              new ShelfError({
+                cause,
+                message: "Invalid request body",
+                label: "Request validation",
+                shouldBeCaptured: false,
+                status: 400,
+              }),
+              false
+            ),
+            { status: 400 }
+          );
+        }
+
         const { email, password, redirectTo } = parseData(
-          await request.formData(),
+          formData,
           LoginFormSchema,
           { shouldBeCaptured: false }
         );
