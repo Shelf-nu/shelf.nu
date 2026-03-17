@@ -1514,9 +1514,14 @@ export async function completeAuditSession({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to complete audit session",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to complete audit session",
       additionalData: { sessionId, organizationId, userId },
       label,
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : undefined,
     });
   }
 }
