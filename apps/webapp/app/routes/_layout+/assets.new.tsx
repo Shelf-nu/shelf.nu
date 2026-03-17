@@ -64,22 +64,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    const { categories, totalCategories, tags, locations, totalLocations } =
-      await getAllEntriesForCreateAndEdit({
+    const searchParams = getCurrentSearchParams(request);
+
+    const [
+      { categories, totalCategories, tags, locations, totalLocations },
+      customFields,
+      nextSequentialId,
+    ] = await Promise.all([
+      getAllEntriesForCreateAndEdit({
         organizationId,
         request,
         tagUseFor: TagUseFor.ASSET,
-      });
-
-    const searchParams = getCurrentSearchParams(request);
-
-    const customFields = await getActiveCustomFields({
-      organizationId,
-      category: searchParams.get("category"),
-    });
-
-    // Estimate the next sequential ID that will be assigned to the new asset
-    const nextSequentialId = await estimateNextSequentialId(organizationId);
+      }),
+      getActiveCustomFields({
+        organizationId,
+        category: searchParams.get("category"),
+      }),
+      estimateNextSequentialId(organizationId),
+    ]);
 
     return payload({
       header,
