@@ -10,7 +10,7 @@ import {
 } from "~/modules/barcode/addon.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -61,9 +61,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (intent === "trial") {
       // Validate organization hasn't already used trial
       if (currentOrganization.usedBarcodeTrial) {
-        throw new Error(
-          "This workspace has already used the free barcode trial."
-        );
+        throw new ShelfError({
+          cause: null,
+          message: "This workspace has already used the free barcode trial.",
+          status: 400,
+          label: "Stripe",
+          shouldBeCaptured: false,
+        });
       }
 
       // Create trial subscription directly via Stripe API
@@ -93,7 +97,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       // Redirect back to wherever the user came from
       const referer = request.headers.get("Referer");
-      return redirect(referer ? new URL(referer).pathname : "/assets");
+      let redirectPath = "/assets";
+      if (referer) {
+        try {
+          redirectPath = new URL(referer).pathname;
+        } catch {
+          // Malformed Referer header — fall back to /assets
+        }
+      }
+      return redirect(redirectPath);
     }
 
     // intent === "subscribe"

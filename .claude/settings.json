@@ -37,7 +37,6 @@
       "Bash(gh api:*)",
       "Bash(git status:*)",
       "Bash(git add:*)",
-      "Bash(gh api:*)",
       "Bash(gh pr:*)",
       "Bash(pnpm turbo typecheck:*)",
       "Bash(pnpm --filter @shelf/webapp exec prisma generate:*)",
