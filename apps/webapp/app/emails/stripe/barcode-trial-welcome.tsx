@@ -7,6 +7,7 @@ import {
   render,
   Text,
 } from "@react-email/components";
+import { BARCODE_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -65,10 +66,7 @@ Great news - your 7-day Barcodes trial is now active! You have full access to al
 
 Here's what you can do with Barcodes:
 
-- Support for Code128, Code39, EAN-13, DataMatrix & QR codes
-- Keep your existing labels — ideal for migrations
-- Generate and print barcode labels for your assets
-- Use the built-in scanner for quick asset lookups
+${BARCODE_ADDON.features.map((f) => `- ${f}`).join("\n")}
 
 Get started now: ${SERVER_URL}/settings/general
 ${
@@ -116,18 +114,11 @@ function BarcodeTrialWelcomeEmailTemplate({
           </Text>
 
           <ul style={{ ...styles.li, paddingLeft: "20px" }}>
-            <li style={{ marginBottom: "8px" }}>
-              Support for Code128, Code39, EAN-13, DataMatrix & QR codes
-            </li>
-            <li style={{ marginBottom: "8px" }}>
-              Keep your existing labels — ideal for migrations
-            </li>
-            <li style={{ marginBottom: "8px" }}>
-              Generate and print barcode labels for your assets
-            </li>
-            <li style={{ marginBottom: "8px" }}>
-              Use the built-in scanner for quick asset lookups
-            </li>
+            {BARCODE_ADDON.features.map((feature) => (
+              <li key={feature} style={{ marginBottom: "8px" }}>
+                {feature}
+              </li>
+            ))}
           </ul>
 
           <Button

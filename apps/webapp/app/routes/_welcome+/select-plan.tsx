@@ -8,6 +8,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag } from "~/components/shared/tag";
+import { AUDIT_ADDON, BARCODE_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { getAuditAddonPrices } from "~/modules/audit/addon.server";
@@ -334,7 +335,7 @@ export default function SelectPlan() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <h4 className="text-base font-semibold text-gray-900">
-                            Audits
+                            {AUDIT_ADDON.label}
                           </h4>
                           <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
                             7-day trial
@@ -343,8 +344,7 @@ export default function SelectPlan() {
                       </div>
                     </div>
                     <p className="text-sm text-gray-600">
-                      Create audits, assign auditors, scan QR codes, and track
-                      asset verification in real-time.
+                      {AUDIT_ADDON.description}
                     </p>
                     {activeAuditPrice ? (
                       <div className="mt-1">
@@ -421,7 +421,7 @@ export default function SelectPlan() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <h4 className="text-base font-semibold text-gray-900">
-                            Alternative Barcodes
+                            {BARCODE_ADDON.label}
                           </h4>
                           <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
                             7-day trial
@@ -430,8 +430,7 @@ export default function SelectPlan() {
                       </div>
                     </div>
                     <p className="text-sm text-gray-600">
-                      Keep your existing labels. Supports Code128, Code39,
-                      EAN-13, DataMatrix & QR codes — ideal for migrations.
+                      {BARCODE_ADDON.description}
                     </p>
                     {activeBarcodePrice ? (
                       <div className="mt-1">

@@ -3,6 +3,7 @@ import type { Currency } from "@prisma/client";
 import { BarcodeIcon, CheckCircle2Icon, SparklesIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { BARCODE_ADDON } from "~/config/addon-copy";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -28,12 +29,7 @@ const fmtPrice = (amountInCents: number, currency: string) =>
     locale: "en-US",
   });
 
-const FEATURES = [
-  "Code128, Code39, EAN-13 & DataMatrix support",
-  "Keep your existing labels — ideal for migrations",
-  "Generate and print barcode labels",
-  "Built-in barcode scanner",
-];
+const FEATURES = BARCODE_ADDON.features;
 
 /** Shared hook that loads barcode addon prices and org trial state */
 function useBarcodeAddonState() {
@@ -89,9 +85,9 @@ function UnlockBarcodesModalContent({
         <div className="mb-2 inline-flex size-10 items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 text-primary">
           <BarcodeIcon className="size-5" />
         </div>
-        <AlertDialogTitle>Unlock Alternative Barcodes</AlertDialogTitle>
+        <AlertDialogTitle>Unlock {BARCODE_ADDON.label}</AlertDialogTitle>
         <AlertDialogDescription>
-          Add support for industry-standard barcode formats to your workspace.
+          {BARCODE_ADDON.subtitle}
         </AlertDialogDescription>
       </AlertDialogHeader>
 
@@ -168,11 +164,10 @@ export function UnlockBarcodesBanner() {
     return (
       <div className="rounded border border-gray-200 bg-gray-50 p-4">
         <h4 className="text-sm font-semibold text-gray-900">
-          Alternative Barcodes
+          {BARCODE_ADDON.label}
         </h4>
         <p className="mt-1 text-sm text-gray-600">
-          Support for Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for
-          migrations. Contact your workspace owner to enable this feature.
+          {BARCODE_ADDON.nonOwnerDescription}
         </p>
       </div>
     );
@@ -188,12 +183,9 @@ function OwnerBarcodesBanner() {
   return (
     <div className="rounded border border-gray-200 bg-gray-50 p-4">
       <h4 className="text-sm font-semibold text-gray-900">
-        Alternative Barcodes
+        {BARCODE_ADDON.label}
       </h4>
-      <p className="mt-1 text-sm text-gray-600">
-        Keep your existing labels. Supports Code128, Code39, EAN-13, DataMatrix
-        & QR codes — ideal for migrations.
-      </p>
+      <p className="mt-1 text-sm text-gray-600">{BARCODE_ADDON.description}</p>
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button type="button" variant="secondary" className="mt-3">

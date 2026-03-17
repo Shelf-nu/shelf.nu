@@ -5,6 +5,7 @@ import { CheckIcon, UserIcon, UsersIcon } from "lucide-react";
 import { useNavigation } from "react-router";
 import { Form } from "~/components/custom-form";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { AUDIT_ADDON, BARCODE_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
 import { formatCurrency } from "~/utils/currency";
 import { isFormProcessing } from "~/utils/form";
@@ -200,8 +201,8 @@ export function ChoosePurpose({
             </h4>
             {showAuditOption ? (
               <AddonToggle
-                label="Audits"
-                description="Create audits, assign auditors, scan QR codes, and track asset verification in real-time."
+                label={AUDIT_ADDON.label}
+                description={AUDIT_ADDON.description}
                 selected={wantsAudits}
                 onToggle={() => setWantsAudits((prev) => !prev)}
                 prices={auditPrices}
@@ -212,8 +213,8 @@ export function ChoosePurpose({
             ) : null}
             {showBarcodeOption ? (
               <AddonToggle
-                label="Alternative Barcodes"
-                description="Keep your existing labels. Supports Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for migrations."
+                label={BARCODE_ADDON.label}
+                description={BARCODE_ADDON.description}
                 selected={wantsBarcodes}
                 onToggle={() => setWantsBarcodes((prev) => !prev)}
                 prices={barcodePrices}
