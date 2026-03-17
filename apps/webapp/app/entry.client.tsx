@@ -21,7 +21,6 @@ if (window.env?.SENTRY_DSN) {
     ],
     beforeSend(event) {
       const message = event.exception?.values?.[0]?.value || "";
-      const errorType = event.exception?.values?.[0]?.type || "";
 
       // Filter client-side network errors (not actionable)
       if (
@@ -45,18 +44,8 @@ if (window.env?.SENTRY_DSN) {
         return null;
       }
 
-      // Filter browser compatibility / extension noise
-      if (
-        (message.includes("feature named") &&
-          message.includes("was not found")) ||
-        (errorType === "SyntaxError" &&
-          message.includes("Unexpected identifier")) ||
-        message.includes("Unable to decode turbo-stream") ||
-        message === "false" ||
-        message === "" ||
-        message === "<unknown>" ||
-        message.includes("Error in input stream")
-      ) {
+      // Filter unknown/empty error messages (no actionable info)
+      if (message === "<unknown>") {
         return null;
       }
 
