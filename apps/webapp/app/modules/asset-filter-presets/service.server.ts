@@ -107,6 +107,7 @@ export async function createPreset({
         message:
           "You already have a preset with this name. Please use a different name.",
         status: 409,
+        shouldBeCaptured: false,
       });
     }
 
@@ -177,6 +178,7 @@ export async function renamePreset({
         message:
           "You already have a preset with this name. Please use a different name.",
         status: 409,
+        shouldBeCaptured: false,
       });
     }
 
