@@ -1492,6 +1492,7 @@ export async function relinkKitQrCode({
       title: "QR not valid.",
       message: "This QR code does not belong to your organization",
       label,
+      shouldBeCaptured: false,
     });
   }
 
