@@ -14,6 +14,7 @@ import invariant from "tiny-invariant";
 import type { z } from "zod";
 import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
@@ -90,19 +91,18 @@ export async function getExistingActiveInvite({
   inviteeEmail,
 }: Pick<Invite, "inviteeEmail" | "organizationId">) {
   try {
-    return await db.invite.findFirst({
-      where: {
-        organizationId,
-        inviteeEmail,
-        OR: [
-          //invite is either not rejected or not expired
-          {
-            status: { notIn: ["REJECTED"] }, //should we allow reinvite if user rejects?
-          },
-          { expiresAt: { gt: new Date() } },
-        ],
-      },
-    });
+    const { data, error } = await sbDb
+      .from("Invite")
+      .select()
+      .eq("organizationId", organizationId)
+      .eq("inviteeEmail", inviteeEmail)
+      .or(`status.neq.REJECTED,expiresAt.gt.${new Date().toISOString()}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -442,16 +442,11 @@ export async function checkUserAndInviteMatch({
   const { userId } = authSession;
 
   /** We get the user, selecting only the email */
-  const user = await db.user
-    .findFirst({
-      where: {
-        id: userId,
-      },
-      select: {
-        email: true,
-      },
-    })
-    .catch(() => null);
+  const { data: user } = await sbDb
+    .from("User")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle();
 
   if (user?.email !== invite?.inviteeEmail) {
     throw new ShelfError({

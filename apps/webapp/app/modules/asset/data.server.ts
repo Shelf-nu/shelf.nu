@@ -1,11 +1,12 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Kit } from "@prisma/client";
+import type { Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -53,7 +54,7 @@ interface Props {
   role: OrganizationRoles;
   currentOrganization: OrganizationFromUser;
   user: { firstName: string | null };
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
 }
 
 const searchFieldTooltipText = `
@@ -402,14 +403,28 @@ export async function advancedModeLoader({
     }),
 
     // Kits
-    db.kit.findMany({
-      where: { organizationId },
-      take:
-        searchParams.has("getAll") && hasGetAllValue(searchParams, "kit")
-          ? undefined
-          : 12,
-    }),
-    db.kit.count({ where: { organizationId } }),
+    (async () => {
+      let query = sbDb
+        .from("Kit")
+        .select("*")
+        .eq("organizationId", organizationId);
+      if (
+        !(searchParams.has("getAll") && hasGetAllValue(searchParams, "kit"))
+      ) {
+        query = query.limit(12);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    })(),
+    (async () => {
+      const { count, error } = await sbDb
+        .from("Kit")
+        .select("*", { count: "exact", head: true })
+        .eq("organizationId", organizationId);
+      if (error) throw error;
+      return count ?? 0;
+    })(),
     // Tags for booking form
     getTagsForBookingTagsFilter({
       organizationId,
@@ -427,24 +442,31 @@ export async function advancedModeLoader({
       : Promise.resolve(null),
 
     // Bookings for filter dropdown (upcoming bookings only)
-    db.booking.findMany({
-      where: {
-        organizationId,
-        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-      },
-      select: { id: true, name: true },
-      take:
-        searchParams.has("getAll") && hasGetAllValue(searchParams, "booking")
-          ? undefined
-          : 12,
-      orderBy: { from: "asc" },
-    }),
-    db.booking.count({
-      where: {
-        organizationId,
-        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-      },
-    }),
+    (async () => {
+      let query = sbDb
+        .from("Booking")
+        .select("id, name")
+        .eq("organizationId", organizationId)
+        .in("status", ["RESERVED", "ONGOING", "OVERDUE"])
+        .order("from", { ascending: true });
+      if (
+        !(searchParams.has("getAll") && hasGetAllValue(searchParams, "booking"))
+      ) {
+        query = query.limit(12);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return data as { id: string; name: string }[];
+    })(),
+    (async () => {
+      const { count, error } = await sbDb
+        .from("Booking")
+        .select("*", { count: "exact", head: true })
+        .eq("organizationId", organizationId)
+        .in("status", ["RESERVED", "ONGOING", "OVERDUE"]);
+      if (error) throw error;
+      return count ?? 0;
+    })(),
   ]);
 
   const currentUserTeamMember = isSelfService

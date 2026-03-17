@@ -1,7 +1,9 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { OrganizationRoles, Prisma } from "@prisma/client";
 import { UpdateStatus } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
 export type UpdateWithRelations = Prisma.UpdateGetPayload<{
@@ -335,18 +337,18 @@ export async function createUpdate({
   createdById: string;
 }): Promise<void> {
   try {
-    await db.update.create({
-      data: {
-        title,
-        content,
-        url: url === undefined ? null : url, // Convert undefined to null for database
-        imageUrl: imageUrl === undefined ? null : imageUrl, // Convert undefined to null for database
-        publishDate,
-        status,
-        targetRoles,
-        createdById,
-      },
-    });
+    const { error } = await sbDb.from("Update").insert({
+      title,
+      content,
+      url: url === undefined ? null : url,
+      imageUrl: imageUrl === undefined ? null : imageUrl,
+      publishDate: publishDate.toISOString(),
+      status,
+      targetRoles,
+      createdById,
+    } as Sb.UpdateInsert);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -380,18 +382,22 @@ export async function updateUpdate({
   targetRoles?: OrganizationRoles[];
 }): Promise<void> {
   try {
-    await db.update.update({
-      where: { id },
-      data: {
-        ...(title !== undefined && { title }),
-        ...(content !== undefined && { content }),
-        ...(url !== undefined && { url }),
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(publishDate !== undefined && { publishDate }),
-        ...(status !== undefined && { status }),
-        ...(targetRoles !== undefined && { targetRoles }),
-      },
-    });
+    const updateData: Record<string, unknown> = {};
+    if (title !== undefined) updateData.title = title;
+    if (content !== undefined) updateData.content = content;
+    if (url !== undefined) updateData.url = url;
+    if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
+    if (publishDate !== undefined)
+      updateData.publishDate = publishDate.toISOString();
+    if (status !== undefined) updateData.status = status;
+    if (targetRoles !== undefined) updateData.targetRoles = targetRoles;
+
+    const { error } = await sbDb
+      .from("Update")
+      .update(updateData as Sb.UpdateUpdate)
+      .eq("id", id);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -407,9 +413,9 @@ export async function updateUpdate({
  */
 export async function deleteUpdate({ id }: { id: string }): Promise<void> {
   try {
-    await db.update.delete({
-      where: { id },
-    });
+    const { error } = await sbDb.from("Update").delete().eq("id", id);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,

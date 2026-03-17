@@ -1,5 +1,5 @@
-import type { Booking, BookingNote, User } from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
@@ -41,37 +41,36 @@ const label = "Booking";
  * @param userId - User ID for manual notes, undefined for system notes
  * @param bookingId - Booking ID to associate the note with
  */
-export function createBookingNote({
+export async function createBookingNote({
   content,
   type,
   userId,
   bookingId,
-}: Pick<BookingNote, "content"> & {
-  type?: BookingNote["type"];
-  userId?: User["id"];
-  bookingId: Booking["id"];
+}: {
+  content: string;
+  type?: Sb.NoteType;
+  userId?: string;
+  bookingId: string;
 }) {
   try {
-    const data = {
+    const insertData: Record<string, unknown> = {
       content,
       type: type || "COMMENT",
-      booking: {
-        connect: {
-          id: bookingId,
-        },
-      },
-      ...(userId && {
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      }),
+      bookingId,
     };
 
-    return db.bookingNote.create({
-      data,
-    });
+    if (userId) {
+      insertData.userId = userId;
+    }
+
+    const { data, error } = await sbDb
+      .from("BookingNote")
+      .insert(insertData as Sb.BookingNoteInsert)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -96,8 +95,9 @@ export function createBookingNote({
 export function createSystemBookingNote({
   content,
   bookingId,
-}: Pick<BookingNote, "content"> & {
-  bookingId: Booking["id"];
+}: {
+  content: string;
+  bookingId: string;
 }) {
   return createBookingNote({
     content,
@@ -126,20 +126,19 @@ export async function getBookingNotes({
   bookingId,
   organizationId,
 }: {
-  bookingId: Booking["id"];
+  bookingId: string;
   organizationId: string;
 }) {
   try {
     // First verify the booking belongs to the organization
-    const booking = await db.booking.findFirst({
-      where: {
-        id: bookingId,
-        organizationId,
-      },
-      select: {
-        id: true,
-      },
-    });
+    const { data: booking, error: bookingError } = await sbDb
+      .from("Booking")
+      .select("id")
+      .eq("id", bookingId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (bookingError) throw bookingError;
 
     if (!booking) {
       throw new ShelfError({
@@ -151,23 +150,14 @@ export async function getBookingNotes({
       });
     }
 
-    return await db.bookingNote.findMany({
-      where: {
-        bookingId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-    });
+    const { data: notes, error: notesError } = await sbDb
+      .from("BookingNote")
+      .select("*, user:User(id, firstName, lastName)")
+      .eq("bookingId", bookingId)
+      .order("createdAt", { ascending: false });
+
+    if (notesError) throw notesError;
+    return notes ?? [];
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -187,7 +177,7 @@ export async function getBookingNotes({
  * SECURITY:
  * - Users can only delete their own manual notes
  * - System-generated notes cannot be deleted (userId is null)
- * - Uses deleteMany with userId filter for additional security
+ * - Uses delete with userId filter for additional security
  *
  * @param id - Note ID to delete
  * @param userId - User ID (must match note creator)
@@ -196,12 +186,19 @@ export async function getBookingNotes({
 export async function deleteBookingNote({
   id,
   userId,
-}: Pick<BookingNote, "id"> & { userId: User["id"] }) {
+}: {
+  id: string;
+  userId: string;
+}) {
   try {
-    const result = await db.bookingNote.deleteMany({
-      where: { id, userId },
-    });
-    return result;
+    const { error, count } = await sbDb
+      .from("BookingNote")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("userId", userId);
+
+    if (error) throw error;
+    return { count: count ?? 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,

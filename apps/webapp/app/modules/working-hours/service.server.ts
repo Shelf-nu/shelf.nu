@@ -1,46 +1,65 @@
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import type { WeeklyScheduleForUpdate } from "./types";
+import type {
+  WeeklyScheduleForUpdate,
+  WorkingHoursWithOverrides,
+} from "./types";
 
 const label = "Working hours";
 
 export async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
 
-  const workingHours = await db.workingHours.create({
-    data: {
+  const { data: workingHours, error: whError } = await sbDb
+    .from("WorkingHours")
+    .insert({
       organizationId,
       enabled: false,
       weeklySchedule: defaultSchedule,
-    },
-    include: {
-      overrides: {
-        orderBy: { date: "asc" },
-      },
-    },
-  });
-  return workingHours;
+    })
+    .select()
+    .single();
+
+  if (whError) throw whError;
+
+  // Fetch overrides (will be empty for new entry)
+  const { data: overrides } = await sbDb
+    .from("WorkingHoursOverride")
+    .select("*")
+    .eq("workingHoursId", workingHours.id)
+    .order("date", { ascending: true });
+
+  return { ...workingHours, overrides: overrides ?? [] };
 }
 
 export async function getWorkingHoursForOrganization(organizationId: string) {
   try {
-    // First try to find existing working hours
-    const existingWorkingHours = await db.workingHours.findUnique({
-      where: { organizationId },
-      include: {
-        overrides: {
-          orderBy: { date: "asc" },
-        },
-      },
-    });
+    // Try to find existing working hours with overrides
+    const { data: existingWorkingHours, error: fetchError } = await sbDb
+      .from("WorkingHours")
+      .select("*, overrides:WorkingHoursOverride(*)")
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
 
     if (existingWorkingHours) {
-      return existingWorkingHours;
+      // Cast to proper type — Supabase generated types can't resolve the
+      // WorkingHours → WorkingHoursOverride relation automatically.
+      const typedResult =
+        existingWorkingHours as unknown as WorkingHoursWithOverrides;
+
+      // Sort overrides by date ascending
+      if (typedResult.overrides) {
+        typedResult.overrides.sort(
+          (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+        );
+      }
+      return typedResult;
     }
 
-    const newWorkingHours = await createDefaultWorkingHours(organizationId);
-
-    return newWorkingHours;
+    return await createDefaultWorkingHours(organizationId);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -59,11 +78,14 @@ export async function toggleWorkingHours({
   enabled: boolean;
 }) {
   try {
-    const updatedWorkingHours = await db.workingHours.update({
-      where: { organizationId },
-      data: { enabled },
-    });
+    const { data: updatedWorkingHours, error } = await sbDb
+      .from("WorkingHours")
+      .update({ enabled })
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
 
+    if (error) throw error;
     return updatedWorkingHours;
   } catch (cause) {
     throw new ShelfError({
@@ -83,14 +105,16 @@ export async function updateWorkingHoursSchedule({
   weeklySchedule: WeeklyScheduleForUpdate;
 }) {
   try {
-    // Update the weekly schedule - cast to any for Prisma Json type
-    await db.workingHours.update({
-      where: { organizationId },
-      data: {
-        weeklySchedule, // Prisma Json type requires any
-        updatedAt: new Date(),
-      },
-    });
+    const { error } = await sbDb
+      .from("WorkingHours")
+      .update({
+        weeklySchedule:
+          weeklySchedule as unknown as Sb.WorkingHoursUpdate["weeklySchedule"],
+        updatedAt: new Date().toISOString(),
+      })
+      .eq("organizationId", organizationId);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -119,24 +143,30 @@ export async function createWorkingHoursOverride({
   try {
     let workingHoursId: string;
     // First ensure working hours exist for this organization
-    const workingHours = await db.workingHours.findUnique({
-      where: { organizationId },
-      select: { id: true },
-    });
+    const { data: workingHours, error: whError } = await sbDb
+      .from("WorkingHours")
+      .select("id")
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (whError) throw whError;
+
     if (!workingHours) {
-      const workingHours = await createDefaultWorkingHours(organizationId);
-      workingHoursId = workingHours.id;
+      const created = await createDefaultWorkingHours(organizationId);
+      workingHoursId = created.id;
     } else {
       workingHoursId = workingHours.id;
     }
 
     // Check if an override already exists for this date
-    const existingOverride = await db.workingHoursOverride.findFirst({
-      where: {
-        workingHoursId,
-        date: new Date(date),
-      },
-    });
+    const { data: existingOverride, error: checkError } = await sbDb
+      .from("WorkingHoursOverride")
+      .select("id")
+      .eq("workingHoursId", workingHoursId)
+      .eq("date", new Date(date).toISOString())
+      .maybeSingle();
+
+    if (checkError) throw checkError;
 
     if (existingOverride) {
       throw new ShelfError({
@@ -150,17 +180,20 @@ export async function createWorkingHoursOverride({
     }
 
     // Create the override
-    const override = await db.workingHoursOverride.create({
-      data: {
+    const { data: override, error: createError } = await sbDb
+      .from("WorkingHoursOverride")
+      .insert({
         workingHoursId,
-        date: new Date(date),
+        date: new Date(date).toISOString(),
         isOpen,
-        openTime: isOpen ? openTime : null,
-        closeTime: isOpen ? closeTime : null,
-        reason,
-      },
-    });
+        openTime: isOpen ? openTime ?? null : null,
+        closeTime: isOpen ? closeTime ?? null : null,
+        reason: reason ?? null,
+      })
+      .select()
+      .single();
 
+    if (createError) throw createError;
     return override;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
@@ -199,26 +232,29 @@ export async function updateWorkingHoursOverride({
   reason?: string;
 }) {
   try {
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       isOpen,
-      openTime: isOpen ? openTime : null,
-      closeTime: isOpen ? closeTime : null,
-      updatedAt: new Date(),
+      openTime: isOpen ? openTime ?? null : null,
+      closeTime: isOpen ? closeTime ?? null : null,
+      updatedAt: new Date().toISOString(),
     };
 
     if (date) {
-      updateData.date = new Date(date);
+      updateData.date = new Date(date).toISOString();
     }
 
     if (reason !== undefined) {
       updateData.reason = reason;
     }
 
-    const updatedOverride = await db.workingHoursOverride.update({
-      where: { id: overrideId },
-      data: updateData,
-    });
+    const { data: updatedOverride, error } = await sbDb
+      .from("WorkingHoursOverride")
+      .update(updateData as Sb.WorkingHoursOverrideUpdate)
+      .eq("id", overrideId)
+      .select()
+      .single();
 
+    if (error) throw error;
     return updatedOverride;
   } catch (cause) {
     throw new ShelfError({
@@ -232,9 +268,12 @@ export async function updateWorkingHoursOverride({
 
 export async function deleteWorkingHoursOverride(overrideId: string) {
   try {
-    await db.workingHoursOverride.delete({
-      where: { id: overrideId },
-    });
+    const { error } = await sbDb
+      .from("WorkingHoursOverride")
+      .delete()
+      .eq("id", overrideId);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -249,21 +288,25 @@ export async function getWorkingHoursOverridesForOrganization(
   organizationId: string
 ) {
   try {
-    const workingHours = await db.workingHours.findUnique({
-      where: { organizationId },
-      include: {
-        overrides: {
-          orderBy: { date: "asc" },
-          where: {
-            date: {
-              gte: new Date(), // Only get future and today's overrides
-            },
-          },
-        },
-      },
-    });
+    const { data: workingHours, error: whError } = await sbDb
+      .from("WorkingHours")
+      .select("id")
+      .eq("organizationId", organizationId)
+      .maybeSingle();
 
-    return workingHours?.overrides || [];
+    if (whError) throw whError;
+
+    if (!workingHours) return [];
+
+    const { data: overrides, error: overridesError } = await sbDb
+      .from("WorkingHoursOverride")
+      .select("*")
+      .eq("workingHoursId", workingHours.id)
+      .gte("date", new Date().toISOString())
+      .order("date", { ascending: true });
+
+    if (overridesError) throw overridesError;
+    return overrides ?? [];
   } catch (cause) {
     throw new ShelfError({
       cause,

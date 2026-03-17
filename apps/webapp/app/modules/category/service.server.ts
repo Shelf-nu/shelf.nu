@@ -1,5 +1,4 @@
-import type { Category, Organization, Prisma, User } from "@prisma/client";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
@@ -15,27 +14,28 @@ export async function createCategory({
   color,
   userId,
   organizationId,
-}: Pick<Category, "description" | "name" | "color" | "organizationId"> & {
-  userId: User["id"];
+}: {
+  name: string;
+  description: string | null;
+  color: string;
+  userId: string;
+  organizationId: string;
 }) {
   try {
-    return await db.category.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("Category")
+      .insert({
         name: name.trim(),
         description,
         color,
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-        organization: {
-          connect: {
-            id: organizationId,
-          },
-        },
-      },
-    });
+        userId,
+        organizationId,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Category", {
       additionalData: { userId, organizationId },
@@ -44,7 +44,7 @@ export async function createCategory({
 }
 
 export async function getCategories(params: {
-  organizationId: Organization["id"];
+  organizationId: string;
   /** Page number. Starts at 1 */
   page?: number;
   /** Items to be loaded per page */
@@ -55,38 +55,36 @@ export async function getCategories(params: {
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
-    const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+    const take = perPage >= 1 ? perPage : 8;
 
-    /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.CategoryWhereInput = { organizationId };
+    let query = sbDb
+      .from("Category")
+      .select("*, Asset(count)", { count: "exact" })
+      .eq("organizationId", organizationId)
+      .order("updatedAt", { ascending: false })
+      .range(skip, skip + take - 1);
 
-    /** If the search string exists, add it to the where object */
     if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      query = query.ilike("name", `%${search}%`);
     }
 
-    const [categories, totalCategories] = await Promise.all([
-      /** Get the items */
-      db.category.findMany({
-        skip,
-        take,
-        where,
-        orderBy: { updatedAt: "desc" },
-        include: {
-          _count: {
-            select: { assets: true },
-          },
-        },
-      }),
+    const { data, count: totalCategories, error } = await query;
 
-      /** Count them */
-      db.category.count({ where }),
-    ]);
+    if (error) throw error;
 
-    return { categories, totalCategories };
+    // Transform the response to match the previous Prisma shape:
+    // { ...category, _count: { assets: N } }
+    const categories = (data ?? []).map((row) => {
+      const { Asset, ...rest } = row as unknown as Record<string, unknown> & {
+        Asset: { count: number }[];
+      };
+      return {
+        ...rest,
+        _count: { assets: Asset?.[0]?.count ?? 0 },
+      };
+    });
+
+    return { categories, totalCategories: totalCategories ?? 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -100,11 +98,19 @@ export async function getCategories(params: {
 export async function deleteCategory({
   id,
   organizationId,
-}: Pick<Category, "id"> & { organizationId: Organization["id"] }) {
+}: {
+  id: string;
+  organizationId: string;
+}) {
   try {
-    return await db.category.deleteMany({
-      where: { id, organizationId },
-    });
+    const { error, count } = await sbDb
+      .from("Category")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("organizationId", organizationId);
+
+    if (error) throw error;
+    return { count };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -122,11 +128,11 @@ export async function createCategoriesIfNotExists({
   organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
-  userId: User["id"];
-  organizationId: Organization["id"];
-}): Promise<Record<string, Category["id"]>> {
+  userId: string;
+  organizationId: string;
+}): Promise<Record<string, string>> {
   try {
-    // first we get all the categories from the assets and make then into an object where the category is the key and the value is an empty string
+    // first we get all the categories from the assets and make them into a Map
     const categories = new Map(
       data
         .filter((asset) => asset.category)
@@ -134,33 +140,29 @@ export async function createCategoriesIfNotExists({
     );
 
     // now we loop through the categories and check if they exist
-    for (const [category, _] of categories) {
+    for (const [category] of categories) {
       const trimmedCategory = (category as string).trim();
-      const existingCategory = await db.category.findFirst({
-        where: {
-          name: { equals: trimmedCategory, mode: "insensitive" },
-          organizationId,
-        },
-      });
+      const { data: existingCategory } = await sbDb
+        .from("Category")
+        .select("id")
+        .ilike("name", trimmedCategory)
+        .eq("organizationId", organizationId)
+        .maybeSingle();
 
       if (!existingCategory) {
         // if the category doesn't exist, we create a new one
-        const newCategory = await db.category.create({
-          data: {
+        const { data: newCategory, error } = await sbDb
+          .from("Category")
+          .insert({
             name: trimmedCategory,
             color: getRandomColor(),
-            user: {
-              connect: {
-                id: userId,
-              },
-            },
-            organization: {
-              connect: {
-                id: organizationId,
-              },
-            },
-          },
-        });
+            userId,
+            organizationId,
+          })
+          .select("id")
+          .single();
+
+        if (error) throw error;
         categories.set(category, newCategory.id);
       } else {
         // if the category exists, we just update the id
@@ -181,14 +183,24 @@ export async function createCategoriesIfNotExists({
     });
   }
 }
+
 export async function getCategory({
   id,
   organizationId,
-}: Pick<Category, "id" | "organizationId">) {
+}: {
+  id: string;
+  organizationId: string;
+}) {
   try {
-    return await db.category.findFirstOrThrow({
-      where: { id, organizationId },
-    });
+    const { data, error } = await sbDb
+      .from("Category")
+      .select("*")
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -207,19 +219,28 @@ export async function updateCategory({
   name,
   description,
   color,
-}: Pick<Category, "id" | "organizationId" | "description" | "name" | "color">) {
+}: {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string | null;
+  color: string;
+}) {
   try {
-    return await db.category.update({
-      where: {
-        id,
-        organizationId,
-      },
-      data: {
+    const { data, error } = await sbDb
+      .from("Category")
+      .update({
         name: name?.trim(),
         description,
         color,
-      },
-    });
+      })
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Category", {
       additionalData: { id, organizationId, name },
@@ -231,15 +252,23 @@ export async function bulkDeleteCategories({
   categoryIds,
   organizationId,
 }: {
-  categoryIds: Category["id"][];
-  organizationId: Organization["id"];
+  categoryIds: string[];
+  organizationId: string;
 }) {
   try {
-    return await db.category.deleteMany({
-      where: categoryIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
-        : { id: { in: categoryIds }, organizationId },
-    });
+    let query = sbDb
+      .from("Category")
+      .delete({ count: "exact" })
+      .eq("organizationId", organizationId);
+
+    if (!categoryIds.includes(ALL_SELECTED_KEY)) {
+      query = query.in("id", categoryIds);
+    }
+
+    const { error, count } = await query;
+
+    if (error) throw error;
+    return { count };
   } catch (cause) {
     throw new ShelfError({
       cause,

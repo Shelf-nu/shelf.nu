@@ -1,5 +1,4 @@
-import type { Asset, Kit, Prisma, ReportFound, User } from "@prisma/client";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import type { QR_SELECT_FOR_REPORT } from "~/routes/qr+/_public+/$qrId_.contact-owner";
 import { ShelfError } from "~/utils/error";
@@ -10,32 +9,26 @@ export async function createReport({
   content,
   assetId,
   kitId,
-}: Pick<ReportFound, "email" | "content"> & {
-  assetId?: Asset["id"];
-  kitId?: Kit["id"];
+}: {
+  email: string;
+  content: string;
+  assetId?: string;
+  kitId?: string;
 }) {
   try {
-    return await db.reportFound.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("ReportFound")
+      .insert({
         email,
         content,
-        ...(assetId && {
-          asset: {
-            connect: {
-              id: assetId,
-            },
-          },
-        }),
+        ...(assetId ? { assetId } : {}),
+        ...(kitId ? { kitId } : {}),
+      })
+      .select()
+      .single();
 
-        ...(kitId && {
-          kit: {
-            connect: {
-              id: kitId,
-            },
-          },
-        }),
-      },
-    });
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -53,12 +46,16 @@ export function sendReportEmails({
   reporterEmail,
   qr,
 }: {
-  ownerEmail: User["email"];
-  message: ReportFound["content"];
-  reporterEmail: ReportFound["email"];
-  qr: Prisma.QrGetPayload<{
-    select: typeof QR_SELECT_FOR_REPORT;
-  }>;
+  ownerEmail: string;
+  message: string;
+  reporterEmail: string;
+  qr: {
+    id: string;
+    assetId: string | null;
+    kitId: string | null;
+    asset: { title: string } | null;
+    kit: { name: string } | null;
+  };
 }) {
   const { item, type, normalizedName } = normalizeQrData(qr);
   const isUnlinked = !qr.assetId && !qr.kitId;

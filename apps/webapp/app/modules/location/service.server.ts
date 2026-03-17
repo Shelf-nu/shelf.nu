@@ -10,6 +10,7 @@ import type {
 import { BookingStatus } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -282,31 +283,14 @@ export async function getLocationHierarchy(params: {
 }) {
   const { organizationId, locationId } = params;
 
-  return db.$queryRaw<LocationHierarchyEntry[]>`
-    WITH RECURSIVE location_hierarchy AS (
-      SELECT
-        id,
-        name,
-        "parentId",
-        "organizationId",
-        0 AS depth
-      FROM "Location"
-      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l.name,
-        l."parentId",
-        l."organizationId",
-        lh.depth + 1 AS depth
-      FROM "Location" l
-      INNER JOIN location_hierarchy lh ON lh."parentId" = l.id
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT id, name, "parentId", depth
-    FROM location_hierarchy
-    ORDER BY depth DESC
-  `;
+  const { data, error } = await sbDb.rpc("get_location_hierarchy", {
+    location_id: locationId,
+    organization_id: organizationId,
+  });
+
+  if (error) throw error;
+
+  return (data ?? []) as LocationHierarchyEntry[];
 }
 
 /** Represents a node in the descendant tree rendered on location detail pages. */
@@ -316,8 +300,6 @@ export type LocationTreeNode = Pick<Location, "id" | "name"> & {
 
 /** Raw row returned when querying descendants via recursive CTE. */
 type LocationDescendantRow = Pick<Location, "id" | "name" | "parentId">;
-/** Aggregate row holding the maximum depth returned from subtree depth query. */
-type SubtreeDepthRow = { maxDepth: number | null };
 
 /**
  * Fetches a nested tree of all descendants for the provided location.
@@ -329,28 +311,14 @@ export async function getLocationDescendantsTree(params: {
 }): Promise<LocationTreeNode[]> {
   const { organizationId, locationId } = params;
 
-  const descendants = await db.$queryRaw<LocationDescendantRow[]>`
-    WITH RECURSIVE location_descendants AS (
-      SELECT
-        id,
-        name,
-        "parentId",
-        "organizationId"
-      FROM "Location"
-      WHERE "parentId" = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l.name,
-        l."parentId",
-        l."organizationId"
-      FROM "Location" l
-      INNER JOIN location_descendants ld ON ld.id = l."parentId"
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT id, name, "parentId"
-    FROM location_descendants
-  `;
+  const { data, error } = await sbDb.rpc("get_location_descendants", {
+    location_id: locationId,
+    organization_id: organizationId,
+  });
+
+  if (error) throw error;
+
+  const descendants = (data ?? []) as LocationDescendantRow[];
 
   const nodes = new Map<string, LocationTreeNode>();
   const rootNodes: LocationTreeNode[] = [];
@@ -386,30 +354,14 @@ export async function getLocationSubtreeDepth(params: {
 }): Promise<number> {
   const { organizationId, locationId } = params;
 
-  const [result] = await db.$queryRaw<SubtreeDepthRow[]>`
-    WITH RECURSIVE location_subtree AS (
-      SELECT
-        id,
-        "parentId",
-        "organizationId",
-        0 AS depth
-      FROM "Location"
-      WHERE id = ${locationId} AND "organizationId" = ${organizationId}
-      UNION ALL
-      SELECT
-        l.id,
-        l."parentId",
-        l."organizationId",
-        ls.depth + 1 AS depth
-      FROM "Location" l
-      INNER JOIN location_subtree ls ON l."parentId" = ls.id
-      WHERE l."organizationId" = ${organizationId}
-    )
-    SELECT MAX(depth) AS "maxDepth"
-    FROM location_subtree
-  `;
+  const { data, error } = await sbDb.rpc("get_location_subtree_depth", {
+    location_id: locationId,
+    organization_id: organizationId,
+  });
 
-  return result?.maxDepth ?? 0;
+  if (error) throw error;
+
+  return (data as number) ?? 0;
 }
 
 export const LOCATION_LIST_INCLUDE = {

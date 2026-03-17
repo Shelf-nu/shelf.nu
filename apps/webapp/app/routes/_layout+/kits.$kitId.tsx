@@ -157,7 +157,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const lastScan = kit.qrCodes[0]?.id
       ? parseScanData({
-          scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) || null,
+          scan:
+            ((await getScanByQrId({ qrId: kit.qrCodes[0].id })) as any) || null,
           userId,
         })
       : null;

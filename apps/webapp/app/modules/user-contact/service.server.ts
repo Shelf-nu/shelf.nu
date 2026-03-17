@@ -1,21 +1,36 @@
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 import { USER_CONTACT_SELECT } from "./constants";
 
 const label = "User Contact";
 
+/** Supabase select string matching USER_CONTACT_SELECT */
+const USER_CONTACT_SELECT_STR =
+  "id, userId, phone, street, city, stateProvince, zipPostalCode, countryRegion" as const;
+
 export async function getUserContactById(userId: string) {
   try {
-    // Use upsert to ensure that we always have a user contact entry
-    const userContact = await db.userContact.upsert({
-      where: { userId },
-      update: {},
-      create: {
-        userId,
-      },
-      select: USER_CONTACT_SELECT,
-    });
-    return userContact;
+    // Try to find existing user contact
+    const { data: existing, error: fetchError } = await sbDb
+      .from("UserContact")
+      .select(USER_CONTACT_SELECT_STR)
+      .eq("userId", userId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (existing) return existing;
+
+    // Create default entry if not found
+    const { data: created, error: createError } = await sbDb
+      .from("UserContact")
+      .insert({ userId })
+      .select(USER_CONTACT_SELECT_STR)
+      .single();
+
+    if (createError) throw createError;
+    return created;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -41,15 +56,15 @@ export async function updateUserContact(payload: UpdateUserContactPayload) {
     const { userId, ...contactData } = payload;
 
     // Use upsert to create or update contact information
-    const userContact = await db.userContact.upsert({
-      where: { userId },
-      update: contactData,
-      create: {
-        userId,
-        ...contactData,
-      },
-    });
+    const { data: userContact, error } = await sbDb
+      .from("UserContact")
+      .upsert({ userId, ...contactData } as Sb.UserContactInsert, {
+        onConflict: "userId",
+      })
+      .select()
+      .single();
 
+    if (error) throw error;
     return userContact;
   } catch (cause) {
     throw new ShelfError({

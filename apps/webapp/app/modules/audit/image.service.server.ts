@@ -7,6 +7,7 @@ import type {
   Prisma,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -54,7 +55,7 @@ export async function uploadAuditImage({
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
-}): Promise<AuditImage> {
+}) {
   try {
     // Check image count limits before uploading
     await validateImageLimits({
@@ -123,8 +124,9 @@ export async function uploadAuditImage({
     }
 
     // Create the database record
-    const auditImage = await db.auditImage.create({
-      data: {
+    const { data: auditImage, error: createError } = await sbDb
+      .from("AuditImage")
+      .insert({
         imageUrl: imagePublicUrl,
         thumbnailUrl: thumbnailPublicUrl ?? null,
         description: description ?? null,
@@ -132,8 +134,11 @@ export async function uploadAuditImage({
         auditAssetId: auditAssetId ?? null,
         uploadedById,
         organizationId,
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (createError) throw createError;
 
     return auditImage;
   } catch (cause) {
@@ -160,28 +165,18 @@ async function validateImageLimits({
   auditAssetId?: AuditAsset["id"];
   organizationId: Organization["id"];
 }) {
-  // Safety check - ensure the AuditImage model exists
-  if (!db.auditImage) {
-    throw new ShelfError({
-      cause: null,
-      message:
-        "AuditImage model not available. Please restart the server after running migrations.",
-      additionalData: { auditSessionId, auditAssetId, organizationId },
-      label,
-    });
-  }
-
   if (auditAssetId) {
     // Check asset-specific image limit
-    const assetImageCount = await db.auditImage.count({
-      where: {
-        auditSessionId,
-        auditAssetId,
-        organizationId,
-      },
-    });
+    const { count, error } = await sbDb
+      .from("AuditImage")
+      .select("*", { count: "exact", head: true })
+      .eq("auditSessionId", auditSessionId)
+      .eq("auditAssetId", auditAssetId)
+      .eq("organizationId", organizationId);
 
-    if (assetImageCount >= MAX_IMAGES_PER_ASSET) {
+    if (error) throw error;
+
+    if ((count ?? 0) >= MAX_IMAGES_PER_ASSET) {
       throw new ShelfError({
         cause: null,
         message: `Maximum of ${MAX_IMAGES_PER_ASSET} images per asset exceeded`,
@@ -189,26 +184,27 @@ async function validateImageLimits({
         additionalData: {
           auditSessionId,
           auditAssetId,
-          currentCount: assetImageCount,
+          currentCount: count,
         },
         label,
       });
     }
   } else {
     // Check general audit image limit (images not tied to specific assets)
-    const generalImageCount = await db.auditImage.count({
-      where: {
-        auditSessionId,
-        auditAssetId: null,
-        organizationId,
-      },
-    });
+    const { count, error } = await sbDb
+      .from("AuditImage")
+      .select("*", { count: "exact", head: true })
+      .eq("auditSessionId", auditSessionId)
+      .is("auditAssetId", null)
+      .eq("organizationId", organizationId);
 
-    if (generalImageCount >= MAX_GENERAL_IMAGES_PER_AUDIT) {
+    if (error) throw error;
+
+    if ((count ?? 0) >= MAX_GENERAL_IMAGES_PER_AUDIT) {
       throw new ShelfError({
         cause: null,
         message: `Maximum of ${MAX_GENERAL_IMAGES_PER_AUDIT} general images per audit exceeded`,
-        additionalData: { auditSessionId, currentCount: generalImageCount },
+        additionalData: { auditSessionId, currentCount: count },
         label,
       });
     }
@@ -231,12 +227,14 @@ export async function deleteAuditImage({
 }): Promise<boolean> {
   try {
     // Get the image record to retrieve URLs
-    const image = await db.auditImage.findFirst({
-      where: {
-        id: imageId,
-        organizationId,
-      },
-    });
+    const { data: image, error: findError } = await sbDb
+      .from("AuditImage")
+      .select("*")
+      .eq("id", imageId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (findError) throw findError;
 
     if (!image) {
       throw new ShelfError({
@@ -254,11 +252,12 @@ export async function deleteAuditImage({
     }
 
     // Delete from database
-    await db.auditImage.delete({
-      where: {
-        id: imageId,
-      },
-    });
+    const { error: deleteError } = await sbDb
+      .from("AuditImage")
+      .delete()
+      .eq("id", imageId);
+
+    if (deleteError) throw deleteError;
 
     return true;
   } catch (cause) {
@@ -382,20 +381,21 @@ export async function getAuditImageCount({
   auditAssetId?: AuditAsset["id"];
 }): Promise<number> {
   try {
-    const where: {
-      auditSessionId: string;
-      organizationId: string;
-      auditAssetId?: string | null;
-    } = {
-      auditSessionId,
-      organizationId,
-    };
+    let query = sbDb
+      .from("AuditImage")
+      .select("*", { count: "exact", head: true })
+      .eq("auditSessionId", auditSessionId)
+      .eq("organizationId", organizationId);
 
     if (auditAssetId !== undefined) {
-      where.auditAssetId = auditAssetId;
+      query = query.eq("auditAssetId", auditAssetId);
     }
 
-    return await db.auditImage.count({ where });
+    const { count, error } = await query;
+
+    if (error) throw error;
+
+    return count ?? 0;
   } catch (cause) {
     throw new ShelfError({
       cause,

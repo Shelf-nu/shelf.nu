@@ -7,7 +7,9 @@ import {
 import type { Organization, Prisma, TierId, User } from "@prisma/client";
 import type Stripe from "stripe";
 
+import type { Sb } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
@@ -453,12 +455,17 @@ export async function toggleOrganizationSso({
   enabledSso: boolean;
 }) {
   try {
-    return await db.organization.update({
-      where: { id: organizationId, type: OrganizationType.TEAM },
-      data: {
-        enabledSso,
-      },
-    });
+    const { data, error } = await sbDb
+      .from("Organization")
+      .update({ enabledSso })
+      .eq("id", organizationId)
+      .eq("type", "TEAM" as Sb.OrganizationType)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -478,12 +485,17 @@ export async function toggleWorkspaceDisabled({
   workspaceDisabled: boolean;
 }) {
   try {
-    return await db.organization.update({
-      where: { id: organizationId, type: OrganizationType.TEAM },
-      data: {
-        workspaceDisabled,
-      },
-    });
+    const { data, error } = await sbDb
+      .from("Organization")
+      .update({ workspaceDisabled })
+      .eq("id", organizationId)
+      .eq("type", "TEAM" as Sb.OrganizationType)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -503,13 +515,19 @@ export async function toggleBarcodeEnabled({
   barcodesEnabled: boolean;
 }) {
   try {
-    return await db.organization.update({
-      where: { id: organizationId },
-      data: {
+    const { data, error } = await sbDb
+      .from("Organization")
+      .update({
         barcodesEnabled,
-        barcodesEnabledAt: barcodesEnabled ? new Date() : null,
-      },
-    });
+        barcodesEnabledAt: barcodesEnabled ? new Date().toISOString() : null,
+      })
+      .eq("id", organizationId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -529,13 +547,19 @@ export async function toggleAuditEnabled({
   auditsEnabled: boolean;
 }) {
   try {
-    return await db.organization.update({
-      where: { id: organizationId },
-      data: {
+    const { data, error } = await sbDb
+      .from("Organization")
+      .update({
         auditsEnabled,
-        auditsEnabledAt: auditsEnabled ? new Date() : null,
-      },
-    });
+        auditsEnabledAt: auditsEnabled ? new Date().toISOString() : null,
+      })
+      .eq("id", organizationId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -584,16 +608,18 @@ export function emailMatchesDomains(
  * - baseUserCanSeeCustody
  * - baseUserCanSeeBookings
  */
-export function getOrganizationPermissionColumns(id: string) {
-  return db.organization.findUnique({
-    where: { id },
-    select: {
-      selfServiceCanSeeCustody: true,
-      selfServiceCanSeeBookings: true,
-      baseUserCanSeeCustody: true,
-      baseUserCanSeeBookings: true,
-    },
-  });
+export async function getOrganizationPermissionColumns(id: string) {
+  const { data, error } = await sbDb
+    .from("Organization")
+    .select(
+      "selfServiceCanSeeCustody, selfServiceCanSeeBookings, baseUserCanSeeCustody, baseUserCanSeeBookings"
+    )
+    .eq("id", id)
+    .single();
+
+  if (error) throw error;
+
+  return data;
 }
 
 /**
@@ -604,25 +630,28 @@ export function getOrganizationPermissionColumns(id: string) {
  * - baseUserCanSeeCustody
  * - baseUserCanSeeBookings
  */
-export function updateOrganizationPermissions({
+export async function updateOrganizationPermissions({
   id,
   configuration,
 }: {
   id: string;
-  configuration: Pick<
-    Organization,
-    | "selfServiceCanSeeCustody"
-    | "selfServiceCanSeeBookings"
-    | "baseUserCanSeeCustody"
-    | "baseUserCanSeeBookings"
-  >;
+  configuration: {
+    selfServiceCanSeeCustody: boolean;
+    selfServiceCanSeeBookings: boolean;
+    baseUserCanSeeCustody: boolean;
+    baseUserCanSeeBookings: boolean;
+  };
 }) {
-  return db.organization.update({
-    where: { id },
-    data: {
-      ...configuration,
-    },
-  });
+  const { data, error } = await sbDb
+    .from("Organization")
+    .update(configuration)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return data;
 }
 
 export async function getOrganizationAdmins({
@@ -971,17 +1000,15 @@ ${
  * @param userId - The ID of the user whose personal workspaces should be reset
  * @returns Promise resolving to the update result
  */
-export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
+export async function resetPersonalWorkspaceBranding(userId: string) {
   try {
-    return await db.organization.updateMany({
-      where: {
-        userId,
-        type: OrganizationType.PERSONAL,
-      },
-      data: {
-        showShelfBranding: true,
-      },
-    });
+    const { error } = await sbDb
+      .from("Organization")
+      .update({ showShelfBranding: true })
+      .eq("userId", userId)
+      .eq("type", "PERSONAL" as Sb.OrganizationType);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,

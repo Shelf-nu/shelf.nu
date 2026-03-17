@@ -132,8 +132,8 @@ describe("onboarding action validation", () => {
       primaryUseCase: null,
       currentSolution: null,
       timeline: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     vi.mocked(createStripeCustomer).mockResolvedValue({} as any);
     vi.mocked(signInWithEmail).mockResolvedValue(null);

@@ -80,7 +80,7 @@ export const LocationNotes = ({
             />
           )}
           {/* Render all existing notes */}
-          {(notes as NoteWithUser[]).map((note) => (
+          {(notes as unknown as NoteWithUser[]).map((note) => (
             <Note
               key={note.id}
               note={note}

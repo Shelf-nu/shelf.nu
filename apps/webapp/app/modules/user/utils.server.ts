@@ -6,6 +6,7 @@ import {
 import { redirect } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
@@ -72,25 +73,21 @@ export async function resolveUserAction(
         }
       );
 
-      await db.teamMember
-        .update({
-          where: {
-            id: teamMemberId,
-            organizationId,
-            deletedAt: null,
-          },
-          data: {
-            deletedAt: new Date(),
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to delete team member",
-            additionalData: { teamMemberId, userId, organizationId },
-            label: "Team",
-          });
+      const { error: deleteError } = await sbDb
+        .from("TeamMember")
+        .update({ deletedAt: new Date().toISOString() })
+        .eq("id", teamMemberId)
+        .eq("organizationId", organizationId)
+        .is("deletedAt", null);
+
+      if (deleteError) {
+        throw new ShelfError({
+          cause: deleteError,
+          message: "Failed to delete team member",
+          additionalData: { teamMemberId, userId, organizationId },
+          label: "Team",
         });
+      }
 
       return redirect(`/settings/team/users`);
     }
@@ -113,24 +110,20 @@ export async function resolveUserAction(
         organizationId,
       });
 
-      const org = await db.organization
-        .findUniqueOrThrow({
-          where: {
-            id: organizationId,
-          },
-          select: {
-            name: true,
-            customEmailFooter: true,
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Organization not found",
-            additionalData: { organizationId, targetUserId, userId },
-            label: "Team",
-          });
+      const { data: org, error: orgError } = await sbDb
+        .from("Organization")
+        .select("name, customEmailFooter")
+        .eq("id", organizationId)
+        .single();
+
+      if (orgError || !org) {
+        throw new ShelfError({
+          cause: orgError,
+          message: "Organization not found",
+          additionalData: { organizationId, targetUserId, userId },
+          label: "Team",
         });
+      }
 
       sendEmail({
         to: user.email,
@@ -164,25 +157,21 @@ export async function resolveUserAction(
         }
       );
 
-      await db.invite
-        .updateMany({
-          where: {
-            inviteeEmail,
-            organizationId,
-            status: InviteStatuses.PENDING,
-          },
-          data: {
-            status: InviteStatuses.INVALIDATED,
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to cancel invites",
-            additionalData: { userId, organizationId, inviteeEmail },
-            label: "Team",
-          });
+      const { error: cancelError } = await sbDb
+        .from("Invite")
+        .update({ status: InviteStatuses.INVALIDATED })
+        .eq("inviteeEmail", inviteeEmail)
+        .eq("organizationId", organizationId)
+        .eq("status", InviteStatuses.PENDING);
+
+      if (cancelError) {
+        throw new ShelfError({
+          cause: cancelError,
+          message: "Failed to cancel invites",
+          additionalData: { userId, organizationId, inviteeEmail },
+          label: "Team",
         });
+      }
 
       sendNotification({
         title: "Invitation cancelled",
@@ -232,23 +221,20 @@ export async function resolveUserAction(
       /** Invalidate all previous invites for current user for current organization */
 
       const [_invalidatedInvites, invite] = await Promise.all([
-        db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to invalidate previous invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
+        sbDb
+          .from("Invite")
+          .update({ status: InviteStatuses.INVALIDATED })
+          .eq("inviteeEmail", inviteeEmail)
+          .eq("organizationId", organizationId)
+          .then(({ error: invError }) => {
+            if (invError) {
+              throw new ShelfError({
+                cause: invError,
+                message: "Failed to invalidate previous invites",
+                additionalData: { userId, organizationId, inviteeEmail },
+                label: "Team",
+              });
+            }
           }),
 
         /** Create a new invite, based on the prev invite's role */
@@ -312,9 +298,14 @@ export async function resolveUserAction(
       }
 
       /** Fetch the target's current role to detect demotion */
-      const targetUserOrg = await db.userOrganization.findFirst({
-        where: { userId: targetUserId, organizationId },
-      });
+      const { data: targetUserOrg, error: targetOrgError } = await sbDb
+        .from("UserOrganization")
+        .select()
+        .eq("userId", targetUserId)
+        .eq("organizationId", organizationId)
+        .maybeSingle();
+
+      if (targetOrgError) throw targetOrgError;
 
       if (!targetUserOrg) {
         throw new ShelfError({
@@ -328,18 +319,33 @@ export async function resolveUserAction(
 
       /** Transfer entities on demotion */
       if (isDemotion(currentRole, newRole)) {
-        const org = await db.organization.findUniqueOrThrow({
-          where: { id: organizationId },
-          select: { userId: true },
-        });
+        const { data: orgData, error: orgFetchError } = await sbDb
+          .from("Organization")
+          .select("userId")
+          .eq("id", organizationId)
+          .single();
 
-        const recipientId = transferToUserId || org.userId;
+        if (orgFetchError || !orgData) {
+          throw new ShelfError({
+            cause: orgFetchError,
+            message: "Organization not found",
+            label: "Team",
+            additionalData: { organizationId },
+          });
+        }
+
+        const recipientId = transferToUserId || orgData.userId;
 
         /** Validate that the transfer recipient is a member of this org */
         if (transferToUserId) {
-          const recipientOrg = await db.userOrganization.findFirst({
-            where: { userId: transferToUserId, organizationId },
-          });
+          const { data: recipientOrg, error: recipientOrgError } = await sbDb
+            .from("UserOrganization")
+            .select()
+            .eq("userId", transferToUserId)
+            .eq("organizationId", organizationId)
+            .maybeSingle();
+
+          if (recipientOrgError) throw recipientOrgError;
 
           if (!recipientOrg) {
             throw new ShelfError({
@@ -402,16 +408,34 @@ export async function resolveUserAction(
       }
 
       /** Send email notification to the affected user */
-      const [targetUser, org] = await Promise.all([
-        db.user.findUniqueOrThrow({
-          where: { id: targetUserId },
-          select: { email: true },
-        }),
-        db.organization.findUniqueOrThrow({
-          where: { id: organizationId },
-          select: { name: true, customEmailFooter: true },
-        }),
+      const [targetUserResult, orgResult] = await Promise.all([
+        sbDb.from("User").select("email").eq("id", targetUserId).single(),
+        sbDb
+          .from("Organization")
+          .select("name, customEmailFooter")
+          .eq("id", organizationId)
+          .single(),
       ]);
+
+      if (targetUserResult.error || !targetUserResult.data) {
+        throw new ShelfError({
+          cause: targetUserResult.error,
+          message: "User not found",
+          label: "Team",
+          additionalData: { targetUserId },
+        });
+      }
+      if (orgResult.error || !orgResult.data) {
+        throw new ShelfError({
+          cause: orgResult.error,
+          message: "Organization not found",
+          label: "Team",
+          additionalData: { organizationId },
+        });
+      }
+
+      const targetUser = targetUserResult.data;
+      const org = orgResult.data;
 
       const roleName = organizationRolesMap[newRole] || newRole;
       const previousRoleName = organizationRolesMap[currentRole] || currentRole;
@@ -473,10 +497,11 @@ export async function generateUniqueUsername(email: string): Promise<string> {
     const username = randomUsernameFromEmail(email);
 
     // Check if username exists
-    const existingUser = await db.user.findUnique({
-      where: { username },
-      select: { id: true },
-    });
+    const { data: existingUser } = await sbDb
+      .from("User")
+      .select("id")
+      .eq("username", username)
+      .maybeSingle();
 
     if (!existingUser) {
       return username;

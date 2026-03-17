@@ -1,14 +1,15 @@
-import type { Location, LocationNote, Prisma, User } from "@prisma/client";
-
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
 const label: ErrorLabel = "Location";
 
-type CreateLocationNoteArgs = Pick<LocationNote, "content" | "locationId"> & {
-  type?: LocationNote["type"];
-  userId?: User["id"] | null;
+type CreateLocationNoteArgs = {
+  content: string;
+  locationId: string;
+  type?: Sb.NoteType;
+  userId?: string | null;
 };
 
 export async function createLocationNote({
@@ -18,22 +19,19 @@ export async function createLocationNote({
   userId,
 }: CreateLocationNoteArgs) {
   try {
-    return await db.locationNote.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("LocationNote")
+      .insert({
         content,
         type,
-        location: {
-          connect: { id: locationId },
-        },
-        ...(userId
-          ? {
-              user: {
-                connect: { id: userId },
-              },
-            }
-          : {}),
-      },
-    });
+        locationId,
+        ...(userId ? { userId } : {}),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -48,24 +46,25 @@ export async function createSystemLocationNote({
   content,
   locationId,
   userId,
-}: Pick<LocationNote, "content" | "locationId"> & { userId?: string }) {
+}: {
+  content: string;
+  locationId: string;
+  userId?: string;
+}) {
   try {
-    return await db.locationNote.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("LocationNote")
+      .insert({
         content,
         type: "UPDATE",
-        location: {
-          connect: { id: locationId },
-        },
-        ...(userId
-          ? {
-              user: {
-                connect: { id: userId },
-              },
-            }
-          : {}),
-      },
-    });
+        locationId,
+        ...(userId ? { userId } : {}),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -79,14 +78,17 @@ export async function createSystemLocationNote({
 export async function getLocationNotes({
   locationId,
   organizationId,
-}: Pick<LocationNote, "locationId"> & {
-  organizationId: Location["organizationId"];
+}: {
+  locationId: string;
+  organizationId: string;
 }) {
   try {
-    const location = await db.location.findFirst({
-      where: { id: locationId, organizationId },
-      select: { id: true },
-    });
+    const { data: location } = await sbDb
+      .from("Location")
+      .select("id")
+      .eq("id", locationId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
 
     if (!location) {
       throw new ShelfError({
@@ -98,18 +100,14 @@ export async function getLocationNotes({
       });
     }
 
-    return await db.locationNote.findMany({
-      where: { locationId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-    });
+    const { data, error } = await sbDb
+      .from("LocationNote")
+      .select("*, user:User(firstName, lastName)")
+      .eq("locationId", locationId)
+      .order("createdAt", { ascending: false });
+
+    if (error) throw error;
+    return data ?? [];
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -127,11 +125,19 @@ export async function getLocationNotes({
 export async function deleteLocationNote({
   id,
   userId,
-}: Pick<LocationNote, "id"> & { userId: User["id"] }) {
+}: {
+  id: string;
+  userId: string;
+}) {
   try {
-    return await db.locationNote.deleteMany({
-      where: { id, userId },
-    });
+    const { error, count } = await sbDb
+      .from("LocationNote")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("userId", userId);
+
+    if (error) throw error;
+    return { count };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -142,6 +148,6 @@ export async function deleteLocationNote({
   }
 }
 
-export type LocationNoteWithUser = Prisma.LocationNoteGetPayload<{
-  include: { user: { select: { firstName: true; lastName: true } } };
-}>;
+export type LocationNoteWithUser = Sb.LocationNoteRow & {
+  user: { firstName: string | null; lastName: string | null } | null;
+};

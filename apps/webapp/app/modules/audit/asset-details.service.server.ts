@@ -1,5 +1,6 @@
 import type { AuditNote, AuditAsset, User } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
 const label: "Audit" = "Audit";
@@ -137,13 +138,15 @@ export async function deleteAuditAssetNote({
 }) {
   try {
     // First verify the note exists and user owns it
-    const existingNote = await db.auditNote.findFirst({
-      where: {
-        id: noteId,
-        userId,
-        auditAssetId: { not: null }, // Ensure it's an asset-specific note
-      },
-    });
+    const { data: existingNote, error: findError } = await sbDb
+      .from("AuditNote")
+      .select("*")
+      .eq("id", noteId)
+      .eq("userId", userId)
+      .not("auditAssetId", "is", null)
+      .maybeSingle();
+
+    if (findError) throw findError;
 
     if (!existingNote) {
       throw new ShelfError({
@@ -156,9 +159,14 @@ export async function deleteAuditAssetNote({
       });
     }
 
-    return await db.auditNote.delete({
-      where: { id: noteId },
-    });
+    const { error: deleteError } = await sbDb
+      .from("AuditNote")
+      .delete()
+      .eq("id", noteId);
+
+    if (deleteError) throw deleteError;
+
+    return existingNote;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -232,22 +240,26 @@ export async function getAuditAssetDetailsCounts({
   auditAssetId: AuditAsset["id"];
 }) {
   try {
-    const [notesCount, imagesCount] = await Promise.all([
-      db.auditNote.count({
-        where: {
-          auditSessionId,
-          auditAssetId,
-        },
-      }),
-      db.auditImage.count({
-        where: {
-          auditSessionId,
-          auditAssetId,
-        },
-      }),
+    const [notesResult, imagesResult] = await Promise.all([
+      sbDb
+        .from("AuditNote")
+        .select("*", { count: "exact", head: true })
+        .eq("auditSessionId", auditSessionId)
+        .eq("auditAssetId", auditAssetId),
+      sbDb
+        .from("AuditImage")
+        .select("*", { count: "exact", head: true })
+        .eq("auditSessionId", auditSessionId)
+        .eq("auditAssetId", auditAssetId),
     ]);
 
-    return { notesCount, imagesCount };
+    if (notesResult.error) throw notesResult.error;
+    if (imagesResult.error) throw imagesResult.error;
+
+    return {
+      notesCount: notesResult.count ?? 0,
+      imagesCount: imagesResult.count ?? 0,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

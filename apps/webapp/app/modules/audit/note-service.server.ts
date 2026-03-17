@@ -1,5 +1,6 @@
 import type { AuditNote, User, AuditSession } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Audit";
@@ -22,22 +23,20 @@ export async function createAuditNote({
   auditSessionId: AuditSession["id"];
 }) {
   try {
-    return await db.auditNote.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("AuditNote")
+      .insert({
         content,
         type: type || "COMMENT",
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-        auditSession: {
-          connect: {
-            id: auditSessionId,
-          },
-        },
-      },
-    });
+        userId,
+        auditSessionId,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,

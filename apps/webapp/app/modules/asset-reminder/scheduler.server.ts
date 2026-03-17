@@ -1,6 +1,5 @@
-import type { AssetReminder } from "@prisma/client";
 import { isBefore } from "date-fns";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -35,10 +34,12 @@ export async function scheduleAssetReminder({
       when
     );
 
-    await db.assetReminder.update({
-      where: { id: data.reminderId },
-      data: { activeSchedulerReference: reference },
-    });
+    const { error } = await sbDb
+      .from("AssetReminder")
+      .update({ activeSchedulerReference: reference })
+      .eq("id", data.reminderId);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -52,9 +53,10 @@ export async function scheduleAssetReminder({
 /**
  * This function is used to cancel an asset reminder scheduler.
  */
-export async function cancelAssetReminderScheduler(
-  reminder: Pick<AssetReminder, "alertDateTime" | "activeSchedulerReference">
-) {
+export async function cancelAssetReminderScheduler(reminder: {
+  alertDateTime: Date | string;
+  activeSchedulerReference: string | null;
+}) {
   try {
     /**
      * If the reminder is already triggered, then we don't need to cancel the scheduler.

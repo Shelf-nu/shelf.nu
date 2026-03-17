@@ -14,6 +14,7 @@ Before any work, read these documents in the `docs/` directory:
 2. **asset_mesh_migration_plan.docx** — Prisma → Supabase SQL migration strategy, model inventory (48 models, 18 enums), type mapping reference, new table schemas, RLS policy design, 8-step migration sequence, Claude Code execution brief (Section 7)
 
 Also review the existing Asset Mesh repo (`Stealth-Peanut/assetmesh-io`) for:
+
 - Golden record algorithm (fuzzy matching across NinjaOne/CW/Liongard)
 - Integration patterns and data models
 - Any existing business logic worth transplanting
@@ -57,6 +58,7 @@ Single Supabase database per T1 MSP. RLS policies scope T2 visibility.
 **Prisma → Supabase SQL migration** (migration plan Section 7)
 
 Execute migration files in order:
+
 1. `001_shelf_base_schema.sql` — Clean-state DDL from Prisma schema (all 48 models, all IDs as uuid)
 2. `002_strip_shelf_billing_and_auth.sql` — Drop Tier, TierLimit, CustomTierLimit, SsoDetails, Announcement, UserBusinessIntel
 3. `003_modify_for_msp.sql` — ALTER existing tables (User, Asset, Organization, TeamMember, ReportFound)
@@ -68,13 +70,13 @@ Execute migration files in order:
 
 ## Integration Points
 
-| System | Direction | Purpose |
-|--------|-----------|---------|
-| ConnectWise PSA | Bidirectional | Config items ↔ person ↔ assets. Warranty data (via ScalePad). |
-| NinjaOne | Inbound (source of truth) | Device data, agent check-in, device-to-person assignment |
-| Liongard | Inbound | M365 license assignments per user, tenant config |
-| ControlMap | Outbound | Push asset register data for compliance frameworks |
-| Stealth Peanut T0 | Auth + API proxy | All creds stored/proxied at T0. Modules never hold creds. |
+| System            | Direction                 | Purpose                                                         |
+| ----------------- | ------------------------- | --------------------------------------------------------------- |
+| ConnectWise PSA   | Bidirectional             | Config items ↔ person ↔ assets. Warranty data (via ScalePad). |
+| NinjaOne          | Inbound (source of truth) | Device data, agent check-in, device-to-person assignment        |
+| Liongard          | Inbound                   | M365 license assignments per user, tenant config                |
+| ControlMap        | Outbound                  | Push asset register data for compliance frameworks              |
+| Stealth Peanut T0 | Auth + API proxy          | All creds stored/proxied at T0. Modules never hold creds.       |
 
 ## Stack
 

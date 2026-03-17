@@ -1,15 +1,9 @@
-import {
-  type Asset,
-  type Organization,
-  type PrintBatch,
-  type Prisma,
-  type Qr,
-  type User,
-  type Kit,
-} from "@prisma/client";
+import type { Sb } from "@shelf/database";
+import type { Prisma } from "@prisma/client";
 import type { TypeNumber, ErrorCorrectionLevel } from "qrcode-generator";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -23,11 +17,20 @@ import { generateRandomCode } from "../invite/helpers";
 
 const label: ErrorLabel = "QR";
 
-export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
+export async function getQrByAssetId({ assetId }: { assetId: string | null }) {
   try {
-    return await db.qr.findFirst({
-      where: { assetId },
-    });
+    let query = sbDb.from("Qr").select("*");
+
+    if (assetId === null) {
+      query = query.is("assetId", null);
+    } else {
+      query = query.eq("assetId", assetId);
+    }
+
+    const { data, error } = await query.limit(1).maybeSingle();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -39,11 +42,20 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
   }
 }
 
-export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
+export async function getQrByKitId({ kitId }: { kitId: string | null }) {
   try {
-    return await db.qr.findFirst({
-      where: { kitId },
-    });
+    let query = sbDb.from("Qr").select("*");
+
+    if (kitId === null) {
+      query = query.is("kitId", null);
+    } else {
+      query = query.eq("kitId", kitId);
+    }
+
+    const { data, error } = await query.limit(1).maybeSingle();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -55,22 +67,17 @@ export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
   }
 }
 
-type QrWithInclude<T extends Prisma.QrInclude | undefined> =
-  T extends Prisma.QrInclude ? Prisma.QrGetPayload<{ include: T }> : Qr;
-
-export async function getQr<T extends Prisma.QrInclude | undefined>({
-  id,
-  include,
-}: Pick<Asset, "id"> & {
-  include?: T;
-}): Promise<QrWithInclude<T>> {
+/** Simple Supabase-based getQr returning a flat Qr row */
+export async function getQr({ id }: { id: string }) {
   try {
-    const qr = await db.qr.findUniqueOrThrow({
-      where: { id },
-      include: { ...include },
-    });
+    const { data, error } = await sbDb
+      .from("Qr")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    return qr as QrWithInclude<T>;
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -85,15 +92,67 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
   }
 }
 
-export async function getQrOrganizationLookup({ qrId }: { qrId: Qr["id"] }) {
-  const qr = await db.qr.findUnique({
-    where: { id: qrId },
-    select: { organizationId: true },
-  });
+/**
+ * Prisma-based getQr with flexible include — used by the scanner route.
+ * TODO: Remove once the scanner route is migrated to Supabase.
+ */
+type QrWithInclude<T extends Prisma.QrInclude | undefined> =
+  T extends Prisma.QrInclude ? Prisma.QrGetPayload<{ include: T }> : Sb.QrRow;
 
-  if (!qr) {
+export async function getQrWithInclude<T extends Prisma.QrInclude | undefined>({
+  id: qrId,
+  include,
+}: {
+  id: string;
+  include?: T;
+}): Promise<QrWithInclude<T>> {
+  try {
+    const qr = await db.qr.findUniqueOrThrow({
+      where: { id: qrId },
+      include: { ...include },
+    });
+
+    return qr as QrWithInclude<T>;
+  } catch (cause) {
     throw new ShelfError({
-      cause: null,
+      cause,
+      message:
+        "This code doesn't exist or it doesn't belong to your current organization.",
+      title: "QR code not found",
+      status: 404,
+      additionalData: { id: qrId },
+      label,
+      shouldBeCaptured: !isNotFoundError(cause),
+    });
+  }
+}
+
+export async function getQrOrganizationLookup({ qrId }: { qrId: string }) {
+  try {
+    const { data: qr, error } = await sbDb
+      .from("Qr")
+      .select("organizationId")
+      .eq("id", qrId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!qr) {
+      throw new ShelfError({
+        cause: null,
+        message: "This code doesn't exist.",
+        title: "QR code not found",
+        status: 404,
+        additionalData: { qrId },
+        label,
+      });
+    }
+
+    return qr;
+  } catch (cause) {
+    if (cause instanceof ShelfError) throw cause;
+    throw new ShelfError({
+      cause,
       message: "This code doesn't exist.",
       title: "QR code not found",
       status: 404,
@@ -101,8 +160,6 @@ export async function getQrOrganizationLookup({ qrId }: { qrId: Qr["id"] }) {
       label,
     });
   }
-
-  return qr;
 }
 
 export async function createQr({
@@ -110,45 +167,39 @@ export async function createQr({
   assetId,
   kitId,
   organizationId,
-}: Pick<Qr, "userId" | "organizationId"> & {
-  assetId?: Asset["id"];
-  kitId?: Kit["id"];
+}: {
+  userId: string;
+  organizationId: string;
+  assetId?: string;
+  kitId?: string;
 }) {
-  const data = {
-    id: id(),
-    ...(userId && {
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
-    }),
-    ...(assetId && {
-      asset: {
-        connect: {
-          id: assetId,
-        },
-      },
-    }),
-    ...(kitId && {
-      kit: {
-        connect: {
-          id: kitId,
-        },
-      },
-    }),
-    ...(organizationId && {
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    }),
-  };
+  try {
+    const insertData: Record<string, unknown> = {
+      id: id(),
+    };
 
-  return db.qr.create({
-    data,
-  });
+    if (userId) insertData.userId = userId;
+    if (assetId) insertData.assetId = assetId;
+    if (kitId) insertData.kitId = kitId;
+    if (organizationId) insertData.organizationId = organizationId;
+
+    const { data, error } = await sbDb
+      .from("Qr")
+      .insert(insertData as Sb.QrInsert)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating the QR code. Please try again or contact support.",
+      additionalData: { userId, assetId, kitId, organizationId },
+      label,
+    });
+  }
 }
 
 /** Generates codes that are not attached to assets but attached to a certain org and user */
@@ -157,9 +208,9 @@ export async function generateOrphanedCodes({
   amount,
   organizationId,
 }: {
-  userId: User["id"];
+  userId: string;
   amount: number;
-  organizationId: Organization["id"];
+  organizationId: string;
 }) {
   try {
     const data = Array.from({ length: amount }).map(() => ({
@@ -168,10 +219,14 @@ export async function generateOrphanedCodes({
       id: id(),
     }));
 
-    return await db.qr.createMany({
-      data: data,
-      skipDuplicates: true,
+    const { error, count } = await sbDb.from("Qr").upsert(data, {
+      onConflict: "id",
+      ignoreDuplicates: true,
+      count: "exact",
     });
+
+    if (error) throw error;
+    return { count: count ?? 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -192,40 +247,33 @@ export async function generateUnclaimedCodesForPrint({
 }) {
   try {
     batchName = batchName || generateRandomCode(10);
-    /**
-     * We create an array of empty objects to create the amount of codes requested
-     */
 
-    const batch = await db.printBatch.create({
-      data: {
-        name: batchName,
-      },
-    });
+    const { data: batch, error: batchError } = await sbDb
+      .from("PrintBatch")
+      .insert({ name: batchName })
+      .select()
+      .single();
+
+    if (batchError) throw batchError;
 
     const data = Array.from({ length: amount }).map(() => ({
-      // Generating codes also prints them so unclaimed codes are marked as printed
-      // We generate a random code for the batch
       batchId: batch.id,
       id: id(),
     }));
 
-    await db.qr.createMany({
-      data,
-      skipDuplicates: true,
-    });
+    const { error: insertError } = await sbDb
+      .from("Qr")
+      .upsert(data, { onConflict: "id", ignoreDuplicates: true });
 
-    return await db.qr.findMany({
-      where: {
-        batch: {
-          name: {
-            equals: batchName,
-          },
-        },
-      },
-      include: {
-        batch: true,
-      },
-    });
+    if (insertError) throw insertError;
+
+    const { data: qrCodes, error: fetchError } = await sbDb
+      .from("Qr")
+      .select("*, batch:PrintBatch(*)")
+      .eq("batchId", batch.id);
+
+    if (fetchError) throw fetchError;
+    return qrCodes;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -243,7 +291,7 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
   organizationId,
 }: {
   request: Request;
-  organizationId: Organization["id"];
+  organizationId: string;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const qrId = searchParams.get("qrId");
@@ -251,12 +299,17 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
   try {
     /** We have the case when someone could be linking a QR that doesnt belong to the current org */
     if (qrId) {
-      await db.qr.findUniqueOrThrow({
-        where: {
-          id: qrId,
-          organizationId,
-        },
-      });
+      const { data, error } = await sbDb
+        .from("Qr")
+        .select("id")
+        .eq("id", qrId)
+        .eq("organizationId", organizationId)
+        .single();
+
+      if (error) throw error;
+      if (!data) {
+        throw new Error("QR not found");
+      }
     }
   } catch (cause) {
     throw new ShelfError({
@@ -323,76 +376,41 @@ async function getQrCodes({
 
   search?: string | null;
 
-  batch?: PrintBatch["id"] | "No batch" | null;
+  batch?: string | "No batch" | null;
 }) {
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    /** Default value of where. Takes the assets belonging to current user */
-    const where: Prisma.QrWhereInput = {};
+    let query = sbDb
+      .from("Qr")
+      .select(
+        "*, asset:Asset(id, title), kit:Kit(id, name), organization:Organization(id, name), user:User(id, email, firstName, lastName), batch:PrintBatch(*)",
+        { count: "exact" }
+      );
 
-    /** If the search string exists, add it to the where object
-     */
     if (search) {
-      where.id = {
-        contains: search,
-        mode: "insensitive",
-      };
+      query = query.ilike("id", `%${search}%`);
     }
 
     if (batch) {
-      where.batchId =
-        batch === "No batch"
-          ? {
-              equals: null,
-            }
-          : batch;
+      if (batch === "No batch") {
+        query = query.is("batchId", null);
+      } else {
+        query = query.eq("batchId", batch);
+      }
     }
 
-    const [qrCodes, totalQrCodes] = await Promise.all([
-      /** Get the users */
-      db.qr.findMany({
-        skip,
-        take,
-        include: {
-          asset: {
-            select: {
-              id: true,
-              title: true,
-            },
-          },
-          kit: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          organization: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          batch: true,
-        },
-        where,
-        orderBy: { createdAt: "desc" },
-      }),
+    const {
+      data: qrCodes,
+      count,
+      error,
+    } = await query
+      .order("createdAt", { ascending: false })
+      .range(skip, skip + take - 1);
 
-      /** Count them */
-      db.qr.count({ where }),
-    ]);
-
-    return { qrCodes, totalQrCodes };
+    if (error) throw error;
+    return { qrCodes: qrCodes ?? [], totalQrCodes: count ?? 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -406,14 +424,14 @@ async function getQrCodes({
 /** Generates codes that are not attached to assets but attached to a certain org and user */
 export async function markBatchAsPrinted({ batch }: { batch: string }) {
   try {
-    const updatedBatch = await db.printBatch.update({
-      where: {
-        id: batch,
-      },
-      data: {
-        printed: true,
-      },
-    });
+    const { data: updatedBatch, error } = await sbDb
+      .from("PrintBatch")
+      .update({ printed: true })
+      .eq("id", batch)
+      .select()
+      .single();
+
+    if (error) throw error;
     return updatedBatch;
   } catch (cause) {
     throw new ShelfError({
@@ -427,54 +445,59 @@ export async function markBatchAsPrinted({ batch }: { batch: string }) {
 
 /** Claims a unclaimed code by linking it to an organization and user */
 export async function claimQrCode({
-  id,
+  id: qrId,
   organizationId,
   userId,
 }: {
-  id: Qr["id"];
-  organizationId: Organization["id"];
-  userId: User["id"];
+  id: string;
+  organizationId: string;
+  userId: string;
 }) {
   try {
     /** First, just in case we check whether its claimed */
-    const qr = await getQr({ id });
+    const qr = await getQr({ id: qrId });
     if (qr.organizationId) {
       throw new ShelfError({
         message:
           "This QR code already belongs to an organization so you cannot claim it.",
         title: "QR code already claimed",
         status: 403,
-        additionalData: { id, organizationId, userId },
+        additionalData: { id: qrId, organizationId, userId },
         label,
         cause: null,
       });
     }
 
-    return await db.qr.update({
-      where: {
-        id,
-      },
-      data: {
-        organizationId,
-        userId,
-      },
-    });
+    const { data, error } = await sbDb
+      .from("Qr")
+      .update({ organizationId, userId })
+      .eq("id", qrId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Failed to claim qr code",
-      additionalData: { id, organizationId, userId },
+      additionalData: { id: qrId, organizationId, userId },
       label,
     });
   }
 }
 
+interface AssetWithQrCodes {
+  id: string;
+  qrCodes: Array<{
+    id: string;
+    version: number;
+    errorCorrection: string;
+  }>;
+}
+
 interface QRCodeMapParams {
-  assets: Prisma.AssetGetPayload<{
-    include: {
-      qrCodes: true;
-    };
-  }>[];
+  assets: AssetWithQrCodes[];
   organizationId: string;
   userId: string;
   size: "small" | "medium" | "large" | "cable";
@@ -537,8 +560,8 @@ export async function parseQrCodesFromImportData({
   organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
-  userId: User["id"];
-  organizationId: Organization["id"];
+  userId: string;
+  organizationId: string;
 }) {
   try {
     const qrCodePerAsset = data
@@ -554,13 +577,16 @@ export async function parseQrCodesFromImportData({
       })
       .filter((asset) => asset !== null); // Filter out null values
 
-    const codes = await db.qr.findMany({
-      where: {
-        id: {
-          in: qrCodePerAsset.map((asset) => asset?.qrId),
-        },
-      },
-    });
+    const { data: codes, error: fetchError } = await sbDb
+      .from("Qr")
+      .select("*")
+      .in(
+        "id",
+        qrCodePerAsset.map((asset) => asset?.qrId)
+      );
+
+    if (fetchError) throw fetchError;
+    const codesArr = codes ?? [];
 
     /** Check for any codes that are present more than 1 time in the data */
     const duplicateCodes = qrCodePerAsset.filter(
@@ -580,7 +606,8 @@ export async function parseQrCodesFromImportData({
 
     /** Check if any of the codes are non-existent */
     const nonExistentCodes = qrCodePerAsset.filter(
-      (asset) => !codes.find((code) => code.id === asset?.qrId) && asset?.qrId
+      (asset) =>
+        !codesArr.find((code) => code.id === asset?.qrId) && asset?.qrId
     );
 
     if (nonExistentCodes.length) {
@@ -595,7 +622,7 @@ export async function parseQrCodesFromImportData({
 
     /** Check for codes already linked to asset or kit. Returns QRCodePerImportedAsset[] */
     const linkedCodes = qrCodePerAsset.filter((asset) =>
-      codes.find(
+      codesArr.find(
         (code) => code.id === asset?.qrId && (code.assetId || code.kitId)
       )
     );
@@ -611,7 +638,7 @@ export async function parseQrCodesFromImportData({
 
     /** Check for codes linked to other any organization and the organization is different than the current one */
     const connectedToOtherOrgs = qrCodePerAsset.filter((asset) =>
-      codes.find(
+      codesArr.find(
         (code) =>
           code.id === asset?.qrId &&
           code.organizationId &&
@@ -629,19 +656,17 @@ export async function parseQrCodesFromImportData({
     }
 
     /** Check for codes that dont have org id. If they dont, update them to link them to current org */
-    const unclaimedCodes = codes.filter((code) => !code.organizationId);
+    const unclaimedCodes = codesArr.filter((code) => !code.organizationId);
     if (unclaimedCodes.length) {
-      await db.qr.updateMany({
-        where: {
-          id: {
-            in: unclaimedCodes.map((code) => code.id),
-          },
-        },
-        data: {
-          organizationId,
-          userId,
-        },
-      });
+      const { error: updateError } = await sbDb
+        .from("Qr")
+        .update({ organizationId, userId })
+        .in(
+          "id",
+          unclaimedCodes.map((code) => code.id)
+        );
+
+      if (updateError) throw updateError;
     }
 
     return qrCodePerAsset;

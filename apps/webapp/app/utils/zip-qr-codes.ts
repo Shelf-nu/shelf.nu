@@ -1,10 +1,14 @@
-import type { Qr } from "@prisma/client";
 import { ErrorCorrection } from "@prisma/client";
 import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { getQrBaseUrl } from "~/modules/qr/utils.server";
 
-export async function createQrCodesZip(codes: Qr[]) {
+interface QrCodeForZip {
+  id: string;
+  createdAt: string | Date;
+}
+
+export async function createQrCodesZip(codes: QrCodeForZip[]) {
   const zip = new JSZip();
   const baseUrl = getQrBaseUrl();
 
@@ -18,11 +22,12 @@ export async function createQrCodesZip(codes: Qr[]) {
       scalable: true,
     });
 
-    const dateString = `${c.createdAt.getFullYear().toString()}${(
-      c.createdAt.getMonth() + 1
+    const createdDate = new Date(c.createdAt);
+    const dateString = `${createdDate.getFullYear().toString()}${(
+      createdDate.getMonth() + 1
     )
       .toString()
-      .padStart(2, "0")}${c.createdAt.getDate().toString().padStart(2, "0")}`;
+      .padStart(2, "0")}${createdDate.getDate().toString().padStart(2, "0")}`;
 
     zip.file(`${dateString} - ${c.id}.svg`, svg);
   });

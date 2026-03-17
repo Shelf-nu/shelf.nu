@@ -156,7 +156,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
   const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
-    custodianUserId: defaultTeamMember?.user?.id,
+    custodianUserId: (defaultTeamMember?.user as any)?.id,
     organization: currentOrganization,
     currentUserId: userId,
   });

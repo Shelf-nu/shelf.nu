@@ -7,14 +7,17 @@ import {
 } from "./sequential-id.server";
 
 // why: testing pure sequential ID formatting functions without database connection errors
-vi.mock("~/database/db.server", () => ({
-  db: {
-    $executeRaw: vi.fn(),
-    $queryRaw: vi.fn(),
-    asset: {
-      count: vi.fn(),
-      findFirst: vi.fn(),
-    },
+vi.mock("~/database/supabase.server", () => ({
+  sbDb: {
+    rpc: vi.fn(),
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          not: vi.fn(() => ({ count: 0, error: null })),
+          is: vi.fn(() => ({ count: 0, error: null })),
+        })),
+      })),
+    })),
   },
 }));
 

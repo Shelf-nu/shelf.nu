@@ -72,7 +72,7 @@ export const BookingNotes = () => {
             />
           )}
           {/* Render all existing notes */}
-          {(booking.notes as NoteWithUser[]).map((note) => (
+          {(booking.notes as unknown as NoteWithUser[]).map((note) => (
             <Note
               key={note.id}
               note={note}

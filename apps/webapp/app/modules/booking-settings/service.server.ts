@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking Settings";
@@ -8,13 +8,23 @@ export async function getBookingSettingsForOrganization(
   organizationId: string
 ) {
   try {
-    // First try to find existing working hours
-    const bookingSettings = await db.bookingSettings.upsert({
-      where: {
-        organizationId,
-      },
-      update: {},
-      create: {
+    // Try to find existing booking settings
+    const { data: existing, error: fetchError } = await sbDb
+      .from("BookingSettings")
+      .select(
+        "id, bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays, tagsRequired, autoArchiveBookings, autoArchiveDays, requireExplicitCheckinForAdmin, requireExplicitCheckinForSelfService"
+      )
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (existing) return existing;
+
+    // Create default settings if not found
+    const { data: created, error: createError } = await sbDb
+      .from("BookingSettings")
+      .insert({
         bufferStartTime: 0,
         maxBookingLength: null,
         maxBookingLengthSkipClosedDays: false,
@@ -24,21 +34,14 @@ export async function getBookingSettingsForOrganization(
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
         organizationId,
-      },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        tagsRequired: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
-    });
+      })
+      .select(
+        "id, bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays, tagsRequired, autoArchiveBookings, autoArchiveDays, requireExplicitCheckinForAdmin, requireExplicitCheckinForSelfService"
+      )
+      .single();
 
-    return bookingSettings;
+    if (createError) throw createError;
+    return created;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -71,7 +74,7 @@ export async function updateBookingSettings({
   requireExplicitCheckinForSelfService?: boolean;
 }) {
   try {
-    const updateData: Prisma.BookingSettingsUpdateInput = {};
+    const updateData: Record<string, unknown> = {};
     if (bufferStartTime !== undefined)
       updateData.bufferStartTime = bufferStartTime;
     if (tagsRequired !== undefined) updateData.tagsRequired = tagsRequired;
@@ -91,22 +94,16 @@ export async function updateBookingSettings({
       updateData.requireExplicitCheckinForSelfService =
         requireExplicitCheckinForSelfService;
 
-    const bookingSettings = await db.bookingSettings.update({
-      where: { organizationId },
-      data: updateData,
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-      },
-    });
+    const { data: bookingSettings, error } = await sbDb
+      .from("BookingSettings")
+      .update(updateData as Sb.BookingSettingsUpdate)
+      .eq("organizationId", organizationId)
+      .select(
+        "id, bufferStartTime, tagsRequired, maxBookingLength, maxBookingLengthSkipClosedDays, autoArchiveBookings, autoArchiveDays, requireExplicitCheckinForAdmin, requireExplicitCheckinForSelfService"
+      )
+      .single();
 
+    if (error) throw error;
     return bookingSettings;
   } catch (cause) {
     throw new ShelfError({

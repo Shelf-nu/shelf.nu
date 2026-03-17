@@ -1,5 +1,6 @@
-import type { Prisma, Scan } from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { Prisma } from "@prisma/client";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
@@ -12,11 +13,11 @@ const label: ErrorLabel = "Scan";
 
 export async function createScan(params: {
   userAgent: string;
-  userId?: Scan["userId"];
+  userId?: string | null;
   qrId: string;
   deleted?: boolean;
-  latitude?: Scan["latitude"];
-  longitude?: Scan["longitude"];
+  latitude?: string | null;
+  longitude?: string | null;
   manuallyGenerated?: boolean;
 }) {
   const {
@@ -30,7 +31,7 @@ export async function createScan(params: {
   } = params;
 
   try {
-    const data = {
+    const insertData: Record<string, unknown> = {
       userAgent,
       rawQrId: qrId,
       latitude,
@@ -38,35 +39,21 @@ export async function createScan(params: {
       manuallyGenerated,
     };
 
-    /** If user id is passed, connect to that user */
     if (userId && userId != "anonymous") {
-      Object.assign(data, {
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      });
+      insertData.userId = userId;
     }
-
-    /** If we link it to that QR and also store the id in the rawQrId field
-     * If rawQrId is passed, we store the id of the deleted QR as a string
-     *
-     */
 
     if (!deleted) {
-      Object.assign(data, {
-        qr: {
-          connect: {
-            id: qrId,
-          },
-        },
-      });
+      insertData.qrId = qrId;
     }
 
-    const scan = await db.scan.create({
-      data,
-    });
+    const { data: scan, error } = await sbDb
+      .from("Scan")
+      .insert(insertData as Sb.ScanInsert)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await createScanNote({
       userId,
@@ -89,35 +76,33 @@ export async function createScan(params: {
 }
 
 export async function updateScan(params: {
-  id: Scan["id"];
-  userId?: Scan["userId"];
-  latitude?: Scan["latitude"];
-  longitude?: Scan["longitude"];
+  id: string;
+  userId?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
   manuallyGenerated?: boolean;
 }) {
   const { id, userId, latitude = null, longitude = null } = params;
 
   try {
-    /** Delete the category id from the payload so we can use connect syntax from prisma */
-    const data = {
+    const updateData: Record<string, unknown> = {
       latitude,
       longitude,
     };
 
     if (userId) {
-      Object.assign(data, {
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      });
+      updateData.userId = userId;
     }
 
-    return await db.scan.update({
-      where: { id },
-      data,
-    });
+    const { data, error } = await sbDb
+      .from("Scan")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -131,19 +116,18 @@ export async function updateScan(params: {
 
 export async function getScanByQrId({ qrId }: { qrId: string }) {
   try {
-    return await db.scan.findFirst({
-      where: { rawQrId: qrId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: {
-          include: {
-            userOrganizations: true,
-          },
-        },
-        qr: true,
-      },
-      take: 1,
-    });
+    const { data, error } = await sbDb
+      .from("Scan")
+      .select(
+        "*, user:User(*, userOrganizations:UserOrganization(*)), qr:Qr(*)"
+      )
+      .eq("rawQrId", qrId)
+      .order("createdAt", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -163,35 +147,31 @@ export async function createScanNote({
 }: {
   userId?: string | null;
   qrId: string;
-  latitude?: Scan["latitude"];
-  longitude?: Scan["longitude"];
+  latitude?: string | null;
+  longitude?: string | null;
   manuallyGenerated?: boolean;
 }) {
   try {
     let message = "";
     const { assetId, organizationId } = await getQr({ id: qrId });
     if (assetId && organizationId) {
-      // Check if user has access to the asset's organization
       let hasAccess = false;
-
       let authenticatedUserId: string | null = null;
 
       if (userId && userId !== "anonymous") {
         authenticatedUserId = userId;
 
-        // Check if user belongs to the asset's organization
-        const userOrgCount = await db.userOrganization.count({
-          where: {
-            userId: authenticatedUserId,
-            organizationId: organizationId,
-          },
-        });
+        const { count, error } = await sbDb
+          .from("UserOrganization")
+          .select("*", { count: "exact", head: true })
+          .eq("userId", authenticatedUserId)
+          .eq("organizationId", organizationId);
 
-        hasAccess = userOrgCount > 0;
+        if (error) throw error;
+        hasAccess = (count ?? 0) > 0;
       }
 
       if (hasAccess && authenticatedUserId) {
-        // User has access - log their name
         const { firstName, lastName } = await getUserByID(authenticatedUserId, {
           select: {
             firstName: true,
@@ -216,13 +196,9 @@ export async function createScanNote({
           assetId,
         });
       } else {
-        // User doesn't have access or is anonymous - log as unknown user
         const { userId: ownerId } = await getOrganizationById(organizationId);
         message = "An unknown user has performed a scan of the asset QR code.";
 
-        /* to create a note we are using user id to track which user created the note
-        but in this case where scanner is anonymous, we are using the user id of the owner
-        of the organization to which the scanner QR belongs */
         return await createNote({
           content: message,
           type: "UPDATE",

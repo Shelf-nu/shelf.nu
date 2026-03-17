@@ -18,6 +18,7 @@ import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 
 import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -165,7 +166,15 @@ export async function getUserWithContact<T extends Prisma.UserInclude>(
 
 export async function findUserByEmail(email: User["email"]) {
   try {
-    return await db.user.findUnique({ where: { email: email.toLowerCase() } });
+    const { data, error } = await sbDb
+      .from("User")
+      .select("*")
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1353,12 +1362,11 @@ export async function revokeAccessToOrganization({
     // Uses raw SQL to avoid bumping updatedAt. No-op if already different.
     // Best-effort: don't block revocation if cleanup fails.
     try {
-      await db.$executeRaw`
-        UPDATE "User"
-        SET "lastSelectedOrganizationId" = NULL
-        WHERE "id" = ${userId}
-          AND "lastSelectedOrganizationId" = ${organizationId}
-      `;
+      const { error: cleanupRpcError } = await sbDb.rpc(
+        "clear_user_last_selected_org",
+        { user_id: userId, organization_id: organizationId }
+      );
+      if (cleanupRpcError) throw cleanupRpcError;
     } catch (cleanupError) {
       Logger.warn(
         "Failed to clear lastSelectedOrganizationId during access revocation",

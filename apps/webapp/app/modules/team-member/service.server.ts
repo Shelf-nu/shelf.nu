@@ -1,7 +1,8 @@
-import type { Organization, Prisma, TeamMember } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -11,55 +12,42 @@ import { Logger } from "~/utils/logger";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
-type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
-  include: {
-    user: {
-      select: {
-        firstName: true;
-        lastName: true;
-        email: true;
-      };
-    };
-  };
-}>;
 
-type TeamMemberWithSelect<T extends Prisma.TeamMemberSelect | undefined> =
-  T extends Prisma.TeamMemberSelect
-    ? Prisma.TeamMemberGetPayload<{ select: T }>
-    : TeamMember;
-
-type TeamMemberWithInclude<T extends Prisma.TeamMemberInclude | undefined> =
-  T extends Prisma.TeamMemberInclude
-    ? Prisma.TeamMemberGetPayload<{ include: T }>
-    : TeamMember;
+type TeamMemberWithUserData = Sb.TeamMemberRow & {
+  user: {
+    firstName: string | null;
+    lastName: string | null;
+    email: string;
+  } | null;
+};
 
 export async function createTeamMember({
   name,
   organizationId,
   userId,
 }: {
-  name: TeamMember["name"];
-  organizationId: Organization["id"];
-  userId?: TeamMember["userId"];
+  name: string;
+  organizationId: string;
+  userId?: string | null;
 }) {
   try {
-    return await db.teamMember.create({
-      data: {
-        name,
-        organization: {
-          connect: {
-            id: organizationId,
-          },
-        },
-        user: userId
-          ? {
-              connect: {
-                id: userId,
-              },
-            }
-          : undefined,
-      },
-    });
+    const insertData: Record<string, unknown> = {
+      name,
+      organizationId,
+    };
+
+    if (userId) {
+      insertData.userId = userId;
+    }
+
+    const { data, error } = await sbDb
+      .from("TeamMember")
+      .insert(insertData as Sb.TeamMemberInsert)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -75,14 +63,9 @@ export async function createTeamMemberIfNotExists({
   organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
-  organizationId: Organization["id"];
-}): Promise<Record<string, TeamMember>> {
+  organizationId: string;
+}): Promise<Record<string, Sb.TeamMemberRow>> {
   try {
-    // first we get all the teamMembers from the assets and make then into an object where the category is the key and the value is an empty string
-    /**
-     * Important note: The field in the csv is called "custodian" for making it easy for the user
-     * However in the app it works a bit different due to how the relationships are
-     */
     // Normalize custodian names so whitespace-only or padded values don't create phantom keys.
     const teamMemberNames = Array.from(
       new Set(
@@ -98,19 +81,18 @@ export async function createTeamMemberIfNotExists({
     }
 
     // Process each team member with case-insensitive matching
-    const teamMembers = new Map<string, TeamMember>();
+    const teamMembers = new Map<string, Sb.TeamMemberRow>();
     for (const teamMember of teamMemberNames) {
-      const existingTeamMember = await db.teamMember.findFirst({
-        where: {
-          deletedAt: null,
-          organizationId,
-          // Use case-insensitive comparison via Prisma's mode option
-          name: {
-            equals: teamMember as string,
-            mode: "insensitive",
-          },
-        },
-      });
+      const { data: existingTeamMember, error } = await sbDb
+        .from("TeamMember")
+        .select("*")
+        .is("deletedAt", null)
+        .eq("organizationId", organizationId)
+        .ilike("name", teamMember)
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
 
       if (!existingTeamMember) {
         // if the teamMember doesn't exist, we create a new one
@@ -140,13 +122,12 @@ export async function createTeamMemberIfNotExists({
 }
 
 export async function getTeamMembers(params: {
-  organizationId: Organization["id"];
+  organizationId: string;
   /** Page number. Starts at 1 */
   page: number;
   /** Assets to be loaded per page */
   perPage?: number;
   search?: string | null;
-  where?: Prisma.TeamMemberWhereInput;
 }) {
   const { organizationId, page = 1, perPage = 8, search } = params;
 
@@ -154,38 +135,26 @@ export async function getTeamMembers(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the assets belonging to current user */
-    const where: Prisma.TeamMemberWhereInput = {
-      deletedAt: null,
-      organizationId,
-      ...params.where,
-    };
+    let query = sbDb
+      .from("TeamMember")
+      .select("*, custodies:Custody(*)", { count: "exact" })
+      .is("deletedAt", null)
+      .eq("organizationId", organizationId);
 
-    /** If the search string exists, add it to the where object */
     if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      query = query.ilike("name", `%${search}%`);
     }
 
-    const [teamMembers, totalTeamMembers] = await Promise.all([
-      /** Get the assets */
-      db.teamMember.findMany({
-        skip,
-        take,
-        where,
-        orderBy: { createdAt: "desc" },
-        include: {
-          custodies: true,
-        },
-      }),
+    const {
+      data: teamMembers,
+      count,
+      error,
+    } = await query
+      .order("createdAt", { ascending: false })
+      .range(skip, skip + take - 1);
 
-      /** Count them */
-      db.teamMember.count({ where }),
-    ]);
-
-    return { teamMembers, totalTeamMembers };
+    if (error) throw error;
+    return { teamMembers: teamMembers ?? [], totalTeamMembers: count ?? 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -199,11 +168,9 @@ export async function getTeamMembers(params: {
 export const getPaginatedAndFilterableTeamMembers = async ({
   request,
   organizationId,
-  where,
 }: {
   request: LoaderFunctionArgs["request"];
-  organizationId: Organization["id"];
-  where?: Prisma.TeamMemberWhereInput;
+  organizationId: string;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -217,7 +184,6 @@ export const getPaginatedAndFilterableTeamMembers = async ({
       page,
       perPage,
       search,
-      where,
     });
     const totalPages = Math.ceil(totalTeamMembers / perPage);
 
@@ -240,6 +206,9 @@ export const getPaginatedAndFilterableTeamMembers = async ({
   }
 };
 
+const TEAM_MEMBER_USER_SELECT =
+  "*, user:User(id, firstName, lastName, email)" as const;
+
 export async function getTeamMemberForCustodianFilter({
   organizationId,
   selectedTeamMembers = [],
@@ -248,8 +217,8 @@ export async function getTeamMemberForCustodianFilter({
   userId,
   usersOnly,
 }: {
-  organizationId: Organization["id"];
-  selectedTeamMembers?: TeamMember["id"][];
+  organizationId: string;
+  selectedTeamMembers?: string[];
   getAll?: boolean;
   /**
    * IF set to true and userId is set, it will only return the teamMembers where the userId is equal to the one passed
@@ -263,54 +232,77 @@ export async function getTeamMemberForCustodianFilter({
   usersOnly?: boolean;
 }) {
   try {
-    const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
-      await Promise.all([
-        db.teamMember.findMany({
-          where: {
-            organizationId,
-            id: { notIn: selectedTeamMembers },
-            deletedAt: null,
-            userId: filterByUserId && userId ? userId : undefined,
-            ...(usersOnly ? { user: { isNot: null } } : {}),
-          },
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
-          },
-          take: getAll ? undefined : 12,
-        }),
-        db.teamMember.findMany({
-          where: { organizationId, id: { in: selectedTeamMembers } },
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
-          },
-        }),
-        db.teamMember.count({
-          where: {
-            organizationId,
-            deletedAt: null,
-            ...(usersOnly ? { user: { isNot: null } } : {}),
-          },
-        }),
-      ]);
+    // Query 1: Team members excluding selected
+    let excludedQuery = sbDb
+      .from("TeamMember")
+      .select(TEAM_MEMBER_USER_SELECT)
+      .eq("organizationId", organizationId)
+      .is("deletedAt", null);
 
-    const teamMembers = [
-      ...teamMembersSelected,
-      ...teamMemberExcludedSelected,
-    ].sort((a, b) => {
+    if (selectedTeamMembers.length > 0) {
+      excludedQuery = excludedQuery.not(
+        "id",
+        "in",
+        `(${selectedTeamMembers.join(",")})`
+      );
+    }
+
+    if (filterByUserId && userId) {
+      excludedQuery = excludedQuery.eq("userId", userId);
+    }
+
+    if (usersOnly) {
+      excludedQuery = excludedQuery.not("userId", "is", null);
+    }
+
+    if (!getAll) {
+      excludedQuery = excludedQuery.limit(12);
+    }
+
+    // Query 2: Selected team members
+    let selectedQuery = sbDb
+      .from("TeamMember")
+      .select(TEAM_MEMBER_USER_SELECT)
+      .eq("organizationId", organizationId);
+
+    if (selectedTeamMembers.length > 0) {
+      selectedQuery = selectedQuery.in("id", selectedTeamMembers);
+    } else {
+      // No selected members, return empty
+      selectedQuery = selectedQuery.eq("id", "NONE_SELECTED_PLACEHOLDER");
+    }
+
+    // Query 3: Total count
+    let countQuery = sbDb
+      .from("TeamMember")
+      .select("*", { count: "exact", head: true })
+      .eq("organizationId", organizationId)
+      .is("deletedAt", null);
+
+    if (usersOnly) {
+      countQuery = countQuery.not("userId", "is", null);
+    }
+
+    const [excludedResult, selectedResult, countResult] = await Promise.all([
+      excludedQuery,
+      selectedQuery,
+      countQuery,
+    ]);
+
+    if (excludedResult.error) throw excludedResult.error;
+    if (selectedResult.error) throw selectedResult.error;
+    if (countResult.error) throw countResult.error;
+
+    const teamMemberExcludedSelected = excludedResult.data ?? [];
+    const teamMembersSelected =
+      selectedTeamMembers.length > 0 ? selectedResult.data ?? [] : [];
+
+    const teamMembers = (
+      [
+        ...teamMembersSelected,
+        ...teamMemberExcludedSelected,
+      ] as unknown as TeamMemberWithUserData[]
+    ).sort((a, b) => {
       // First sort by whether they have a userId
       if (a.userId && !b.userId) return -1;
       if (!a.userId && b.userId) return 1;
@@ -330,7 +322,7 @@ export async function getTeamMemberForCustodianFilter({
     await fixTeamMembersNames(teamMembers);
     return {
       teamMembers,
-      totalTeamMembers,
+      totalTeamMembers: countResult.count ?? 0,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -367,13 +359,13 @@ export async function getTeamMemberForForm({
   bookingStatus,
   usersOnly,
 }: {
-  organizationId: Organization["id"];
+  organizationId: string;
   userId: string;
   isSelfServiceOrBase: boolean;
   getAll?: boolean;
   custodianUserId?: string;
   custodianTeamMemberId?: string;
-  bookingStatus?: BookingStatus;
+  bookingStatus?: Sb.BookingStatus;
   /**
    * If set to true, only return team members with users (exclude NRMs)
    */
@@ -382,83 +374,68 @@ export async function getTeamMemberForForm({
   try {
     // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member
     if (isSelfServiceOrBase) {
-      const teamMember = await db.teamMember.findFirst({
-        where: {
-          organizationId,
-          userId,
-          deletedAt: null,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-        },
-      });
+      const { data: teamMember, error } = await sbDb
+        .from("TeamMember")
+        .select(TEAM_MEMBER_USER_SELECT)
+        .eq("organizationId", organizationId)
+        .eq("userId", userId)
+        .is("deletedAt", null)
+        .limit(1)
+        .maybeSingle();
 
-      await fixTeamMembersNames(teamMember ? [teamMember] : []);
+      if (error) throw error;
+
+      const typedTeamMember =
+        teamMember as unknown as TeamMemberWithUserData | null;
+      await fixTeamMembersNames(typedTeamMember ? [typedTeamMember] : []);
 
       return {
-        teamMembers: teamMember ? [teamMember] : [],
-        totalTeamMembers: teamMember ? 1 : 0,
+        teamMembers: typedTeamMember ? [typedTeamMember] : [],
+        totalTeamMembers: typedTeamMember ? 1 : 0,
       };
     }
 
     // For ADMIN users with locked booking statuses, only return the current custodian
-    const lockedStatuses: BookingStatus[] = [
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-      BookingStatus.COMPLETE,
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
+    const lockedStatuses: Sb.BookingStatus[] = [
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "CANCELLED",
+      "ARCHIVED",
     ];
     const isLockedStatus =
       bookingStatus && lockedStatuses.includes(bookingStatus);
 
     if (isLockedStatus) {
       // Find the custodian's team member (try by team member id first, then by user id)
-      const custodianTeamMember = custodianTeamMemberId
-        ? await db.teamMember.findFirst({
-            where: {
-              id: custodianTeamMemberId,
-              organizationId,
-              deletedAt: null,
-            },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  email: true,
-                },
-              },
-            },
-          })
-        : custodianUserId
-        ? await db.teamMember.findFirst({
-            where: {
-              userId: custodianUserId,
-              organizationId,
-              deletedAt: null,
-            },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  email: true,
-                },
-              },
-            },
-          })
-        : null;
+      let custodianTeamMember: TeamMemberWithUserData | null = null;
+
+      if (custodianTeamMemberId) {
+        const { data, error } = await sbDb
+          .from("TeamMember")
+          .select(TEAM_MEMBER_USER_SELECT)
+          .eq("id", custodianTeamMemberId)
+          .eq("organizationId", organizationId)
+          .is("deletedAt", null)
+          .limit(1)
+          .maybeSingle();
+
+        if (error) throw error;
+        custodianTeamMember = data as unknown as TeamMemberWithUserData | null;
+      } else if (custodianUserId) {
+        const { data, error } = await sbDb
+          .from("TeamMember")
+          .select(TEAM_MEMBER_USER_SELECT)
+          .eq("userId", custodianUserId)
+          .eq("organizationId", organizationId)
+          .is("deletedAt", null)
+          .limit(1)
+          .maybeSingle();
+
+        if (error) throw error;
+        custodianTeamMember = data as unknown as TeamMemberWithUserData | null;
+      }
 
       await fixTeamMembersNames(
         custodianTeamMember ? [custodianTeamMember] : []
@@ -477,14 +454,16 @@ export async function getTeamMemberForForm({
     if (bookingStatus === "DRAFT") {
       // Find custodian team member id if we have custodianUserId but no custodianTeamMemberId
       if (custodianUserId && !custodianTeamMemberId) {
-        const custodian = await db.teamMember.findFirst({
-          where: {
-            userId: custodianUserId,
-            organizationId,
-            deletedAt: null,
-          },
-          select: { id: true },
-        });
+        const { data: custodian, error } = await sbDb
+          .from("TeamMember")
+          .select("id")
+          .eq("userId", custodianUserId)
+          .eq("organizationId", organizationId)
+          .is("deletedAt", null)
+          .limit(1)
+          .maybeSingle();
+
+        if (error) throw error;
         if (custodian) {
           selectedTeamMembers.push(custodian.id);
         }
@@ -512,78 +491,52 @@ export async function getTeamMemberForForm({
 }
 
 type GetTeamMemberArgsBase = {
-  id: TeamMember["id"];
-  organizationId: Organization["id"];
+  id: string;
+  organizationId: string;
 };
+
+type TeamMemberWithSelect<T extends Prisma.TeamMemberSelect | undefined> =
+  T extends Prisma.TeamMemberSelect
+    ? Prisma.TeamMemberGetPayload<{ select: T }>
+    : Sb.TeamMemberRow;
+
+type TeamMemberWithInclude<T extends Prisma.TeamMemberInclude | undefined> =
+  T extends Prisma.TeamMemberInclude
+    ? Prisma.TeamMemberGetPayload<{ include: T }>
+    : Sb.TeamMemberRow;
 
 /**
  * Retrieves a team member by ID with organization validation.
  * Supports flexible data fetching with select/include options.
  *
- * @param args - Base arguments containing team member ID and organization ID
- * @returns Promise resolving to the complete TeamMember object
- * @throws ShelfError if team member not found or doesn't belong to organization
- *
- * @example
- * ```typescript
- * const member = await getTeamMember({
- *   id: "member-123",
- *   organizationId: "org-456"
- * });
- * ```
+ * TODO: Remove Prisma dependency once all callers are migrated to Supabase select strings.
  */
 export async function getTeamMember(
   args: GetTeamMemberArgsBase
-): Promise<TeamMember>;
+): Promise<Sb.TeamMemberRow>;
 
-/**
- * Retrieves a team member with specific field selection.
- *
- * @param args - Arguments with select object to specify which fields to return
- * @returns Promise resolving to TeamMember with only selected fields
- * @throws ShelfError if team member not found or doesn't belong to organization
- *
- * @example
- * ```typescript
- * const member = await getTeamMember({
- *   id: "member-123",
- *   organizationId: "org-456",
- *   select: { id: true, userId: true }
- * });
- * ```
- */
 export async function getTeamMember<T extends Prisma.TeamMemberSelect>(
   args: GetTeamMemberArgsBase & { select: T; include?: never }
 ): Promise<TeamMemberWithSelect<T>>;
 
-/**
- * Retrieves a team member with related data included.
- *
- * @param args - Arguments with include object to specify which relations to include
- * @returns Promise resolving to TeamMember with included relations
- * @throws ShelfError if team member not found or doesn't belong to organization
- *
- * @example
- * ```typescript
- * const member = await getTeamMember({
- *   id: "member-123",
- *   organizationId: "org-456",
- *   include: { user: true }
- * });
- * ```
- */
 export async function getTeamMember<T extends Prisma.TeamMemberInclude>(
   args: GetTeamMemberArgsBase & { include: T; select?: never }
 ): Promise<TeamMemberWithInclude<T>>;
-export async function getTeamMember({
+
+export async function getTeamMember<
+  S extends Prisma.TeamMemberSelect | undefined = undefined,
+  I extends Prisma.TeamMemberInclude | undefined = undefined,
+>({
   id,
   organizationId,
   select,
   include,
 }: GetTeamMemberArgsBase & {
-  select?: Prisma.TeamMemberSelect;
-  include?: Prisma.TeamMemberInclude;
-}) {
+  select?: S;
+  include?: I;
+}): Promise<
+  Sb.TeamMemberRow | TeamMemberWithSelect<S> | TeamMemberWithInclude<I>
+> {
   try {
     if (select && include) {
       throw new ShelfError({
@@ -607,14 +560,14 @@ export async function getTeamMember({
     const teamMember = await db.teamMember.findUniqueOrThrow(queryOptions);
 
     if (select) {
-      return teamMember as TeamMemberWithSelect<typeof select>;
+      return teamMember as TeamMemberWithSelect<S>;
     }
 
     if (include) {
-      return teamMember as TeamMemberWithInclude<typeof include>;
+      return teamMember as TeamMemberWithInclude<I>;
     }
 
-    return teamMember as TeamMember;
+    return teamMember as unknown as Sb.TeamMemberRow;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -635,22 +588,30 @@ export async function bulkDeleteNRMs({
   nrmIds,
   organizationId,
 }: {
-  nrmIds: TeamMember["id"][];
-  organizationId: TeamMember["organizationId"];
+  nrmIds: string[];
+  organizationId: string;
 }) {
   try {
-    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
-      ? { organizationId }
-      : { id: { in: nrmIds }, organizationId };
+    // Build query based on whether all are selected or specific ids
+    let query = sbDb
+      .from("TeamMember")
+      .select("id, Custody(count)")
+      .eq("organizationId", organizationId);
 
-    const teamMembers = await db.teamMember.findMany({
-      where,
-      select: { id: true, _count: { select: { custodies: true } } },
-    });
+    if (!nrmIds.includes(ALL_SELECTED_KEY)) {
+      query = query.in("id", nrmIds);
+    }
+
+    const { data: teamMembers, error: fetchError } = await query;
+
+    if (fetchError) throw fetchError;
+    if (!teamMembers) {
+      return { count: 0 };
+    }
 
     /** If some team members have custody, then delete is not allowed */
     const someTeamMemberHasCustodies = teamMembers.some(
-      (tm) => tm._count.custodies > 0
+      (tm) => (tm.Custody as unknown as { count: number }[])?.[0]?.count > 0
     );
 
     if (someTeamMemberHasCustodies) {
@@ -662,10 +623,14 @@ export async function bulkDeleteNRMs({
       });
     }
 
-    return await db.teamMember.updateMany({
-      where: { id: { in: teamMembers.map((tm) => tm.id) } },
-      data: { deletedAt: new Date() },
-    });
+    const idsToDelete = teamMembers.map((tm) => tm.id);
+    const { error: updateError, count } = await sbDb
+      .from("TeamMember")
+      .update({ deletedAt: new Date().toISOString() })
+      .in("id", idsToDelete);
+
+    if (updateError) throw updateError;
+    return { count: count ?? 0 };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -732,10 +697,10 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
               .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
           }
 
-          return db.teamMember.update({
-            where: { id: teamMember.id },
-            data: { name },
-          });
+          return sbDb
+            .from("TeamMember")
+            .update({ name })
+            .eq("id", teamMember.id);
         })
     );
 

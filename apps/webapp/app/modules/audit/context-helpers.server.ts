@@ -1,4 +1,5 @@
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { getLocationDescendantIds } from "~/modules/location/descendants.server";
 import { ShelfError } from "~/utils/error";
 
@@ -122,18 +123,16 @@ export async function getAssetsForLocationContext({
   }
 
   // Fetch all assets at the specified location(s)
-  const assets = await db.asset.findMany({
-    where: {
-      organizationId,
-      locationId: { in: locationIds },
-    },
-    select: {
-      id: true,
-    },
-  });
+  const { data: assets, error } = await sbDb
+    .from("Asset")
+    .select("id")
+    .eq("organizationId", organizationId)
+    .in("locationId", locationIds);
+
+  if (error) throw error;
 
   // Return just the asset IDs
-  return assets.map((asset) => asset.id);
+  return (assets ?? []).map((asset) => asset.id);
 }
 
 /**
@@ -153,18 +152,16 @@ export async function getAssetsForKitContext({
   kitId: string;
 }): Promise<string[]> {
   // Fetch all assets assigned to the kit
-  const assets = await db.asset.findMany({
-    where: {
-      organizationId,
-      kitId,
-    },
-    select: {
-      id: true,
-    },
-  });
+  const { data: assets, error } = await sbDb
+    .from("Asset")
+    .select("id")
+    .eq("organizationId", organizationId)
+    .eq("kitId", kitId);
+
+  if (error) throw error;
 
   // Return just the asset IDs
-  return assets.map((asset) => asset.id);
+  return (assets ?? []).map((asset) => asset.id);
 }
 
 /**

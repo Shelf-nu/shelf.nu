@@ -1,6 +1,8 @@
 import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -57,25 +59,32 @@ export async function createBarcode({
       });
     }
 
-    const barcode = await db.barcode.create({
-      data: {
-        type,
-        value: normalizedValue, // Preserve case for ExternalQR, uppercase others
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
-    });
-    return barcode;
-  } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
-    // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
+    const insertData: Record<string, unknown> = {
+      type,
+      value: normalizedValue, // Preserve case for ExternalQR, uppercase others
+      organizationId,
+    };
+    if (assetId) insertData.assetId = assetId;
+    if (kitId) insertData.kitId = kitId;
 
-      if (target && target.includes("value")) {
-        // Use existing validation function for detailed error messages
+    const { data: barcode, error } = await sbDb
+      .from("Barcode")
+      .insert(insertData as Sb.BarcodeInsert)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return barcode as unknown as Barcode;
+  } catch (cause) {
+    // If it's a unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    const err = cause as any;
+    if (err?.code === "P2002" || err?.code === "23505") {
+      const target = err?.meta?.target || err?.message || "";
+      if (
+        (typeof target === "string" && target.includes("value")) ||
+        (Array.isArray(target) && target.includes("value"))
+      ) {
         const relationshipType = assetId ? "asset" : "kit";
         await validateBarcodeUniqueness(
           [{ type, value }],
@@ -134,27 +143,33 @@ export async function createBarcodes({
       }
     }
 
-    // Let Prisma handle unique constraint violations for performance
-
-    // Use createMany for bulk insert performance
-    await db.barcode.createMany({
-      data: barcodes.map((barcode) => ({
+    // Use Supabase bulk insert for performance
+    const insertRows = barcodes.map((barcode) => {
+      const row: Record<string, unknown> = {
         type: barcode.type,
         value: normalizeBarcodeValue(barcode.type, barcode.value),
         organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      })),
+      };
+      if (assetId) row.assetId = assetId;
+      if (kitId) row.kitId = kitId;
+      return row;
     });
-  } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
-    // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
 
-      if (target && target.includes("value")) {
-        // Use existing validation function for detailed error messages
+    const { error } = await sbDb
+      .from("Barcode")
+      .insert(insertRows as Sb.BarcodeInsert[]);
+
+    if (error) throw error;
+  } catch (cause) {
+    // If it's a unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    const err = cause as any;
+    if (err?.code === "P2002" || err?.code === "23505") {
+      const target = err?.meta?.target || err?.message || "";
+      if (
+        (typeof target === "string" && target.includes("value")) ||
+        (Array.isArray(target) && target.includes("value"))
+      ) {
         const relationshipType = assetId ? "asset" : "kit";
         await validateBarcodeUniqueness(
           barcodes,
@@ -208,24 +223,32 @@ export async function updateBarcode({
       }
     }
 
-    const barcode = await db.barcode.update({
-      where: { id, organizationId },
-      data: updateData,
-    });
-    return barcode;
-  } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
-    // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
+    const { data: barcode, error } = await sbDb
+      .from("Barcode")
+      .update(updateData)
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .select()
+      .single();
 
-      if (target && target.includes("value") && value !== undefined) {
+    if (error) throw error;
+    return barcode as unknown as Barcode;
+  } catch (cause) {
+    // If it's a unique constraint violation on barcode values,
+    // use our detailed validation to provide specific field errors
+    const err = cause as any;
+    if (err?.code === "P2002" || err?.code === "23505") {
+      const target = err?.meta?.target || err?.message || "";
+      if (
+        value !== undefined &&
+        ((typeof target === "string" && target.includes("value")) ||
+          (Array.isArray(target) && target.includes("value")))
+      ) {
         const relationshipType = assetId ? "asset" : "kit";
         const currentItemId = assetId || kitId;
 
         await validateBarcodeUniqueness(
-          [{ type: type || "Code128", value }], // Use provided type or default
+          [{ type: type || "Code128", value }],
           organizationId,
           currentItemId,
           relationshipType as "asset" | "kit"
@@ -246,13 +269,17 @@ export async function deleteBarcode({
   id,
   organizationId,
 }: {
-  id: Barcode["id"];
-  organizationId: Organization["id"];
+  id: string;
+  organizationId: string;
 }): Promise<void> {
   try {
-    await db.barcode.delete({
-      where: { id, organizationId },
-    });
+    const { error } = await sbDb
+      .from("Barcode")
+      .delete()
+      .eq("id", id)
+      .eq("organizationId", organizationId);
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -271,18 +298,22 @@ export async function deleteBarcodes({
   kitId,
   organizationId,
 }: {
-  assetId?: Asset["id"];
-  kitId?: Kit["id"];
-  organizationId: Organization["id"];
+  assetId?: string;
+  kitId?: string;
+  organizationId: string;
 }): Promise<void> {
   try {
-    await db.barcode.deleteMany({
-      where: {
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
-    });
+    let query = sbDb
+      .from("Barcode")
+      .delete()
+      .eq("organizationId", organizationId);
+
+    if (assetId) query = query.eq("assetId", assetId);
+    if (kitId) query = query.eq("kitId", kitId);
+
+    const { error } = await query;
+
+    if (error) throw error;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -343,20 +374,20 @@ export async function getAssetBarcodes({
   assetId,
   organizationId,
 }: {
-  assetId: Asset["id"];
-  organizationId: Organization["id"];
-}): Promise<Barcode[]> {
+  assetId: string;
+  organizationId: string;
+}): Promise<Sb.BarcodeRow[]> {
   try {
-    const barcodes = await db.barcode.findMany({
-      where: {
-        assetId,
-        organizationId,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-    });
-    return barcodes;
+    const { data, error } = await sbDb
+      .from("Barcode")
+      .select("*")
+      .eq("assetId", assetId)
+      .eq("organizationId", organizationId)
+      .order("createdAt", { ascending: true });
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -374,20 +405,20 @@ export async function getKitBarcodes({
   kitId,
   organizationId,
 }: {
-  kitId: Kit["id"];
-  organizationId: Organization["id"];
-}): Promise<Barcode[]> {
+  kitId: string;
+  organizationId: string;
+}): Promise<Sb.BarcodeRow[]> {
   try {
-    const barcodes = await db.barcode.findMany({
-      where: {
-        kitId,
-        organizationId,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-    });
-    return barcodes;
+    const { data, error } = await sbDb
+      .from("Barcode")
+      .select("*")
+      .eq("kitId", kitId)
+      .eq("organizationId", organizationId)
+      .order("createdAt", { ascending: true });
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -587,16 +618,17 @@ export async function updateBarcodes({
       }
     }
 
-    // Let Prisma handle unique constraint violations for performance
-
     // Get existing barcodes
-    const existingBarcodes = await db.barcode.findMany({
-      where: {
-        organizationId,
-        ...(assetId && { assetId }),
-        ...(kitId && { kitId }),
-      },
-    });
+    let existingQuery = sbDb
+      .from("Barcode")
+      .select()
+      .eq("organizationId", organizationId);
+
+    if (assetId) existingQuery = existingQuery.eq("assetId", assetId);
+    if (kitId) existingQuery = existingQuery.eq("kitId", kitId);
+
+    const { data: existingBarcodes, error: fetchError } = await existingQuery;
+    if (fetchError) throw fetchError;
 
     // Separate barcodes into updates and creates
     const barcodesToUpdate = barcodes.filter((barcode) => barcode.id);
@@ -604,66 +636,82 @@ export async function updateBarcodes({
 
     // Find barcodes to delete (existing ones not in the new list)
     const submittedIds = new Set(barcodes.map((b) => b.id).filter(Boolean));
-    const barcodesToDelete = existingBarcodes.filter(
+    const barcodesToDelete = (existingBarcodes || []).filter(
       (existing) => !submittedIds.has(existing.id)
     );
 
-    const operations = [];
+    const operations: PromiseLike<unknown>[] = [];
 
     // Update existing barcodes
     for (const barcode of barcodesToUpdate) {
       operations.push(
-        db.barcode.update({
-          where: {
-            id: barcode.id!,
-            organizationId, // Security: ensure the barcode belongs to this org
-          },
-          data: {
+        sbDb
+          .from("Barcode")
+          .update({
             type: barcode.type,
             value: normalizeBarcodeValue(barcode.type, barcode.value),
-          },
-        })
+          })
+          .eq("id", barcode.id!)
+          .eq("organizationId", organizationId)
+          .then(({ error }) => {
+            if (error) throw error;
+          })
       );
     }
 
     // Create new barcodes
-    for (const barcode of barcodesToCreate) {
+    if (barcodesToCreate.length > 0) {
+      const insertRows = barcodesToCreate.map((barcode) => {
+        const row: Record<string, unknown> = {
+          type: barcode.type,
+          value: normalizeBarcodeValue(barcode.type, barcode.value),
+          organizationId,
+        };
+        if (assetId) row.assetId = assetId;
+        if (kitId) row.kitId = kitId;
+        return row;
+      });
+
       operations.push(
-        db.barcode.create({
-          data: {
-            type: barcode.type,
-            value: normalizeBarcodeValue(barcode.type, barcode.value),
-            organizationId,
-            ...(assetId && { assetId }),
-            ...(kitId && { kitId }),
-          },
-        })
+        sbDb
+          .from("Barcode")
+          .insert(insertRows as Sb.BarcodeInsert[])
+          .then(({ error }) => {
+            if (error) throw error;
+          })
       );
     }
 
     // Delete removed barcodes
     if (barcodesToDelete.length > 0) {
       operations.push(
-        db.barcode.deleteMany({
-          where: {
-            id: { in: barcodesToDelete.map((b) => b.id) },
-            organizationId, // Security: ensure we only delete from this org
-          },
-        })
+        sbDb
+          .from("Barcode")
+          .delete()
+          .in(
+            "id",
+            barcodesToDelete.map((b) => b.id)
+          )
+          .eq("organizationId", organizationId)
+          .then(({ error }) => {
+            if (error) throw error;
+          })
       );
     }
 
-    // Execute all operations in a transaction
-    await db.$transaction(operations);
+    // Execute all operations (no longer in a Prisma transaction,
+    // but individual operations are atomic via PostgREST)
+    await Promise.all(operations);
   } catch (cause) {
-    // If it's a Prisma unique constraint violation on barcode values,
+    // If it's a unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
-    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
-      const prismaError = cause as any;
-      const target = prismaError.meta?.target;
-
-      if (target && target.includes("value")) {
-        // Use existing validation function for detailed error messages
+    const err = cause as any;
+    if (err?.code === "P2002" || err?.code === "23505") {
+      const target = err?.meta?.target || err?.message || "";
+      if (
+        (typeof target === "string" && target.includes("value")) ||
+        (Array.isArray(target) && target.includes("value"))
+      ) {
         const currentItemId = assetId || kitId;
         const relationshipType = assetId ? "asset" : "kit";
         await validateBarcodeUniqueness(

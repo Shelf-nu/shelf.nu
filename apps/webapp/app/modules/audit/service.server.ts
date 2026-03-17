@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
@@ -688,10 +689,12 @@ export async function scheduleNextAuditJob({
   try {
     const id = await scheduler.sendAfter(QueueNames.auditQueue, data, {}, when);
     if (id) {
-      await db.auditSession.update({
-        where: { id: data.id },
-        data: { activeSchedulerReference: id },
-      });
+      const { error } = await sbDb
+        .from("AuditSession")
+        .update({ activeSchedulerReference: id })
+        .eq("id", data.id);
+
+      if (error) throw error;
     }
     Logger.info(
       `Scheduled audit job: ${data.eventType} for audit ${
@@ -718,12 +721,13 @@ export async function scheduleNextAuditJob({
  */
 async function cancelAuditReminders(auditId: string) {
   try {
-    const auditSession = await db.auditSession.findUnique({
-      where: { id: auditId },
-      select: { activeSchedulerReference: true },
-    });
+    const { data: auditSession, error: findError } = await sbDb
+      .from("AuditSession")
+      .select("activeSchedulerReference")
+      .eq("id", auditId)
+      .single();
 
-    if (!auditSession?.activeSchedulerReference) {
+    if (findError || !auditSession?.activeSchedulerReference) {
       Logger.info(
         `Skipping audit reminder cancellation for audit ${auditId} because no activeSchedulerReference was found.`
       );
@@ -731,10 +735,12 @@ async function cancelAuditReminders(auditId: string) {
     }
 
     await scheduler.cancel(auditSession.activeSchedulerReference);
-    await db.auditSession.update({
-      where: { id: auditId },
-      data: { activeSchedulerReference: null },
-    });
+    const { error: updateError } = await sbDb
+      .from("AuditSession")
+      .update({ activeSchedulerReference: null })
+      .eq("id", auditId);
+
+    if (updateError) throw updateError;
     Logger.info(`Cancelled all reminder jobs for audit ${auditId}`);
   } catch (cause) {
     Logger.error(

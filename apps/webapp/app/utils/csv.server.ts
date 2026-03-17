@@ -1,6 +1,5 @@
 import type {
   Asset,
-  AssetIndexSettings,
   Note,
   Organization,
   Prisma,
@@ -35,6 +34,7 @@ import {
   columnsLabelsMap,
   parseColumnName,
 } from "~/modules/asset-index-settings/helpers";
+import type { AssetIndexSettingsRow } from "~/modules/asset-index-settings/service.server";
 import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
   getBookings,
@@ -292,7 +292,7 @@ export async function exportAssetsFromIndexToCsv({
 }: {
   request: Request;
   assetIds: string;
-  settings: AssetIndexSettings;
+  settings: AssetIndexSettingsRow;
   currentOrganization: Pick<
     Organization,
     "id" | "barcodesEnabled" | "currency"
