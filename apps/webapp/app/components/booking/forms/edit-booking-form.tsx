@@ -303,6 +303,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             >
               <CheckinDropdown
                 portalContainer={zo.form}
+                formId="edit-booking-form"
                 booking={{
                   id,
                   name: name!,

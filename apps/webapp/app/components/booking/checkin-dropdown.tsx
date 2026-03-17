@@ -15,6 +15,8 @@ type CheckinDropdownProps = {
   disabled?: boolean;
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   portalContainer?: HTMLElement;
+  /** Form ID for explicit form association when buttons render in a portal */
+  formId?: string;
   requireExplicitCheckin?: boolean;
 };
 
@@ -22,6 +24,7 @@ export default function CheckinDropdown({
   disabled,
   booking,
   portalContainer,
+  formId,
   requireExplicitCheckin,
 }: CheckinDropdownProps) {
   const {
@@ -120,6 +123,7 @@ export default function CheckinDropdown({
                 booking={booking}
                 disabled={disabled}
                 portalContainer={portalContainer}
+                formId={formId}
                 onClose={closeMenu}
                 label="Quick check-in"
                 variant="dropdown"

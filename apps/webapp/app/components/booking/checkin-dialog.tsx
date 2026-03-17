@@ -25,6 +25,8 @@ type CheckinDialogProps = {
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
+  /** Form ID for explicit form association when buttons render in a portal */
+  formId?: string;
 
   /** Callback to close parent dropdown/menu */
   onClose?: () => void;
@@ -40,6 +42,7 @@ export default function CheckinDialog({
   disabled,
   booking,
   portalContainer,
+  formId,
   label = "Check-in",
   variant = "default",
   specificAssetIds,
@@ -52,6 +55,7 @@ export default function CheckinDialog({
         type="submit"
         name="intent"
         value="checkIn"
+        form={formId}
         className={tw(
           "whitespace-nowrap",
           variant === "dropdown"
