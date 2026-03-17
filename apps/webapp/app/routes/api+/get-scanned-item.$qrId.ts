@@ -3,7 +3,6 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { getQrWithInclude } from "~/modules/qr/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -171,8 +170,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kit: { include: kitInclude },
     };
 
-    const qr = await getQrWithInclude({
-      id: qrId,
+    const qr = await db.qr.findUniqueOrThrow({
+      where: { id: qrId },
       include,
     });
 

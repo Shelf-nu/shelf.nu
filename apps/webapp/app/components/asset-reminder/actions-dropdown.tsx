@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { Prisma } from "@prisma/client";
 import { PencilIcon } from "lucide-react";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -9,15 +8,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
+import type { AssetReminderWithRelations } from "~/modules/asset-reminder/fields";
 import DeleteReminder from "./delete-reminder";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 import When from "../when/when";
 
 type ActionsDropdownProps = {
-  reminder: Prisma.AssetReminderGetPayload<{
-    include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  reminder: AssetReminderWithRelations;
 };
 
 export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
@@ -68,7 +65,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
           id: reminder.id,
           name: reminder.name,
           message: reminder.message,
-          alertDateTime: reminder.alertDateTime,
+          alertDateTime: new Date(reminder.alertDateTime),
           teamMembers: reminder.teamMembers.map((tm) => tm.id),
         }}
         open={isEditDialogOpen}

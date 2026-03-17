@@ -4,34 +4,61 @@ import { createTeamMember } from "@factories";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { ShelfError } from "~/utils/error";
 
-const dbMocks = vi.hoisted(() => ({
-  teamMember: {
-    findUniqueOrThrow: vi.fn(),
-  },
-}));
+/**
+ * Creates a chainable mock that simulates sbDb.from("TeamMember").select(...).eq(...).eq(...).single()
+ * The final method in the chain (single) resolves with { data, error }.
+ */
+function createSupabaseChainMock(resolvedValue: {
+  data: unknown;
+  error: unknown;
+}) {
+  const single = vi.fn().mockResolvedValue(resolvedValue);
+  const _eq = vi
+    .fn()
+    .mockReturnValue({ eq: vi.fn().mockReturnValue({ single }), single });
 
-// why: testing service error handling and data transformation without database dependency
-vi.mock("~/database/db.server", () => ({
-  db: {
-    teamMember: {
-      findUniqueOrThrow: dbMocks.teamMember.findUniqueOrThrow,
-    },
-  },
-}));
+  // We need a proper chain: select -> eq -> eq -> single
+  // Each eq call returns an object with eq and single
+  const makeEq: () => Record<string, ReturnType<typeof vi.fn>> = () => {
+    const eqFn: ReturnType<typeof vi.fn> = vi.fn().mockImplementation(() => ({
+      eq: eqFn,
+      single,
+    }));
+    return { eq: eqFn, single };
+  };
 
-const mockTeamMemberFindUniqueOrThrow = dbMocks.teamMember.findUniqueOrThrow;
+  const chain = makeEq();
+  const select = vi.fn().mockReturnValue(chain);
+  const from = vi.fn().mockReturnValue({ select });
+
+  return { from, select, single, eq: chain.eq };
+}
 
 const mockTeamMember = createTeamMember();
 
+let sbDbMock: ReturnType<typeof createSupabaseChainMock>;
+
+// why: testing service error handling and data transformation without database dependency
+vi.mock("~/database/supabase.server", () => ({
+  get sbDb() {
+    return {
+      from: (...args: unknown[]) => sbDbMock.from(...args),
+    };
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockTeamMemberFindUniqueOrThrow.mockReset();
+  sbDbMock = createSupabaseChainMock({ data: null, error: null });
 });
 
 describe("getTeamMember", () => {
   describe("basic functionality", () => {
     it("should return team member when found", async () => {
-      mockTeamMemberFindUniqueOrThrow.mockResolvedValue(mockTeamMember);
+      sbDbMock = createSupabaseChainMock({
+        data: mockTeamMember,
+        error: null,
+      });
 
       const result = await getTeamMember({
         id: "team-member-123",
@@ -39,14 +66,15 @@ describe("getTeamMember", () => {
       });
 
       expect(result).toEqual(mockTeamMember);
-      expect(mockTeamMemberFindUniqueOrThrow).toHaveBeenCalledWith({
-        where: { id: "team-member-123", organizationId: "org-789" },
-      });
+      expect(sbDbMock.from).toHaveBeenCalledWith("TeamMember");
+      expect(sbDbMock.select).toHaveBeenCalledWith("*");
     });
 
     it("should throw ShelfError when team member not found", async () => {
-      const dbError = new Error("Record not found");
-      mockTeamMemberFindUniqueOrThrow.mockRejectedValue(dbError);
+      sbDbMock = createSupabaseChainMock({
+        data: null,
+        error: new Error("Record not found"),
+      });
 
       await expect(
         getTeamMember({
@@ -54,6 +82,11 @@ describe("getTeamMember", () => {
           organizationId: "org-789",
         })
       ).rejects.toThrow(ShelfError);
+
+      sbDbMock = createSupabaseChainMock({
+        data: null,
+        error: new Error("Record not found"),
+      });
 
       await expect(
         getTeamMember({
@@ -63,24 +96,30 @@ describe("getTeamMember", () => {
       ).rejects.toThrow("The selected team member could not be found.");
     });
 
-    it("should validate organization ID", async () => {
-      mockTeamMemberFindUniqueOrThrow.mockResolvedValue(mockTeamMember);
+    it("should pass correct filters", async () => {
+      sbDbMock = createSupabaseChainMock({
+        data: mockTeamMember,
+        error: null,
+      });
 
       await getTeamMember({
         id: "team-member-123",
         organizationId: "different-org",
       });
 
-      expect(mockTeamMemberFindUniqueOrThrow).toHaveBeenCalledWith({
-        where: { id: "team-member-123", organizationId: "different-org" },
-      });
+      expect(sbDbMock.from).toHaveBeenCalledWith("TeamMember");
+      // Verify eq was called (chain: .eq("id", ...).eq("organizationId", ...))
+      expect(sbDbMock.eq).toHaveBeenCalledWith("id", "team-member-123");
     });
   });
 
   describe("select functionality", () => {
     it("should return only selected fields", async () => {
       const selectedData = { id: "team-member-123", userId: "user-456" };
-      mockTeamMemberFindUniqueOrThrow.mockResolvedValue(selectedData);
+      sbDbMock = createSupabaseChainMock({
+        data: selectedData,
+        error: null,
+      });
 
       const result = await getTeamMember({
         id: "team-member-123",
@@ -89,10 +128,7 @@ describe("getTeamMember", () => {
       });
 
       expect(result).toEqual(selectedData);
-      expect(mockTeamMemberFindUniqueOrThrow).toHaveBeenCalledWith({
-        where: { id: "team-member-123", organizationId: "org-789" },
-        select: { id: true, userId: true },
-      });
+      expect(sbDbMock.select).toHaveBeenCalledWith("id, userId");
     });
 
     it("should handle complex select queries", async () => {
@@ -101,7 +137,10 @@ describe("getTeamMember", () => {
         name: "John Doe",
         role: "MEMBER",
       };
-      mockTeamMemberFindUniqueOrThrow.mockResolvedValue(selectedData);
+      sbDbMock = createSupabaseChainMock({
+        data: selectedData,
+        error: null,
+      });
 
       const result = await getTeamMember({
         id: "team-member-123",
@@ -110,10 +149,7 @@ describe("getTeamMember", () => {
       });
 
       expect(result).toEqual(selectedData);
-      expect(mockTeamMemberFindUniqueOrThrow).toHaveBeenCalledWith({
-        where: { id: "team-member-123", organizationId: "org-789" },
-        select: { id: true, name: true, role: true },
-      });
+      expect(sbDbMock.select).toHaveBeenCalledWith("id, name, role");
     });
   });
 
@@ -123,7 +159,10 @@ describe("getTeamMember", () => {
         ...mockTeamMember,
         user: { id: "user-456", email: "john@example.com" },
       };
-      mockTeamMemberFindUniqueOrThrow.mockResolvedValue(includedData);
+      sbDbMock = createSupabaseChainMock({
+        data: includedData,
+        error: null,
+      });
 
       const result = await getTeamMember({
         id: "team-member-123",
@@ -132,10 +171,7 @@ describe("getTeamMember", () => {
       });
 
       expect(result).toEqual(includedData);
-      expect(mockTeamMemberFindUniqueOrThrow).toHaveBeenCalledWith({
-        where: { id: "team-member-123", organizationId: "org-789" },
-        include: { user: true },
-      });
+      expect(sbDbMock.select).toHaveBeenCalledWith("*, user:User(*)");
     });
 
     it("should handle complex include queries", async () => {
@@ -144,7 +180,10 @@ describe("getTeamMember", () => {
         user: { id: "user-456", email: "john@example.com" },
         organization: { id: "org-789", name: "Test Org" },
       };
-      mockTeamMemberFindUniqueOrThrow.mockResolvedValue(includedData);
+      sbDbMock = createSupabaseChainMock({
+        data: includedData,
+        error: null,
+      });
 
       const result = await getTeamMember({
         id: "team-member-123",
@@ -153,10 +192,9 @@ describe("getTeamMember", () => {
       });
 
       expect(result).toEqual(includedData);
-      expect(mockTeamMemberFindUniqueOrThrow).toHaveBeenCalledWith({
-        where: { id: "team-member-123", organizationId: "org-789" },
-        include: { user: true, organization: true },
-      });
+      expect(sbDbMock.select).toHaveBeenCalledWith(
+        "*, user:User(*), organization:Organization(*)"
+      );
     });
   });
 
@@ -183,7 +221,7 @@ describe("getTeamMember", () => {
       );
 
       // Should not call database when validation fails
-      expect(mockTeamMemberFindUniqueOrThrow).not.toHaveBeenCalled();
+      expect(sbDbMock.from).not.toHaveBeenCalled();
     });
 
     it("should not call database when select/include validation fails", async () => {
@@ -198,7 +236,7 @@ describe("getTeamMember", () => {
         // Expected to throw
       }
 
-      expect(mockTeamMemberFindUniqueOrThrow).not.toHaveBeenCalled();
+      expect(sbDbMock.from).not.toHaveBeenCalled();
     });
   });
 
@@ -211,7 +249,10 @@ describe("getTeamMember", () => {
         label: "Assets",
       });
 
-      mockTeamMemberFindUniqueOrThrow.mockRejectedValue(originalError);
+      sbDbMock = createSupabaseChainMock({
+        data: null,
+        error: originalError,
+      });
 
       await expect(
         getTeamMember({
@@ -223,7 +264,10 @@ describe("getTeamMember", () => {
 
     it("should wrap generic database errors in ShelfError", async () => {
       const dbError = new Error("Database connection failed");
-      mockTeamMemberFindUniqueOrThrow.mockRejectedValue(dbError);
+      sbDbMock = createSupabaseChainMock({
+        data: null,
+        error: dbError,
+      });
 
       await expect(
         getTeamMember({
@@ -231,6 +275,11 @@ describe("getTeamMember", () => {
           organizationId: "org-789",
         })
       ).rejects.toThrow(ShelfError);
+
+      sbDbMock = createSupabaseChainMock({
+        data: null,
+        error: dbError,
+      });
 
       try {
         await getTeamMember({
@@ -249,7 +298,10 @@ describe("getTeamMember", () => {
 
     it("should include correct error details in ShelfError", async () => {
       const dbError = new Error("Record not found");
-      mockTeamMemberFindUniqueOrThrow.mockRejectedValue(dbError);
+      sbDbMock = createSupabaseChainMock({
+        data: null,
+        error: dbError,
+      });
 
       try {
         await getTeamMember({

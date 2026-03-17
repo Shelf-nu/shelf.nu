@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
-import type { Update, UserUpdateRead } from "@prisma/client";
 import { ExternalLinkIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Badge } from "~/components/shared/badge";
 import { DateS } from "~/components/shared/date";
+import type { UpdateForUser } from "~/modules/update/service.server";
 import { tw } from "~/utils/tw";
 
-type UpdateWithParsedContent = Omit<Update, "content"> & {
+type UpdateWithParsedContent = Omit<UpdateForUser, "content"> & {
   content: string | RenderableTreeNodes;
-  userReads: UserUpdateRead[];
-  imageUrl: string | null;
 };
 
 interface UpdateTimelineItemProps {

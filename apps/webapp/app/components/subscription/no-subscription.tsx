@@ -8,7 +8,7 @@ export const NoSubscription = () => {
   const currentOrganization = useCurrentOrganization();
   const user = useUserData();
 
-  const userIsOwner = user?.id === currentOrganization?.owner.id;
+  const userIsOwner = user?.id === currentOrganization?.owner?.id;
 
   return (
     <div className="flex size-full items-center justify-center">
@@ -29,7 +29,7 @@ export const NoSubscription = () => {
             <CustomerPortalForm buttonText={"Manage subscription"} />
           )}
           <Button
-            to={`mailto:${currentOrganization?.owner.email}`}
+            to={`mailto:${currentOrganization?.owner?.email}`}
             variant="secondary"
           >
             Contact owner

@@ -1,8 +1,8 @@
 import { InviteStatuses } from "@prisma/client";
-import type { Prisma, Organization, OrganizationRoles } from "@prisma/client";
+import type { Organization, OrganizationRoles } from "@prisma/client";
 
 import type { LoaderFunctionArgs } from "react-router";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import {
   organizationRolesMap,
   type UserFriendlyRoles,
@@ -47,67 +47,105 @@ export async function getPaginatedAndFilterableSettingUsers({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
-    const userOrganizationWhere: Prisma.UserOrganizationWhereInput = {
-      organizationId,
-    };
+    /**
+     * We need to:
+     * 1. Get UserOrganization rows for this org
+     * 2. Join with User data
+     * 3. For each user, get their TeamMember custody count
+     *
+     * Supabase PostgREST supports foreign-key joins via embedded resources.
+     * UserOrganization.userId -> User.id
+     */
+    let query = sbDb
+      .from("UserOrganization")
+      .select("roles, user:User!inner(*)", { count: "exact" })
+      .eq("organizationId", organizationId);
 
     if (search) {
-      /** Either search the input against organization's user */
-      userOrganizationWhere.user = {
-        OR: [
-          { firstName: { contains: search, mode: "insensitive" } },
-          { lastName: { contains: search, mode: "insensitive" } },
-          { email: { contains: search, mode: "insensitive" } },
-        ],
-      };
+      query = query.or(
+        `firstName.ilike.%${search}%,lastName.ilike.%${search}%,email.ilike.%${search}%`,
+        { referencedTable: "User" }
+      );
     }
 
-    const [userMembers, totalItems] = await Promise.all([
-      /** Get Users */
-      db.userOrganization.findMany({
-        where: userOrganizationWhere,
-        skip,
-        take,
-        select: {
-          user: {
-            include: {
-              teamMembers: {
-                where: { organizationId },
-                include: {
-                  _count: {
-                    select: { custodies: true },
-                  },
-                },
-              },
-            },
-          },
-          roles: true,
-        },
-      }),
+    const {
+      data: userOrgs,
+      count: totalItems,
+      error: userOrgsError,
+    } = await query.range(skip, skip + take - 1);
 
-      db.userOrganization.count({ where: userOrganizationWhere }),
-    ]);
+    if (userOrgsError) throw userOrgsError;
+
+    const userIds = (userOrgs ?? []).map(
+      (uo) =>
+        (
+          uo.user as unknown as {
+            id: string;
+            firstName: string | null;
+            lastName: string | null;
+            profilePicture: string | null;
+            email: string;
+            sso: boolean;
+          }
+        ).id
+    );
+
+    /**
+     * Get team members for these users in this org so we can count custodies.
+     * TeamMember.userId -> User.id, filtered by organizationId.
+     */
+    let custodyMap: Record<string, number> = {};
+    if (userIds.length > 0) {
+      const { data: teamMembers, error: tmError } = await sbDb
+        .from("TeamMember")
+        .select("userId, custodies:Custody(id)")
+        .eq("organizationId", organizationId)
+        .in("userId", userIds);
+
+      if (tmError) throw tmError;
+
+      for (const tm of teamMembers ?? []) {
+        if (tm.userId) {
+          custodyMap[tm.userId] = Array.isArray(tm.custodies)
+            ? tm.custodies.length
+            : 0;
+        }
+      }
+    }
 
     /**
      * Create a structure for the users org members and merge it with invites
      */
-    const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
-      userMembers.map((um) => ({
-        id: um.user.id,
-        name: `${um.user.firstName ? um.user.firstName : ""} ${
-          um.user.lastName ? um.user.lastName : ""
+    type UserShape = {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePicture: string | null;
+      email: string;
+      sso: boolean;
+    };
+
+    const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] = (
+      userOrgs ?? []
+    ).map((um) => {
+      const user = um.user as unknown as UserShape;
+      return {
+        id: user.id,
+        name: `${user.firstName ? user.firstName : ""} ${
+          user.lastName ? user.lastName : ""
         }`,
-        img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
-        email: um.user.email,
-        status: "ACCEPTED",
+        img: user.profilePicture ?? "/static/images/default_pfp.jpg",
+        email: user.email,
+        status: "ACCEPTED" as InviteStatuses,
         role: organizationRolesMap[um.roles[0]],
         roleEnum: um.roles[0],
-        userId: um.user.id,
-        sso: um.user.sso,
-        custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
-      }));
+        userId: user.id,
+        sso: user.sso,
+        custodies: custodyMap[user.id] ?? 0,
+      };
+    });
 
-    const totalPages = Math.ceil(totalItems / perPage);
+    const totalPages = Math.ceil((totalItems ?? 0) / perPage);
 
     return {
       page,
@@ -115,7 +153,7 @@ export async function getPaginatedAndFilterableSettingUsers({
       totalPages,
       search,
       items: teamMembersWithUserOrInvite,
-      totalItems,
+      totalItems: totalItems ?? 0,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -147,47 +185,72 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
     /**
-     * 1. Don't have any invites(userId:null)
-     * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+     * We need TeamMembers that:
+     * 1. Are not deleted (deletedAt is null)
+     * 2. Belong to this org
+     * 3. Have no linked user (userId is null) — these are non-user team members
+     * 4. Do NOT have any pending invites
+     *
+     * We also need custody counts.
      */
-    const where: Prisma.TeamMemberWhereInput = {
-      deletedAt: null,
-      organizationId,
-      userId: null,
-      receivedInvites: {
-        none: { status: InviteStatuses.PENDING },
-      },
-    };
 
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { user: { firstName: { contains: search, mode: "insensitive" } } },
-        { user: { lastName: { contains: search, mode: "insensitive" } } },
-      ];
+    /** First, get IDs of team members with pending invites so we can exclude them */
+    const { data: pendingInvites, error: inviteError } = await sbDb
+      .from("Invite")
+      .select("teamMemberId")
+      .eq("organizationId", organizationId)
+      .eq("status", InviteStatuses.PENDING);
+
+    if (inviteError) throw inviteError;
+
+    const pendingTeamMemberIds = (pendingInvites ?? []).map(
+      (inv) => inv.teamMemberId
+    );
+
+    let query = sbDb
+      .from("TeamMember")
+      .select("*, custodies:Custody(id)", { count: "exact" })
+      .is("deletedAt", null)
+      .eq("organizationId", organizationId)
+      .is("userId", null);
+
+    /** Exclude team members with pending invites */
+    if (pendingTeamMemberIds.length > 0) {
+      query = query.not("id", "in", `(${pendingTeamMemberIds.join(",")})`);
     }
 
-    const [teamMembers, totalTeamMembers] = await Promise.all([
-      db.teamMember.findMany({
-        where,
-        take,
-        skip,
-        include: {
-          _count: { select: { custodies: true } },
-        },
-      }),
-      db.teamMember.count({ where }),
-    ]);
+    if (search) {
+      query = query.ilike("name", `%${search}%`);
+    }
 
-    const totalPages = Math.ceil(totalTeamMembers / perPage);
+    const {
+      data: teamMembers,
+      count: totalTeamMembers,
+      error: tmError,
+    } = await query.range(skip, skip + take - 1);
+
+    if (tmError) throw tmError;
+
+    const totalPages = Math.ceil((totalTeamMembers ?? 0) / perPage);
+
+    /**
+     * Map team members to include custody count as `_count.custodies`
+     * to match the shape expected by consumers.
+     */
+    const teamMembersWithCount = (teamMembers ?? []).map((tm) => ({
+      ...tm,
+      _count: {
+        custodies: Array.isArray(tm.custodies) ? tm.custodies.length : 0,
+      },
+    }));
 
     return {
       page,
       perPage,
       totalPages,
       search,
-      totalTeamMembers,
-      teamMembers,
+      totalTeamMembers: totalTeamMembers ?? 0,
+      teamMembers: teamMembersWithCount,
     };
   } catch (cause) {
     throw new ShelfError({

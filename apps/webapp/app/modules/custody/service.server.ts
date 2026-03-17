@@ -1,6 +1,6 @@
 import type { Asset } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
 export async function releaseCustody({
@@ -11,24 +11,34 @@ export async function releaseCustody({
   organizationId: Asset["organizationId"];
 }) {
   try {
-    return await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        status: AssetStatus.AVAILABLE,
-        custody: {
-          delete: true,
-        },
-      },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-        custody: true,
-      },
-    });
+    // Delete the custody record for this asset
+    const { error: deleteCustodyError } = await sbDb
+      .from("Custody")
+      .delete()
+      .eq("assetId", assetId);
+
+    if (deleteCustodyError) throw deleteCustodyError;
+
+    // Update the asset status to AVAILABLE
+    const { error: updateError } = await sbDb
+      .from("Asset")
+      .update({ status: AssetStatus.AVAILABLE })
+      .eq("id", assetId)
+      .eq("organizationId", organizationId);
+
+    if (updateError) throw updateError;
+
+    // Fetch the updated asset with user and custody
+    const { data: asset, error: fetchError } = await sbDb
+      .from("Asset")
+      .select("*, user:User(firstName, lastName), custody:Custody(*)")
+      .eq("id", assetId)
+      .eq("organizationId", organizationId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    return asset;
   } catch (cause) {
     throw new ShelfError({
       cause,

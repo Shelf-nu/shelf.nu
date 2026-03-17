@@ -1,11 +1,11 @@
-import type { CustomField, Organization, User } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 
 export type CustomFieldDraftPayload = Pick<
-  CustomField,
+  Sb.CustomFieldRow,
   "helpText" | "name" | "type" | "required" | "active"
 > & {
-  organizationId: Organization["id"];
-  userId: User["id"];
-  options?: CustomField["options"];
+  organizationId: string;
+  userId: string;
+  options?: Sb.CustomFieldRow["options"];
   categories?: string[];
 };

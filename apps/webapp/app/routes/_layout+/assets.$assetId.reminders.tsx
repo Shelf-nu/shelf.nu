@@ -38,7 +38,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableReminders({
         organizationId,
         request,
-        where: { assetId },
+        assetId,
       });
 
     const header: HeaderData = { title: "Reminders" };

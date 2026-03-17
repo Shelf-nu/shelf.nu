@@ -1,6 +1,6 @@
-import type { Invite, Organization, User } from "@prisma/client";
+import type { Invite, Organization } from "@prisma/client";
 
 export type InviteWithInviterAndOrg = Invite & {
-  inviter: Pick<User, "firstName" | "lastName">;
+  inviter: { firstName: string | null; lastName: string | null };
   organization: Organization;
 };

@@ -5,7 +5,7 @@ import type {
   TierLimit,
   User,
 } from "@prisma/client";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -15,47 +15,65 @@ export async function getUserTierLimit(
   id: User["id"]
 ): Promise<TierLimit | CustomTierLimit> {
   try {
-    const { tier } = await db.user
-      .findUniqueOrThrow({
-        where: { id },
-        select: {
-          tier: {
-            include: { tierLimit: true },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "User tier not found. This seems like a bug. Please contact support.",
-          additionalData: { userId: id },
-          label,
-        });
+    /** Fetch user with tier and tierLimit in a single query via join */
+    const { data: user, error: userError } = await sbDb
+      .from("User")
+      .select(
+        "tierId, Tier:tierId ( id, tierLimitId, TierLimit:tierLimitId (*) )"
+      )
+      .eq("id", id)
+      .single();
+
+    if (userError || !user) {
+      throw new ShelfError({
+        cause: userError,
+        message:
+          "User tier not found. This seems like a bug. Please contact support.",
+        additionalData: { userId: id },
+        label,
       });
+    }
+
+    const tier = user.Tier as unknown as {
+      id: string;
+      tierLimitId: string | null;
+      TierLimit: TierLimit | null;
+    } | null;
+
+    if (!tier) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "User tier not found. This seems like a bug. Please contact support.",
+        additionalData: { userId: id },
+        label,
+      });
+    }
 
     /**
      * If the tier is custom, we fetch the custom tier limit and return it
      */
     if (tier.id === "custom") {
-      const customLimit = (await db.customTierLimit
-        .findUniqueOrThrow({
-          where: { userId: id },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Failed to get custom tier limit. This seems like a bug. Please contact support.",
-            additionalData: { userId: id },
-            label,
-          });
-        })) as CustomTierLimit;
+      const { data: customLimit, error: customError } = await sbDb
+        .from("CustomTierLimit")
+        .select("*")
+        .eq("userId", id)
+        .single();
 
-      return customLimit;
+      if (customError || !customLimit) {
+        throw new ShelfError({
+          cause: customError,
+          message:
+            "Failed to get custom tier limit. This seems like a bug. Please contact support.",
+          additionalData: { userId: id },
+          label,
+        });
+      }
+
+      return customLimit as unknown as CustomTierLimit;
     }
 
-    return tier.tierLimit as TierLimit;
+    return tier.TierLimit as TierLimit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -68,28 +86,59 @@ export async function getUserTierLimit(
 
 export async function updateUserTierId(id: User["id"], tierId: TierId) {
   try {
-    return await db.user.update({
-      where: { id },
-      data: {
-        tierId,
-        /**
-         * If the user tier is being change to custom, we upsert CustomTierLimit
-         * The upsert will make sure that if there is no customTierLimit for that user its created
-         */
-        ...(tierId === "custom" && {
-          customTierLimit: {
-            upsert: {
-              create: {},
-              update: {},
-            },
-          },
-        }),
-      },
-      select: {
-        id: true,
-        tierId: true,
-      },
-    });
+    /**
+     * If the user tier is being changed to custom, we upsert CustomTierLimit.
+     * The upsert will make sure that if there is no customTierLimit for that user it's created.
+     */
+    if (tierId === "custom") {
+      const { data: existing, error: lookupError } = await sbDb
+        .from("CustomTierLimit")
+        .select("id")
+        .eq("userId", id)
+        .maybeSingle();
+
+      if (lookupError) {
+        throw new ShelfError({
+          cause: lookupError,
+          message: "Failed to look up custom tier limit",
+          additionalData: { userId: id, tierId },
+          label,
+        });
+      }
+
+      if (!existing) {
+        const { error: insertError } = await sbDb
+          .from("CustomTierLimit")
+          .insert({ userId: id });
+
+        if (insertError) {
+          throw new ShelfError({
+            cause: insertError,
+            message: "Failed to create custom tier limit",
+            additionalData: { userId: id, tierId },
+            label,
+          });
+        }
+      }
+    }
+
+    const { data, error } = await sbDb
+      .from("User")
+      .update({ tierId })
+      .eq("id", id)
+      .select("id, tierId")
+      .single();
+
+    if (error) {
+      throw new ShelfError({
+        cause: error,
+        message: "Something went wrong while updating user tier limit",
+        additionalData: { userId: id, tierId },
+        label,
+      });
+    }
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,

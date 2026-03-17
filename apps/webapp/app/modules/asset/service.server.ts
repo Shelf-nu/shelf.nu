@@ -2440,7 +2440,7 @@ export async function createAssetsFromContentImport({
           try {
             const value = buildCustomFieldValue(
               { raw: asset[key] },
-              definition
+              definition as any
             );
 
             if (value) {

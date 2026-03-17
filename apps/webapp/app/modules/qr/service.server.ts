@@ -1,8 +1,6 @@
 import type { Sb } from "@shelf/database";
-import type { Prisma } from "@prisma/client";
 import type { TypeNumber, ErrorCorrectionLevel } from "qrcode-generator";
 import type { LoaderFunctionArgs } from "react-router";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -92,27 +90,72 @@ export async function getQr({ id }: { id: string }) {
   }
 }
 
-/**
- * Prisma-based getQr with flexible include — used by the scanner route.
- * TODO: Remove once the scanner route is migrated to Supabase.
- */
-type QrWithInclude<T extends Prisma.QrInclude | undefined> =
-  T extends Prisma.QrInclude ? Prisma.QrGetPayload<{ include: T }> : Sb.QrRow;
+/** Select string for QR with scanner relations */
+const QR_WITH_RELATIONS_SELECT =
+  `*, asset:Asset(*, location:Location(id, name), custody:Custody(*, custodian:TeamMember(name, user:User(firstName, lastName, profilePicture)))), kit:Kit(*, location:Location(id, name), assets:Asset(id, status, availableToBook, custody:Custody(*)), custody:Custody(*, custodian:TeamMember(name, user:User(firstName, lastName, profilePicture))))` as const;
 
-export async function getQrWithInclude<T extends Prisma.QrInclude | undefined>({
+/** Return type for getQrWithRelations */
+export type QrWithRelations = Sb.QrRow & {
+  asset:
+    | (Sb.AssetRow & {
+        location: { id: string; name: string } | null;
+        custody:
+          | (Sb.CustodyRow & {
+              custodian: {
+                name: string;
+                user: {
+                  firstName: string | null;
+                  lastName: string | null;
+                  profilePicture: string | null;
+                } | null;
+              };
+            })
+          | null;
+      })
+    | null;
+  kit:
+    | (Sb.KitRow & {
+        location: { id: string; name: string } | null;
+        assets: Array<{
+          id: string;
+          status: string;
+          availableToBook: boolean;
+          custody: Sb.CustodyRow | null;
+        }>;
+        custody:
+          | (Sb.CustodyRow & {
+              custodian: {
+                name: string;
+                user: {
+                  firstName: string | null;
+                  lastName: string | null;
+                  profilePicture: string | null;
+                } | null;
+              };
+            })
+          | null;
+      })
+    | null;
+};
+
+/**
+ * Supabase-based getQr with relations needed by the scanner route.
+ * Fetches the QR with asset (location, custody) and kit (location, custody, assets) relations.
+ */
+export async function getQrWithRelations({
   id: qrId,
-  include,
 }: {
   id: string;
-  include?: T;
-}): Promise<QrWithInclude<T>> {
+}): Promise<QrWithRelations> {
   try {
-    const qr = await db.qr.findUniqueOrThrow({
-      where: { id: qrId },
-      include: { ...include },
-    });
+    const { data, error } = await sbDb
+      .from("Qr")
+      .select(QR_WITH_RELATIONS_SELECT)
+      .eq("id", qrId)
+      .single();
 
-    return qr as QrWithInclude<T>;
+    if (error) throw error;
+    return data as unknown as QrWithRelations;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -126,6 +169,9 @@ export async function getQrWithInclude<T extends Prisma.QrInclude | undefined>({
     });
   }
 }
+
+/** @deprecated Use getQrWithRelations instead */
+export const getQrWithInclude = getQrWithRelations;
 
 export async function getQrOrganizationLookup({ qrId }: { qrId: string }) {
   try {

@@ -1,12 +1,10 @@
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
-import type { Update, UserUpdateRead } from "@prisma/client";
 import { BellIcon } from "lucide-react";
+import type { UpdateForUser } from "~/modules/update/service.server";
 import { UpdateTimelineItem } from "./update-timeline-item";
 
-type UpdateWithParsedContent = Omit<Update, "content"> & {
+type UpdateWithParsedContent = Omit<UpdateForUser, "content"> & {
   content: string | RenderableTreeNodes;
-  userReads: UserUpdateRead[];
-  imageUrl: string | null;
 };
 
 interface UpdateTimelineProps {

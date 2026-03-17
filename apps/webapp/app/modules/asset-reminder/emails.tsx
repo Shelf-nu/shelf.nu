@@ -1,4 +1,3 @@
-import type { Asset, AssetReminder, User } from "@prisma/client";
 import {
   Button,
   Column,
@@ -9,6 +8,7 @@ import {
   Row,
   Text,
 } from "@react-email/components";
+import type { Sb } from "@shelf/database";
 import colors from "tailwindcss/colors";
 import { CustomEmailFooter } from "~/emails/components/custom-footer";
 import { LogoForEmail } from "~/emails/logo";
@@ -16,9 +16,18 @@ import { styles } from "~/emails/styles";
 import { SERVER_URL } from "~/utils/env";
 
 type AssetAlertEmailProps = {
-  user: Pick<User, "email" | "firstName" | "lastName" | "email">;
-  asset: Pick<Asset, "id" | "title" | "mainImage" | "mainImageExpiration">;
-  reminder: AssetReminder;
+  user: {
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+  };
+  asset: {
+    id: string;
+    title: string;
+    mainImage: string | null;
+    mainImageExpiration: string | null;
+  };
+  reminder: Pick<Sb.AssetReminderRow, "name" | "message">;
   workspaceName: string;
   isOwner?: boolean;
   customEmailFooter?: string | null;
@@ -60,7 +69,7 @@ The Shelf Team
 `;
 }
 
-function isAssetImageExpired(expiry: Asset["mainImageExpiration"]) {
+function isAssetImageExpired(expiry: string | null) {
   if (!expiry) {
     return false;
   }

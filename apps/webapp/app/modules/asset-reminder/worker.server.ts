@@ -1,38 +1,23 @@
-import type { Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
+import {
+  ASSET_REMINDER_SELECT_FOR_EMAIL,
+  flattenReminderTeamMembers,
+  type AssetReminderForEmail,
+  type RawAssetReminderForEmail,
+} from "./fields";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
 import { createNote } from "../note/service.server";
 
-const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
-  teamMembers: {
-    select: {
-      user: {
-        select: {
-          email: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  },
-  asset: {
-    select: {
-      id: true,
-      title: true,
-      mainImage: true,
-      mainImageExpiration: true,
-    },
-  },
-  organization: { select: { name: true, customEmailFooter: true } },
-} satisfies Prisma.AssetReminderInclude;
-
-type UserToEmail = Pick<User, "email" | "firstName" | "lastName"> & {
+type UserToEmail = {
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
   isOwner?: boolean;
 };
 
@@ -41,12 +26,15 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
   (job: PgBoss.Job<AssetsSchedulerData>) => Promise<void>
 > = {
   REMINDER: async (job) => {
-    const reminder = await db.assetReminder.findFirst({
-      where: { id: job.data.reminderId },
-      include: ASSET_REMINDER_INCLUDES_FOR_EMAIL,
-    });
+    const { data: rawReminder, error: findError } = await sbDb
+      .from("AssetReminder")
+      .select(ASSET_REMINDER_SELECT_FOR_EMAIL)
+      .eq("id", job.data.reminderId)
+      .maybeSingle();
 
-    if (!reminder) {
+    if (findError) throw findError;
+
+    if (!rawReminder) {
       Logger.warn(
         new ShelfError({
           cause: null,
@@ -59,7 +47,11 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       return;
     }
 
-    const usersToSendEmail = reminder.teamMembers
+    const reminder = flattenReminderTeamMembers(
+      rawReminder as unknown as RawAssetReminderForEmail
+    ) as AssetReminderForEmail;
+
+    const usersToSendEmail: UserToEmail[] = reminder.teamMembers
       .filter((tm) => !!tm.user)
       .map((teamMember) => teamMember.user! as UserToEmail);
 
@@ -73,28 +65,32 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      * Then, in this case we have to send an email to the owner with special note.
      */
     if (hasTeamMemberWithoutUser) {
-      const owner = await db.user.findFirst({
-        where: {
-          userOrganizations: {
-            some: {
-              organizationId: reminder.organizationId,
-              roles: { has: "OWNER" },
-            },
-          },
-        },
-        select: { email: true, firstName: true, lastName: true },
-      });
+      const { data: owner, error: ownerError } = await sbDb
+        .from("UserOrganization")
+        .select("user:User!inner(email, firstName, lastName)")
+        .eq("organizationId", reminder.organizationId)
+        .contains("roles", ["OWNER"])
+        .limit(1)
+        .single();
 
-      if (!owner) {
-        throw new ShelfError({
-          cause: null,
-          message: "No owner found",
-          label: "Asset Scheduler",
-        });
+      if (ownerError || !owner) {
+        throw (
+          ownerError ||
+          new ShelfError({
+            cause: null,
+            message: "No owner found",
+            label: "Asset Scheduler",
+          })
+        );
       }
 
+      const ownerUser = owner.user as unknown as {
+        email: string;
+        firstName: string | null;
+        lastName: string | null;
+      };
       usersToSendEmail.push({
-        ...owner,
+        ...ownerUser,
         isOwner: true,
       });
     }
@@ -112,7 +108,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         });
 
         sendEmail({
-          subject: "⏰ Asset Reminder Notice - Shelf",
+          subject: "\u23F0 Asset Reminder Notice - Shelf",
           to: user.email,
           text: assetAlertEmailText({
             asset: reminder.asset,

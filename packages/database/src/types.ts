@@ -1586,6 +1586,46 @@ export type Database = {
         Args: { column_name: string; organization_id: string };
         Returns: undefined;
       };
+      increment_update_view_count: {
+        Args: { update_id: string };
+        Returns: undefined;
+      };
+      increment_update_click_count: {
+        Args: { update_id: string };
+        Returns: undefined;
+      };
+      increment_update_view_count_bulk: {
+        Args: { update_ids: string[] };
+        Returns: undefined;
+      };
+      get_updates_for_user: {
+        Args: { p_user_id: string; p_user_role: OrganizationRoles };
+        Returns: {
+          id: string;
+          title: string;
+          content: string;
+          url: string | null;
+          imageUrl: string | null;
+          publishDate: string;
+          status: string;
+          targetRoles: OrganizationRoles[];
+          clickCount: number;
+          viewCount: number;
+          createdById: string;
+          createdAt: string;
+          updatedAt: string;
+          userReadId: string | null;
+          userReadAt: string | null;
+        }[];
+      };
+      get_unread_update_count: {
+        Args: { p_user_id: string; p_user_role: OrganizationRoles };
+        Returns: number;
+      };
+      get_unread_update_ids: {
+        Args: { p_user_id: string; p_user_role: OrganizationRoles };
+        Returns: string[];
+      };
     };
     Enums: {
       AssetStatus: AssetStatus;

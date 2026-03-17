@@ -1,8 +1,7 @@
 import { useState } from "react";
-import type { Prisma } from "@prisma/client";
 import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
-import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
+import type { AssetReminderWithRelations } from "~/modules/asset-reminder/fields";
 import { List } from "../list";
 import ReminderTeamMembers from "./reminder-team-members";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
@@ -104,9 +103,7 @@ function ListContent({
   item,
   extraProps,
 }: {
-  item: Prisma.AssetReminderGetPayload<{
-    include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  item: AssetReminderWithRelations;
   extraProps: { isAssetReminderPage: boolean };
 }) {
   const now = new Date();

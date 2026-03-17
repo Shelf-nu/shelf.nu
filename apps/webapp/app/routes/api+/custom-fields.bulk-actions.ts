@@ -2,7 +2,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkActivateCustomFieldSchema } from "~/components/custom-fields/bulk-activate-dialog";
 import { BulkDeactivateCustomFieldSchema } from "~/components/custom-fields/bulk-deactivate-dialog";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { bulkActivateOrDeactivateCustomFields } from "~/modules/custom-field/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -57,20 +57,29 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkActivateCustomFieldSchema
         );
 
-        const newActivatingFields = await db.customField.findMany({
-          where: customFieldIds.includes(ALL_SELECTED_KEY)
-            ? { organizationId, deletedAt: null }
-            : { id: { in: customFieldIds }, deletedAt: null },
-        });
+        let activateQuery = sbDb
+          .from("CustomField")
+          .select("*")
+          .eq("organizationId", organizationId)
+          .is("deletedAt", null);
+
+        if (!customFieldIds.includes(ALL_SELECTED_KEY)) {
+          activateQuery = activateQuery.in("id", customFieldIds);
+        }
+
+        const { data: newActivatingFields, error: activateError } =
+          await activateQuery;
+
+        if (activateError) throw activateError;
 
         await assertWillExceedCustomFieldLimit({
           organizationId,
           organizations,
-          newActivatingFields: newActivatingFields.length,
+          newActivatingFields: (newActivatingFields ?? []).length,
         });
 
         await bulkActivateOrDeactivateCustomFields({
-          customFields: newActivatingFields,
+          customFields: newActivatingFields ?? [],
           organizationId,
           userId,
           active: true,
@@ -91,14 +100,23 @@ export async function action({ request, context }: ActionFunctionArgs) {
           formData,
           BulkDeactivateCustomFieldSchema
         );
-        const newActivatingFields = await db.customField.findMany({
-          where: customFieldIds.includes(ALL_SELECTED_KEY)
-            ? { organizationId, deletedAt: null }
-            : { id: { in: customFieldIds }, deletedAt: null },
-        });
+        let deactivateQuery = sbDb
+          .from("CustomField")
+          .select("*")
+          .eq("organizationId", organizationId)
+          .is("deletedAt", null);
+
+        if (!customFieldIds.includes(ALL_SELECTED_KEY)) {
+          deactivateQuery = deactivateQuery.in("id", customFieldIds);
+        }
+
+        const { data: deactivatingFields, error: deactivateError } =
+          await deactivateQuery;
+
+        if (deactivateError) throw deactivateError;
 
         await bulkActivateOrDeactivateCustomFields({
-          customFields: newActivatingFields,
+          customFields: deactivatingFields ?? [],
           organizationId,
           userId,
           active: false,

@@ -1,7 +1,6 @@
 import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
 import type { Sb } from "@shelf/database";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -343,19 +342,25 @@ export async function getBarcodeByValue<
 }): Promise<any> {
   try {
     // Try to find barcode with original case first (for ExternalQR), then uppercase (for other types)
-    const barcode = await db.barcode.findFirst({
-      where: {
-        OR: [
-          { value: value }, // Try original case first (ExternalQR)
-          { value: value.toUpperCase() }, // Try uppercase (other barcode types)
-        ],
-        organizationId,
-      },
-      include: include || {
-        asset: true,
-        kit: true,
-      },
-    });
+    // Build select string based on include parameter
+    const defaultSelect = "*, Asset(*), Kit(*)";
+    let selectStr = defaultSelect;
+    if (include) {
+      const parts = ["*"];
+      if ((include as any).asset) parts.push("Asset(*)");
+      if ((include as any).kit) parts.push("Kit(*)");
+      selectStr = parts.join(", ");
+    }
+
+    const { data: barcode, error } = await sbDb
+      .from("Barcode")
+      .select(selectStr)
+      .eq("organizationId", organizationId)
+      .or(`value.eq.${value},value.eq.${value.toUpperCase()}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
     return barcode;
   } catch (cause) {
     throw new ShelfError({
@@ -515,16 +520,20 @@ export async function validateBarcodeUniqueness(
   );
 
   const isEditing = !!currentItemId && !!relationshipType;
-  const existingBarcodes = await db.barcode.findMany({
-    where: {
-      value: { in: submittedValues },
-      organizationId,
-    },
-    include: {
-      asset: { select: { title: true } },
-      kit: { select: { name: true } },
-    },
-  });
+  const { data: existingBarcodesRaw, error: existingError } = await sbDb
+    .from("Barcode")
+    .select("*, asset:Asset(title), kit:Kit(name)")
+    .in("value", submittedValues)
+    .eq("organizationId", organizationId);
+
+  if (existingError) throw existingError;
+
+  type BarcodeWithAliases = Sb.BarcodeRow & {
+    asset: { title: string } | null;
+    kit: { name: string } | null;
+  };
+  const existingBarcodes =
+    existingBarcodesRaw as unknown as BarcodeWithAliases[];
 
   // Filter out the current item manually
   const filteredExistingBarcodes = isEditing
@@ -876,16 +885,20 @@ export async function parseBarcodesFromImportData({
     }
 
     // Check existing barcodes in the current organization only
-    const existingBarcodes = await db.barcode.findMany({
-      where: {
-        value: { in: allBarcodeValues },
-        organizationId, // Only check within current organization
-      },
-      include: {
-        asset: { select: { title: true } },
-        kit: { select: { name: true } },
-      },
-    });
+    const { data: existingBarcodesRaw, error: existingError } = await sbDb
+      .from("Barcode")
+      .select("*, asset:Asset(title), kit:Kit(name)")
+      .in("value", allBarcodeValues)
+      .eq("organizationId", organizationId);
+
+    if (existingError) throw existingError;
+
+    type BarcodeWithAliases = Sb.BarcodeRow & {
+      asset: { title: string } | null;
+      kit: { name: string } | null;
+    };
+    const existingBarcodes =
+      existingBarcodesRaw as unknown as BarcodeWithAliases[];
 
     // Check for barcodes already linked to assets or kits in this organization
     const linkedBarcodes = existingBarcodes.filter(

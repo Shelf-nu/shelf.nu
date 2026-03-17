@@ -53,19 +53,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const customField = await getCustomField({
+    const customField = (await getCustomField({
       organizationId,
       id,
       userOrganizations,
       request,
       include: { categories: { select: { id: true } } },
-    });
+    })) as any as Awaited<ReturnType<typeof getCustomField>> & {
+      categories: { id: string }[];
+    };
 
     const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
       {
         organizationId,
         request,
-        defaultCategory: customField.categories.map((c) => c.id),
+        defaultCategory: customField.categories.map(
+          (c: { id: string }) => c.id
+        ),
       }
     );
 
@@ -167,7 +171,7 @@ export default function CustomFieldEditPage() {
           type={customField.type}
           active={customField.active}
           options={customField.options}
-          categories={customField.categories.map((c) => c.id)}
+          categories={customField.categories.map((c: { id: string }) => c.id)}
         />
       </div>
     </>

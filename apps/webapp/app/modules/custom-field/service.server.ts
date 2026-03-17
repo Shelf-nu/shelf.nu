@@ -1,12 +1,16 @@
-import type {
-  CustomField,
-  Organization,
-  Prisma,
-  User,
-  UserOrganization,
-} from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { CustomField } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import { sbDb } from "~/database/supabase.server";
+
+/** Coerce Supabase string dates to Date objects for Prisma compatibility */
+function coerceCustomFieldDates(row: Sb.CustomFieldRow): CustomField {
+  return {
+    ...row,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+    deletedAt: row.deletedAt ? new Date(row.deletedAt) : null,
+  };
+}
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -27,6 +31,51 @@ import {
 
 const label: ErrorLabel = "Custom fields";
 
+/**
+ * Helper to fetch categories for a set of custom field IDs via the join table.
+ * Returns a map of customFieldId -> array of Category rows.
+ */
+async function getCategoriesForCustomFieldIds(
+  customFieldIds: string[]
+): Promise<Map<string, Sb.CategoryRow[]>> {
+  const map = new Map<string, Sb.CategoryRow[]>();
+  if (customFieldIds.length === 0) return map;
+
+  // Get all join table entries for these custom fields (B = customFieldId)
+  const { data: joins, error: joinError } = await sbDb
+    .from("_CategoryToCustomField")
+    .select("*")
+    .in("B", customFieldIds);
+
+  if (joinError) throw joinError;
+
+  if (!joins || joins.length === 0) return map;
+
+  // Get unique category IDs (A = categoryId)
+  const categoryIds = [...new Set(joins.map((j) => j.A))];
+
+  const { data: categories, error: catError } = await sbDb
+    .from("Category")
+    .select("*")
+    .in("id", categoryIds);
+
+  if (catError) throw catError;
+
+  const categoryMap = new Map((categories ?? []).map((c) => [c.id, c]));
+
+  // Build the result map
+  for (const join of joins) {
+    const cat = categoryMap.get(join.A);
+    if (cat) {
+      const existing = map.get(join.B) ?? [];
+      existing.push(cat);
+      map.set(join.B, existing);
+    }
+  }
+
+  return map;
+}
+
 export async function createCustomField({
   name,
   helpText,
@@ -39,37 +88,46 @@ export async function createCustomField({
   categories = [],
 }: CustomFieldDraftPayload) {
   try {
-    const [customField, settingsResult] = await Promise.all([
-      db.customField.create({
-        data: {
+    // Insert the custom field and fetch settings in parallel
+    const [insertResult, settingsResult] = await Promise.all([
+      sbDb
+        .from("CustomField")
+        .insert({
           name,
           helpText,
           type,
           required,
           active,
           options,
-          organization: {
-            connect: {
-              id: organizationId,
-            },
-          },
-          createdBy: {
-            connect: {
-              id: userId,
-            },
-          },
-          categories: {
-            connect: categories.map((category) => ({ id: category })),
-          },
-        },
-      }),
+          organizationId,
+          userId,
+        })
+        .select()
+        .single(),
       sbDb
         .from("AssetIndexSettings")
         .select()
         .eq("organizationId", organizationId),
     ]);
 
+    if (insertResult.error) throw insertResult.error;
+    const customField = insertResult.data;
+
     if (settingsResult.error) throw settingsResult.error;
+
+    // Connect categories via join table
+    if (categories.length > 0) {
+      const { error: catError } = await sbDb
+        .from("_CategoryToCustomField")
+        .insert(
+          categories.map((categoryId) => ({
+            A: categoryId,
+            B: customField.id,
+          }))
+        );
+
+      if (catError) throw catError;
+    }
 
     /** We need to add it to the advanced index settings for each entry belonging to this organization */
     if (customField.active) {
@@ -109,7 +167,7 @@ export async function createCustomField({
 }
 
 export async function getFilteredAndPaginatedCustomFields(params: {
-  organizationId: Organization["id"];
+  organizationId: string;
   /** Page number. Starts at 1 */
   page?: number;
   /** Items to be loaded per page */
@@ -122,32 +180,22 @@ export async function getFilteredAndPaginatedCustomFields(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.CustomFieldWhereInput = {
-      organizationId,
-      deletedAt: null,
-    };
+    let query = sbDb
+      .from("CustomField")
+      .select("*", { count: "exact" })
+      .eq("organizationId", organizationId)
+      .is("deletedAt", null)
+      .order("active", { ascending: false })
+      .order("updatedAt", { ascending: false })
+      .range(skip, skip + take - 1);
 
-    /** If the search string exists, add it to the where object */
+    /** If the search string exists, add it to the query */
     if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      query = query.ilike("name", `%${search}%`);
     }
 
-    const [customFields, totalCustomFields, usageCounts] = await Promise.all([
-      /** Get the items */
-      db.customField.findMany({
-        skip,
-        take,
-        where,
-        orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
-        include: { categories: true },
-      }),
-
-      /** Count them */
-      db.customField.count({ where }),
+    const [fieldsResult, usageCounts] = await Promise.all([
+      query,
 
       /**
        * Get usage counts for all custom fields in this organization
@@ -167,14 +215,25 @@ export async function getFilteredAndPaginatedCustomFields(params: {
         }),
     ]);
 
+    if (fieldsResult.error) throw fieldsResult.error;
+
+    const customFields = fieldsResult.data ?? [];
+    const totalCustomFields = fieldsResult.count ?? 0;
+
+    // Fetch categories for all custom fields via the join table
+    const categoriesMap = await getCategoriesForCustomFieldIds(
+      customFields.map((f) => f.id)
+    );
+
     /** Create a map of custom field ID to usage count */
     const usageCountMap = new Map(
       usageCounts.map((item) => [item.customFieldId, Number(item.count)])
     );
 
-    /** Attach usage count to each custom field */
+    /** Attach usage count and categories to each custom field */
     const customFieldsWithUsage = customFields.map((field) => ({
       ...field,
+      categories: categoriesMap.get(field.id) ?? [],
       usageCount: usageCountMap.get(field.id) || 0,
     }));
 
@@ -192,42 +251,56 @@ export async function getFilteredAndPaginatedCustomFields(params: {
   }
 }
 
-type CustomFieldWithInclude<T extends Prisma.CustomFieldInclude | undefined> =
-  T extends Prisma.CustomFieldInclude
-    ? Prisma.CustomFieldGetPayload<{ include: T }>
-    : CustomField;
-
-export async function getCustomField<
-  T extends Prisma.CustomFieldInclude | undefined,
->({
+export async function getCustomField({
   organizationId,
   id,
   userOrganizations,
   request,
   include,
-}: Pick<CustomField, "id"> & {
-  organizationId: Organization["id"];
-  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+}: {
+  id: string;
+  organizationId: string;
+  userOrganizations?: { organizationId: string }[];
   request?: Request;
-  include?: T;
+  include?: { categories?: boolean | { select?: { id?: boolean } } };
 }) {
   try {
     const otherOrganizationIds = userOrganizations?.map(
       (org) => org.organizationId
     );
 
-    const customField = await db.customField.findFirstOrThrow({
-      where: {
-        deletedAt: null,
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
-      include: { ...include },
-    });
+    // Build the query for the custom field
+    let query = sbDb
+      .from("CustomField")
+      .select("*")
+      .is("deletedAt", null)
+      .eq("id", id);
+
+    if (userOrganizations?.length && otherOrganizationIds?.length) {
+      // Match either the current org or any of the user's other orgs
+      query = query.in("organizationId", [
+        organizationId,
+        ...otherOrganizationIds,
+      ]);
+    } else {
+      query = query.eq("organizationId", organizationId);
+    }
+
+    const { data: customField, error } = await query.maybeSingle();
+
+    if (error) throw error;
+
+    if (!customField) {
+      throw new ShelfError({
+        cause: null,
+        title: "Custom field not found",
+        message:
+          "The custom field you are trying to access does not exist or you do not have permission to access it.",
+        additionalData: { id, organizationId },
+        label,
+        status: 404,
+      });
+    }
 
     /* User is trying to access customField in wrong organization. */
     if (
@@ -257,7 +330,26 @@ export async function getCustomField<
       });
     }
 
-    return customField as CustomFieldWithInclude<T>;
+    // If include.categories is requested, fetch categories via join table
+    if (include?.categories) {
+      const categoriesMap = await getCategoriesForCustomFieldIds([
+        customField.id,
+      ]);
+      const categories = categoriesMap.get(customField.id) ?? [];
+
+      // If include.categories.select.id is set, only return id
+      const includeObj = include.categories;
+      if (typeof includeObj === "object" && includeObj.select?.id) {
+        return {
+          ...customField,
+          categories: categories.map((c) => ({ id: c.id })),
+        };
+      }
+
+      return { ...customField, categories };
+    }
+
+    return customField;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -279,15 +371,15 @@ export async function getCustomField<
 }
 
 export async function updateCustomField(payload: {
-  id: CustomField["id"];
-  name?: CustomField["name"];
-  helpText?: CustomField["helpText"];
-  type?: CustomField["type"];
-  required?: CustomField["required"];
-  active?: CustomField["active"];
-  options?: CustomField["options"];
+  id: string;
+  name?: string;
+  helpText?: string | null;
+  type?: Sb.CustomFieldType;
+  required?: boolean;
+  active?: boolean;
+  options?: string[];
   categories?: string[];
-  organizationId: CustomField["organizationId"];
+  organizationId: string;
 }) {
   const {
     id,
@@ -304,37 +396,71 @@ export async function updateCustomField(payload: {
     //dont ever update type
     //updating type would require changing all custom field values to that type
     //which might fail when changing to incompatible type hence need a careful definition
-    const data = {
-      name,
-      helpText,
-      required,
-      active,
-      options,
-    } satisfies Prisma.CustomFieldUpdateInput;
-    const hasCategories = categories && categories.length > 0;
-
-    Object.assign(data, {
-      categories: {
-        set: hasCategories // if categories are empty, remove all categories
-          ? categories.map((category) => ({ id: category }))
-          : [],
-      },
-    });
+    const updateData: Record<string, unknown> = {};
+    if (name !== undefined) updateData.name = name;
+    if (helpText !== undefined) updateData.helpText = helpText;
+    if (required !== undefined) updateData.required = required;
+    if (active !== undefined) updateData.active = active;
+    if (options !== undefined) updateData.options = options;
 
     /** Get the custom field. We need it in order to be able to update the asset index settings */
-    const customField = (await db.customField.findFirst({
-      where: { id, organizationId, deletedAt: null },
-    })) as CustomField;
+    const { data: customField, error: findError } = await sbDb
+      .from("CustomField")
+      .select("*")
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .is("deletedAt", null)
+      .maybeSingle();
 
-    const updatedField = await db.customField.update({
-      where: { id },
-      data: data,
-    });
+    if (findError) throw findError;
+    if (!customField) {
+      throw new ShelfError({
+        cause: null,
+        message: "Custom field not found",
+        additionalData: { id, organizationId },
+        label,
+        status: 404,
+      });
+    }
 
-    /** Updates the Asset */
+    const { data: updatedField, error: updateError } = await sbDb
+      .from("CustomField")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Handle categories via join table if provided
+    if (categories !== undefined) {
+      // Remove all existing category associations
+      const { error: deleteError } = await sbDb
+        .from("_CategoryToCustomField")
+        .delete()
+        .eq("B", id);
+
+      if (deleteError) throw deleteError;
+
+      // Insert new category associations
+      if (categories.length > 0) {
+        const { error: insertError } = await sbDb
+          .from("_CategoryToCustomField")
+          .insert(
+            categories.map((categoryId) => ({
+              A: categoryId,
+              B: id,
+            }))
+          );
+
+        if (insertError) throw insertError;
+      }
+    }
+
+    /** Updates the Asset index settings */
     await updateAssetIndexSettingsAfterCfUpdate({
-      oldField: customField,
-      newField: updatedField,
+      oldField: customField as unknown as CustomField,
+      newField: updatedField as unknown as CustomField,
     });
 
     return updatedField;
@@ -366,53 +492,56 @@ export async function updateCustomField(payload: {
 export async function softDeleteCustomField({
   id,
   organizationId,
-}: Pick<CustomField, "id"> & { organizationId: Organization["id"] }) {
+}: {
+  id: string;
+  organizationId: string;
+}) {
   try {
-    const customField = await db.$transaction(
-      async (tx) => {
-        // 1. Verify the custom field exists, belongs to the organization, and is not already deleted
-        const existingCustomField = await tx.customField.findFirst({
-          where: { id, organizationId, deletedAt: null },
-        });
+    // 1. Verify the custom field exists, belongs to the organization, and is not already deleted
+    const { data: existingCustomField, error: findError } = await sbDb
+      .from("CustomField")
+      .select("*")
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .is("deletedAt", null)
+      .maybeSingle();
 
-        if (!existingCustomField) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "The custom field you are trying to delete does not exist.",
-            additionalData: { id, organizationId },
-            label,
-            status: 404,
-            shouldBeCaptured: false,
-          });
-        }
+    if (findError) throw findError;
 
-        // 2. Soft delete the custom field by appending timestamp to name and setting deletedAt
-        // This frees up the original name for creating a new field
-        const timestamp = Math.floor(Date.now() / 1000);
-        const deletedField = await tx.customField.update({
-          where: { id },
-          data: {
-            name: `${existingCustomField.name}_${timestamp}`,
-            deletedAt: new Date(),
-          },
-        });
+    if (!existingCustomField) {
+      throw new ShelfError({
+        cause: null,
+        message: "The custom field you are trying to delete does not exist.",
+        additionalData: { id, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
-        // 3. Remove column from all users' AssetIndexSettings immediately
-        // This ensures consistency with deactivation behavior
-        await removeCustomFieldFromAssetIndexSettings({
-          customFieldName: existingCustomField.name,
-          organizationId,
-        });
+    // 2. Soft delete the custom field by appending timestamp to name and setting deletedAt
+    // This frees up the original name for creating a new field
+    const timestamp = Math.floor(Date.now() / 1000);
+    const { data: deletedField, error: updateError } = await sbDb
+      .from("CustomField")
+      .update({
+        name: `${existingCustomField.name}_${timestamp}`,
+        deletedAt: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single();
 
-        return deletedField;
-      },
-      {
-        timeout: 30000, // 30 second timeout for consistency
-      }
-    );
+    if (updateError) throw updateError;
 
-    return customField;
+    // 3. Remove column from all users' AssetIndexSettings immediately
+    // This ensures consistency with deactivation behavior
+    await removeCustomFieldFromAssetIndexSettings({
+      customFieldName: existingCustomField.name,
+      organizationId,
+    });
+
+    return deletedField;
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -431,24 +560,23 @@ export async function softDeleteCustomField({
 export async function upsertCustomField(
   definitions: CustomFieldDraftPayload[]
 ): Promise<{
-  customFields: Record<string, CustomField>;
-  newOrUpdatedFields: CustomField[];
+  customFields: Record<string, Sb.CustomFieldRow>;
+  newOrUpdatedFields: Sb.CustomFieldRow[];
 }> {
   try {
-    const customFields: Record<string, CustomField> = {};
-    const newOrUpdatedFields: CustomField[] = [];
+    const customFields: Record<string, Sb.CustomFieldRow> = {};
+    const newOrUpdatedFields: Sb.CustomFieldRow[] = [];
 
     for (const def of definitions) {
-      let existingCustomField = await db.customField.findFirst({
-        where: {
-          name: {
-            equals: def.name,
-            mode: "insensitive",
-          },
-          organizationId: def.organizationId,
-          deletedAt: null,
-        },
-      });
+      const { data: existingCustomField, error: findError } = await sbDb
+        .from("CustomField")
+        .select("*")
+        .ilike("name", def.name)
+        .eq("organizationId", def.organizationId)
+        .is("deletedAt", null)
+        .maybeSingle();
+
+      if (findError) throw findError;
 
       if (!existingCustomField) {
         const newCustomField = await createCustomField(def);
@@ -484,18 +612,21 @@ export async function upsertCustomField(
               options,
               organizationId: def.organizationId,
             });
-            existingCustomField = updatedCustomField;
+            customFields[def.name] = updatedCustomField;
             newOrUpdatedFields.push(updatedCustomField);
+          } else {
+            customFields[def.name] = existingCustomField;
           }
+        } else {
+          customFields[def.name] = existingCustomField;
         }
-        customFields[def.name] = existingCustomField;
       }
     }
 
     // Update asset index settings if we have any new or updated fields
     if (newOrUpdatedFields.length > 0) {
       void updateAssetIndexSettingsWithNewCustomFields({
-        newCustomFields: newOrUpdatedFields,
+        newCustomFields: newOrUpdatedFields as unknown as CustomField[],
         organizationId: definitions[0].organizationId,
       });
     }
@@ -519,8 +650,8 @@ export async function createCustomFieldsIfNotExists({
   organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
-  userId: User["id"];
-  organizationId: Organization["id"];
+  userId: string;
+  organizationId: string;
 }) {
   try {
     //{CF header:[all options in csv combined]}
@@ -607,28 +738,43 @@ export async function getActiveCustomFields({
   includeAllCategories?: boolean;
 }) {
   try {
-    return await db.customField.findMany({
-      where: {
-        organizationId,
-        active: { equals: true },
-        deletedAt: null,
-        /**
-         * Category filtering logic:
-         * - If includeAllCategories: no category filtering
-         * - If category provided: get fields for that category + uncategorized
-         * - Otherwise: get only uncategorized fields
-         */
-        ...(includeAllCategories
-          ? {} // No category filtering
-          : typeof category === "string"
-          ? {
-              OR: [
-                { categories: { none: {} } }, // Uncategorized fields
-                { categories: { some: { id: category } } }, // Category-specific fields
-              ],
-            }
-          : { categories: { none: {} } }), // Only uncategorized fields
-      },
+    // Get all active, non-deleted custom fields for this org
+    const { data: allFields, error } = await sbDb
+      .from("CustomField")
+      .select("*")
+      .eq("organizationId", organizationId)
+      .eq("active", true)
+      .is("deletedAt", null);
+
+    if (error) throw error;
+
+    const fields = (allFields ?? []).map(coerceCustomFieldDates);
+
+    // If includeAllCategories, return all fields without category filtering
+    if (includeAllCategories) {
+      return fields;
+    }
+
+    // We need category info for filtering
+    const fieldIds = fields.map((f) => f.id);
+    const categoriesMap = await getCategoriesForCustomFieldIds(fieldIds);
+
+    if (typeof category === "string") {
+      /**
+       * Category filtering: return fields that are either:
+       * - Uncategorized (no categories)
+       * - Associated with the given category
+       */
+      return fields.filter((field) => {
+        const cats = categoriesMap.get(field.id) ?? [];
+        return cats.length === 0 || cats.some((c) => c.id === category);
+      });
+    }
+
+    // Default: return only uncategorized fields
+    return fields.filter((field) => {
+      const cats = categoriesMap.get(field.id) ?? [];
+      return cats.length === 0;
     });
   } catch (cause) {
     throw new ShelfError({
@@ -674,18 +820,21 @@ export async function bulkActivateOrDeactivateCustomFields({
   userId,
   active,
 }: {
-  customFields: CustomField[];
-  organizationId: CustomField["organizationId"];
-  userId: CustomField["userId"];
+  customFields: Sb.CustomFieldRow[];
+  organizationId: string;
+  userId: string;
   active: boolean;
 }) {
   try {
     const customFieldsIds = customFields.map((field) => field.id);
 
-    const updatedFields = await db.customField.updateMany({
-      where: { id: { in: customFieldsIds }, organizationId },
-      data: { active },
-    });
+    const { error: updateError } = await sbDb
+      .from("CustomField")
+      .update({ active })
+      .in("id", customFieldsIds)
+      .eq("organizationId", organizationId);
+
+    if (updateError) throw updateError;
 
     /** Get the asset index settings for the organization */
     const { data: settings, error: settingsError } = await sbDb
@@ -740,7 +889,7 @@ export async function bulkActivateOrDeactivateCustomFields({
 
     await Promise.all(updates.filter(Boolean));
 
-    return updatedFields;
+    return { count: customFieldsIds.length };
   } catch (cause) {
     throw new ShelfError({
       cause,

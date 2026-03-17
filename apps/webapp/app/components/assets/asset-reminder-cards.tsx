@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useLoaderData } from "react-router";
+import type { AssetReminderWithRelations } from "~/modules/asset-reminder/fields";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
 import ReminderTeamMembers from "../asset-reminder/reminder-team-members";
@@ -15,7 +16,9 @@ export function AssetReminderCards({
   className,
   style,
 }: AssetReminderCardsProps) {
-  const { asset, reminders } = useLoaderData<typeof loader>();
+  const { asset, reminders } = useLoaderData<typeof loader>() as ReturnType<
+    typeof useLoaderData<typeof loader>
+  > & { reminders: AssetReminderWithRelations[] };
 
   if (!reminders.length) {
     return;

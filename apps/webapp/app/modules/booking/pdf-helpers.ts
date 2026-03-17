@@ -7,7 +7,8 @@ import type {
   Kit,
   OrganizationRoles,
 } from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
@@ -16,6 +17,14 @@ import { groupAndSortAssetsByKit } from "./helpers";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+
+/** Shape of an asset row from Supabase with joined relations for the PDF query */
+type SbAssetWithRelations = Sb.AssetRow & {
+  category: { name: string } | null;
+  qrCodes: Sb.QrRow[];
+  location: { name: string } | null;
+  kit: { name: string } | null;
+};
 
 export interface SortParams {
   orderBy?: string;
@@ -77,43 +86,29 @@ export async function fetchAllPdfRelatedData(
     const orderBy = sortParams?.orderBy || "status";
     const orderDirection = sortParams?.orderDirection || "desc";
 
-    const [assets, organization] = await Promise.all([
-      db.asset.findMany({
-        where: {
-          id: { in: booking?.assets.map((a) => a.id) || [] },
-        },
-        include: {
-          category: {
-            select: {
-              name: true,
-            },
-          },
-          qrCodes: true,
-          location: {
-            select: {
-              name: true,
-            },
-          },
-          kit: {
-            select: {
-              name: true,
-            },
-          },
-        },
-      }),
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: {
-          imageId: true,
-          name: true,
-          id: true,
-          currency: true,
-          updatedAt: true,
-        },
-      }),
+    const assetIds = booking?.assets.map((a) => a.id) || [];
+
+    const [assetsResult, organizationResult] = await Promise.all([
+      sbDb
+        .from("Asset")
+        .select(
+          "*, category:Category(name), qrCodes:Qr(*), location:Location(name), kit:Kit(name)"
+        )
+        .in("id", assetIds),
+      sbDb
+        .from("Organization")
+        .select("imageId, name, id, currency, updatedAt")
+        .eq("id", organizationId)
+        .maybeSingle(),
     ]);
 
-    if (!organization) {
+    if (assetsResult.error) throw assetsResult.error;
+    if (organizationResult.error) throw organizationResult.error;
+
+    const assets = assetsResult.data as unknown as SbAssetWithRelations[];
+    const organizationData = organizationResult.data;
+
+    if (!organizationData) {
       throw new ShelfError({
         cause: null,
         message: "Organization not found",
@@ -135,9 +130,15 @@ export async function fetchAllPdfRelatedData(
       organizationId,
       size: "small",
     });
+
+    const organization = {
+      ...organizationData,
+      updatedAt: new Date(organizationData.updatedAt),
+    };
+
     return {
       booking,
-      assets: sortedAssets,
+      assets: sortedAssets as unknown as PdfDbResult["assets"],
       totalValue: calculateTotalValueOfAssets({
         assets: booking.assets,
         currency: organization.currency,

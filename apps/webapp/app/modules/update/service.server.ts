@@ -1,123 +1,164 @@
-import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { OrganizationRoles, Prisma } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
 import { UpdateStatus } from "@prisma/client";
 import type { Sb } from "@shelf/database";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
-export type UpdateWithRelations = Prisma.UpdateGetPayload<{
-  include: {
-    createdBy: {
-      select: {
-        id: true;
-        firstName: true;
-        lastName: true;
-      };
-    };
-    userReads: true;
-    _count: {
-      select: {
-        userReads: true;
-      };
-    };
-  };
-}>;
+/** Shape returned by the get_updates_for_user RPC */
+type UpdateForUserRpcRow = {
+  id: string;
+  title: string;
+  content: string;
+  url: string | null;
+  imageUrl: string | null;
+  publishDate: string;
+  status: string;
+  targetRoles: OrganizationRoles[];
+  clickCount: number;
+  viewCount: number;
+  createdById: string;
+  createdAt: string;
+  updatedAt: string;
+  userReadId: string | null;
+  userReadAt: string | null;
+};
 
-export type UpdateForUser = Prisma.UpdateGetPayload<{
-  content: RenderableTreeNode;
-  include: {
-    userReads: {
-      where: {
-        userId: string;
-      };
-    };
+export type UpdateForUser = {
+  id: string;
+  title: string;
+  content: string;
+  url: string | null;
+  imageUrl: string | null;
+  publishDate: string;
+  status: UpdateStatus;
+  targetRoles: OrganizationRoles[];
+  clickCount: number;
+  viewCount: number;
+  createdById: string;
+  createdAt: string;
+  updatedAt: string;
+  userReads: { id: string; userId: string; updateId: string; readAt: string }[];
+};
+
+export type UpdateWithRelations = {
+  id: string;
+  title: string;
+  content: string;
+  url: string | null;
+  imageUrl: string | null;
+  publishDate: string;
+  status: UpdateStatus;
+  targetRoles: OrganizationRoles[];
+  clickCount: number;
+  viewCount: number;
+  createdById: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
   };
-}>;
+  userReads: {
+    id: string;
+    userId: string;
+    updateId: string;
+    readAt: string;
+  }[];
+  _count: {
+    userReads: number;
+  };
+};
 
 /**
  * Get all updates visible to a specific user based on their role
  */
-export function getUpdatesForUser({
+export async function getUpdatesForUser({
   userId,
   userRole,
 }: {
   userId: string;
   userRole: OrganizationRoles;
 }): Promise<UpdateForUser[]> {
-  return db.update.findMany({
-    where: {
-      status: UpdateStatus.PUBLISHED,
-      publishDate: {
-        lte: new Date(),
-      },
-      OR: [
-        // Updates with no role targeting (visible to all)
-        {
-          targetRoles: {
-            isEmpty: true,
-          },
-        },
-        // Updates that target the user's role
-        {
-          targetRoles: {
-            has: userRole,
-          },
-        },
-      ],
-    },
-    include: {
-      userReads: {
-        where: {
+  try {
+    const { data, error } = await sbDb.rpc("get_updates_for_user", {
+      p_user_id: userId,
+      p_user_role: userRole,
+    });
+
+    if (error) throw error;
+
+    // Group rows by update ID and collect userRead info
+    const updatesMap = new Map<string, UpdateForUser>();
+
+    for (const row of (data as UpdateForUserRpcRow[]) ?? []) {
+      if (!updatesMap.has(row.id)) {
+        updatesMap.set(row.id, {
+          id: row.id,
+          title: row.title,
+          content: row.content,
+          url: row.url,
+          imageUrl: row.imageUrl,
+          publishDate: row.publishDate,
+          status: row.status as UpdateStatus,
+          targetRoles: row.targetRoles,
+          clickCount: row.clickCount,
+          viewCount: row.viewCount,
+          createdById: row.createdById,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          userReads: [],
+        });
+      }
+
+      if (row.userReadId) {
+        updatesMap.get(row.id)!.userReads.push({
+          id: row.userReadId,
           userId,
-        },
-      },
-    },
-    orderBy: {
-      publishDate: "desc",
-    },
-  });
+          updateId: row.id,
+          readAt: row.userReadAt!,
+        });
+      }
+    }
+
+    return Array.from(updatesMap.values());
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get updates for user",
+      additionalData: { userId, userRole },
+      label: "Update",
+    });
+  }
 }
 
 /**
  * Get unread count for a user
  */
-export function getUnreadCountForUser({
+export async function getUnreadCountForUser({
   userId,
   userRole,
 }: {
   userId: string;
   userRole: OrganizationRoles;
 }): Promise<number> {
-  return db.update.count({
-    where: {
-      status: UpdateStatus.PUBLISHED,
-      publishDate: {
-        lte: new Date(),
-      },
-      OR: [
-        // Updates with no role targeting (visible to all)
-        {
-          targetRoles: {
-            isEmpty: true,
-          },
-        },
-        // Updates that target the user's role
-        {
-          targetRoles: {
-            has: userRole,
-          },
-        },
-      ],
-      NOT: {
-        userReads: {
-          some: {
-            userId,
-          },
-        },
-      },
-    },
-  });
+  try {
+    const { data, error } = await sbDb.rpc("get_unread_update_count", {
+      p_user_id: userId,
+      p_user_role: userRole,
+    });
+
+    if (error) throw error;
+
+    return (data as number) ?? 0;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get unread update count",
+      additionalData: { userId, userRole },
+      label: "Update",
+    });
+  }
 }
 
 /**
@@ -130,30 +171,33 @@ export async function markUpdateAsRead({
   updateId: string;
   userId: string;
 }): Promise<void> {
-  await db.userUpdateRead.upsert({
-    where: {
-      userId_updateId: {
+  try {
+    // Upsert the read record
+    const { error: upsertError } = await sbDb.from("UserUpdateRead").upsert(
+      {
         userId,
         updateId,
-      },
-    },
-    create: {
-      userId,
-      updateId,
-    },
-    update: {
-      readAt: new Date(),
-    },
-  });
+        readAt: new Date().toISOString(),
+      } as Sb.UserUpdateReadInsert,
+      { onConflict: "userId,updateId" }
+    );
 
-  await db.update.update({
-    where: { id: updateId },
-    data: {
-      viewCount: {
-        increment: 1,
-      },
-    },
-  });
+    if (upsertError) throw upsertError;
+
+    // Increment view count via RPC
+    const { error: rpcError } = await sbDb.rpc("increment_update_view_count", {
+      update_id: updateId,
+    });
+
+    if (rpcError) throw rpcError;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to mark update as read",
+      additionalData: { updateId, userId },
+      label: "Update",
+    });
+  }
 }
 
 /**
@@ -166,64 +210,48 @@ export async function markAllUpdatesAsRead({
   userId: string;
   userRole: OrganizationRoles;
 }): Promise<void> {
-  // Get all unread updates for the user
-  const unreadUpdates = await db.update.findMany({
-    where: {
-      status: UpdateStatus.PUBLISHED,
-      publishDate: {
-        lte: new Date(),
-      },
-      OR: [
-        {
-          targetRoles: {
-            isEmpty: true,
-          },
-        },
-        {
-          targetRoles: {
-            has: userRole,
-          },
-        },
-      ],
-      NOT: {
-        userReads: {
-          some: {
-            userId,
-          },
-        },
-      },
-    },
-    select: {
-      id: true,
-    },
-  });
+  try {
+    // Get all unread update IDs via RPC
+    const { data: unreadIds, error: idsError } = await sbDb.rpc(
+      "get_unread_update_ids",
+      {
+        p_user_id: userId,
+        p_user_role: userRole,
+      }
+    );
 
-  if (unreadUpdates.length === 0) return;
+    if (idsError) throw idsError;
 
-  // Mark all as read and increment view counts
-  await db.$transaction(async (prisma) => {
+    const ids = (unreadIds as string[]) ?? [];
+    if (ids.length === 0) return;
+
     // Create read records for all unread updates
-    await prisma.userUpdateRead.createMany({
-      data: unreadUpdates.map((update) => ({
-        userId,
-        updateId: update.id,
-      })),
-    });
+    const readRecords = ids.map((updateId) => ({
+      userId,
+      updateId,
+    })) as Sb.UserUpdateReadInsert[];
 
-    // Increment view count for all updates
-    await prisma.update.updateMany({
-      where: {
-        id: {
-          in: unreadUpdates.map((update) => update.id),
-        },
-      },
-      data: {
-        viewCount: {
-          increment: 1,
-        },
-      },
+    const { error: insertError } = await sbDb
+      .from("UserUpdateRead")
+      .insert(readRecords);
+
+    if (insertError) throw insertError;
+
+    // Increment view count for all updates via bulk RPC
+    const { error: rpcError } = await sbDb.rpc(
+      "increment_update_view_count_bulk",
+      { update_ids: ids }
+    );
+
+    if (rpcError) throw rpcError;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to mark all updates as read",
+      additionalData: { userId, userRole },
+      label: "Update",
     });
-  });
+  }
 }
 
 /**
@@ -234,14 +262,20 @@ export async function trackUpdateView({
 }: {
   updateId: string;
 }): Promise<void> {
-  await db.update.update({
-    where: { id: updateId },
-    data: {
-      viewCount: {
-        increment: 1,
-      },
-    },
-  });
+  try {
+    const { error } = await sbDb.rpc("increment_update_view_count", {
+      update_id: updateId,
+    });
+
+    if (error) throw error;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to track update view",
+      additionalData: { updateId },
+      label: "Update",
+    });
+  }
 }
 
 /**
@@ -252,14 +286,20 @@ export async function trackUpdateClick({
 }: {
   updateId: string;
 }): Promise<void> {
-  await db.update.update({
-    where: { id: updateId },
-    data: {
-      clickCount: {
-        increment: 1,
-      },
-    },
-  });
+  try {
+    const { error } = await sbDb.rpc("increment_update_click_count", {
+      update_id: updateId,
+    });
+
+    if (error) throw error;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to track update click",
+      additionalData: { updateId },
+      label: "Update",
+    });
+  }
 }
 
 // ===== ADMIN FUNCTIONS =====
@@ -267,51 +307,121 @@ export async function trackUpdateClick({
 /**
  * Get a single update by ID for admin editing
  */
-export function getUpdateById(id: string): Promise<UpdateWithRelations | null> {
-  return db.update.findUnique({
-    where: { id },
-    include: {
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      userReads: true,
+export async function getUpdateById(
+  id: string
+): Promise<UpdateWithRelations | null> {
+  try {
+    // Fetch the update
+    const { data: update, error } = await sbDb
+      .from("Update")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!update) return null;
+
+    // Fetch createdBy user
+    const { data: createdBy, error: userError } = await sbDb
+      .from("User")
+      .select("id, firstName, lastName")
+      .eq("id", update.createdById)
+      .single();
+
+    if (userError) throw userError;
+
+    // Fetch userReads for this update
+    const { data: userReads, error: readsError } = await sbDb
+      .from("UserUpdateRead")
+      .select("*")
+      .eq("updateId", id);
+
+    if (readsError) throw readsError;
+
+    return {
+      ...update,
+      createdBy,
+      userReads: userReads ?? [],
       _count: {
-        select: {
-          userReads: true,
-        },
+        userReads: (userReads ?? []).length,
       },
-    },
-  });
+    } as UpdateWithRelations;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get update by ID",
+      additionalData: { id },
+      label: "Update",
+    });
+  }
 }
 
 /**
  * Get all updates for admin dashboard with analytics
  */
-export function getAllUpdatesForAdmin(): Promise<UpdateWithRelations[]> {
-  return db.update.findMany({
-    include: {
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
+export async function getAllUpdatesForAdmin(): Promise<UpdateWithRelations[]> {
+  try {
+    // Fetch all updates
+    const { data: updates, error } = await sbDb
+      .from("Update")
+      .select("*")
+      .order("publishDate", { ascending: false });
+
+    if (error) throw error;
+
+    if (!updates || updates.length === 0) return [];
+
+    // Fetch all createdBy users in a single query
+    const creatorIds = [...new Set(updates.map((u) => u.createdById))];
+    const { data: creators, error: creatorsError } = await sbDb
+      .from("User")
+      .select("id, firstName, lastName")
+      .in("id", creatorIds);
+
+    if (creatorsError) throw creatorsError;
+
+    const creatorsById = new Map((creators ?? []).map((c) => [c.id, c]));
+
+    // Fetch all userReads in a single query
+    const updateIds = updates.map((u) => u.id);
+    const { data: allUserReads, error: readsError } = await sbDb
+      .from("UserUpdateRead")
+      .select("*")
+      .in("updateId", updateIds);
+
+    if (readsError) throw readsError;
+
+    // Group userReads by updateId
+    const readsByUpdateId = new Map<string, Sb.UserUpdateReadRow[]>();
+    for (const read of allUserReads ?? []) {
+      const existing = readsByUpdateId.get(read.updateId) ?? [];
+      existing.push(read);
+      readsByUpdateId.set(read.updateId, existing);
+    }
+
+    return updates.map((update) => {
+      const userReads = readsByUpdateId.get(update.id) ?? [];
+      const createdBy = creatorsById.get(update.createdById) ?? {
+        id: update.createdById,
+        firstName: null,
+        lastName: null,
+      };
+      return {
+        ...update,
+        createdBy,
+        userReads,
+        _count: {
+          userReads: userReads.length,
         },
-      },
-      userReads: true,
-      _count: {
-        select: {
-          userReads: true,
-        },
-      },
-    },
-    orderBy: {
-      publishDate: "desc",
-    },
-  });
+      } as UpdateWithRelations;
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get all updates for admin",
+      label: "Update",
+    });
+  }
 }
 
 /**

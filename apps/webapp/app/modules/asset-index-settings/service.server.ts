@@ -10,7 +10,6 @@ import {
   fixedFields,
   generateBarcodeColumns,
 } from "./helpers";
-import { getOrganizationById } from "../organization/service.server";
 
 /**
  * Re-export the Supabase row type so consumers can reference it without
@@ -51,11 +50,15 @@ export async function createUserAssetIndexSettings({
   role?: OrganizationRoles;
 }) {
   try {
-    const org = await getOrganizationById(organizationId, {
-      customFields: {
-        where: { active: true, deletedAt: null },
-      },
-    });
+    // Fetch active custom fields for the organization separately
+    const { data: customFields, error: cfError } = await sbDb
+      .from("CustomField")
+      .select("name, type")
+      .eq("organizationId", organizationId)
+      .eq("active", true)
+      .is("deletedAt", null);
+
+    if (cfError) throw cfError;
 
     /** We start at the default fields length */
     let position = defaultFields.length - 1;
@@ -64,7 +67,7 @@ export async function createUserAssetIndexSettings({
     const barcodeColumns = canUseBarcodes ? generateBarcodeColumns() : [];
     position += barcodeColumns.length;
 
-    const customFieldsColumns = org.customFields.map((cf) => {
+    const customFieldsColumns = (customFields ?? []).map((cf) => {
       /** We increment the position for each custom field */
       position += 1;
       return {

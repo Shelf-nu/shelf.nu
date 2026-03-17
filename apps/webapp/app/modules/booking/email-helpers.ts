@@ -1,4 +1,5 @@
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
+import { sbDb } from "~/database/supabase.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
@@ -8,7 +9,14 @@ import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { BOOKING_INCLUDE_FOR_EMAIL } from "./constants";
+
+/** Shape returned by the Supabase booking-for-email query in sendBookingUpdatedEmail */
+type BookingUpdatedRow = Sb.BookingRow & {
+  custodianUser: Sb.UserRow | null;
+  custodianTeamMember: Sb.TeamMemberRow | null;
+  organization: Sb.OrganizationRow & { owner: Pick<Sb.UserRow, "email"> };
+  _count: { assets: number };
+};
 
 type BasicEmailContentArgs = {
   bookingName: string;
@@ -245,12 +253,36 @@ export async function sendBookingUpdatedEmail({
   try {
     if (changes.length === 0) return;
 
-    const booking = await db.booking.findUnique({
-      where: { id: bookingId, organizationId },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    });
+    const { data: bookingRow, error: bookingError } = await sbDb
+      .from("Booking")
+      .select(
+        "*, custodianTeamMember:TeamMember(*), custodianUser:User(*), organization:Organization(*, owner:User(email))"
+      )
+      .eq("id", bookingId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
 
-    if (!booking) return;
+    if (bookingError) throw bookingError;
+    if (!bookingRow) return;
+
+    // Compute asset count separately (Supabase has no _count equivalent)
+    const { count: assetsCount, error: countError } = await sbDb
+      .from("_AssetToBooking")
+      .select("*", { count: "exact", head: true })
+      .eq("B", bookingId);
+
+    if (countError) throw countError;
+
+    const booking: BookingUpdatedRow = {
+      ...(bookingRow as unknown as Sb.BookingRow & {
+        custodianUser: Sb.UserRow | null;
+        custodianTeamMember: Sb.TeamMemberRow | null;
+        organization: Sb.OrganizationRow & {
+          owner: Pick<Sb.UserRow, "email">;
+        };
+      }),
+      _count: { assets: assetsCount ?? 0 },
+    };
 
     const custodian = booking.custodianUser
       ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
@@ -262,8 +294,8 @@ export async function sendBookingUpdatedEmail({
       bookingName: booking.name,
       assetsCount: booking._count.assets,
       custodian,
-      from: booking.from!,
-      to: booking.to!,
+      from: new Date(booking.from),
+      to: new Date(booking.to),
       bookingId: booking.id,
       hints,
       customEmailFooter: booking.organization.customEmailFooter,
@@ -272,7 +304,7 @@ export async function sendBookingUpdatedEmail({
     const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
 
     const html = await bookingUpdatesTemplateString({
-      booking,
+      booking: booking as unknown as BookingForEmail,
       heading: `Your booking "${booking.name}" has been updated`,
       assetCount: booking._count.assets,
       hints,
@@ -295,10 +327,13 @@ export async function sendBookingUpdatedEmail({
     // so we use the email directly)
     if (oldCustodianEmail) {
       // Look up the old custodian's user to check if they are the editor
-      const oldCustodianUser = await db.user.findUnique({
-        where: { email: oldCustodianEmail },
-        select: { id: true },
-      });
+      const { data: oldCustodianUser, error: oldCustodianError } = await sbDb
+        .from("User")
+        .select("id")
+        .eq("email", oldCustodianEmail)
+        .maybeSingle();
+
+      if (oldCustodianError) throw oldCustodianError;
 
       if (!oldCustodianUser || oldCustodianUser.id !== userId) {
         sendEmail({

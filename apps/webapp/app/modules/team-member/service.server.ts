@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { Sb } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -12,6 +11,75 @@ import { Logger } from "~/utils/logger";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
+
+/**
+ * Map from Prisma relation field names on TeamMember to Supabase foreign table names.
+ * Used when converting Prisma select/include objects to Supabase select strings.
+ */
+const RELATION_TABLE_MAP: Record<string, string> = {
+  user: "User",
+  organization: "Organization",
+  custodies: "Custody",
+  receivedInvites: "Invite",
+  kitCustodies: "KitCustody",
+  bookings: "Booking",
+  assetReminders: "AssetReminder",
+};
+
+/**
+ * Converts a Prisma select or include object into a Supabase select string.
+ *
+ * For `select`: only listed fields are returned.
+ *   e.g. `{ id: true, name: true, user: { select: { id: true, email: true } } }`
+ *   → `"id, name, user:User(id, email)"`
+ *
+ * For `include`: all columns plus listed relations.
+ *   e.g. `{ user: true }` → `"*, user:User(*)""`
+ */
+function buildSupabaseSelect(
+  select?: Record<string, unknown>,
+  include?: Record<string, unknown>
+): string {
+  if (include) {
+    const relations = Object.entries(include)
+      .filter(([, v]) => v)
+      .map(([key]) => {
+        const table = RELATION_TABLE_MAP[key] ?? key;
+        return `${key}:${table}(*)`;
+      });
+    return ["*", ...relations].join(", ");
+  }
+
+  if (select) {
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(select)) {
+      if (!value) continue;
+
+      if (typeof value === "object" && value !== null) {
+        // Nested relation select, e.g. user: { select: { id: true } }
+        const nested = (value as Record<string, unknown>).select as
+          | Record<string, unknown>
+          | undefined;
+        const table = RELATION_TABLE_MAP[key] ?? key;
+        if (nested) {
+          const nestedFields = Object.entries(nested)
+            .filter(([, v]) => v)
+            .map(([k]) => k)
+            .join(", ");
+          parts.push(`${key}:${table}(${nestedFields})`);
+        } else {
+          parts.push(`${key}:${table}(*)`);
+        }
+      } else {
+        // Scalar field
+        parts.push(key);
+      }
+    }
+    return parts.join(", ");
+  }
+
+  return "*";
+}
 
 type TeamMemberWithUserData = Sb.TeamMemberRow & {
   user: {
@@ -549,22 +617,26 @@ export async function getTeamMember<
       });
     }
 
-    const queryOptions: Prisma.TeamMemberFindUniqueOrThrowArgs = {
-      where: { id, organizationId },
-    };
-    if (select) {
-      queryOptions.select = select;
-    } else if (include) {
-      queryOptions.include = include;
-    }
-    const teamMember = await db.teamMember.findUniqueOrThrow(queryOptions);
+    const selectString = buildSupabaseSelect(
+      select as Record<string, unknown> | undefined,
+      include as Record<string, unknown> | undefined
+    );
+
+    const { data: teamMember, error } = await sbDb
+      .from("TeamMember")
+      .select(selectString)
+      .eq("id", id)
+      .eq("organizationId", organizationId)
+      .single();
+
+    if (error) throw error;
 
     if (select) {
-      return teamMember as TeamMemberWithSelect<S>;
+      return teamMember as unknown as TeamMemberWithSelect<S>;
     }
 
     if (include) {
-      return teamMember as TeamMemberWithInclude<I>;
+      return teamMember as unknown as TeamMemberWithInclude<I>;
     }
 
     return teamMember as unknown as Sb.TeamMemberRow;

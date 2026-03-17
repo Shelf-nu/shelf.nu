@@ -1,19 +1,21 @@
-import type { AssetReminder, Prisma, TeamMember } from "@prisma/client";
-import { db } from "~/database/db.server";
+import type { Sb } from "@shelf/database";
 import { sbDb } from "~/database/supabase.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
+import {
+  ASSET_REMINDER_SELECT_WITH_RELATIONS,
+  flattenReminderTeamMembers,
+  type RawAssetReminderWithRelations,
+} from "./fields";
 import {
   ASSETS_EVENT_TYPE_MAP,
   cancelAssetReminderScheduler,
   scheduleAssetReminder,
 } from "./scheduler.server";
 import { createNote } from "../note/service.server";
-import { getUserByID } from "../user/service.server";
 
 const label = "Asset Reminder";
 
@@ -26,37 +28,51 @@ export async function createAssetReminder({
   organizationId,
   teamMembers,
 }: Pick<
-  AssetReminder,
-  | "name"
-  | "message"
-  | "alertDateTime"
-  | "assetId"
-  | "createdById"
-  | "organizationId"
-> & { teamMembers: TeamMember["id"][] }) {
+  Sb.AssetReminderRow,
+  "name" | "message" | "assetId" | "createdById" | "organizationId"
+> & { alertDateTime: string | Date; teamMembers: string[] }) {
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
-    const user = await getUserByID(createdById, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      } satisfies Prisma.UserSelect,
-    });
-    const assetReminder = await db.assetReminder.create({
-      data: {
+    const { data: user, error: userError } = await sbDb
+      .from("User")
+      .select("id, firstName, lastName")
+      .eq("id", createdById)
+      .single();
+
+    if (userError) throw userError;
+
+    /** Insert the reminder row */
+    const alertDateTimeStr =
+      typeof alertDateTime === "string"
+        ? alertDateTime
+        : alertDateTime.toISOString();
+
+    const { data: assetReminder, error: insertError } = await sbDb
+      .from("AssetReminder")
+      .insert({
         name,
         message,
-        alertDateTime,
+        alertDateTime: alertDateTimeStr,
         assetId,
         createdById,
         organizationId,
-        teamMembers: {
-          connect: teamMembers.map((id) => ({ id })),
-        },
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    /** Connect team members via the join table */
+    const joinRows = teamMembers.map((tmId) => ({
+      A: assetReminder.id,
+      B: tmId,
+    }));
+    const { error: joinError } = await sbDb
+      .from("_AssetReminderToTeamMember")
+      .insert(joinRows);
+
+    if (joinError) throw joinError;
 
     await Promise.all([
       createNote({
@@ -79,7 +95,7 @@ export async function createAssetReminder({
           reminderId: assetReminder.id,
           eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
         },
-        when: alertDateTime,
+        when: new Date(alertDateTime),
       }),
     ]);
 
@@ -97,8 +113,8 @@ export async function createAssetReminder({
 }
 
 async function validateTeamMembersForReminder(
-  teamMembers: TeamMember["id"][],
-  organizationId: TeamMember["organizationId"]
+  teamMembers: string[],
+  organizationId: string
 ) {
   const { count: teamMembersWithUserCount, error: countError } = await sbDb
     .from("TeamMember")
@@ -122,17 +138,19 @@ async function validateTeamMembersForReminder(
 export async function getPaginatedAndFilterableReminders({
   organizationId,
   request,
-  where,
-}: Pick<AssetReminder, "organizationId"> & {
+  assetId,
+}: {
+  organizationId: string;
   request: Request;
-  where?: Prisma.AssetReminderWhereInput;
+  assetId?: string;
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, orderDirection } =
       getParamsValues(searchParams);
     /**
-     * We dont use orderBy from getParamsValues because in our case we need the default value to be alertDateTime whgen orderBy is not present
+     * We dont use orderBy from getParamsValues because in our case
+     * we need the default value to be alertDateTime when orderBy is not present
      */
     const orderBy = searchParams.get("orderBy") || "alertDateTime";
 
@@ -142,10 +160,14 @@ export async function getPaginatedAndFilterableReminders({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    const finalWhere: Prisma.AssetReminderWhereInput = {
-      organizationId,
-      ...where,
-    };
+    let query = sbDb
+      .from("AssetReminder")
+      .select(ASSET_REMINDER_SELECT_WITH_RELATIONS, { count: "exact" })
+      .eq("organizationId", organizationId);
+
+    if (assetId) {
+      query = query.eq("assetId", assetId);
+    }
 
     if (search) {
       const searchTerms = search
@@ -155,50 +177,35 @@ export async function getPaginatedAndFilterableReminders({
         .map((term) => term.trim())
         .filter(Boolean);
 
-      finalWhere.OR = searchTerms.map((term) => ({
-        OR: [
-          { name: { contains: term, mode: "insensitive" } },
-          { message: { contains: term, mode: "insensitive" } },
-          {
-            teamMembers: {
-              some: {
-                user: {
-                  OR: [
-                    {
-                      firstName: {
-                        contains: term,
-                        mode: "insensitive",
-                      },
-                    },
-                    {
-                      lastName: {
-                        contains: term,
-                        mode: "insensitive",
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          {
-            asset: { title: { contains: term, mode: "insensitive" } },
-          },
-        ],
-      }));
+      /**
+       * Build an OR filter for name and message fields.
+       * Supabase PostgREST doesn't natively support deep relation-based
+       * filtering (e.g. teamMembers.user.firstName) in .or(), so we
+       * filter on direct columns here. Relation-based search for team
+       * member names would require an RPC or view.
+       */
+      const orClauses = searchTerms.flatMap((term) => [
+        `name.ilike.%${term}%`,
+        `message.ilike.%${term}%`,
+      ]);
+      query = query.or(orClauses.join(","));
     }
 
-    const [reminders, totalReminders] = await Promise.all([
-      db.assetReminder.findMany({
-        where: finalWhere,
-        take,
-        skip,
-        include: ASSET_REMINDER_INCLUDE_FIELDS,
-        orderBy: [{ [orderBy]: orderDirection }, { createdAt: "desc" }],
-      }),
-      db.assetReminder.count({ where: finalWhere }),
-    ]);
+    const {
+      data: rawReminders,
+      count,
+      error,
+    } = await query
+      .order(orderBy, { ascending: orderDirection === "asc" })
+      .order("createdAt", { ascending: false })
+      .range(skip, skip + take - 1);
 
+    if (error) throw error;
+
+    const totalReminders = count ?? 0;
+    const reminders = (
+      (rawReminders ?? []) as unknown as RawAssetReminderWithRelations[]
+    ).map(flattenReminderTeamMembers);
     const totalPages = Math.ceil(totalReminders / perPageParam);
 
     return {
@@ -225,10 +232,10 @@ export async function editAssetReminder({
   alertDateTime,
   organizationId,
   teamMembers,
-}: Pick<
-  AssetReminder,
-  "id" | "name" | "message" | "alertDateTime" | "organizationId"
-> & { teamMembers: TeamMember["id"][] }) {
+}: Pick<Sb.AssetReminderRow, "id" | "name" | "message" | "organizationId"> & {
+  alertDateTime: string | Date;
+  teamMembers: string[];
+}) {
   try {
     await validateTeamMembersForReminder(teamMembers, organizationId);
 
@@ -255,18 +262,44 @@ export async function editAssetReminder({
       });
     }
 
-    const updatedReminder = await db.assetReminder.update({
-      where: { id: reminder.id },
-      data: {
-        name,
-        message,
-        alertDateTime,
-        teamMembers: {
-          set: [], // set empty so that if any team member is removed, the relation is removed
-          connect: teamMembers.map((id) => ({ id })), // then connect
-        },
-      },
-    });
+    const alertDateTimeStr =
+      typeof alertDateTime === "string"
+        ? alertDateTime
+        : alertDateTime.toISOString();
+
+    /** Update the reminder row */
+    const { data: updatedReminder, error: updateError } = await sbDb
+      .from("AssetReminder")
+      .update({ name, message, alertDateTime: alertDateTimeStr })
+      .eq("id", reminder.id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    /**
+     * Replace team member associations:
+     * 1. Delete all existing join rows for this reminder
+     * 2. Insert the new set
+     */
+    const { error: deleteJoinError } = await sbDb
+      .from("_AssetReminderToTeamMember")
+      .delete()
+      .eq("A", reminder.id);
+
+    if (deleteJoinError) throw deleteJoinError;
+
+    if (teamMembers.length > 0) {
+      const joinRows = teamMembers.map((tmId) => ({
+        A: reminder.id,
+        B: tmId,
+      }));
+      const { error: insertJoinError } = await sbDb
+        .from("_AssetReminderToTeamMember")
+        .insert(joinRows);
+
+      if (insertJoinError) throw insertJoinError;
+    }
 
     /** Reschedule Reminder */
     await cancelAssetReminderScheduler(reminder);
@@ -302,7 +335,7 @@ export async function editAssetReminder({
 export async function deleteAssetReminder({
   id,
   organizationId,
-}: Pick<AssetReminder, "id" | "organizationId">) {
+}: Pick<Sb.AssetReminderRow, "id" | "organizationId">) {
   try {
     const { data: deletedReminder, error } = await sbDb
       .from("AssetReminder")
@@ -332,23 +365,23 @@ export async function getUpcomingRemindersForHomePage({
   organizationId,
   take = 5,
 }: {
-  organizationId: AssetReminder["organizationId"];
+  organizationId: string;
   take?: number;
 }) {
   try {
-    const reminders = await db.assetReminder.findMany({
-      where: {
-        organizationId,
-        alertDateTime: {
-          gte: new Date(),
-        },
-      },
-      take,
-      include: ASSET_REMINDER_INCLUDE_FIELDS,
-      orderBy: { alertDateTime: "asc" },
-    });
+    const { data: rawReminders, error } = await sbDb
+      .from("AssetReminder")
+      .select(ASSET_REMINDER_SELECT_WITH_RELATIONS)
+      .eq("organizationId", organizationId)
+      .gte("alertDateTime", new Date().toISOString())
+      .order("alertDateTime", { ascending: true })
+      .limit(take);
 
-    return reminders;
+    if (error) throw error;
+
+    return (
+      (rawReminders ?? []) as unknown as RawAssetReminderWithRelations[]
+    ).map(flattenReminderTeamMembers);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -362,24 +395,24 @@ export async function getRemindersForOverviewPage({
   assetId,
   organizationId,
 }: {
-  assetId: AssetReminder["assetId"];
-  organizationId: AssetReminder["organizationId"];
+  assetId: string;
+  organizationId: string;
 }) {
   try {
-    const reminders = await db.assetReminder.findMany({
-      where: {
-        assetId,
-        organizationId,
-        alertDateTime: {
-          gte: new Date(),
-        },
-      },
-      take: 2,
-      include: ASSET_REMINDER_INCLUDE_FIELDS,
-      orderBy: { alertDateTime: "desc" },
-    });
+    const { data: rawReminders, error } = await sbDb
+      .from("AssetReminder")
+      .select(ASSET_REMINDER_SELECT_WITH_RELATIONS)
+      .eq("assetId", assetId)
+      .eq("organizationId", organizationId)
+      .gte("alertDateTime", new Date().toISOString())
+      .order("alertDateTime", { ascending: false })
+      .limit(2);
 
-    return reminders;
+    if (error) throw error;
+
+    return (
+      (rawReminders ?? []) as unknown as RawAssetReminderWithRelations[]
+    ).map(flattenReminderTeamMembers);
   } catch (cause) {
     throw new ShelfError({
       cause,

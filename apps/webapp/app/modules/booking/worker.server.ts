@@ -1,18 +1,17 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import type PgBoss from "pg-boss";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import type { BookingForEmail } from "~/emails/types";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import {
-  BOOKING_INCLUDE_FOR_EMAIL,
-  BOOKING_SCHEDULER_EVENTS_ENUM,
-} from "./constants";
+import { BOOKING_SCHEDULER_EVENTS_ENUM } from "./constants";
 import {
   checkoutReminderEmailContent,
   overdueBookingEmailContent,
@@ -25,26 +24,71 @@ import {
 import type { SchedulerData } from "./types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 
+/** Shape returned by the Supabase booking-for-email query */
+type BookingEmailRow = Sb.BookingRow & {
+  custodianUser: Sb.UserRow | null;
+  custodianTeamMember: Sb.TeamMemberRow | null;
+  organization: Sb.OrganizationRow & { owner: Pick<Sb.UserRow, "email"> };
+  _count: { assets: number };
+};
+
+const BOOKING_EMAIL_SELECT =
+  "*, custodianTeamMember:TeamMember(*), custodianUser:User(*), organization:Organization(*, owner:User(email))";
+
+/** Fetch a booking with the relations needed for email templates */
+async function fetchBookingForEmail(
+  bookingId: string
+): Promise<BookingEmailRow | null> {
+  const { data: bookingRow, error: bookingError } = await sbDb
+    .from("Booking")
+    .select(BOOKING_EMAIL_SELECT)
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) throw bookingError;
+  if (!bookingRow) return null;
+
+  const { count: assetsCount, error: countError } = await sbDb
+    .from("_AssetToBooking")
+    .select("*", { count: "exact", head: true })
+    .eq("B", bookingId);
+
+  if (countError) throw countError;
+
+  return {
+    ...(bookingRow as unknown as Sb.BookingRow & {
+      custodianUser: Sb.UserRow | null;
+      custodianTeamMember: Sb.TeamMemberRow | null;
+      organization: Sb.OrganizationRow & { owner: Pick<Sb.UserRow, "email"> };
+    }),
+    _count: { assets: assetsCount ?? 0 },
+  };
+}
+
 const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking not found",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
+  const booking = await fetchBookingForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Booking not found",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
     });
+  });
+
+  if (!booking) {
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
+    });
+  }
 
   const email = booking.custodianUser?.email;
 
   if (email && booking.from && booking.to) {
     const html = await bookingUpdatesTemplateString({
-      booking,
+      booking: booking as unknown as BookingForEmail,
       heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
         new Date(booking.from),
         new Date()
@@ -62,8 +106,8 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         custodian:
           `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
           (booking.custodianTeamMember?.name as string),
-        from: booking.from,
-        to: booking.to,
+        from: new Date(booking.from),
+        to: new Date(booking.to),
         bookingId: booking.id,
         hints: data.hints,
         customEmailFooter: booking.organization.customEmailFooter,
@@ -74,19 +118,23 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 };
 
 const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .findFirstOrThrow({
-      where: { id: data.id },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking not found",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
+  const booking = await fetchBookingForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Booking not found",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
     });
+  });
+
+  if (!booking) {
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
+    });
+  }
 
   const email = booking.custodianUser?.email;
 
@@ -99,7 +147,11 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
     booking.to &&
     booking.status === BookingStatus.ONGOING
   ) {
-    await sendCheckinReminder(booking, booking._count.assets, data.hints);
+    await sendCheckinReminder(
+      booking as unknown as BookingForEmail,
+      booking._count.assets,
+      data.hints
+    );
   }
 
   //schedule the next job
@@ -118,20 +170,33 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 };
 
 const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
-  const booking = await db.booking
-    .update({
-      where: { id: data.id, status: BookingStatus.ONGOING },
-      data: { status: BookingStatus.OVERDUE },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Booking update failed",
-        additionalData: { data, work: data.eventType },
-        label: "Booking",
-      });
+  // Update booking status to OVERDUE (only if currently ONGOING)
+  const { error: updateError } = await sbDb
+    .from("Booking")
+    .update({ status: "OVERDUE" })
+    .eq("id", data.id)
+    .eq("status", "ONGOING");
+
+  if (updateError) {
+    throw new ShelfError({
+      cause: updateError,
+      message: "Booking update failed",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
     });
+  }
+
+  // Fetch the updated booking with relations for email
+  const booking = await fetchBookingForEmail(data.id).catch((cause) => {
+    throw new ShelfError({
+      cause,
+      message: "Booking not found after update",
+      additionalData: { data, work: data.eventType },
+      label: "Booking",
+    });
+  });
+
+  if (!booking) return;
 
   /** Check this just in case  */
   if (booking.status !== BookingStatus.OVERDUE) {
@@ -161,7 +226,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
   if (email) {
     const html = await bookingUpdatesTemplateString({
-      booking,
+      booking: booking as unknown as BookingForEmail,
       heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
       assetCount: booking._count.assets,
       hints: data.hints,
@@ -176,8 +241,8 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         custodian:
           `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
           (booking.custodianTeamMember?.name as string),
-        from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it must have a from and to date
-        to: booking.to as Date,
+        from: new Date(booking.from), // We can safely use this as we know the booking is overdue so it must have a from and to date
+        to: new Date(booking.to),
         bookingId: booking.id,
         hints: data.hints,
         customEmailFooter: booking.organization.customEmailFooter,
@@ -190,15 +255,13 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   try {
     // Fetch the booking to check if it's still in COMPLETE status
-    const booking = await db.booking.findUnique({
-      where: { id: data.id },
-      select: {
-        id: true,
-        status: true,
-        custodianUserId: true,
-        organizationId: true,
-      },
-    });
+    const { data: booking, error: fetchError } = await sbDb
+      .from("Booking")
+      .select("id, status, custodianUserId, organizationId")
+      .eq("id", data.id)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
 
     if (!booking) {
       Logger.warn(
@@ -217,10 +280,13 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     }
 
     // Check if auto-archive is still enabled for this organization
-    const bookingSettings = await db.bookingSettings.findUnique({
-      where: { organizationId: booking.organizationId },
-      select: { autoArchiveBookings: true },
-    });
+    const { data: bookingSettings, error: settingsError } = await sbDb
+      .from("BookingSettings")
+      .select("autoArchiveBookings")
+      .eq("organizationId", booking.organizationId)
+      .maybeSingle();
+
+    if (settingsError) throw settingsError;
 
     if (!bookingSettings?.autoArchiveBookings) {
       Logger.info(
@@ -232,15 +298,22 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     // Archive the booking atomically — include status in where clause
     // to prevent race with concurrent manual archive (TOCTOU)
     const now = new Date();
-    const updatedBooking = await db.booking
+    const { data: updatedBooking, error: archiveError } = await sbDb
+      .from("Booking")
       .update({
-        where: { id: booking.id, status: BookingStatus.COMPLETE },
-        data: {
-          status: BookingStatus.ARCHIVED,
-          autoArchivedAt: now,
-        },
+        status: "ARCHIVED",
+        autoArchivedAt: now.toISOString(),
       })
-      .catch(() => null);
+      .eq("id", booking.id)
+      .eq("status", "COMPLETE")
+      .select("id, status, custodianUserId")
+      .maybeSingle();
+
+    if (archiveError) {
+      Logger.warn(
+        `Auto-archive: Failed to archive booking ${data.id}: ${archiveError.message}`
+      );
+    }
 
     if (!updatedBooking) {
       Logger.info(

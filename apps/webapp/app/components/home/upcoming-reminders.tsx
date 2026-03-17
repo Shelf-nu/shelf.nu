@@ -1,4 +1,5 @@
 import { useLoaderData } from "react-router";
+import type { AssetReminderWithRelations } from "~/modules/asset-reminder/fields";
 import type { loader } from "~/routes/_layout+/home";
 import { ClickableTr } from "../dashboard/clickable-tr";
 import { DashboardEmptyState } from "../dashboard/empty-state";
@@ -7,12 +8,12 @@ import { DateS } from "../shared/date";
 
 import { Table, Td } from "../table";
 
-type ReminderItem = ReturnType<
-  typeof useLoaderData<typeof loader>
->["upcomingReminders"][number];
+type ReminderItem = AssetReminderWithRelations;
 
 export default function UpcomingReminders() {
-  const { upcomingReminders } = useLoaderData<typeof loader>();
+  const { upcomingReminders } = useLoaderData<typeof loader>() as ReturnType<
+    typeof useLoaderData<typeof loader>
+  > & { upcomingReminders: ReminderItem[] };
 
   return (
     <div className="flex h-full flex-col rounded border border-gray-200 bg-white">
