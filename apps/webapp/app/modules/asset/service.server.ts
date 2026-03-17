@@ -3156,18 +3156,24 @@ export async function refreshExpiredAssetImages<
         bucketName: "assets",
       });
 
-      // Refresh thumbnail if present
+      // Refresh thumbnail if present — isolated so failure doesn't block mainImage
       let newThumbnailUrl: string | null = null;
       if (asset.thumbnailImage) {
-        const thumbnailPath = extractStoragePath(
-          asset.thumbnailImage,
-          "assets"
-        );
-        if (thumbnailPath) {
-          newThumbnailUrl = await createSignedUrl({
-            filename: thumbnailPath,
-            bucketName: "assets",
-          });
+        try {
+          const thumbnailPath = extractStoragePath(
+            asset.thumbnailImage,
+            "assets"
+          );
+          if (thumbnailPath) {
+            newThumbnailUrl = await createSignedUrl({
+              filename: thumbnailPath,
+              bucketName: "assets",
+            });
+          }
+        } catch {
+          Logger.info(
+            `Failed to refresh thumbnail for asset ${asset.id}, proceeding with mainImage only`
+          );
         }
       }
 
@@ -3215,13 +3221,22 @@ export async function refreshExpiredAssetImages<
         return null;
       }
 
+      // Preserve shouldBeCaptured from original error if present
+      const shouldCapture =
+        error &&
+        typeof error === "object" &&
+        "shouldBeCaptured" in error &&
+        typeof error.shouldBeCaptured === "boolean"
+          ? error.shouldBeCaptured
+          : true;
+
       Logger.error(
         new ShelfError({
           cause: error,
           message: `Failed to refresh expired image URLs for asset ${asset.id}`,
           additionalData: { assetId: asset.id },
           label: "Assets",
-          shouldBeCaptured: true,
+          shouldBeCaptured: shouldCapture,
         })
       );
 
