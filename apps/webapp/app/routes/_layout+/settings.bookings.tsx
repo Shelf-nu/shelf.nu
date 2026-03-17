@@ -1,3 +1,4 @@
+import type { WorkingHoursOverride } from "@prisma/client";
 import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -497,7 +498,15 @@ export default function GeneralPage() {
         />
       )}
       {/* New weekly schedule form - only show if working hours are enabled */}
-      {workingHours.enabled && <Overrides overrides={workingHours.overrides} />}
+      {/* Cast needed: Supabase returns string dates, Prisma type expects Date objects.
+          At runtime the serialized loader data always has string dates anyway. */}
+      {workingHours.enabled && (
+        <Overrides
+          overrides={
+            workingHours.overrides as unknown as WorkingHoursOverride[]
+          }
+        />
+      )}
     </>
   );
 }

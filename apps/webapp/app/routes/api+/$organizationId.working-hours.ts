@@ -42,13 +42,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return data(
       payload({
-        workingHours: {
-          ...workingHours,
-          overrides: workingHours.overrides.map((override) => ({
-            ...override,
-            date: override.date.toISOString(),
-          })),
-        },
+        workingHours,
       })
     );
   } catch (cause) {

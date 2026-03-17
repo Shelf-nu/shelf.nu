@@ -55,7 +55,7 @@ export async function uploadAuditImage({
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
-}): Promise<AuditImage> {
+}) {
   try {
     // Check image count limits before uploading
     await validateImageLimits({

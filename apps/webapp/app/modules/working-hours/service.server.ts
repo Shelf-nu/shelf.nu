@@ -1,7 +1,10 @@
 import type { Sb } from "@shelf/database";
 import { sbDb } from "~/database/supabase.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import type { WeeklyScheduleForUpdate } from "./types";
+import type {
+  WeeklyScheduleForUpdate,
+  WorkingHoursWithOverrides,
+} from "./types";
 
 const label = "Working hours";
 
@@ -42,13 +45,18 @@ export async function getWorkingHoursForOrganization(organizationId: string) {
     if (fetchError) throw fetchError;
 
     if (existingWorkingHours) {
+      // Cast to proper type — Supabase generated types can't resolve the
+      // WorkingHours → WorkingHoursOverride relation automatically.
+      const typedResult =
+        existingWorkingHours as unknown as WorkingHoursWithOverrides;
+
       // Sort overrides by date ascending
-      if (existingWorkingHours.overrides) {
-        existingWorkingHours.overrides.sort(
+      if (typedResult.overrides) {
+        typedResult.overrides.sort(
           (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
         );
       }
-      return existingWorkingHours;
+      return typedResult;
     }
 
     return await createDefaultWorkingHours(organizationId);

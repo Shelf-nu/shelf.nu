@@ -93,7 +93,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
-    custodianUserId: defaultTeamMember?.user?.id,
+    custodianUserId: (defaultTeamMember?.user as any)?.id,
     organization: currentOrganization,
     currentUserId: userId,
   });

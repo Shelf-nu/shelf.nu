@@ -197,13 +197,13 @@ describe("calculateEffectiveEndDate", () => {
       overrides: [
         {
           id: "holiday",
-          date: new Date("2025-07-28"), // Monday is now closed (holiday) - absolute date
+          date: new Date("2025-07-28").toISOString(), // Monday is now closed (holiday) - absolute date
           isOpen: false,
           openTime: null,
           closeTime: null,
           reason: "Holiday",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
           workingHoursId: "working-hours-1",
         },
       ],
@@ -232,13 +232,13 @@ describe("calculateEffectiveEndDate", () => {
       overrides: [
         {
           id: "special",
-          date: new Date("2025-07-26"), // Saturday is now open (special day) - absolute date
+          date: new Date("2025-07-26").toISOString(), // Saturday is now open (special day) - absolute date
           isOpen: true,
           openTime: "10:00",
           closeTime: "16:00",
           reason: "Special event",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
           workingHoursId: "working-hours-1",
         },
       ],
@@ -364,13 +364,13 @@ describe("calculateBusinessHoursDuration", () => {
       overrides: [
         {
           id: "holiday",
-          date: new Date("2025-07-28"), // Monday is closed (holiday) - absolute date
+          date: new Date("2025-07-28").toISOString(), // Monday is closed (holiday) - absolute date
           isOpen: false,
           openTime: null,
           closeTime: null,
           reason: "Holiday",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
           workingHoursId: "working-hours-1",
         },
       ],
@@ -525,13 +525,13 @@ describe("getBookingDefaultStartEndTimes", () => {
       overrides: [
         {
           id: "today-closed",
-          date: new Date("2025-07-25"), // Today (Friday) is closed - absolute date
+          date: new Date("2025-07-25").toISOString(), // Today (Friday) is closed - absolute date
           isOpen: false,
           openTime: null,
           closeTime: null,
           reason: "Company event",
-          createdAt: new Date("2025-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
           workingHoursId: "working-hours-1",
         },
       ],

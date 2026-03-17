@@ -54,7 +54,7 @@ export default function NewCategoryForm({
 
     // Check if response is success (has category, not error)
     if (fetcher.data && "category" in fetcher.data) {
-      onSuccess(fetcher.data);
+      onSuccess(fetcher.data as any);
       fetcher.reset();
     }
   }, [fetcher, onSuccess]);

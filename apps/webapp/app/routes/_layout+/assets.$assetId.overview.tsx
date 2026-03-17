@@ -115,7 +115,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const lastScan = asset.qrCodes[0]?.id
       ? parseScanData({
-          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
+          scan:
+            ((await getScanByQrId({ qrId: asset.qrCodes[0].id })) as any) ||
+            null,
           userId,
         })
       : null;

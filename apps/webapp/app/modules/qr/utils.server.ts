@@ -1,8 +1,15 @@
-import type { Organization, Qr, User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import QRCode, {
   type TypeNumber,
   type ErrorCorrectionLevel,
 } from "qrcode-generator";
+
+/** Minimal QR data needed for code generation */
+interface QrData {
+  id: string;
+  version: number;
+  errorCorrection: string;
+}
 import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -24,7 +31,7 @@ export async function generateCode({
 }: {
   version: TypeNumber;
   errorCorrection: ErrorCorrectionLevel;
-  qr: Qr;
+  qr: QrData;
   size: "cable" | "small" | "medium" | "large";
 }) {
   const baseUrl = getQrBaseUrl();
@@ -68,8 +75,8 @@ export async function generateQrObj({
   userId,
   organizationId,
 }: {
-  kitId?: Qr["kitId"];
-  assetId?: Qr["assetId"];
+  kitId?: string | null;
+  assetId?: string | null;
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
@@ -82,7 +89,7 @@ export async function generateQrObj({
       });
     }
 
-    let qr: Qr | null = null;
+    let qr: QrData | null = null;
 
     if (assetId) {
       qr = await getQrByAssetId({ assetId });
@@ -125,10 +132,12 @@ export async function generateQrObj({
   }
 }
 
-export const belongsToCurrentUser = (qr: Qr, userId: User["id"]) =>
-  qr.userId === userId;
+export const belongsToCurrentUser = (
+  qr: { userId: string | null },
+  userId: User["id"]
+) => qr.userId === userId;
 
 export const belongsToCurrentUsersOrg = (
-  qr: Qr,
+  qr: { organizationId: string | null },
   orgs?: Organization[]
 ): boolean => Boolean(orgs?.find(({ id }) => id === qr.organizationId));

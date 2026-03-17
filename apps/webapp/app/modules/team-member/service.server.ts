@@ -1,5 +1,5 @@
-import type { Sb } from "@shelf/database";
 import type { Prisma } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
@@ -297,10 +297,12 @@ export async function getTeamMemberForCustodianFilter({
     const teamMembersSelected =
       selectedTeamMembers.length > 0 ? selectedResult.data ?? [] : [];
 
-    const teamMembers = [
-      ...teamMembersSelected,
-      ...teamMemberExcludedSelected,
-    ].sort((a, b) => {
+    const teamMembers = (
+      [
+        ...teamMembersSelected,
+        ...teamMemberExcludedSelected,
+      ] as unknown as TeamMemberWithUserData[]
+    ).sort((a, b) => {
       // First sort by whether they have a userId
       if (a.userId && !b.userId) return -1;
       if (!a.userId && b.userId) return 1;
@@ -383,11 +385,13 @@ export async function getTeamMemberForForm({
 
       if (error) throw error;
 
-      await fixTeamMembersNames(teamMember ? [teamMember] : []);
+      const typedTeamMember =
+        teamMember as unknown as TeamMemberWithUserData | null;
+      await fixTeamMembersNames(typedTeamMember ? [typedTeamMember] : []);
 
       return {
-        teamMembers: teamMember ? [teamMember] : [],
-        totalTeamMembers: teamMember ? 1 : 0,
+        teamMembers: typedTeamMember ? [typedTeamMember] : [],
+        totalTeamMembers: typedTeamMember ? 1 : 0,
       };
     }
 
@@ -418,7 +422,7 @@ export async function getTeamMemberForForm({
           .maybeSingle();
 
         if (error) throw error;
-        custodianTeamMember = data;
+        custodianTeamMember = data as unknown as TeamMemberWithUserData | null;
       } else if (custodianUserId) {
         const { data, error } = await sbDb
           .from("TeamMember")
@@ -430,7 +434,7 @@ export async function getTeamMemberForForm({
           .maybeSingle();
 
         if (error) throw error;
-        custodianTeamMember = data;
+        custodianTeamMember = data as unknown as TeamMemberWithUserData | null;
       }
 
       await fixTeamMembersNames(
@@ -518,15 +522,21 @@ export async function getTeamMember<T extends Prisma.TeamMemberSelect>(
 export async function getTeamMember<T extends Prisma.TeamMemberInclude>(
   args: GetTeamMemberArgsBase & { include: T; select?: never }
 ): Promise<TeamMemberWithInclude<T>>;
-export async function getTeamMember({
+
+export async function getTeamMember<
+  S extends Prisma.TeamMemberSelect | undefined = undefined,
+  I extends Prisma.TeamMemberInclude | undefined = undefined,
+>({
   id,
   organizationId,
   select,
   include,
 }: GetTeamMemberArgsBase & {
-  select?: Prisma.TeamMemberSelect;
-  include?: Prisma.TeamMemberInclude;
-}) {
+  select?: S;
+  include?: I;
+}): Promise<
+  Sb.TeamMemberRow | TeamMemberWithSelect<S> | TeamMemberWithInclude<I>
+> {
   try {
     if (select && include) {
       throw new ShelfError({
@@ -550,14 +560,14 @@ export async function getTeamMember({
     const teamMember = await db.teamMember.findUniqueOrThrow(queryOptions);
 
     if (select) {
-      return teamMember as TeamMemberWithSelect<typeof select>;
+      return teamMember as TeamMemberWithSelect<S>;
     }
 
     if (include) {
-      return teamMember as TeamMemberWithInclude<typeof include>;
+      return teamMember as TeamMemberWithInclude<I>;
     }
 
-    return teamMember as Sb.TeamMemberRow;
+    return teamMember as unknown as Sb.TeamMemberRow;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;

@@ -205,7 +205,7 @@ async function setKitCustodyAfterAssetImport({
 }: {
   data: CreateAssetFromContentImportPayload[];
   kits: Record<string, Kit>;
-  teamMembers: Record<string, TeamMember>;
+  teamMembers: Record<string, { id: string; name: string }>;
 }) {
   // Normalize kit/custodian names so padded CSV values still map to created records.
   const assetsWithKitAndCustodian = data
@@ -2634,7 +2634,7 @@ export async function createAssetsFromContentImport({
     await setKitCustodyAfterAssetImport({
       data,
       kits,
-      teamMembers,
+      teamMembers: teamMembers as Record<string, { id: string; name: string }>,
     });
 
     return true;

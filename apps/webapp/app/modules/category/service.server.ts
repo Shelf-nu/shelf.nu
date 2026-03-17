@@ -75,7 +75,7 @@ export async function getCategories(params: {
     // Transform the response to match the previous Prisma shape:
     // { ...category, _count: { assets: N } }
     const categories = (data ?? []).map((row) => {
-      const { Asset, ...rest } = row as Record<string, unknown> & {
+      const { Asset, ...rest } = row as unknown as Record<string, unknown> & {
         Asset: { count: number }[];
       };
       return {

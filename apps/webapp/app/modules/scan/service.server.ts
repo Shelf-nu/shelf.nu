@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
@@ -47,7 +49,7 @@ export async function createScan(params: {
 
     const { data: scan, error } = await sbDb
       .from("Scan")
-      .insert(insertData)
+      .insert(insertData as Sb.ScanInsert)
       .select()
       .single();
 
@@ -174,7 +176,7 @@ export async function createScanNote({
           select: {
             firstName: true,
             lastName: true,
-          },
+          } satisfies Prisma.UserSelect,
         });
         const actor = wrapUserLinkForNote({
           id: authenticatedUserId,

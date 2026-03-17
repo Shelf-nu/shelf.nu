@@ -1,9 +1,34 @@
-import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
 import parser from "ua-parser-js";
 import { ShelfError } from "~/utils/error";
 
+interface ScanUserOrganization {
+  organizationId: string;
+}
+
+interface ScanUser {
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+  userOrganizations: ScanUserOrganization[] | null;
+}
+
+interface ScanQr {
+  organizationId: string | null;
+}
+
+interface ScanData {
+  userId: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  userAgent: string | null;
+  createdAt: string | Date;
+  manuallyGenerated: boolean;
+  user: ScanUser | null;
+  qr: ScanQr | null;
+}
+
 function isValidUser(
-  userOrganizations: UserOrganization[] | null | undefined,
+  userOrganizations: ScanUserOrganization[] | null | undefined,
   organizationId: string | null | undefined
 ) {
   if (!userOrganizations || !organizationId) {
@@ -16,11 +41,7 @@ export function parseScanData({
   scan,
   userId,
 }: {
-  scan:
-    | (Scan & {
-        user: (User & { userOrganizations: UserOrganization[] | null }) | null;
-      } & { qr: Qr | null })
-    | null;
+  scan: ScanData | null;
   userId: string;
 }) {
   try {
