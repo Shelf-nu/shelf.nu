@@ -270,6 +270,7 @@ function ConditionalDropdown() {
 
             <DropdownMenuItem className="border-t md:hidden lg:p-0">
               <Button
+                type="button"
                 role="button"
                 variant="secondary"
                 className="flex items-center justify-center text-gray-700 hover:text-gray-700 "

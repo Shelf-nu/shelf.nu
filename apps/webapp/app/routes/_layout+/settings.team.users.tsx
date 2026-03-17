@@ -178,6 +178,7 @@ export default function UserTeamSetting() {
             <InviteUserDialog
               trigger={
                 <Button
+                  type="button"
                   className="mt-2 w-full md:mt-0 md:w-max"
                   variant="primary"
                 >

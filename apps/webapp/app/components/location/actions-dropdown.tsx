@@ -126,6 +126,7 @@ const ConditionalActionsDropdown = ({
               >
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
+                    type="button"
                     variant="link"
                     className="w-full justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
@@ -162,6 +163,7 @@ const ConditionalActionsDropdown = ({
                   location={location}
                   trigger={
                     <Button
+                      type="button"
                       variant="link"
                       data-test-id="deleteAssetButton"
                       icon="trash"
@@ -176,6 +178,7 @@ const ConditionalActionsDropdown = ({
 
               <div className="border-t p-4 md:hidden md:p-0">
                 <Button
+                  type="button"
                   role="button"
                   variant="secondary"
                   className="flex items-center justify-center text-gray-700 hover:text-gray-700"

@@ -310,6 +310,7 @@ export default function BookingsIndexPage({
           <CreateBookingDialog
             trigger={
               <Button
+                type="button"
                 aria-label="new booking"
                 data-test-id="createNewBooking"
                 prefetch="none"

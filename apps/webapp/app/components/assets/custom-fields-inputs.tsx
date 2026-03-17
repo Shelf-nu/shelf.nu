@@ -376,6 +376,7 @@ function OptionSelect({
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left"
             ref={triggerRef}

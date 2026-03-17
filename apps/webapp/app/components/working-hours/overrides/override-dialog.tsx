@@ -33,6 +33,7 @@ export function NewOverrideDialog() {
   return (
     <>
       <Button
+        type="button"
         variant="secondary"
         onClick={handleOpenDialog}
         disabled={disabled}

@@ -14,9 +14,11 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -29,6 +31,7 @@ import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
   getPaginatedAndFilterableAssets,
+  refreshExpiredAssetImages,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
 import { getAllSelectedValuesFromFilters } from "./utils.server";
@@ -206,6 +209,21 @@ export async function simpleModeLoader({
     : null;
 
   assets = await updateAssetsWithBookingCustodians(assets);
+
+  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  try {
+    assets = await refreshExpiredAssetImages(assets);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to batch refresh expired asset images",
+        label: "Assets",
+        additionalData: { assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
+  }
 
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
@@ -451,6 +469,22 @@ export async function advancedModeLoader({
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
+  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  let refreshedAssets = assets;
+  try {
+    refreshedAssets = await refreshExpiredAssetImages(assets);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to batch refresh expired asset images",
+        label: "Assets",
+        additionalData: { assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
+  }
+
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -481,7 +515,7 @@ export async function advancedModeLoader({
   return data(
     payload({
       header,
-      items: assets,
+      items: refreshedAssets,
       search,
       page,
       totalItems: totalAssets,

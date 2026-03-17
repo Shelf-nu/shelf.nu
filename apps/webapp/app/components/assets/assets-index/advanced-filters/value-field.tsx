@@ -563,6 +563,7 @@ function BooleanField({
       >
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
             disabled={disabled}
@@ -734,6 +735,7 @@ function EnumField({
       >
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
             disabled={disabled}
@@ -909,6 +911,7 @@ function CustodyEnumField({
         name={name}
         trigger={
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start  font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
             disabled={disabled}
@@ -1041,6 +1044,7 @@ function CategoryEnumField({
         name={name}
         trigger={
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
@@ -1158,6 +1162,7 @@ function LocationEnumField({
         name={name}
         trigger={
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
@@ -1286,6 +1291,7 @@ function KitEnumField({
         name={name}
         trigger={
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
@@ -1412,6 +1418,7 @@ function UpcomingBookingsEnumField({
         name={name}
         trigger={
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
           >
@@ -1531,6 +1538,7 @@ function TagsField({
         name={name}
         trigger={
           <Button
+            type="button"
             variant="secondary"
             className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
             disabled={disabled}
@@ -1970,6 +1978,7 @@ function MultiDateInput({
           />
           {dates.length > 1 && (
             <Button
+              type="button"
               variant="block-link-gray"
               className="absolute right-0 -mr-1 mt-[2px] shrink-0 translate-x-full  bg-white  text-[10px] font-normal text-gray-600"
               icon="x"
@@ -1980,6 +1989,7 @@ function MultiDateInput({
       ))}
       {error && <div className="!mt-0 text-[12px] text-red-500">{error}</div>}
       <Button
+        type="button"
         variant="block-link"
         className="text-[14px]"
         size="xs"

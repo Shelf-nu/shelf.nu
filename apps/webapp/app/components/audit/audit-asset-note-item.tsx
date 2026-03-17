@@ -155,6 +155,7 @@ export function AuditAssetNoteItem({
           {/* Show attach images button only for COMMENT notes that are saved (not temp) */}
           {onAttachImages && canDelete && !note.id.startsWith("temp-") && (
             <Button
+              type="button"
               variant="secondary"
               onClick={() => onAttachImages(note.id)}
               disabled={!canAttachImages}
@@ -190,7 +191,7 @@ export function AuditAssetNoteItem({
               </fetcher.Form>
             ) : (
               // Temp notes just remove from state, no server call
-              <Button variant="secondary" onClick={handleDelete}>
+              <Button type="button" variant="secondary" onClick={handleDelete}>
                 <Trash className="size-4" />
               </Button>
             ))}

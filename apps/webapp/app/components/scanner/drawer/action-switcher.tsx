@@ -146,6 +146,7 @@ export function ActionSwitcher() {
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             className={tw(
               "py-[7px] text-[12px] font-normal ",

@@ -383,6 +383,7 @@ export default function SubscriptionPage() {
                     </div>
                   </div>
                   <Button
+                    type="button"
                     variant="secondary"
                     className="whitespace-nowrap"
                     onClick={() => setPricingOpen(true)}

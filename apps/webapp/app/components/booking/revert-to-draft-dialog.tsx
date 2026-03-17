@@ -22,6 +22,7 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
   return (
     <>
       <Button
+        type="button"
         variant="link"
         className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
         width="full"
@@ -68,6 +69,7 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
 
       {/* Only for mobile */}
       <Button
+        type="button"
         variant="link"
         className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
         width="full"

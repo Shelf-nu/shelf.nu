@@ -247,6 +247,7 @@ function ConditionalDropdown() {
               className="border-b py-1 lg:p-0"
             >
               <Button
+                type="button"
                 variant="link"
                 className="w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
                 width="full"
@@ -429,6 +430,7 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t md:hidden lg:p-0">
                 <Button
+                  type="button"
                   role="button"
                   variant="secondary"
                   className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
