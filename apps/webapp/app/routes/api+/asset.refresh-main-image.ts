@@ -4,6 +4,7 @@ import { z } from "zod";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { isStorageObjectNotFound } from "~/modules/asset/service.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
@@ -16,40 +17,6 @@ import { requirePermission } from "~/utils/roles.server";
 import { createSignedUrl, uploadFile } from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
-
-/**
- * Checks if an error (typically a ShelfError from createSignedUrl) indicates
- * that the storage object was not found. Walks both additionalData and the
- * cause chain to handle the Supabase StorageApiError wrapped by ShelfError.
- */
-function isStorageObjectNotFound(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-
-  // Check additionalData.errorMessage (set by createSignedUrl wrapper)
-  if (
-    "additionalData" in error &&
-    error.additionalData &&
-    typeof error.additionalData === "object" &&
-    "errorMessage" in error.additionalData &&
-    typeof error.additionalData.errorMessage === "string" &&
-    error.additionalData.errorMessage.toLowerCase().includes("object not found")
-  ) {
-    return true;
-  }
-
-  // Check cause chain (raw Supabase StorageApiError)
-  if ("cause" in error && error.cause) {
-    if (
-      error.cause instanceof Error &&
-      error.cause.message.toLowerCase().includes("object not found")
-    ) {
-      return true;
-    }
-    return isStorageObjectNotFound(error.cause);
-  }
-
-  return false;
-}
 
 /**
  * Generates a thumbnail for an asset if missing, with proper handling for existing files
