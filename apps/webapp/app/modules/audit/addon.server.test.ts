@@ -400,6 +400,31 @@ describe("linkAuditAddonToOrganization", () => {
     );
   });
 
+  it("allows linking when subscription is already linked to the same org", async () => {
+    const sub = {
+      id: "sub_same_org",
+      status: "active",
+      metadata: { organizationId: "org_456" },
+      items: { data: [{ price: { product: "prod_audit" } }] },
+    };
+    mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
+    mockStripe.products.retrieve.mockResolvedValue({
+      metadata: { product_type: "addon", addon_type: "audits" },
+    });
+    mockStripe.subscriptions.update.mockResolvedValue({});
+    mockOrgUpdate.mockResolvedValue({ id: "org_456" });
+
+    await linkAuditAddonToOrganization(linkParams);
+
+    expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_same_org",
+      expect.objectContaining({
+        metadata: expect.objectContaining({ organizationId: "org_456" }),
+      })
+    );
+    expect(mockOrgUpdate).toHaveBeenCalled();
+  });
+
   it("throws when no audit subscription found", async () => {
     mockStripe.subscriptions.list.mockResolvedValue({ data: [] });
 
