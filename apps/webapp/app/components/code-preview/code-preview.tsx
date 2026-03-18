@@ -15,6 +15,7 @@ import { tw } from "~/utils/tw";
 import { waitForImagesToLoad } from "~/utils/wait-for-images";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
 import { Ean13LookupLink } from "../barcode/barcode-card";
+import { UnlockBarcodesModal } from "../barcode/unlock-barcodes-banner";
 import { CrispButton } from "../marketing/crisp";
 import When from "../when/when";
 
@@ -80,7 +81,7 @@ export const CodePreview = ({
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, isOwner } = useUserRoleHelper();
   const organization = useCurrentOrganization();
   const resolvedShowShelfBranding = resolveShowShelfBranding(
     showShelfBranding,
@@ -286,11 +287,20 @@ export const CodePreview = ({
               disabled={
                 !canUseBarcodes
                   ? {
-                      reason: (
+                      reason: isOwner ? (
                         <>
-                          Your workspace doesn't currently support barcodes. If
-                          you want to enable barcodes for your workspace, please
-                          get in touch with{" "}
+                          Your workspace doesn't have the barcodes addon
+                          enabled.{" "}
+                          <UnlockBarcodesModal
+                            triggerVariant="link"
+                            triggerLabel="Learn more"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          Your workspace doesn't currently support barcodes.
+                          Contact your workspace owner to enable this feature,
+                          or get in touch with{" "}
                           <CrispButton variant="link">sales</CrispButton>.
                         </>
                       ),

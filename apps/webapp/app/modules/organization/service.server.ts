@@ -373,6 +373,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
   barcodesEnabled: true,
+  usedBarcodeTrial: true,
   auditsEnabled: true,
   usedAuditTrial: true,
   hasSequentialIdsMigrated: true,

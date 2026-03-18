@@ -7,7 +7,7 @@ import {
   render,
   Text,
 } from "@react-email/components";
-import { AUDIT_ADDON } from "~/config/addon-copy";
+import { BARCODE_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -16,24 +16,24 @@ import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
 import { styles } from "../styles";
 
-interface AuditTrialWelcomeProps {
+interface BarcodeTrialWelcomeProps {
   firstName?: string | null;
   email: string;
   hasPaymentMethod?: boolean;
 }
 
-export const sendAuditTrialWelcomeEmail = async ({
+export const sendBarcodeTrialWelcomeEmail = async ({
   firstName,
   email,
   hasPaymentMethod,
-}: AuditTrialWelcomeProps) => {
+}: BarcodeTrialWelcomeProps) => {
   try {
-    const subject = "Your 7-day Audits trial is now active!";
-    const html = await auditTrialWelcomeEmailHtml({
+    const subject = "Your 7-day Barcodes trial is now active!";
+    const html = await barcodeTrialWelcomeEmailHtml({
       firstName,
       hasPaymentMethod,
     });
-    const text = auditTrialWelcomeEmailText({ firstName, hasPaymentMethod });
+    const text = barcodeTrialWelcomeEmailText({ firstName, hasPaymentMethod });
 
     void sendEmail({
       to: email,
@@ -46,7 +46,7 @@ export const sendAuditTrialWelcomeEmail = async ({
       new ShelfError({
         cause,
         message:
-          "Something went wrong while sending the audit trial welcome email",
+          "Something went wrong while sending the barcode trial welcome email",
         additionalData: { email },
         label: "User",
       })
@@ -54,7 +54,7 @@ export const sendAuditTrialWelcomeEmail = async ({
   }
 };
 
-export const auditTrialWelcomeEmailText = ({
+export const barcodeTrialWelcomeEmailText = ({
   firstName,
   hasPaymentMethod,
 }: {
@@ -62,26 +62,26 @@ export const auditTrialWelcomeEmailText = ({
   hasPaymentMethod?: boolean;
 }) => `Hey${firstName ? ` ${firstName}` : ""},
 
-Great news - your 7-day Audits trial is now active! You have full access to all audit features starting today.
+Great news - your 7-day Barcodes trial is now active! You have full access to all barcode features starting today.
 
-Here's what you can do with Audits:
+Here's what you can do with Barcodes:
 
-${AUDIT_ADDON.features.map((f) => `- ${f}`).join("\n")}
+${BARCODE_ADDON.features.map((f) => `- ${f}`).join("\n")}
 
-Get started now: ${SERVER_URL}/audits
+Get started now: ${SERVER_URL}/settings/general
 ${
   hasPaymentMethod
-    ? `\nImportant: Because you already have a payment method on file, your subscription will automatically continue after the 7-day trial ends. If you decide Audits isn't for you, you can cancel anytime before the trial ends from your subscription settings to avoid being charged.\n\nManage your subscription: ${SERVER_URL}/account-details/subscription`
+    ? `\nImportant: Because you already have a payment method on file, your subscription will automatically continue after the 7-day trial ends. If you decide Barcodes isn't for you, you can cancel anytime before the trial ends from your subscription settings to avoid being charged.\n\nManage your subscription: ${SERVER_URL}/account-details/subscription`
     : ""
 }
 
 If you have any questions, feel free to reach out to us at ${SUPPORT_EMAIL}. We're happy to help!
 
-Happy auditing,
+Happy labeling,
 The Shelf Team
 `;
 
-function AuditTrialWelcomeEmailTemplate({
+function BarcodeTrialWelcomeEmailTemplate({
   firstName,
   hasPaymentMethod,
 }: {
@@ -93,7 +93,7 @@ function AuditTrialWelcomeEmailTemplate({
   return (
     <Html>
       <Head>
-        <title>Your 7-day Audits trial is now active!</title>
+        <title>Your 7-day Barcodes trial is now active!</title>
       </Head>
 
       <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
@@ -105,16 +105,16 @@ function AuditTrialWelcomeEmailTemplate({
           </Text>
 
           <Text style={{ ...styles.p }}>
-            Great news - your <strong>7-day Audits trial</strong> is now active!
-            You have full access to all audit features starting today.
+            Great news - your <strong>7-day Barcodes trial</strong> is now
+            active! You have full access to all barcode features starting today.
           </Text>
 
           <Text style={{ ...styles.h2 }}>
-            Here's what you can do with Audits:
+            Here's what you can do with Barcodes:
           </Text>
 
           <ul style={{ ...styles.li, paddingLeft: "20px" }}>
-            {AUDIT_ADDON.features.map((feature) => (
+            {BARCODE_ADDON.features.map((feature) => (
               <li key={feature} style={{ marginBottom: "8px" }}>
                 {feature}
               </li>
@@ -122,7 +122,7 @@ function AuditTrialWelcomeEmailTemplate({
           </ul>
 
           <Button
-            href={`${SERVER_URL}/audits`}
+            href={`${SERVER_URL}/settings/general`}
             style={{
               ...styles.button,
               textAlign: "center" as const,
@@ -130,7 +130,7 @@ function AuditTrialWelcomeEmailTemplate({
               marginBottom: "24px",
             }}
           >
-            Start your first audit
+            Explore Barcodes
           </Button>
 
           {hasPaymentMethod ? (
@@ -145,7 +145,7 @@ function AuditTrialWelcomeEmailTemplate({
             >
               <strong>Important:</strong> Because you already have a payment
               method on file, your subscription will automatically continue
-              after the 7-day trial ends. If you decide Audits isn't for you,
+              after the 7-day trial ends. If you decide Barcodes isn't for you,
               you can cancel anytime before the trial ends from your{" "}
               <Link
                 href={`${SERVER_URL}/account-details/subscription`}
@@ -163,7 +163,7 @@ function AuditTrialWelcomeEmailTemplate({
           </Text>
 
           <Text style={{ marginTop: "24px", ...styles.p }}>
-            Happy auditing, <br />
+            Happy labeling, <br />
             The Shelf Team
           </Text>
         </div>
@@ -172,7 +172,7 @@ function AuditTrialWelcomeEmailTemplate({
   );
 }
 
-export const auditTrialWelcomeEmailHtml = ({
+export const barcodeTrialWelcomeEmailHtml = ({
   firstName,
   hasPaymentMethod,
 }: {
@@ -180,7 +180,7 @@ export const auditTrialWelcomeEmailHtml = ({
   hasPaymentMethod?: boolean;
 }) =>
   render(
-    <AuditTrialWelcomeEmailTemplate
+    <BarcodeTrialWelcomeEmailTemplate
       firstName={firstName}
       hasPaymentMethod={hasPaymentMethod}
     />

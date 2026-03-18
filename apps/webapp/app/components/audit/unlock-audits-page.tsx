@@ -8,6 +8,7 @@ import {
 import { useFetcher } from "react-router";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { AUDIT_ADDON } from "~/config/addon-copy";
 import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
@@ -60,12 +61,7 @@ export function UnlockAuditsPage({
         )
       : null;
 
-  const features = [
-    "Track and verify your assets in real-time",
-    "Assign auditors and set due dates",
-    "Scan QR codes for quick verification",
-    "Generate detailed audit reports",
-  ];
+  const features = AUDIT_ADDON.features;
 
   return (
     <div className="flex size-full items-center justify-center p-6">
@@ -75,10 +71,10 @@ export function UnlockAuditsPage({
           <div className="mb-4 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-3 text-primary">
             <ClipboardCheckIcon className="size-6" />
           </div>
-          <h2 className="mb-2 text-display-xs font-semibold">Unlock Audits</h2>
-          <p className="text-gray-600">
-            Add powerful audit capabilities to your workspace.
-          </p>
+          <h2 className="mb-2 text-display-xs font-semibold">
+            Unlock {AUDIT_ADDON.label}
+          </h2>
+          <p className="text-gray-600">{AUDIT_ADDON.subtitle}</p>
         </div>
 
         {/* Feature list */}
@@ -344,10 +340,7 @@ function OwnerCTAs({
 function NonOwnerMessage() {
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 text-center">
-      <p className="text-gray-600">
-        Contact your workspace owner to enable the Audits add-on for your
-        organization.
-      </p>
+      <p className="text-gray-600">{AUDIT_ADDON.nonOwnerDescription}</p>
     </div>
   );
 }

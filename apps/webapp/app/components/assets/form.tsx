@@ -19,6 +19,7 @@ import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissio
 import { tw } from "~/utils/tw";
 import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
+import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
@@ -42,7 +43,6 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
-import When from "../when/when";
 
 export const NewAssetFormSchema = z.object({
   title: z
@@ -563,7 +563,7 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
-        <When truthy={canUseBarcodes}>
+        {canUseBarcodes ? (
           <FormRow
             rowLabel={"Barcodes"}
             className="border-b-0"
@@ -578,7 +578,11 @@ export const AssetForm = ({
               disabled={disabled}
             />
           </FormRow>
-        </When>
+        ) : (
+          <FormRow rowLabel={"Barcodes"} className="border-b-0">
+            <UnlockBarcodesBanner />
+          </FormRow>
+        )}
 
         <AssetCustomFields
           currency={currency}

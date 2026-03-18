@@ -707,9 +707,10 @@ model Organization {
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
-  // Barcode feature (admin-managed, will later integrate with custom tier limits)
+  // Barcode add-on (per-organization, managed via Stripe subscription)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
   barcodesEnabledAt DateTime? // Track when barcode feature was enabled
+  usedBarcodeTrial  Boolean   @default(false) // Set once a 7-day free barcode trial is activated (prevents reuse)
 
   // Audit add-on (per-organization, managed via Stripe subscription)
   auditsEnabled    Boolean   @default(false) // If true, this organization can use audit functionality
