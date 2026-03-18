@@ -314,9 +314,13 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
     getUserTierLimit(userId),
   ]);
 
-  const organizations = user.userOrganizations
-    .map((o) => o.organization)
-    .filter((o) => o.userId === userId);
+  const organizations = (
+    user.userOrganizations as unknown as Array<{
+      organization: { userId: string };
+    }>
+  )
+    .map((o: any) => o.organization)
+    .filter((o: any) => o.userId === userId);
 
   if (
     !canCreateMoreOrganizations({

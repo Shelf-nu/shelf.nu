@@ -15,6 +15,7 @@ import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
+import { sbDb } from "~/database/supabase.server";
 import { getUserFromOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { getUserContactById } from "~/modules/user-contact/service.server";
@@ -57,17 +58,14 @@ export const loader = async ({
       organizationId,
       userOrganizations,
       request,
-      extraInclude: {
-        teamMembers: {
-          where: { organizationId },
-          include: {
-            receivedInvites: {
-              where: { organizationId },
-            },
-          },
-        },
-      },
     });
+
+    // Fetch team members separately (previously done via extraInclude)
+    const { data: teamMembers } = await sbDb
+      .from("TeamMember")
+      .select("*, receivedInvites:Invite(*)")
+      .eq("userId", selectedUserId)
+      .eq("organizationId", organizationId);
 
     const userContact = await getUserContactById(user.id);
 
@@ -85,8 +83,9 @@ export const loader = async ({
       organizationId,
       header,
       user: {
-        ...user,
+        ...(user as any),
         contact: userContact,
+        teamMembers: teamMembers || [],
       },
       userName,
     });
@@ -133,12 +132,16 @@ export default function UserPage() {
    * by matching the organizationId, instead of assuming
    * the first organization is the correct one
    */
-  const currentOrgMembership = user.userOrganizations.find(
+  const userOrgs = (user.userOrganizations ?? []) as unknown as Array<{
+    organizationId: string;
+    roles: string[];
+  }>;
+  const currentOrgMembership = userOrgs.find(
     (uo) => uo.organizationId === organizationId
   );
   const userOrgRole =
     organizationRolesMap[
-      currentOrgMembership?.roles[0] ?? user.userOrganizations[0].roles[0]
+      currentOrgMembership?.roles[0] ?? userOrgs[0]?.roles[0]
     ];
   return (
     <>
@@ -162,7 +165,7 @@ export default function UserPage() {
             </Badge>
           ),
         }}
-        subHeading={<UserSubheading user={user} />}
+        subHeading={<UserSubheading user={user as any} />}
       />
 
       <When truthy={userOrgRole !== "Owner"}>
@@ -185,8 +188,7 @@ export default function UserPage() {
             )}
             role={userOrgRole}
             roleEnum={
-              currentOrgMembership?.roles[0] ??
-              user.userOrganizations[0].roles[0]
+              (currentOrgMembership?.roles[0] ?? userOrgs[0]?.roles[0]) as any
             }
           />
         </AbsolutePositionedHeaderActions>

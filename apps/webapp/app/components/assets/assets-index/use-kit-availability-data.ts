@@ -25,24 +25,26 @@ export function useKitAvailabilityData(items: Items) {
   const { timeZone } = useHints();
 
   const { resources, events } = useMemo(() => {
-    const resources = items.map((item) => ({
+    const resources = items.map((item: any) => ({
       id: item.id,
       title: item.name,
       extendedProps: {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
-        availableToBook: item.assets.some((asset) => asset.availableToBook),
+        availableToBook: item.assets.some(
+          (asset: any) => asset.availableToBook
+        ),
       },
     }));
 
     // Collect all unique bookings across all kits and their assets
     const allBookings = new Map();
 
-    items.forEach((kit) => {
-      kit.assets.forEach((asset) => {
+    items.forEach((kit: any) => {
+      kit.assets.forEach((asset: any) => {
         if (asset.bookings) {
-          asset.bookings.forEach((booking) => {
+          asset.bookings.forEach((booking: any) => {
             // Use booking ID as key to ensure uniqueness
             if (!allBookings.has(booking.id)) {
               allBookings.set(booking.id, { ...booking, kitId: kit.id });

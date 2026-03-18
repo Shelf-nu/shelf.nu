@@ -1,4 +1,3 @@
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { getLocationDescendantIds } from "~/modules/location/descendants.server";
 import { ShelfError } from "~/utils/error";
@@ -181,20 +180,43 @@ export async function getAssetsForUserContext({
   custodianUserId: string;
 }): Promise<string[]> {
   // Fetch all assets where the user is the current custodian
-  const assets = await db.asset.findMany({
-    where: {
-      organizationId,
-      custody: {
-        custodian: {
-          userId: custodianUserId,
-        },
-      },
-    },
-    select: {
-      id: true,
-    },
-  });
+  // First get the TeamMember IDs for this user
+  const { data: teamMembers, error: tmError } = await sbDb
+    .from("TeamMember")
+    .select("id")
+    .eq("userId", custodianUserId);
+
+  if (tmError) throw tmError;
+
+  if (!teamMembers || teamMembers.length === 0) {
+    return [];
+  }
+
+  const teamMemberIds = teamMembers.map((tm) => tm.id);
+
+  // Get custody records for these team members
+  const { data: custodies, error: custodyError } = await sbDb
+    .from("Custody")
+    .select("assetId")
+    .in("custodianId", teamMemberIds);
+
+  if (custodyError) throw custodyError;
+
+  if (!custodies || custodies.length === 0) {
+    return [];
+  }
+
+  const assetIds = custodies.map((c) => c.assetId);
+
+  // Verify these assets belong to the organization
+  const { data: assets, error: assetError } = await sbDb
+    .from("Asset")
+    .select("id")
+    .eq("organizationId", organizationId)
+    .in("id", assetIds);
+
+  if (assetError) throw assetError;
 
   // Return just the asset IDs
-  return assets.map((asset) => asset.id);
+  return (assets ?? []).map((asset) => asset.id);
 }

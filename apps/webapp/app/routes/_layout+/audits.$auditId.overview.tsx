@@ -538,8 +538,8 @@ export default function AuditOverview() {
                       thumbnailUrl={image.thumbnailUrl}
                       // Show asset title in the preview header for context.
                       alt={
-                        image.auditAsset?.asset?.title
-                          ? `Asset: ${image.auditAsset.asset.title}`
+                        (image.auditAsset as any)?.asset?.title
+                          ? `Asset: ${(image.auditAsset as any).asset.title}`
                           : image.description || "Asset image"
                       }
                       withPreview
@@ -548,8 +548,8 @@ export default function AuditOverview() {
                         id: img.id,
                         imageUrl: img.imageUrl,
                         thumbnailUrl: img.thumbnailUrl,
-                        alt: img.auditAsset?.asset?.title
-                          ? `Asset: ${img.auditAsset.asset.title}`
+                        alt: (img.auditAsset as any)?.asset?.title
+                          ? `Asset: ${(img.auditAsset as any).asset.title}`
                           : img.description || "Asset image",
                       }))}
                       currentImageId={image.id}
@@ -612,7 +612,9 @@ type AuditAssetItem = LoaderData["data"]["items"][number];
 
 function AssetListItem({ item }: { item: AuditAssetItem }) {
   const { session, canRemoveAssets } = useLoaderData<typeof loader>();
-  const { category, location, custody } = item;
+  const category = item.category as any;
+  const location = item.location as any;
+  const custody = item.custody as any;
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
   const { roles } = useUserRoleHelper();
@@ -645,7 +647,9 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
                   id: item.id,
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
-                  mainImageExpiration: item.mainImageExpiration,
+                  mainImageExpiration: item.mainImageExpiration
+                    ? new Date(item.mainImageExpiration as any)
+                    : null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -697,10 +701,14 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
         </Td>
       )}
       <Td>
-        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
+        {category ? (
+          <CategoryBadge category={category as any} />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
       <Td>
-        <ListItemTagsColumn tags={item.tags} />
+        <ListItemTagsColumn tags={item.tags as any} />
       </Td>
       {canRemoveAssets && (
         <Td className="text-right">

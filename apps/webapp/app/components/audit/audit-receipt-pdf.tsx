@@ -270,8 +270,10 @@ const AuditPDFContent = ({
           <span className="min-w-[150px] text-sm font-medium">Status</span>
           <span className="grow text-gray-600">
             <AuditStatusBadgeWithOverdue
-              status={session.status}
-              dueDate={session.dueDate}
+              status={session.status as AuditStatus}
+              dueDate={
+                session.dueDate ? new Date(session.dueDate as string) : null
+              }
             />
           </span>
         </div>

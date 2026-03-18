@@ -338,7 +338,7 @@ export const ConfirmLinkingKitModal = ({
   onCancel: () => void;
 }) => {
   const { items: kits } = useLoaderData<typeof loader>();
-  const kit = kits.find((a) => a.id === kitId);
+  const kit = kits.find((a: any) => a.id === kitId);
   const fetcher = useFetcher<typeof action>();
   const { data, state } = fetcher;
   const disabled = isFormProcessing(state);

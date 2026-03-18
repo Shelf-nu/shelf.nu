@@ -4,9 +4,7 @@ import type {
   AuditSession,
   Organization,
   User,
-  Prisma,
 } from "@prisma/client";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -286,71 +284,30 @@ export async function getAuditImages({
   auditSessionId: AuditSession["id"];
   organizationId: Organization["id"];
   auditAssetId?: AuditAsset["id"] | null;
-}): Promise<
-  Prisma.AuditImageGetPayload<{
-    include: {
-      uploadedBy: {
-        select: {
-          id: true;
-          firstName: true;
-          lastName: true;
-          profilePicture: true;
-        };
-      };
-      auditAsset: {
-        include: {
-          asset: {
-            select: {
-              id: true;
-              title: true;
-            };
-          };
-        };
-      };
-    };
-  }>[]
-> {
+}) {
   try {
-    const where: Prisma.AuditImageWhereInput = {
-      auditSessionId,
-      organizationId,
-    };
+    let query = sbDb
+      .from("AuditImage")
+      .select(
+        "*, uploadedBy:User!uploadedById(id, firstName, lastName, profilePicture), auditAsset:AuditAsset!auditAssetId(id, asset:Asset!assetId(id, title))"
+      )
+      .eq("auditSessionId", auditSessionId)
+      .eq("organizationId", organizationId);
 
     // If auditAssetId is explicitly provided (string), filter by that specific asset
     // If auditAssetId is explicitly null, get only general images (auditAssetId IS NULL in DB)
     // If auditAssetId is undefined, get ALL images (no filter)
     if (auditAssetId === null) {
-      where.auditAssetId = null;
+      query = query.is("auditAssetId", null);
     } else if (auditAssetId !== undefined) {
-      where.auditAssetId = auditAssetId;
+      query = query.eq("auditAssetId", auditAssetId);
     }
 
-    const images = await db.auditImage.findMany({
-      where,
-      include: {
-        uploadedBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            profilePicture: true,
-          },
-        },
-        auditAsset: {
-          include: {
-            asset: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+    const { data: images, error } = await query.order("createdAt", {
+      ascending: false,
     });
+
+    if (error) throw error;
 
     return images;
   } catch (cause) {

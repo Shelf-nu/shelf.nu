@@ -247,7 +247,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       authUser.user_metadata.signup_method === "email-password";
 
     const organizationMembership = organizationIdParam
-      ? user.userOrganizations?.find(
+      ? (
+          user.userOrganizations as unknown as Array<{
+            organizationId: string;
+            organization?: { name: string };
+          }>
+        )?.find(
           (membership) => membership.organizationId === organizationIdParam
         )
       : null;
@@ -348,7 +353,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * the user is already linked to that workspace.
      */
     const organizationMembership = metadata.organizationId
-      ? existingUser.userOrganizations?.find(
+      ? (
+          existingUser.userOrganizations as unknown as Array<{
+            organizationId: string;
+          }>
+        )?.find(
           (membership) => membership.organizationId === metadata.organizationId
         )
       : null;

@@ -23,16 +23,12 @@ export const UserContactDetailsFormSchema = z.object({
 export function UserContactDetailsForm({
   user,
 }: {
-  user: ReturnType<typeof getUserWithContact>;
+  user: Awaited<ReturnType<typeof getUserWithContact>>;
 }) {
   const zo = useZorm("UserContactDetailsForm", UserContactDetailsFormSchema);
   const actionData = useActionData<UserPageActionData>();
   const disabled = useDisabled();
-  const isDisabled =
-    disabled ||
-    (user.sso && {
-      reason: "You cannot edit your details when using SSO.",
-    });
+  const isDisabled = disabled || !!user.sso;
   const validationErrors = getValidationErrors<
     typeof UserContactDetailsFormSchema
   >(actionData?.error);

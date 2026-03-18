@@ -73,7 +73,7 @@ export const AuditNotes = () => {
             />
           )}
           {/* Render all existing notes */}
-          {(session.notes as NoteWithUser[]).map((note) => (
+          {(session.notes as unknown as NoteWithUser[]).map((note) => (
             <Note
               key={note.id}
               note={note}

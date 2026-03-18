@@ -1,5 +1,4 @@
 import type { AuditNote, AuditAsset, User } from "@prisma/client";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
@@ -26,26 +25,23 @@ export async function createAuditAssetNote({
   auditAssetId: AuditAsset["id"];
 }) {
   try {
-    return await db.auditNote.create({
-      data: {
+    const { data, error } = await sbDb
+      .from("AuditNote")
+      .insert({
         content,
         type: "COMMENT",
         userId,
         auditSessionId,
         auditAssetId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-      },
-    });
+      })
+      .select(
+        "*, user:User!userId(id, firstName, lastName, email, profilePicture)"
+      )
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -75,13 +71,15 @@ export async function updateAuditAssetNote({
 }) {
   try {
     // First verify the note exists and user owns it
-    const existingNote = await db.auditNote.findFirst({
-      where: {
-        id: noteId,
-        userId,
-        auditAssetId: { not: null }, // Ensure it's an asset-specific note
-      },
-    });
+    const { data: existingNote, error: findError } = await sbDb
+      .from("AuditNote")
+      .select("*")
+      .eq("id", noteId)
+      .eq("userId", userId)
+      .not("auditAssetId", "is", null)
+      .maybeSingle();
+
+    if (findError) throw findError;
 
     if (!existingNote) {
       throw new ShelfError({
@@ -94,21 +92,18 @@ export async function updateAuditAssetNote({
       });
     }
 
-    return await db.auditNote.update({
-      where: { id: noteId },
-      data: { content },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-      },
-    });
+    const { data, error: updateError } = await sbDb
+      .from("AuditNote")
+      .update({ content })
+      .eq("id", noteId)
+      .select(
+        "*, user:User!userId(id, firstName, lastName, email, profilePicture)"
+      )
+      .single();
+
+    if (updateError) throw updateError;
+
+    return data;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -195,26 +190,18 @@ export async function getAuditAssetNotes({
   auditAssetId: AuditAsset["id"];
 }) {
   try {
-    return await db.auditNote.findMany({
-      where: {
-        auditSessionId,
-        auditAssetId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+    const { data, error } = await sbDb
+      .from("AuditNote")
+      .select(
+        "*, user:User!userId(id, firstName, lastName, email, profilePicture)"
+      )
+      .eq("auditSessionId", auditSessionId)
+      .eq("auditAssetId", auditAssetId)
+      .order("createdAt", { ascending: false });
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,

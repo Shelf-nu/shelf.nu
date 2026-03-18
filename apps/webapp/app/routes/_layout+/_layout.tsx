@@ -147,12 +147,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId: authSession.userId,
       request,
     });
-    const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
+    const isAdmin = user?.roles.some(
+      (role: any) => role.name === Roles["ADMIN"]
+    );
 
     // Get current user's organization role for updates filtering
-    const currentOrganizationUserRoles = user?.userOrganizations.find(
-      (userOrg) => userOrg.organization.id === organizationId
-    )?.roles;
+    const currentOrganizationUserRoles = (
+      user?.userOrganizations as any[]
+    )?.find((userOrg: any) => userOrg.organization.id === organizationId)
+      ?.roles;
 
     // Check if current user has OWNER or ADMIN role in the organization
     const isOwner = currentOrganizationUserRoles?.includes("OWNER");

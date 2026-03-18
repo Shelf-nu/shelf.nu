@@ -4,20 +4,12 @@ import type {
   User,
   UserOrganization,
 } from "@prisma/client";
-import {
-  Prisma,
-  Roles,
-  OrganizationRoles,
-  AssetIndexMode,
-} from "@prisma/client";
-import type { ITXClientDenyList } from "@prisma/client/runtime/library";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import type { Prisma } from "@prisma/client";
+import { Roles, OrganizationRoles, AssetIndexMode } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import sharp from "sharp";
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
-import type { ExtendedPrismaClient } from "~/database/db.server";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 
 import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
@@ -47,15 +39,12 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
-import type { MergeInclude } from "~/utils/utils";
-import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
-import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
+import { type UpdateUserPayload } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
-import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
   getUserContactById,
   updateUserContactInfo,
@@ -63,49 +52,57 @@ import {
 
 const label: ErrorLabel = "User";
 
-export function getUserByID<TSelect extends Prisma.UserSelect>(
-  id: User["id"],
-  options: { select: TSelect; include?: never }
-): Promise<Prisma.UserGetPayload<{ select: TSelect }>>;
+/**
+ * Build a Supabase select string from a Prisma-style select/include object.
+ * Only handles the top-level keys (no nested relations).
+ * If no options are provided, returns "id".
+ */
+function buildSelectString(options?: {
+  select?: Record<string, any>;
+  include?: Record<string, any>;
+}): string {
+  if (options?.select) {
+    return Object.keys(options.select)
+      .filter((k) => options.select![k])
+      .join(", ");
+  }
+  if (options?.include) {
+    // include means "all fields + relations"
+    return "*";
+  }
+  return "id";
+}
 
-// Overload 2: With include
-export function getUserByID<TInclude extends Prisma.UserInclude>(
-  id: User["id"],
-  options: { include: TInclude; select?: never }
-): Promise<Prisma.UserGetPayload<{ include: TInclude }>>;
-
-// Overload 3: Without options (default)
-export function getUserByID(id: User["id"]): Promise<Pick<User, "id">>;
-
-// Implementation
 export async function getUserByID(
   id: User["id"],
-  options?: { select?: Prisma.UserSelect; include?: Prisma.UserInclude }
+  options?: { select?: Record<string, any>; include?: Record<string, any> }
 ): Promise<any> {
   try {
-    const select = options?.select;
-    const include = options?.include;
-
-    if (select && include) {
+    if (options?.select && options?.include) {
       throw new ShelfError({
         cause: null,
         message:
           "Cannot use both select and include in getUserByID. Please choose one.",
-        additionalData: { id, select, include },
+        additionalData: {
+          id,
+          select: options.select,
+          include: options.include,
+        },
         label,
       });
     }
 
-    const user = await db.user.findUniqueOrThrow({
-      where: { id },
-      ...(select
-        ? { select }
-        : include
-        ? { include }
-        : { select: { id: true } }),
-    });
+    const selectStr = buildSelectString(options);
 
-    return user;
+    const { data, error } = await sbDb
+      .from("User")
+      .select(selectStr)
+      .eq("id", id)
+      .single();
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -117,43 +114,23 @@ export async function getUserByID(
   }
 }
 
-export async function getUserWithContact<T extends Prisma.UserInclude>(
-  id: string,
-  include?: T
-) {
-  type ReturnType = Prisma.UserGetPayload<{
-    include: T & { contact: true };
-  }> & {
-    contact: NonNullable<
-      Prisma.UserContactGetPayload<{
-        select: typeof USER_CONTACT_SELECT;
-      }>
-    >; // Guarantee contact is never null
-  };
-
+export async function getUserWithContact(id: string, _include?: any) {
   try {
-    const user = await db.user.findUniqueOrThrow({
-      where: { id },
-      include: {
-        ...include,
-        contact: {
-          select: USER_CONTACT_SELECT,
-        },
-      },
-    });
+    const { data: user, error } = await sbDb
+      .from("User")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    // If contact exists, return user as-is
-    if (user.contact) {
-      return user as ReturnType;
-    }
+    if (error) throw error;
 
-    // If no contact, create it and attach to user object
+    // Fetch contact separately since dynamic select strings lose type info
     const contact = await getUserContactById(id);
 
     return {
       ...user,
       contact,
-    } as ReturnType;
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -185,38 +162,51 @@ export async function findUserByEmail(email: User["email"]) {
   }
 }
 
-async function createUserOrgAssociation(
-  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
-  payload: {
-    roles: OrganizationRoles[];
-    organizationIds: Organization["id"][];
-    userId: User["id"];
-  }
-) {
+async function createUserOrgAssociation(payload: {
+  roles: OrganizationRoles[];
+  organizationIds: Organization["id"][];
+  userId: User["id"];
+}) {
   const { organizationIds, userId, roles } = payload;
 
   try {
     return await Promise.all(
-      Array.from(new Set(organizationIds)).map((organizationId) =>
-        tx.userOrganization.upsert({
-          where: {
-            userId_organizationId: {
-              userId,
-              organizationId,
-            },
-          },
-          create: {
-            userId,
-            organizationId,
-            roles,
-          },
-          update: {
-            roles: {
-              push: roles,
-            },
-          },
-        })
-      )
+      Array.from(new Set(organizationIds)).map(async (organizationId) => {
+        // Check if the association already exists
+        const { data: existing, error: findError } = await sbDb
+          .from("UserOrganization")
+          .select("*")
+          .eq("userId", userId)
+          .eq("organizationId", organizationId)
+          .maybeSingle();
+
+        if (findError) throw findError;
+
+        if (existing) {
+          // Update: append roles
+          const updatedRoles = [...existing.roles, ...roles];
+          const { data, error } = await sbDb
+            .from("UserOrganization")
+            .update({ roles: updatedRoles })
+            .eq("userId", userId)
+            .eq("organizationId", organizationId)
+            .select("*")
+            .single();
+
+          if (error) throw error;
+          return data;
+        } else {
+          // Create new association
+          const { data, error } = await sbDb
+            .from("UserOrganization")
+            .insert({ userId, organizationId, roles })
+            .select("*")
+            .single();
+
+          if (error) throw error;
+          return data;
+        }
+      })
     );
   } catch (cause) {
     throw new ShelfError({
@@ -244,12 +234,17 @@ export async function createUserOrAttachOrg({
     createdWithInvite: boolean;
   }) {
   try {
-    const shelfUser = await db.user.findFirst({
-      where: { email },
-      select: USER_WITH_SSO_DETAILS_SELECT,
-    });
+    const { data: shelfUser, error: findError } = await sbDb
+      .from("User")
+      .select(
+        "id, email, firstName, lastName, sso, userOrganizations:UserOrganization(roles, organization:Organization(id, name, enabledSso, ssoDetails:SsoDetails(id, domain, baseUserGroupId, selfServiceGroupId, adminGroupId)))"
+      )
+      .eq("email", email)
+      .maybeSingle();
 
-    // If no Prisma User exists, create one.
+    if (findError) throw findError;
+
+    // If no User exists, create one.
     // First try creating a fresh auth account. If that fails (email already
     // exists in Supabase from a previous unconfirmed signup), fall back to
     // confirming the existing auth account. The invite JWT (sent to the
@@ -296,7 +291,7 @@ export async function createUserOrAttachOrg({
     }
 
     /** If the user already exists, we just attach the new org to it */
-    await createUserOrgAssociation(db, {
+    await createUserOrgAssociation({
       userId: shelfUser.id,
       organizationIds: [organizationId],
       roles,
@@ -340,7 +335,6 @@ export async function createUserOrAttachOrg({
  * @returns Object containing the created/updated user and their first organization (if any)
  * @throws ShelfError if user creation/update fails
  */
-
 export async function createUserFromSSO(
   authSession: AuthSession,
   userData: {
@@ -396,7 +390,7 @@ export async function createUserFromSSO(
 
         if (role) {
           roles.push(role);
-          await createUserOrgAssociation(db, {
+          await createUserOrgAssociation({
             userId: user.id,
             organizationIds: [org.id],
             roles: [role],
@@ -468,14 +462,13 @@ async function handleSCIMTransition(
   try {
     if (!desiredRole) {
       // User has no valid SCIM groups, revoke access
-      await db.userOrganization.delete({
-        where: {
-          userId_organizationId: {
-            userId,
-            organizationId: organization.id,
-          },
-        },
-      });
+      const { error } = await sbDb
+        .from("UserOrganization")
+        .delete()
+        .eq("userId", userId)
+        .eq("organizationId", organization.id);
+
+      if (error) throw error;
 
       transition.transitionType = "ACCESS_REVOKED";
 
@@ -489,19 +482,13 @@ async function handleSCIMTransition(
       });
     } else {
       // Update to SCIM-based role
-      await db.userOrganization.update({
-        where: {
-          userId_organizationId: {
-            userId,
-            organizationId: organization.id,
-          },
-        },
-        data: {
-          roles: {
-            set: [desiredRole],
-          },
-        },
-      });
+      const { error } = await sbDb
+        .from("UserOrganization")
+        .update({ roles: [desiredRole] })
+        .eq("userId", userId)
+        .eq("organizationId", organization.id);
+
+      if (error) throw error;
 
       transition.transitionType = "ROLE_CHANGE";
 
@@ -538,9 +525,7 @@ async function handleSCIMTransition(
  */
 export async function updateUserFromSSO(
   authSession: AuthSession,
-  existingUser: Prisma.UserGetPayload<{
-    select: typeof USER_WITH_SSO_DETAILS_SELECT;
-  }>,
+  existingUser: any,
   userData: {
     firstName: string;
     lastName: string;
@@ -555,7 +540,7 @@ export async function updateUserFromSSO(
     };
   }
 ): Promise<{
-  user: Prisma.UserGetPayload<{ select: typeof USER_WITH_SSO_DETAILS_SELECT }>;
+  user: any;
   org: Organization | null;
   transitions: UserOrgTransition[];
 }> {
@@ -568,11 +553,17 @@ export async function updateUserFromSSO(
 
     // Update user profile if needed
     if (user.firstName !== firstName || user.lastName !== lastName) {
-      user = await db.user.update({
-        where: { id: userId },
-        data: { firstName, lastName },
-        select: USER_WITH_SSO_DETAILS_SELECT,
-      });
+      const { data, error } = await sbDb
+        .from("User")
+        .update({ firstName, lastName })
+        .eq("id", userId)
+        .select(
+          "id, email, firstName, lastName, sso, userOrganizations:UserOrganization(roles, organization:Organization(id, name, enabledSso, ssoDetails:SsoDetails(id, domain, baseUserGroupId, selfServiceGroupId, adminGroupId)))"
+        )
+        .single();
+
+      if (error) throw error;
+      user = data;
     }
 
     // Update contact information if provided
@@ -600,7 +591,7 @@ export async function updateUserFromSSO(
       if (hasGroupMappings) {
         const desiredRole = getRoleFromGroupId(ssoDetails, groups);
         const existingOrgAccess = existingUserOrganizations.find(
-          (uo) => uo.organization.id === org.id
+          (uo: any) => uo.organization.id === org.id
         );
 
         if (desiredRole) {
@@ -616,7 +607,7 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
         } else if (desiredRole) {
-          await createUserOrgAssociation(db, {
+          await createUserOrgAssociation({
             userId: user.id,
             organizationIds: [org.id],
             roles: [desiredRole],
@@ -713,107 +704,144 @@ export async function createUser(
   const shouldCreatePersonalOrg = !config.disableSignup;
 
   try {
-    return await db.$transaction(
-      async (tx) => {
-        const user = await tx.user.create({
-          data: {
-            email,
-            id: userId,
-            username,
-            firstName,
-            lastName,
-            createdWithInvite,
-            roles: {
-              connect: {
-                name: Roles["USER"],
-              },
-            },
+    // Step 1: Get the Role record for USER
+    const { data: roleRecord, error: roleError } = await sbDb
+      .from("Role")
+      .select("id")
+      .eq("name", Roles["USER"])
+      .single();
 
-            ...(shouldCreatePersonalOrg && {
-              organizations: {
-                create: [
-                  {
-                    name: "Personal",
-                    hasSequentialIdsMigrated: true, // New personal organizations don't need migration
-                    categories: {
-                      create: defaultUserCategories.map((c) => ({
-                        ...c,
-                        userId,
-                      })),
-                    },
-                    /**
-                     * Creating a teamMember when a new organization/workspace is created
-                     * so that the owner appear in the list by default
-                     */
-                    members: {
-                      create: {
-                        name: [
-                          ...[firstName, lastName].filter(Boolean),
-                          "(Owner)",
-                        ].join(" "),
-                        user: { connect: { id: userId } },
-                      },
-                    },
-                    // Creating asset index settings for new users' personal org
-                    assetIndexSettings: {
-                      create: {
-                        mode: AssetIndexMode.ADVANCED,
-                        columns: defaultFields,
-                        user: {
-                          connect: {
-                            id: userId,
-                          },
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
-            }),
-            ...(isSSO && {
-              // When user is coming from SSO, we set them as onboarded as we already have their first and last name and they dont need a password.
-              onboarded: true,
-              sso: true,
-            }),
-          },
-          select: {
-            ...USER_WITH_SSO_DETAILS_SELECT,
-            organizations: {
-              select: {
-                id: true,
-              },
-            },
-          },
-        });
+    if (roleError) throw roleError;
 
-        /**
-         * Creating an organization for the user
-         * 1. For the personal org
-         * 2. For the org that the user is being attached to
-         */
-        await Promise.all([
-          shouldCreatePersonalOrg && // We only create a personal org for non-SSO users
-            createUserOrgAssociation(tx, {
-              userId: user.id,
-              organizationIds: [user.organizations[0].id],
-              roles: [OrganizationRoles.OWNER],
-            }),
-          organizationId &&
-            roles?.length &&
-            createUserOrgAssociation(tx, {
-              userId: user.id,
-              organizationIds: [organizationId],
-              roles,
-            }),
-        ]);
+    // Step 2: Create the user
+    const { data: user, error: userError } = await sbDb
+      .from("User")
+      .insert({
+        id: userId,
+        email,
+        username,
+        firstName: firstName ?? null,
+        lastName: lastName ?? null,
+        createdWithInvite: createdWithInvite ?? false,
+        ...(isSSO && {
+          onboarded: true,
+          sso: true,
+        }),
+      })
+      .select(
+        "id, email, firstName, lastName, sso, userOrganizations:UserOrganization(roles, organization:Organization(id, name, enabledSso, ssoDetails:SsoDetails(id, domain, baseUserGroupId, selfServiceGroupId, adminGroupId)))"
+      )
+      .single();
 
-        return user;
-      },
-      { maxWait: 6000, timeout: 10000 }
-    );
+    if (userError) throw userError;
+
+    // Step 3: Link user to Role via _RoleToUser join table
+    const { error: roleJoinError } = await sbDb
+      .from("_RoleToUser")
+      .insert({ A: roleRecord.id, B: userId });
+
+    if (roleJoinError) throw roleJoinError;
+
+    let personalOrgId: string | null = null;
+
+    // Step 4: Create personal organization if needed
+    if (shouldCreatePersonalOrg) {
+      const { data: org, error: orgError } = await sbDb
+        .from("Organization")
+        .insert({
+          name: "Personal",
+          userId,
+          hasSequentialIdsMigrated: true,
+        })
+        .select("id")
+        .single();
+
+      if (orgError) throw orgError;
+      personalOrgId = org.id;
+
+      // Create default categories for the personal org
+      const categoryInserts = defaultUserCategories.map((c) => ({
+        ...c,
+        userId,
+        organizationId: org.id,
+      }));
+
+      if (categoryInserts.length > 0) {
+        const { error: catError } = await sbDb
+          .from("Category")
+          .insert(categoryInserts);
+
+        if (catError) throw catError;
+      }
+
+      // Create team member for the owner
+      const memberName = [
+        ...[firstName, lastName].filter(Boolean),
+        "(Owner)",
+      ].join(" ");
+
+      const { error: tmError } = await sbDb.from("TeamMember").insert({
+        name: memberName,
+        organizationId: org.id,
+        userId,
+      });
+
+      if (tmError) throw tmError;
+
+      // Create asset index settings for new users' personal org
+      const { error: aisError } = await sbDb.from("AssetIndexSettings").insert({
+        mode: AssetIndexMode.ADVANCED,
+        columns: defaultFields,
+        organizationId: org.id,
+        userId,
+      });
+
+      if (aisError) throw aisError;
+    }
+
+    // Step 5: Create user-org associations
+    const orgAssociationPromises: Promise<any>[] = [];
+
+    if (shouldCreatePersonalOrg && personalOrgId) {
+      orgAssociationPromises.push(
+        createUserOrgAssociation({
+          userId: user.id,
+          organizationIds: [personalOrgId],
+          roles: [OrganizationRoles.OWNER],
+        })
+      );
+    }
+
+    if (organizationId && roles?.length) {
+      orgAssociationPromises.push(
+        createUserOrgAssociation({
+          userId: user.id,
+          organizationIds: [organizationId],
+          roles,
+        })
+      );
+    }
+
+    await Promise.all(orgAssociationPromises);
+
+    // Re-fetch user with full data including the new organizations
+    const { data: fullUser, error: fetchError } = await sbDb
+      .from("User")
+      .select(
+        "id, email, firstName, lastName, sso, userOrganizations:UserOrganization(roles, organization:Organization(id, name, enabledSso, ssoDetails:SsoDetails(id, domain, baseUserGroupId, selfServiceGroupId, adminGroupId))), organizations:Organization(id)"
+      )
+      .eq("id", userId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    return fullUser;
   } catch (cause) {
     const isUniqueViolation =
-      cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
+      cause &&
+      typeof cause === "object" &&
+      "code" in cause &&
+      (cause as any).code === "23505";
 
     throw new ShelfError({
       cause,
@@ -827,12 +855,12 @@ export async function createUser(
   }
 }
 
-export async function updateUser<T extends Prisma.UserInclude>(
+export async function updateUser(
   updateUserPayload: UpdateUserPayload,
-  extraIncludes?: T
+  _extraIncludes?: any
 ) {
   /**
-   * Remove password from object so we can pass it to prisma user update
+   * Remove password from object so we can pass it to user update
    * Also we remove the email as we don't allow it to be changed for now
    * */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -841,27 +869,27 @@ export async function updateUser<T extends Prisma.UserInclude>(
   );
 
   try {
-    const updatedUser = await db.user.update({
-      where: { id: updateUserPayload.id },
-      data: {
-        ...cleanClone,
-        teamMembers: {
-          updateMany: {
-            where: { userId: updateUserPayload.id },
-            data: {
-              name: `${
-                updateUserPayload.firstName ? updateUserPayload.firstName : ""
-              } ${
-                updateUserPayload.lastName ? updateUserPayload.lastName : ""
-              }`,
-            },
-          },
-        },
-      },
-      include: {
-        ...extraIncludes,
-      },
-    });
+    // Update user
+    const { data: updatedUser, error: updateError } = await sbDb
+      .from("User")
+      .update(cleanClone)
+      .eq("id", updateUserPayload.id)
+      .select("*")
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Update team members name
+    const fullName = `${
+      updateUserPayload.firstName ? updateUserPayload.firstName : ""
+    } ${updateUserPayload.lastName ? updateUserPayload.lastName : ""}`;
+
+    const { error: tmUpdateError } = await sbDb
+      .from("TeamMember")
+      .update({ name: fullName })
+      .eq("userId", updateUserPayload.id);
+
+    if (tmUpdateError) throw tmUpdateError;
 
     if (
       updateUserPayload.password &&
@@ -873,18 +901,20 @@ export async function updateUser<T extends Prisma.UserInclude>(
       );
     }
 
-    return updatedUser as Prisma.UserGetPayload<{ include: T }>;
+    return updatedUser;
   } catch (cause) {
     const validationErrors: ValidationError<any> = {};
 
     const isUniqueViolation =
-      cause instanceof Prisma.PrismaClientKnownRequestError &&
-      cause.code === "P2002";
+      cause &&
+      typeof cause === "object" &&
+      "code" in cause &&
+      (cause as any).code === "23505";
 
     if (isUniqueViolation) {
-      // The .code property can be accessed in a type-safe manner
-      validationErrors[cause.meta?.target as string] = {
-        message: `${cause.meta?.target} is already taken.`,
+      const target = (cause as any).details?.match(/\((\w+)\)/)?.[1] || "field";
+      validationErrors[target] = {
+        message: `${target} is already taken.`,
       };
     }
 
@@ -901,7 +931,7 @@ export async function updateUser<T extends Prisma.UserInclude>(
 
 /**
  * Updates user email in both the auth and shelf databases
- * If for some reason the user update fails we should also revenrt the auth account update
+ * If for some reason the user update fails we should also revert the auth account update
  */
 export async function updateUserEmail({
   userId,
@@ -934,25 +964,26 @@ export async function updateUserEmail({
     }
 
     /** Update the user in the DB */
-    const updatedUser = await db.user
-      .update({
-        where: { id: userId },
-        data: { email: newEmail },
-      })
-      .catch((cause) => {
-        // On failure, revert the change of the user update in auth
-        void getSupabaseAdmin().auth.admin.updateUserById(userId, {
-          email: currentEmail,
-        });
+    const { data: updatedUser, error: updateError } = await sbDb
+      .from("User")
+      .update({ email: newEmail })
+      .eq("id", userId)
+      .select("*")
+      .single();
 
-        // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
-        throw new ShelfError({
-          cause,
-          message: "Failed to update email in shelf",
-          additionalData: { userId, newEmail, currentEmail },
-          label,
-        });
+    if (updateError) {
+      // On failure, revert the change of the user update in auth
+      void getSupabaseAdmin().auth.admin.updateUserById(userId, {
+        email: currentEmail,
       });
+
+      throw new ShelfError({
+        cause: updateError,
+        message: "Failed to update email in shelf",
+        additionalData: { userId, newEmail, currentEmail },
+        label,
+      });
+    }
 
     return updatedUser;
   } catch (cause) {
@@ -1018,64 +1049,33 @@ async function getUsers({
   tierId?: string | null;
 }) {
   try {
-    const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+    const skip = page > 1 ? (page - 1) * take : 0;
 
-    /** Default value of where. Takes the assets belonging to current user */
-    const where: Prisma.UserWhereInput = {};
+    let query = sbDb
+      .from("User")
+      .select(
+        "*, tier:Tier(*), userOrganizations:UserOrganization(roles, organization:Organization(id, type, userId))",
+        { count: "exact" }
+      )
+      .order("createdAt", { ascending: false })
+      .range(skip, skip + take - 1);
 
-    /** If the search string exists, add it to the where object */
+    /** If the search string exists, add filters */
     if (search) {
-      where.OR = [
-        {
-          email: {
-            contains: search,
-            mode: "insensitive",
-          },
-        },
-        {
-          id: {
-            contains: search,
-            mode: "insensitive",
-          },
-        },
-      ];
+      query = query.or(`email.ilike.%${search}%,id.ilike.%${search}%`);
     }
 
-    /** If tierId filter exists, add it to the where object */
+    /** If tierId filter exists, add it */
     if (tierId) {
-      where.tierId = tierId as TierId;
+      query = query.eq("tierId", tierId as TierId);
     }
 
-    const [users, totalUsers] = await Promise.all([
-      /** Get the users */
-      db.user.findMany({
-        skip,
-        take,
-        where,
-        orderBy: { createdAt: "desc" },
-        include: {
-          tier: true,
-          userOrganizations: {
-            select: {
-              roles: true,
-              organization: {
-                select: {
-                  id: true,
-                  type: true,
-                  userId: true,
-                },
-              },
-            },
-          },
-        },
-      }),
+    const { data: users, error, count } = await query;
 
-      /** Count them */
-      db.user.count({ where }),
-    ]);
+    if (error) throw error;
 
-    return { users, totalUsers };
+    return { users: users || [], totalUsers: count || 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1159,85 +1159,73 @@ export async function softDeleteUser(id: User["id"]) {
         id: true,
         email: true,
         profilePicture: true,
-        userOrganizations: {
-          include: {
-            organization: {
-              select: { id: true, userId: true },
-            },
-          },
-        },
-        contact: {
-          select: {
-            id: true,
-          },
-        },
       } satisfies Prisma.UserSelect,
     });
 
-    const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(
-      (uo) => !uo.roles.includes(OrganizationRoles.OWNER)
+    // Fetch user organizations with org details
+    const { data: userOrganizations, error: uoError } = await sbDb
+      .from("UserOrganization")
+      .select("*, organization:Organization(id, userId)")
+      .eq("userId", id);
+
+    if (uoError) throw uoError;
+
+    // Fetch contact
+    const { data: contact } = await sbDb
+      .from("UserContact")
+      .select("id")
+      .eq("userId", id)
+      .maybeSingle();
+
+    const organizationsTheUserDoesNotOwn = (userOrganizations || []).filter(
+      (uo: any) => !uo.roles.includes(OrganizationRoles.OWNER)
     );
 
-    await db.$transaction(async (tx) => {
-      /** Move entries inside each of organizationsTheUserDoesNotOwn from following models:
-       *   - [x] Asset
-       *   - [x] Category
-       *   - [x] Tag
-       *   - [x] Location
-       *   - [x] CustomField
-       *   - [x] Invite
-       *   - [x] Booking
-       *   - [x] Image
-       *   - [x] Kit
-       * The new owner should be the owner of the organization
-       */
-      for (const userOrg of organizationsTheUserDoesNotOwn) {
-        const newOwnerId = userOrg.organization?.userId;
+    // Sequential operations (replacing transaction)
+    for (const userOrg of organizationsTheUserDoesNotOwn) {
+      const newOwnerId = (userOrg as any).organization?.userId;
 
-        if (newOwnerId) {
-          await transferEntitiesToNewOwner({
-            tx,
-            id,
-            newOwnerId,
-            organizationId: userOrg.organizationId,
-          });
-        }
-        /**
-         * Remove the user from all organizations the user belongs to but doesnt own.
-         * */
-        await revokeAccessToOrganization({
-          userId: id,
+      if (newOwnerId) {
+        await transferEntitiesToNewOwner({
+          id,
+          newOwnerId,
           organizationId: userOrg.organizationId,
         });
       }
-
-      /** Update the user data */
-
-      const randomId = generateId();
-      await tx.user.update({
-        where: { id },
-        data: {
-          email: `deleted+${randomId}${SOFT_DELETED_EMAIL_DOMAIN}`,
-          username: `deleted+${randomId}`,
-          firstName: "Deleted",
-          lastName: "User",
-          deletedAt: new Date(),
-        },
+      await revokeAccessToOrganization({
+        userId: id,
+        organizationId: userOrg.organizationId,
       });
-      if (user.contact) {
-        /** Delete the user contact info */
-        await tx.userContact.delete({
-          where: { id: user.contact.id },
-        });
-      }
-    });
+    }
+
+    /** Update the user data */
+    const randomId = generateId();
+    const { error: userUpdateError } = await sbDb
+      .from("User")
+      .update({
+        email: `deleted+${randomId}${SOFT_DELETED_EMAIL_DOMAIN}`,
+        username: `deleted+${randomId}`,
+        firstName: "Deleted",
+        lastName: "User",
+        deletedAt: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (userUpdateError) throw userUpdateError;
+
+    if (contact) {
+      /** Delete the user contact info */
+      const { error: contactDeleteError } = await sbDb
+        .from("UserContact")
+        .delete()
+        .eq("id", contact.id);
+
+      if (contactDeleteError) throw contactDeleteError;
+    }
 
     /**
      * Delete the picture of the user
-     *
-     * Note: This happens outside of the transaction because we dont want to rollback the deletion of the user if the deletion of the picture fails
-     * If it fails for some reason, we will get it in our logs that there was an issue so we can check it manually
-     * */
+     */
     if (user.profilePicture) {
       await deleteProfilePicture({ url: user.profilePicture });
     }
@@ -1265,8 +1253,10 @@ export async function softDeleteUser(id: User["id"]) {
     }
   } catch (cause) {
     if (
-      cause instanceof PrismaClientKnownRequestError &&
-      cause.code === "P2025"
+      cause &&
+      typeof cause === "object" &&
+      "code" in cause &&
+      (cause as any).code === "PGRST116"
     ) {
       // eslint-disable-next-line no-console
       console.log("User not found, so no need to delete");
@@ -1299,7 +1289,7 @@ export async function createUserAccountForTesting(
 
   const authSession = await signInWithEmail(email, password).catch(() => null);
 
-  // user account created but no session 😱
+  // user account created but no session
   // we should delete the user account to allow retry create account again
   if (!authSession) {
     await deleteAuthAccount(authAccount.id);
@@ -1333,34 +1323,42 @@ export async function revokeAccessToOrganization({
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
      */
-    const teamMember = await db.teamMember.findFirst({
-      where: { userId, organizationId },
-    });
+    const { data: teamMember } = await sbDb
+      .from("TeamMember")
+      .select("id")
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
 
-    const result = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(teamMember?.id && {
-          teamMembers: {
-            disconnect: {
-              id: teamMember.id,
-            },
-          },
-        }),
-        userOrganizations: {
-          delete: {
-            userId_organizationId: {
-              userId,
-              organizationId,
-            },
-          },
-        },
-      },
-    });
+    // Disconnect team member from user if exists
+    if (teamMember?.id) {
+      const { error: tmError } = await sbDb
+        .from("TeamMember")
+        .update({ userId: null })
+        .eq("id", teamMember.id);
+
+      if (tmError) throw tmError;
+    }
+
+    // Delete the UserOrganization entry
+    const { error: uoError } = await sbDb
+      .from("UserOrganization")
+      .delete()
+      .eq("userId", userId)
+      .eq("organizationId", organizationId);
+
+    if (uoError) throw uoError;
+
+    // Fetch the updated user to return
+    const { data: result, error: fetchError } = await sbDb
+      .from("User")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (fetchError) throw fetchError;
 
     // Clear lastSelectedOrganizationId if it points to the revoked org.
-    // Uses raw SQL to avoid bumping updatedAt. No-op if already different.
-    // Best-effort: don't block revocation if cleanup fails.
     try {
       const { error: cleanupRpcError } = await sbDb.rpc(
         "clear_user_last_selected_org",
@@ -1404,13 +1402,11 @@ export async function changeUserRole({
   organizationId,
   newRole,
   callerRole,
-  tx: client = db,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   newRole: OrganizationRoles;
   callerRole: OrganizationRoles;
-  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
   try {
     if (newRole === OrganizationRoles.OWNER) {
@@ -1423,12 +1419,14 @@ export async function changeUserRole({
       });
     }
 
-    const userOrg = await client.userOrganization.findFirst({
-      where: {
-        userId,
-        organizationId,
-      },
-    });
+    const { data: userOrg, error: findError } = await sbDb
+      .from("UserOrganization")
+      .select("*")
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (findError) throw findError;
 
     if (!userOrg) {
       throw new ShelfError({
@@ -1482,17 +1480,15 @@ export async function changeUserRole({
       });
     }
 
-    const updated = await client.userOrganization.update({
-      where: {
-        userId_organizationId: {
-          userId,
-          organizationId,
-        },
-      },
-      data: {
-        roles: { set: [newRole] },
-      },
-    });
+    const { data: updated, error: updateError } = await sbDb
+      .from("UserOrganization")
+      .update({ roles: [newRole] })
+      .eq("userId", userId)
+      .eq("organizationId", organizationId)
+      .select("*")
+      .single();
+
+    if (updateError) throw updateError;
 
     return { ...updated, previousRole: currentRole };
   } catch (cause) {
@@ -1522,208 +1518,188 @@ export async function changeUserRole({
  *   - [x] AssetReminder
  *
  * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
- * transferred — their userId represents authorship, not ownership.
+ * transferred -- their userId represents authorship, not ownership.
  *
  * Invites can be skipped via `skipInvites` (used during demotion) because
  * inviterId represents "who sent this" (authorship), not ownership.
  *
- * Required to be used inside a transaction
+ * Previously required a transaction; now uses sequential calls.
  */
 export async function transferEntitiesToNewOwner({
-  tx,
   id,
   newOwnerId,
   organizationId,
   skipInvites = false,
 }: {
-  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   id: User["id"];
   newOwnerId: User["id"];
   organizationId: Organization["id"];
   skipInvites?: boolean;
 }) {
   /** Update assets */
-  await tx.asset.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  const { error: assetError } = await sbDb
+    .from("Asset")
+    .update({ userId: newOwnerId })
+    .eq("userId", id)
+    .eq("organizationId", organizationId);
+
+  if (assetError) throw assetError;
 
   /** Update categories */
-  await tx.category.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  const { error: catError } = await sbDb
+    .from("Category")
+    .update({ userId: newOwnerId })
+    .eq("userId", id)
+    .eq("organizationId", organizationId);
+
+  if (catError) throw catError;
 
   /** Update tags */
-  await tx.tag.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  const { error: tagError } = await sbDb
+    .from("Tag")
+    .update({ userId: newOwnerId })
+    .eq("userId", id)
+    .eq("organizationId", organizationId);
+
+  if (tagError) throw tagError;
 
   /** Update locations */
-  await tx.location.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  const { error: locError } = await sbDb
+    .from("Location")
+    .update({ userId: newOwnerId })
+    .eq("userId", id)
+    .eq("organizationId", organizationId);
+
+  if (locError) throw locError;
 
   /** Update custom fields */
-  await tx.customField.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  const { error: cfError } = await sbDb
+    .from("CustomField")
+    .update({ userId: newOwnerId })
+    .eq("userId", id)
+    .eq("organizationId", organizationId);
 
-  /** Update invites (skipped during demotion — inviterId is authorship) */
+  if (cfError) throw cfError;
+
+  /** Update invites (skipped during demotion -- inviterId is authorship) */
   if (!skipInvites) {
-    await tx.invite.updateMany({
-      where: {
-        inviterId: id,
-        organizationId: organizationId,
-      },
-      data: {
-        inviterId: newOwnerId,
-      },
-    });
+    const { error: invError } = await sbDb
+      .from("Invite")
+      .update({ inviterId: newOwnerId })
+      .eq("inviterId", id)
+      .eq("organizationId", organizationId);
+
+    if (invError) throw invError;
   }
 
   /** Update bookings */
-  await tx.booking.updateMany({
-    where: {
-      creatorId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      creatorId: newOwnerId,
-    },
-  });
+  const { error: bookError } = await sbDb
+    .from("Booking")
+    .update({ creatorId: newOwnerId })
+    .eq("creatorId", id)
+    .eq("organizationId", organizationId);
+
+  if (bookError) throw bookError;
 
   /** Update bookings where the person deleted is the custodian */
-  await tx.booking.updateMany({
-    where: {
-      custodianUserId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      custodianUserId: null,
-    },
-  });
+  const { error: custError } = await sbDb
+    .from("Booking")
+    .update({ custodianUserId: null })
+    .eq("custodianUserId", id)
+    .eq("organizationId", organizationId);
+
+  if (custError) throw custError;
 
   /** Update images */
-  await tx.image.updateMany({
-    where: {
-      userId: id,
-      ownerOrgId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  const { error: imgError } = await sbDb
+    .from("Image")
+    .update({ userId: newOwnerId })
+    .eq("userId", id)
+    .eq("ownerOrgId", organizationId);
+
+  if (imgError) throw imgError;
 
   /** Update kits */
-  await tx.kit.updateMany({
-    where: {
-      createdById: id,
-      organizationId: organizationId,
-    },
-    data: {
-      createdById: newOwnerId,
-    },
-  });
+  const { error: kitError } = await sbDb
+    .from("Kit")
+    .update({ createdById: newOwnerId })
+    .eq("createdById", id)
+    .eq("organizationId", organizationId);
+
+  if (kitError) throw kitError;
 
   /** Update asset reminders */
-  await tx.assetReminder.updateMany({
-    where: {
-      createdById: id,
-      organizationId: organizationId,
-    },
-    data: {
-      createdById: newOwnerId,
-    },
-  });
+  const { error: reminderError } = await sbDb
+    .from("AssetReminder")
+    .update({ createdById: newOwnerId })
+    .eq("createdById", id)
+    .eq("organizationId", organizationId);
+
+  if (reminderError) throw reminderError;
 }
 
-type UserWithExtraInclude<T extends Prisma.UserInclude | undefined> =
-  T extends Prisma.UserInclude
-    ? Prisma.UserGetPayload<{
-        include: MergeInclude<typeof USER_STATIC_INCLUDE, T>;
-      }>
-    : Prisma.UserGetPayload<{ include: typeof USER_STATIC_INCLUDE }>;
-
-export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
+export async function getUserFromOrg({
   id,
   organizationId,
   userOrganizations,
   request,
-  extraInclude,
 }: Pick<User, "id"> & {
   organizationId: Organization["id"];
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
-  extraInclude?: T;
 }) {
   try {
+    // Check if user belongs to the organization (or any of the provided orgs)
     const otherOrganizationIds = userOrganizations?.map(
       (org) => org.organizationId
     );
 
-    const mergedInclude = {
-      ...USER_STATIC_INCLUDE,
-      ...extraInclude,
-    } as MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+    // Build the org IDs to check
+    const orgIdsToCheck = [
+      organizationId,
+      ...(otherOrganizationIds || []),
+    ].filter(Boolean);
 
-    const user = (await db.user.findFirstOrThrow({
-      where: {
-        OR: [
-          { id, userOrganizations: { some: { organizationId } } },
-          ...(userOrganizations?.length
-            ? [
-                {
-                  id,
-                  userOrganizations: {
-                    some: { organizationId: { in: otherOrganizationIds } },
-                  },
-                },
-              ]
-            : []),
-        ],
-      },
-      include: mergedInclude,
-    })) as UserWithExtraInclude<T>;
+    // First check if user has any of these org memberships
+    const { data: userOrgMemberships, error: membershipError } = await sbDb
+      .from("UserOrganization")
+      .select("organizationId")
+      .eq("userId", id)
+      .in("organizationId", orgIdsToCheck);
+
+    if (membershipError) throw membershipError;
+
+    if (!userOrgMemberships || userOrgMemberships.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "User not found.",
+        message:
+          "The user you are trying to access does not exists or you do not have permission to access it.",
+        additionalData: { id, organizationId },
+        label,
+      });
+    }
+
+    // Fetch the user with userOrganizations (USER_STATIC_INCLUDE equivalent)
+    const { data: user, error: userError } = await sbDb
+      .from("User")
+      .select("*, userOrganizations:UserOrganization(*)")
+      .eq("id", id)
+      .single();
+
+    if (userError) throw userError;
 
     /* User is accessing the User in the wrong organization */
-    const isUserInCurrentOrg = !!user.userOrganizations.find(
-      (userOrg) => userOrg.organizationId === organizationId
+    const userOrgs = (user as any).userOrganizations as any[];
+    const isUserInCurrentOrg = !!userOrgs.find(
+      (userOrg: any) => userOrg.organizationId === organizationId
     );
 
     const otherOrgsForUser =
       userOrganizations?.filter(
         (org) =>
-          !!user.userOrganizations.find(
-            (userOrg) => userOrg.organizationId === org.organizationId
+          !!userOrgs.find(
+            (userOrg: any) => userOrg.organizationId === org.organizationId
           )
       ) ?? [];
 

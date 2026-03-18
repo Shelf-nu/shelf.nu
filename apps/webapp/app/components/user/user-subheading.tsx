@@ -4,7 +4,7 @@ import { Button } from "../shared/button";
 export function UserSubheading({
   user,
 }: {
-  user: ReturnType<typeof getUserWithContact>;
+  user: Awaited<ReturnType<typeof getUserWithContact>>;
 }) {
   const { contact } = user;
   const hasAnyContactInfo =

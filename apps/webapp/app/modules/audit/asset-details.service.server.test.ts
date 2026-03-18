@@ -85,7 +85,7 @@ describe("audit asset details service", () => {
       });
 
       expect(result).toEqual(mockNote);
-      expect(result.user?.firstName).toBe("John");
+      expect((result.user as any)?.firstName).toBe("John");
     });
 
     it("throws ShelfError when database operation fails", async () => {

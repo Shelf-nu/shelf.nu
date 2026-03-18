@@ -32,7 +32,7 @@ export const UserDetailsFormSchema = z.object({
 export function UserDetailsForm({
   user,
 }: {
-  user: ReturnType<typeof getUserWithContact>;
+  user: Awaited<ReturnType<typeof getUserWithContact>>;
 }) {
   const zo = useZorm("NewQuestionWizardScreen", UserDetailsFormSchema);
   const data = useActionData<UserPageActionData>();
@@ -43,11 +43,7 @@ export function UserDetailsForm({
   const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   const disabled = useDisabled();
-  const isDisabled =
-    disabled ||
-    (user.sso && {
-      reason: "You cannot edit your details when using SSO.",
-    });
+  const isDisabled = disabled || !!user.sso;
 
   const profilePictureError =
     (data?.error?.additionalData?.field === "profile-picture"

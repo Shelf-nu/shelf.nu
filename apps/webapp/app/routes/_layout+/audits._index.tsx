@@ -1,5 +1,4 @@
 import type { AuditStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
@@ -18,7 +17,6 @@ import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
-import type { AUDIT_LIST_INCLUDE } from "~/modules/audit/service.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -174,9 +172,34 @@ export default function AuditsIndexPage() {
   );
 }
 
-type AuditListItem = Prisma.AuditSessionGetPayload<{
-  include: typeof AUDIT_LIST_INCLUDE;
-}>;
+type AuditListItem = {
+  id: string;
+  name: string;
+  status: string;
+  description: string | null;
+  dueDate: string | Date | null;
+  createdAt: string | Date;
+  startedAt: string | Date | null;
+  completedAt: string | Date | null;
+  expectedAssetCount: number;
+  foundAssetCount: number;
+  missingAssetCount: number;
+  unexpectedAssetCount: number;
+  createdBy: {
+    firstName: string | null;
+    lastName: string | null;
+    email: string;
+    profilePicture: string | null;
+  } | null;
+  assignments: Array<{
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+      profilePicture: string | null;
+    };
+  }>;
+};
 
 const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const { createdBy } = item;
@@ -218,8 +241,8 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
 
       <Td>
         <AuditStatusBadgeWithOverdue
-          status={item.status}
-          dueDate={item.dueDate}
+          status={item.status as AuditStatus}
+          dueDate={item.dueDate ? new Date(item.dueDate as string) : null}
         />
       </Td>
 

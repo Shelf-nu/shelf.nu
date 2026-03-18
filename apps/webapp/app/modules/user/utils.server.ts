@@ -5,7 +5,6 @@ import {
 } from "@prisma/client";
 import { redirect } from "react-router";
 import { z } from "zod";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
@@ -358,53 +357,46 @@ export async function resolveUserAction(
           }
         }
 
-        await db.$transaction(async (tx) => {
-          await transferEntitiesToNewOwner({
-            tx,
-            id: targetUserId,
-            newOwnerId: recipientId,
-            organizationId,
-            skipInvites: true,
-          });
-
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
-
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        await transferEntitiesToNewOwner({
+          id: targetUserId,
+          newOwnerId: recipientId,
+          organizationId,
+          skipInvites: true,
         });
+
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          callerRole,
+        });
+
+        const { error: logError1 } = await sbDb.from("RoleChangeLog").insert({
+          userId: targetUserId,
+          changedById: userId,
+          organizationId,
+          previousRole: currentRole,
+          newRole,
+        });
+
+        if (logError1) throw logError1;
       } else {
-        await db.$transaction(async (tx) => {
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
-
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          callerRole,
         });
+
+        const { error: logError2 } = await sbDb.from("RoleChangeLog").insert({
+          userId: targetUserId,
+          changedById: userId,
+          organizationId,
+          previousRole: currentRole,
+          newRole,
+        });
+
+        if (logError2) throw logError2;
       }
 
       /** Send email notification to the affected user */

@@ -106,7 +106,9 @@ export default function TransferOwnershipCard({
     actionData?.error
   );
 
-  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
+  const isShelfAdmin = user?.roles?.some(
+    (role: { name: string }) => role.name === Roles.ADMIN
+  );
 
   // Check if current owner has subscriptions that could be transferred
   const ownerHasSubscription =

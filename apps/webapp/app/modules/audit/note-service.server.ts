@@ -1,5 +1,4 @@
 import type { AuditNote, User, AuditSession } from "@prisma/client";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 
@@ -56,36 +55,17 @@ export async function getAuditNotes({
   auditSessionId: AuditSession["id"];
 }) {
   try {
-    return await db.auditNote.findMany({
-      where: {
-        auditSessionId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-        auditAsset: {
-          select: {
-            id: true,
-            asset: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+    const { data, error } = await sbDb
+      .from("AuditNote")
+      .select(
+        "*, user:User!userId(id, firstName, lastName, email, profilePicture), auditAsset:AuditAsset!auditAssetId(id, asset:Asset!assetId(id, title))"
+      )
+      .eq("auditSessionId", auditSessionId)
+      .order("createdAt", { ascending: false });
+
+    if (error) throw error;
+
+    return data;
   } catch (cause) {
     throw new ShelfError({
       cause,

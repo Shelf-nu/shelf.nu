@@ -1,3 +1,4 @@
+import { db } from "~/database/db.server";
 import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
@@ -16,9 +17,10 @@ export async function createAuditCreationNote({
   auditSessionId: string;
   createdById: string;
   expectedAssetCount: number;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
-  const creator = await tx.user.findUnique({
+  const client = tx ?? db;
+  const creator = await client.user.findUnique({
     where: { id: createdById },
     select: {
       id: true,
@@ -31,7 +33,7 @@ export async function createAuditCreationNote({
     return; // Skip note creation if user not found
   }
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: creator.id,
@@ -64,7 +66,7 @@ export async function createAssetScanNote({
   assetId: string;
   userId: string;
   isExpected: boolean;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
   prefetchedUser?: {
     id: string;
     firstName: string | null;
@@ -72,15 +74,16 @@ export async function createAssetScanNote({
   } | null;
   prefetchedAsset?: { id: string; title: string } | null;
 }) {
+  const client = tx ?? db;
   // Use pre-fetched data if available, otherwise fetch inside the transaction
   const [asset, scanner] = await Promise.all([
     prefetchedAsset ??
-      tx.asset.findUnique({
+      client.asset.findUnique({
         where: { id: assetId },
         select: { id: true, title: true },
       }),
     prefetchedUser ??
-      tx.user.findUnique({
+      client.user.findUnique({
         where: { id: userId },
         select: {
           id: true,
@@ -97,7 +100,7 @@ export async function createAssetScanNote({
   const assetStatus = isExpected ? "expected" : "unexpected";
   const assetLink = wrapAssetsWithDataForNote(asset, "scanned");
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: scanner.id,
@@ -123,14 +126,15 @@ export async function createAssetScanRemovedNote({
   auditSessionId: string;
   assetId: string;
   userId: string;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [asset, remover] = await Promise.all([
-    tx.asset.findUnique({
+    client.asset.findUnique({
       where: { id: assetId },
       select: { id: true, title: true },
     }),
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -146,7 +150,7 @@ export async function createAssetScanRemovedNote({
 
   const assetLink = wrapAssetsWithDataForNote(asset, "removed");
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: remover.id,
@@ -172,17 +176,18 @@ export async function createAuditStartedNote({
 }: {
   auditSessionId: string;
   userId: string;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
   prefetchedUser?: {
     id: string;
     firstName: string | null;
     lastName: string | null;
   } | null;
 }) {
+  const client = tx ?? db;
   // Use pre-fetched data if available, otherwise fetch inside the transaction
   const starter =
     prefetchedUser ??
-    (await tx.user.findUnique({
+    (await client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -195,7 +200,7 @@ export async function createAuditStartedNote({
     return; // Skip note creation if user not found
   }
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: starter.id,
@@ -231,9 +236,10 @@ export async function createAuditCompletedNote({
   missingCount: number;
   unexpectedCount: number;
   completionNote?: string | null;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
-  const completer = await tx.user.findUnique({
+  const client = tx ?? db;
+  const completer = await client.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
@@ -261,7 +267,7 @@ export async function createAuditCompletedNote({
   }
 
   // Fetch and append audit images if any were uploaded during completion
-  const auditImages = await tx.auditImage.findMany({
+  const auditImages = await client.auditImage.findMany({
     where: {
       auditSessionId,
       auditAssetId: null, // Only general audit images, not asset-specific
@@ -276,7 +282,7 @@ export async function createAuditCompletedNote({
   }
 
   // Create a single COMMENT note for better layout
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: completer.id,
@@ -299,9 +305,10 @@ export async function createAuditUpdateNote({
   auditSessionId: string;
   userId: string;
   changes: Array<{ field: string; from: string; to: string }>;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
-  const updater = await tx.user.findUnique({
+  const client = tx ?? db;
+  const updater = await client.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
@@ -326,7 +333,7 @@ export async function createAuditUpdateNote({
     lastName: updater.lastName,
   })} updated audit details:\n\n${changeDescriptions.join("\n\n")}`;
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: updater.id,
@@ -351,10 +358,11 @@ export async function createAuditAssetImagesAddedNote({
   auditAssetId: string;
   userId: string;
   imageIds: string[];
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [uploader, asset] = await Promise.all([
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -362,7 +370,7 @@ export async function createAuditAssetImagesAddedNote({
         lastName: true,
       },
     }),
-    tx.auditAsset.findUnique({
+    client.auditAsset.findUnique({
       where: { id: auditAssetId },
       include: {
         asset: {
@@ -392,7 +400,7 @@ export async function createAuditAssetImagesAddedNote({
   const imageIdsStr = imageIds.join(",");
   content += `\n\n{% audit_images count=${imageCount} ids="${imageIdsStr}" /%}`;
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       auditAssetId, // Associate with specific asset
@@ -417,9 +425,10 @@ export async function createDueDateChangedNote({
   userId: string;
   oldDate: Date | null;
   newDate: Date | null;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
-  const updater = await tx.user.findUnique({
+  const client = tx ?? db;
+  const updater = await client.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
@@ -477,7 +486,7 @@ export async function createDueDateChangedNote({
     return; // No change, skip note creation
   }
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: updater.id,
@@ -499,10 +508,11 @@ export async function createAssigneeAddedNote({
   auditSessionId: string;
   userId: string;
   assigneeUserId: string;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [updater, assignee] = await Promise.all([
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -510,7 +520,7 @@ export async function createAssigneeAddedNote({
         lastName: true,
       },
     }),
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: assigneeUserId },
       select: {
         id: true,
@@ -534,7 +544,7 @@ export async function createAssigneeAddedNote({
     lastName: assignee.lastName,
   })}.`;
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: updater.id,
@@ -556,10 +566,11 @@ export async function createAssigneeRemovedNote({
   auditSessionId: string;
   userId: string;
   assigneeUserId: string;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [updater, assignee] = await Promise.all([
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -567,7 +578,7 @@ export async function createAssigneeRemovedNote({
         lastName: true,
       },
     }),
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: assigneeUserId },
       select: {
         id: true,
@@ -591,7 +602,7 @@ export async function createAssigneeRemovedNote({
     lastName: assignee.lastName,
   })}.`;
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: updater.id,
@@ -616,10 +627,11 @@ export async function createAssetsAddedToAuditNote({
   userId: string;
   addedAssetIds: string[];
   skippedCount: number;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [adder, addedAssets] = await Promise.all([
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -627,7 +639,7 @@ export async function createAssetsAddedToAuditNote({
         lastName: true,
       },
     }),
-    tx.asset.findMany({
+    client.asset.findMany({
       where: { id: { in: addedAssetIds } },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
@@ -653,7 +665,7 @@ export async function createAssetsAddedToAuditNote({
     } skipped as already in audit)`;
   }
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: adder.id,
@@ -676,10 +688,11 @@ export async function createAssetRemovedFromAuditNote({
   auditSessionId: string;
   assetId: string;
   userId: string;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [remover, asset] = await Promise.all([
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -687,7 +700,7 @@ export async function createAssetRemovedFromAuditNote({
         lastName: true,
       },
     }),
-    tx.asset.findUnique({
+    client.asset.findUnique({
       where: { id: assetId },
       select: { id: true, title: true },
     }),
@@ -705,7 +718,7 @@ export async function createAssetRemovedFromAuditNote({
     lastName: remover.lastName,
   })} removed ${assetMarkdoc} from audit.`;
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: remover.id,
@@ -728,10 +741,11 @@ export async function createAssetsRemovedFromAuditNote({
   auditSessionId: string;
   assetIds: string[];
   userId: string;
-  tx: any; // Prisma transaction client
+  tx?: any; // Prisma transaction client
 }) {
+  const client = tx ?? db;
   const [remover, assets] = await Promise.all([
-    tx.user.findUnique({
+    client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -739,7 +753,7 @@ export async function createAssetsRemovedFromAuditNote({
         lastName: true,
       },
     }),
-    tx.asset.findMany({
+    client.asset.findMany({
       where: { id: { in: assetIds } },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
@@ -758,7 +772,7 @@ export async function createAssetsRemovedFromAuditNote({
     lastName: remover.lastName,
   })} removed ${assetsMarkdoc} from audit.`;
 
-  await tx.auditNote.create({
+  await client.auditNote.create({
     data: {
       auditSessionId,
       userId: remover.id,

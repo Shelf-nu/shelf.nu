@@ -5,9 +5,9 @@ import {
   Roles,
 } from "@prisma/client";
 import type { Organization, Prisma, TierId, User } from "@prisma/client";
+import type { Sb } from "@shelf/database";
 import type Stripe from "stripe";
 
-import type { Sb } from "@shelf/database";
 import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import { sendEmail } from "~/emails/mail.server";

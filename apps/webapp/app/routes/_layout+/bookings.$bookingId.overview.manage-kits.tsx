@@ -520,17 +520,20 @@ export default function AddKitsToBooking() {
    * Set disabled items for kit
    */
   useEffect(() => {
-    const _disabledBulkItems = items.reduce<ListItemData[]>((acc, kit) => {
-      const { isKitUnavailable } = getKitAvailabilityStatus(
-        kit as unknown as KitForBooking,
-        booking.id
-      );
-      if (isKitUnavailable) {
-        acc.push(kit);
-      }
+    const _disabledBulkItems = items.reduce<ListItemData[]>(
+      (acc: ListItemData[], kit: any) => {
+        const { isKitUnavailable } = getKitAvailabilityStatus(
+          kit as unknown as KitForBooking,
+          booking.id
+        );
+        if (isKitUnavailable) {
+          acc.push(kit);
+        }
 
-      return acc;
-    }, []);
+        return acc;
+      },
+      []
+    );
 
     setDisabledBulkItems(_disabledBulkItems);
   }, [booking.id, items, setDisabledBulkItems]);

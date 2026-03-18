@@ -1,12 +1,10 @@
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
-import { db } from "~/database/db.server";
 import { sbDb } from "~/database/supabase.server";
 import {
   createAssetNotesForAuditAddition,
@@ -39,38 +37,11 @@ import {
 } from "./helpers.server";
 
 import type { AuditSchedulerData } from "./types";
-import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
-export const AUDIT_LIST_INCLUDE = {
-  createdBy: {
-    select: {
-      firstName: true,
-      lastName: true,
-      email: true,
-      profilePicture: true,
-    },
-  },
-  assignments: {
-    include: {
-      user: {
-        select: {
-          firstName: true,
-          lastName: true,
-          email: true,
-          profilePicture: true,
-        },
-      },
-    },
-  },
-  _count: {
-    select: {
-      assets: true,
-      scans: true,
-      assignments: true,
-    },
-  },
-} satisfies Prisma.AuditSessionInclude;
+/** Supabase select string equivalent of the old Prisma AUDIT_LIST_INCLUDE */
+export const AUDIT_LIST_SELECT =
+  "*, createdBy:User!createdById(firstName, lastName, email, profilePicture), assignments:AuditAssignment(*, user:User!userId(firstName, lastName, email, profilePicture))";
 
 export type AuditScopeMeta = {
   contextType?: string | null;
@@ -210,18 +181,15 @@ export async function createAuditSession(
     });
   }
 
-  const assets = await db.asset.findMany({
-    where: {
-      id: { in: uniqueAssetIds },
-      organizationId,
-    },
-    select: {
-      id: true,
-      title: true,
-    },
-  });
+  const { data: assets, error: assetsError } = await sbDb
+    .from("Asset")
+    .select("id, title")
+    .eq("organizationId", organizationId)
+    .in("id", uniqueAssetIds);
 
-  if (assets.length !== uniqueAssetIds.length) {
+  if (assetsError) throw assetsError;
+
+  if (!assets || assets.length !== uniqueAssetIds.length) {
     throw new ShelfError({
       cause: null,
       message:
@@ -236,91 +204,99 @@ export async function createAuditSession(
   // Creator is NOT automatically added as an assignee
   const uniqueAssigneeIds = assignee ? [assignee] : [];
 
-  const result = await db.$transaction(async (tx) => {
-    const session = await tx.auditSession.create({
-      data: {
-        name,
-        description,
-        organizationId,
-        createdById,
-        expectedAssetCount: assets.length,
-        missingAssetCount: assets.length,
-        scopeMeta: scopeMeta ?? undefined,
-        dueDate,
-      },
-    });
-
-    if (assets.length > 0) {
-      await tx.auditAsset.createMany({
-        data: assets.map((asset) => ({
-          auditSessionId: session.id,
-          assetId: asset.id,
-          expected: true,
-        })),
-      });
-    }
-
-    if (uniqueAssigneeIds.length > 0) {
-      await tx.auditAssignment.createMany({
-        data: uniqueAssigneeIds.map((userId) => ({
-          auditSessionId: session.id,
-          userId,
-          // LEAD role is reserved for future use (e.g., when we support multiple assignees)
-          role: undefined,
-        })),
-      });
-    }
-
-    const sessionWithAssignments = await tx.auditSession.findUnique({
-      where: { id: session.id },
-      include: {
-        assignments: true,
-      },
-    });
-
-    if (!sessionWithAssignments) {
-      throw new ShelfError({
-        cause: null,
-        message: "Unable to load the newly created audit session.",
-        label,
-        additionalData: { sessionId: session.id },
-      });
-    }
-
-    // Create automatic note for audit creation
-    await createAuditCreationNote({
-      auditSessionId: session.id,
+  // Create the audit session
+  const { data: session, error: sessionError } = await sbDb
+    .from("AuditSession")
+    .insert({
+      name,
+      description: description ?? null,
+      organizationId,
       createdById,
       expectedAssetCount: assets.length,
-      tx,
-    });
+      missingAssetCount: assets.length,
+      scopeMeta: scopeMeta ?? null,
+      dueDate: dueDate ? dueDate.toISOString() : null,
+    })
+    .select()
+    .single();
 
-    // Fetch the created audit assets to get their IDs
-    const createdAuditAssets = await tx.auditAsset.findMany({
-      where: {
+  if (sessionError) throw sessionError;
+
+  // Create audit asset entries
+  if (assets.length > 0) {
+    const { error: auditAssetError } = await sbDb.from("AuditAsset").insert(
+      assets.map((asset) => ({
         auditSessionId: session.id,
+        assetId: asset.id,
         expected: true,
-      },
-      select: {
-        id: true,
-        assetId: true,
-      },
-    });
-
-    // Create a map for quick lookup
-    const auditAssetMap = new Map(
-      createdAuditAssets.map((aa) => [aa.assetId, aa.id])
+      }))
     );
 
-    return {
-      session: sessionWithAssignments,
-      expectedAssets: assets.map((asset) => ({
-        id: asset.id,
-        name: asset.title,
-        auditAssetId: auditAssetMap.get(asset.id) ?? "",
-      })),
-    } satisfies CreateAuditSessionResult;
+    if (auditAssetError) throw auditAssetError;
+  }
+
+  // Create audit assignment entries
+  if (uniqueAssigneeIds.length > 0) {
+    const { error: assignmentError } = await sbDb
+      .from("AuditAssignment")
+      .insert(
+        uniqueAssigneeIds.map((userId) => ({
+          auditSessionId: session.id,
+          userId,
+        }))
+      );
+
+    if (assignmentError) throw assignmentError;
+  }
+
+  // Fetch session with assignments
+  const { data: sessionWithAssignments, error: fetchError } = await sbDb
+    .from("AuditSession")
+    .select("*, assignments:AuditAssignment(*)")
+    .eq("id", session.id)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  if (!sessionWithAssignments) {
+    throw new ShelfError({
+      cause: null,
+      message: "Unable to load the newly created audit session.",
+      label,
+      additionalData: { sessionId: session.id },
+    });
+  }
+
+  // Create automatic note for audit creation
+  await createAuditCreationNote({
+    auditSessionId: session.id,
+    createdById,
+    expectedAssetCount: assets.length,
   });
+
+  // Fetch the created audit assets to get their IDs
+  const { data: createdAuditAssets, error: createdAuditAssetsError } =
+    await sbDb
+      .from("AuditAsset")
+      .select("id, assetId")
+      .eq("auditSessionId", session.id)
+      .eq("expected", true);
+
+  if (createdAuditAssetsError) throw createdAuditAssetsError;
+
+  // Create a map for quick lookup
+  const auditAssetMap = new Map(
+    (createdAuditAssets ?? []).map((aa) => [aa.assetId, aa.id])
+  );
+
+  const result = {
+    session: sessionWithAssignments as any,
+    expectedAssets: assets.map((asset) => ({
+      id: asset.id,
+      name: asset.title,
+      auditAssetId: auditAssetMap.get(asset.id) ?? "",
+    })),
+  } satisfies CreateAuditSessionResult;
 
   // Create asset notes outside the transaction
   if (assets.length > 0) {
@@ -358,180 +334,185 @@ export async function updateAuditSession({
     assigneeUserId?: string | null;
   };
 }) {
-  // Use transaction to ensure atomicity
-  return db.$transaction(async (tx) => {
-    // Fetch the current audit to track changes
-    const currentAudit = await tx.auditSession.findUnique({
-      where: { id, organizationId },
-      select: {
-        name: true,
-        description: true,
-        status: true,
-        dueDate: true,
-        assignments: {
-          select: {
-            userId: true,
-          },
-        },
-      },
+  // Fetch the current audit to track changes
+  const { data: currentAudit, error: fetchError } = await sbDb
+    .from("AuditSession")
+    .select(
+      "name, description, status, dueDate, assignments:AuditAssignment(userId)"
+    )
+    .eq("id", id)
+    .eq("organizationId", organizationId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  if (!currentAudit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 404,
     });
+  }
 
-    if (!currentAudit) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 404,
-      });
-    }
-
-    if (currentAudit.status === AuditStatus.CANCELLED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cancelled audits cannot be edited.",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 400,
-      });
-    }
-
-    if (currentAudit.status === AuditStatus.COMPLETED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Completed audits cannot be edited.",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 400,
-      });
-    }
-
-    // Track what changed for activity logging
-    const changes: Array<{ field: string; from: string; to: string }> = [];
-    const currentAssignee = currentAudit.assignments[0]?.userId || null;
-    const newAssignee =
-      data.assigneeUserId === undefined
-        ? undefined
-        : data.assigneeUserId || null;
-
-    // Track basic field changes
-    if (data.name !== undefined && data.name !== currentAudit.name) {
-      changes.push({
-        field: "name",
-        from: currentAudit.name,
-        to: data.name,
-      });
-    }
-
-    if (
-      data.description !== undefined &&
-      data.description !== currentAudit.description
-    ) {
-      changes.push({
-        field: "description",
-        from: currentAudit.description || "(empty)",
-        to: data.description || "(empty)",
-      });
-    }
-
-    // Check if due date changed
-    const dueDateChanged =
-      data.dueDate !== undefined &&
-      ((currentAudit.dueDate === null && data.dueDate !== null) ||
-        (currentAudit.dueDate !== null && data.dueDate === null) ||
-        (currentAudit.dueDate !== null &&
-          data.dueDate !== null &&
-          currentAudit.dueDate.getTime() !== data.dueDate.getTime()));
-
-    // Check if assignee changed
-    const assigneeChanged =
-      newAssignee !== undefined && newAssignee !== currentAssignee;
-
-    // Single update for all audit session fields
-    const updatedAudit = await tx.auditSession.update({
-      where: { id, organizationId },
-      data: {
-        name: data.name,
-        description: data.description,
-        dueDate: data.dueDate,
-      },
+  if (currentAudit.status === AuditStatus.CANCELLED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Cancelled audits cannot be edited.",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 400,
     });
+  }
 
-    // Single batch operation for assignee changes
-    if (assigneeChanged) {
-      // Remove old assignee if exists
-      if (currentAssignee) {
-        await tx.auditAssignment.deleteMany({
-          where: { auditSessionId: id, userId: currentAssignee },
-        });
-      }
-      // Add new assignee if provided
-      if (newAssignee) {
-        await tx.auditAssignment.create({
-          data: { auditSessionId: id, userId: newAssignee },
-        });
-      }
+  if (currentAudit.status === AuditStatus.COMPLETED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Completed audits cannot be edited.",
+      additionalData: { id, organizationId },
+      label: "Audit",
+      status: 400,
+    });
+  }
+
+  // Track what changed for activity logging
+  const changes: Array<{ field: string; from: string; to: string }> = [];
+  const currentAssignee =
+    (currentAudit.assignments as unknown as { userId: string }[])[0]?.userId ||
+    null;
+  const newAssignee =
+    data.assigneeUserId === undefined ? undefined : data.assigneeUserId || null;
+
+  // Track basic field changes
+  if (data.name !== undefined && data.name !== currentAudit.name) {
+    changes.push({
+      field: "name",
+      from: currentAudit.name,
+      to: data.name,
+    });
+  }
+
+  if (
+    data.description !== undefined &&
+    data.description !== currentAudit.description
+  ) {
+    changes.push({
+      field: "description",
+      from: currentAudit.description || "(empty)",
+      to: data.description || "(empty)",
+    });
+  }
+
+  // Check if due date changed (Supabase returns dates as strings)
+  const currentDueDate = currentAudit.dueDate
+    ? new Date(currentAudit.dueDate)
+    : null;
+  const dueDateChanged =
+    data.dueDate !== undefined &&
+    ((currentDueDate === null && data.dueDate !== null) ||
+      (currentDueDate !== null && data.dueDate === null) ||
+      (currentDueDate !== null &&
+        data.dueDate !== null &&
+        currentDueDate.getTime() !== data.dueDate.getTime()));
+
+  // Check if assignee changed
+  const assigneeChanged =
+    newAssignee !== undefined && newAssignee !== currentAssignee;
+
+  // Single update for all audit session fields
+  const updateData: Record<string, unknown> = {};
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.dueDate !== undefined)
+    updateData.dueDate = data.dueDate ? data.dueDate.toISOString() : null;
+
+  const { data: updatedAudit, error: updateError } = await sbDb
+    .from("AuditSession")
+    .update(updateData)
+    .eq("id", id)
+    .eq("organizationId", organizationId)
+    .select()
+    .single();
+
+  if (updateError) throw updateError;
+
+  // Handle assignee changes
+  if (assigneeChanged) {
+    // Remove old assignee if exists
+    if (currentAssignee) {
+      const { error: deleteError } = await sbDb
+        .from("AuditAssignment")
+        .delete()
+        .eq("auditSessionId", id)
+        .eq("userId", currentAssignee);
+
+      if (deleteError) throw deleteError;
     }
+    // Add new assignee if provided
+    if (newAssignee) {
+      const { error: insertError } = await sbDb
+        .from("AuditAssignment")
+        .insert({ auditSessionId: id, userId: newAssignee });
 
-    // Create all activity notes in batch (minimize DB round trips)
-    const notePromises: Promise<any>[] = [];
+      if (insertError) throw insertError;
+    }
+  }
 
-    // Basic field changes note
-    if (changes.length > 0) {
+  // Create all activity notes in batch (minimize DB round trips)
+  const notePromises: Promise<any>[] = [];
+
+  // Basic field changes note
+  if (changes.length > 0) {
+    notePromises.push(
+      createAuditUpdateNote({
+        auditSessionId: id,
+        userId,
+        changes,
+      })
+    );
+  }
+
+  // Due date change note
+  if (dueDateChanged) {
+    notePromises.push(
+      createDueDateChangedNote({
+        auditSessionId: id,
+        userId,
+        oldDate: currentDueDate,
+        newDate: data.dueDate!,
+      })
+    );
+  }
+
+  // Assignee change notes
+  if (assigneeChanged) {
+    if (currentAssignee) {
       notePromises.push(
-        createAuditUpdateNote({
+        createAssigneeRemovedNote({
           auditSessionId: id,
           userId,
-          changes,
-          tx,
+          assigneeUserId: currentAssignee,
         })
       );
     }
-
-    // Due date change note
-    if (dueDateChanged) {
+    if (newAssignee) {
       notePromises.push(
-        createDueDateChangedNote({
+        createAssigneeAddedNote({
           auditSessionId: id,
           userId,
-          oldDate: currentAudit.dueDate,
-          newDate: data.dueDate!,
-          tx,
+          assigneeUserId: newAssignee,
         })
       );
     }
+  }
 
-    // Assignee change notes
-    if (assigneeChanged) {
-      if (currentAssignee) {
-        notePromises.push(
-          createAssigneeRemovedNote({
-            auditSessionId: id,
-            userId,
-            assigneeUserId: currentAssignee,
-            tx,
-          })
-        );
-      }
-      if (newAssignee) {
-        notePromises.push(
-          createAssigneeAddedNote({
-            auditSessionId: id,
-            userId,
-            assigneeUserId: newAssignee,
-            tx,
-          })
-        );
-      }
-    }
+  // Execute all note creations in parallel
+  if (notePromises.length > 0) {
+    await Promise.all(notePromises);
+  }
 
-    // Execute all note creations in parallel
-    if (notePromises.length > 0) {
-      await Promise.all(notePromises);
-    }
-
-    return updatedAudit;
-  });
+  return updatedAudit;
 }
 
 export async function getAuditSessionDetails({
@@ -550,60 +531,25 @@ export async function getAuditSessionDetails({
       (org) => org.organizationId
     );
 
-    const session = await db.auditSession.findFirst({
-      where: {
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
-      include: {
-        assignments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-        createdBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-        assets: {
-          include: {
-            asset: {
-              select: {
-                id: true,
-                title: true,
-                mainImage: true,
-                thumbnailImage: true,
-              },
-            },
-            _count: {
-              select: {
-                notes: {
-                  where: { type: "COMMENT" },
-                },
-                images: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    // Build a list of all organization IDs to check
+    const allOrgIds = [organizationId];
+    if (otherOrganizationIds?.length) {
+      allOrgIds.push(
+        ...otherOrganizationIds.filter((oid) => oid !== organizationId)
+      );
+    }
+
+    // Fetch the audit session with relations
+    const { data: session, error: sessionError } = await sbDb
+      .from("AuditSession")
+      .select(
+        "*, assignments:AuditAssignment(*, user:User!userId(id, firstName, lastName, email, profilePicture)), createdBy:User!createdById(id, firstName, lastName, email, profilePicture), assets:AuditAsset(id, assetId, expected, status, asset:Asset!assetId(id, title, mainImage, thumbnailImage))"
+      )
+      .eq("id", id)
+      .in("organizationId", allOrgIds)
+      .maybeSingle();
+
+    if (sessionError) throw sessionError;
 
     if (!session) {
       throw new ShelfError({
@@ -644,20 +590,65 @@ export async function getAuditSessionDetails({
       });
     }
 
-    const expectedAssets: AuditExpectedAsset[] = session.assets
-      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => ({
+    // Fetch counts for notes (COMMENT type only) and images per audit asset
+    const auditAssetIds = (session.assets as unknown as any[])
+      .filter((aa: any) => aa.expected && aa.asset)
+      .map((aa: any) => aa.id);
+
+    // Batch fetch counts for all audit assets
+    let notesCounts: Record<string, number> = {};
+    let imagesCounts: Record<string, number> = {};
+
+    if (auditAssetIds.length > 0) {
+      const [notesResult, imagesResult] = await Promise.all([
+        sbDb
+          .from("AuditNote")
+          .select("auditAssetId")
+          .in("auditAssetId", auditAssetIds)
+          .eq("type", "COMMENT"),
+        sbDb
+          .from("AuditImage")
+          .select("auditAssetId")
+          .in("auditAssetId", auditAssetIds),
+      ]);
+
+      // Count notes per audit asset
+      if (notesResult.data) {
+        for (const note of notesResult.data) {
+          if (note.auditAssetId) {
+            notesCounts[note.auditAssetId] =
+              (notesCounts[note.auditAssetId] || 0) + 1;
+          }
+        }
+      }
+
+      // Count images per audit asset
+      if (imagesResult.data) {
+        for (const img of imagesResult.data) {
+          if (img.auditAssetId) {
+            imagesCounts[img.auditAssetId] =
+              (imagesCounts[img.auditAssetId] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    const expectedAssets: AuditExpectedAsset[] = (
+      session.assets as unknown as any[]
+    )
+      .filter((auditAsset: any) => auditAsset.expected && auditAsset.asset)
+      .map((auditAsset: any) => ({
         id: auditAsset.assetId,
         name: auditAsset.asset?.title ?? "",
         auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
-        auditNotesCount: auditAsset._count?.notes ?? 0,
-        auditImagesCount: auditAsset._count?.images ?? 0,
+        auditNotesCount: notesCounts[auditAsset.id] ?? 0,
+        auditImagesCount: imagesCounts[auditAsset.id] ?? 0,
         mainImage: auditAsset.asset?.mainImage ?? null,
         thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
       }));
 
     return {
-      session,
+      session: session as any,
       expectedAssets,
     };
   } catch (cause) {
@@ -792,57 +783,47 @@ export async function getAssetsForAuditSession({
   });
 
   try {
-    // Build where clause for audit assets based on status filter
-    const auditAssetWhere: Prisma.AuditAssetWhereInput = {
-      auditSessionId,
-    };
+    // Build Supabase query for audit assets based on status filter
+    let auditAssetQuery = sbDb
+      .from("AuditAsset")
+      .select("id, assetId, expected, status")
+      .eq("auditSessionId", auditSessionId);
 
     // Apply status filter
     if (auditStatus && auditStatus !== "ALL") {
       switch (auditStatus) {
         case "EXPECTED":
-          // Assets that are expected in the audit
-          auditAssetWhere.expected = true;
+          auditAssetQuery = auditAssetQuery.eq("expected", true);
           break;
         case "FOUND":
-          // Assets that were found (scanned)
-          auditAssetWhere.status = AuditAssetStatus.FOUND;
+          auditAssetQuery = auditAssetQuery.eq(
+            "status",
+            AuditAssetStatus.FOUND
+          );
           break;
         case "MISSING":
-          // Assets that are expected but not found
-          // During active audits, unscanned assets have PENDING status;
-          // after completion they become MISSING.
-          auditAssetWhere.expected = true;
-          auditAssetWhere.status = {
-            in: [AuditAssetStatus.MISSING, AuditAssetStatus.PENDING],
-          };
+          auditAssetQuery = auditAssetQuery
+            .eq("expected", true)
+            .in("status", [AuditAssetStatus.MISSING, AuditAssetStatus.PENDING]);
           break;
         case "UNEXPECTED":
-          // Assets that were scanned but not expected
-          auditAssetWhere.expected = false;
-          auditAssetWhere.status = AuditAssetStatus.UNEXPECTED;
+          auditAssetQuery = auditAssetQuery
+            .eq("expected", false)
+            .eq("status", AuditAssetStatus.UNEXPECTED);
           break;
       }
     }
-    // If auditStatus is "ALL" or not provided, no filter is applied
-    // This shows all assets (expected + unexpected)
 
-    // Get the filtered audit assets
-    const auditAssets = await db.auditAsset.findMany({
-      where: auditAssetWhere,
-      select: {
-        id: true,
-        assetId: true,
-        expected: true,
-        status: true,
-      },
-    });
+    const { data: auditAssets, error: auditAssetsError } =
+      await auditAssetQuery;
 
-    const assetIds = auditAssets.map((aa) => aa.assetId);
+    if (auditAssetsError) throw auditAssetsError;
+
+    const assetIds = (auditAssets ?? []).map((aa) => aa.assetId);
 
     // Create lookup map for audit status data
     const auditStatusMap = new Map(
-      auditAssets.map((aa) => [
+      (auditAssets ?? []).map((aa) => [
         aa.assetId,
         {
           auditAssetId: aa.id,
@@ -863,91 +844,33 @@ export async function getAssetsForAuditSession({
       };
     }
 
-    // Build where clause
-    const where: Prisma.AssetWhereInput = {
-      organizationId,
-      id: { in: assetIds },
-    };
+    // Build Supabase query for assets with full details
+    let assetQuery = sbDb
+      .from("Asset")
+      .select(
+        "id, title, mainImage, thumbnailImage, mainImageExpiration, category:Category(id, name, color), tags:Tag(id, name, color), location:Location(id, name, parentId), custody:Custody(custodian:TeamMember!custodianId(id, name, user:User!userId(id, firstName, lastName, email, profilePicture)))"
+      )
+      .eq("organizationId", organizationId)
+      .in("id", assetIds)
+      .order("title", { ascending: true });
 
     // Apply search filter if provided
     if (search) {
       const searchTerm = search.toLowerCase().trim();
-      where.OR = [
-        { title: { contains: searchTerm, mode: "insensitive" } },
-        {
-          category: {
-            name: { contains: searchTerm, mode: "insensitive" },
-          },
-        },
-        {
-          location: {
-            name: { contains: searchTerm, mode: "insensitive" },
-          },
-        },
-      ];
+      assetQuery = assetQuery.or(`title.ilike.%${searchTerm}%`);
     }
 
-    // Fetch assets with full details
-    const assets = await db.asset.findMany({
-      where,
-      select: {
-        id: true,
-        title: true,
-        mainImage: true,
-        thumbnailImage: true,
-        mainImageExpiration: true,
-        category: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
-        },
-        tags: TAG_WITH_COLOR_SELECT,
-        location: {
-          select: {
-            id: true,
-            name: true,
-            parentId: true,
-            _count: {
-              select: {
-                children: true,
-              },
-            },
-          },
-        },
-        custody: {
-          select: {
-            custodian: {
-              select: {
-                id: true,
-                name: true,
-                user: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    profilePicture: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        title: "asc",
-      },
-    });
+    const { data: assets, error: assetsError } = await assetQuery;
+
+    if (assetsError) throw assetsError;
 
     // Enrich assets with audit status data for "ALL" filter
-    const enrichedAssets = assets.map((asset) => ({
+    const enrichedAssets = (assets ?? []).map((asset) => ({
       ...asset,
       auditData: auditStatusMap.get(asset.id) || null,
     }));
 
-    const totalItems = assets.length;
+    const totalItems = enrichedAssets.length;
 
     return {
       page: 1,
@@ -982,12 +905,14 @@ export async function recordAuditScan(
 
   try {
     // Verify the audit session exists and belongs to the organization
-    const session = await db.auditSession.findFirst({
-      where: {
-        id: auditSessionId,
-        organizationId,
-      },
-    });
+    const { data: session, error: sessionError } = await sbDb
+      .from("AuditSession")
+      .select("*")
+      .eq("id", auditSessionId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (sessionError) throw sessionError;
 
     if (!session) {
       throw new ShelfError({
@@ -1000,16 +925,14 @@ export async function recordAuditScan(
     }
 
     // Check if this asset was already scanned in this audit
-    const existingScan = await db.auditScan.findFirst({
-      where: {
-        auditSessionId,
-        assetId,
-      },
-      select: {
-        id: true,
-        auditAssetId: true,
-      },
-    });
+    const { data: existingScan, error: existingScanError } = await sbDb
+      .from("AuditScan")
+      .select("id, auditAssetId")
+      .eq("auditSessionId", auditSessionId)
+      .eq("assetId", assetId)
+      .maybeSingle();
+
+    if (existingScanError) throw existingScanError;
 
     if (existingScan) {
       // Already scanned, just return current counts
@@ -1021,141 +944,150 @@ export async function recordAuditScan(
       };
     }
 
-    // Pre-fetch user and asset data for note creation outside the transaction
-    const [scannerUser, scannedAsset] = await Promise.all([
-      db.user.findUnique({
-        where: { id: userId },
-        select: { id: true, firstName: true, lastName: true },
-      }),
-      db.asset.findUnique({
-        where: { id: assetId },
-        select: { id: true, title: true },
-      }),
+    // Pre-fetch user and asset data for note creation
+    const [scannerResult, scannedAssetResult] = await Promise.all([
+      sbDb
+        .from("User")
+        .select("id, firstName, lastName")
+        .eq("id", userId)
+        .maybeSingle(),
+      sbDb.from("Asset").select("id, title").eq("id", assetId).maybeSingle(),
     ]);
 
-    // Record the scan in a transaction
-    const result = await db.$transaction(
-      async (tx) => {
-        // If this is the first scan and audit is still PENDING, activate it
-        if (session.status === AuditStatus.PENDING) {
-          await tx.auditSession.update({
-            where: { id: auditSessionId },
-            data: {
-              status: AuditStatus.ACTIVE,
-              startedAt: new Date(),
-            },
-          });
+    const scannerUser = scannerResult.data;
+    const scannedAsset = scannedAssetResult.data;
 
-          // Create automatic note for audit being started
-          await createAuditStartedNote({
-            auditSessionId,
-            userId,
-            tx,
-            prefetchedUser: scannerUser,
-          });
-        }
+    // If this is the first scan and audit is still PENDING, activate it
+    if (session.status === AuditStatus.PENDING) {
+      const { error: activateError } = await sbDb
+        .from("AuditSession")
+        .update({
+          status: AuditStatus.ACTIVE,
+          startedAt: new Date().toISOString(),
+        })
+        .eq("id", auditSessionId);
 
-        // Create the scan record
-        const scan = await tx.auditScan.create({
-          data: {
-            auditSessionId,
-            code: qrId,
-            assetId,
-            scannedById: userId,
-            scannedAt: new Date(),
-          },
-        });
+      if (activateError) throw activateError;
 
-        let auditAssetId: string | null = null;
+      // Create automatic note for audit being started
+      await createAuditStartedNote({
+        auditSessionId,
+        userId,
+        prefetchedUser: scannerUser,
+      });
+    }
 
-        // Update or create the audit asset record
-        if (isExpected) {
-          // Expected asset - update its status to FOUND
-          await tx.auditAsset.updateMany({
-            where: {
-              auditSessionId,
-              assetId,
-              expected: true,
-            },
-            data: {
-              status: AuditAssetStatus.FOUND,
-              scannedAt: new Date(),
-              scannedById: userId,
-            },
-          });
+    // Create the scan record
+    const { data: scan, error: scanError } = await sbDb
+      .from("AuditScan")
+      .insert({
+        auditSessionId,
+        code: qrId,
+        assetId,
+        scannedById: userId,
+        scannedAt: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
-          // Get the audit asset ID for return
-          const updatedAsset = await tx.auditAsset.findFirst({
-            where: {
-              auditSessionId,
-              assetId,
-              expected: true,
-            },
-            select: { id: true },
-          });
+    if (scanError) throw scanError;
 
-          auditAssetId = updatedAsset?.id ?? null;
-        } else {
-          // Unexpected asset - create a new audit asset record
-          const auditAsset = await tx.auditAsset.create({
-            data: {
-              auditSessionId,
-              assetId,
-              expected: false,
-              status: AuditAssetStatus.UNEXPECTED,
-              scannedAt: new Date(),
-              scannedById: userId,
-            },
-          });
-          auditAssetId = auditAsset.id;
-        }
+    let auditAssetId: string | null = null;
 
-        // Link the scan to the audit asset so we can query it later
-        if (auditAssetId) {
-          await tx.auditScan.update({
-            where: { id: scan.id },
-            data: { auditAssetId },
-          });
-        }
+    // Update or create the audit asset record
+    if (isExpected) {
+      // Expected asset - update its status to FOUND
+      const { error: updateAssetError } = await sbDb
+        .from("AuditAsset")
+        .update({
+          status: AuditAssetStatus.FOUND,
+          scannedAt: new Date().toISOString(),
+          scannedById: userId,
+        })
+        .eq("auditSessionId", auditSessionId)
+        .eq("assetId", assetId)
+        .eq("expected", true);
 
-        // Update the audit session counts
-        const updatedSession = await tx.auditSession.update({
-          where: { id: auditSessionId },
-          data: {
-            foundAssetCount: isExpected
-              ? { increment: 1 }
-              : session.foundAssetCount,
-            missingAssetCount: isExpected
-              ? { decrement: 1 }
-              : session.missingAssetCount,
-            unexpectedAssetCount: !isExpected
-              ? { increment: 1 }
-              : session.unexpectedAssetCount,
-          },
-        });
+      if (updateAssetError) throw updateAssetError;
 
-        // Create automatic note for asset scan using pre-fetched data
-        await createAssetScanNote({
+      // Get the audit asset ID for return
+      const { data: updatedAsset } = await sbDb
+        .from("AuditAsset")
+        .select("id")
+        .eq("auditSessionId", auditSessionId)
+        .eq("assetId", assetId)
+        .eq("expected", true)
+        .maybeSingle();
+
+      auditAssetId = updatedAsset?.id ?? null;
+    } else {
+      // Unexpected asset - create a new audit asset record
+      const { data: auditAsset, error: createAssetError } = await sbDb
+        .from("AuditAsset")
+        .insert({
           auditSessionId,
           assetId,
-          userId,
-          isExpected,
-          tx,
-          prefetchedUser: scannerUser,
-          prefetchedAsset: scannedAsset,
-        });
+          expected: false,
+          status: AuditAssetStatus.UNEXPECTED,
+          scannedAt: new Date().toISOString(),
+          scannedById: userId,
+        })
+        .select()
+        .single();
 
-        return {
-          scanId: scan.id,
-          auditAssetId,
-          foundAssetCount: updatedSession.foundAssetCount,
-          unexpectedAssetCount: updatedSession.unexpectedAssetCount,
-        };
-      },
-      { timeout: 15000 }
-    );
+      if (createAssetError) throw createAssetError;
+      auditAssetId = auditAsset.id;
+    }
 
-    return result;
+    // Link the scan to the audit asset so we can query it later
+    if (auditAssetId) {
+      const { error: linkError } = await sbDb
+        .from("AuditScan")
+        .update({ auditAssetId })
+        .eq("id", scan.id);
+
+      if (linkError) throw linkError;
+    }
+
+    // Update the audit session counts
+    // Read-then-update since Supabase doesn't support increment/decrement
+    const newFoundCount = isExpected
+      ? session.foundAssetCount + 1
+      : session.foundAssetCount;
+    const newMissingCount = isExpected
+      ? session.missingAssetCount - 1
+      : session.missingAssetCount;
+    const newUnexpectedCount = !isExpected
+      ? session.unexpectedAssetCount + 1
+      : session.unexpectedAssetCount;
+
+    const { error: countUpdateError } = await sbDb
+      .from("AuditSession")
+      .update({
+        foundAssetCount: newFoundCount,
+        missingAssetCount: newMissingCount,
+        unexpectedAssetCount: newUnexpectedCount,
+      })
+      .eq("id", auditSessionId);
+
+    if (countUpdateError) throw countUpdateError;
+
+    // Create automatic note for asset scan using pre-fetched data
+    await createAssetScanNote({
+      auditSessionId,
+      assetId,
+      userId,
+      isExpected,
+      prefetchedUser: scannerUser,
+      prefetchedAsset: scannedAsset,
+    });
+
+    return {
+      scanId: scan.id,
+      auditAssetId,
+      foundAssetCount: newFoundCount,
+      unexpectedAssetCount: newUnexpectedCount,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1183,12 +1115,14 @@ export async function getAuditScans({
 }): Promise<AuditScanData[]> {
   try {
     // Verify the audit session exists and belongs to the organization
-    const session = await db.auditSession.findFirst({
-      where: {
-        id: auditSessionId,
-        organizationId,
-      },
-    });
+    const { data: session, error: sessionError } = await sbDb
+      .from("AuditSession")
+      .select("id")
+      .eq("id", auditSessionId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (sessionError) throw sessionError;
 
     if (!session) {
       throw new ShelfError({
@@ -1200,81 +1134,101 @@ export async function getAuditScans({
       });
     }
 
-    const scans = await db.auditScan.findMany({
-      where: { auditSessionId },
-      include: {
-        asset: {
-          select: {
-            id: true,
-            title: true,
-          },
-        },
-        auditAsset: {
-          select: {
-            id: true,
-            expected: true,
-            _count: {
-              select: {
-                notes: {
-                  where: { type: "COMMENT" },
-                },
-                images: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { scannedAt: "asc" },
-    });
+    // Fetch scans with asset info
+    const { data: scans, error: scansError } = await sbDb
+      .from("AuditScan")
+      .select(
+        "*, asset:Asset!assetId(id, title), auditAsset:AuditAsset!auditAssetId(id, expected)"
+      )
+      .eq("auditSessionId", auditSessionId)
+      .order("scannedAt", { ascending: true });
+
+    if (scansError) throw scansError;
 
     // For scans without auditAsset relation (created before the fix that links them),
     // look up AuditAsset by assetId
-    const assetIdsWithoutLink = scans
-      .filter((s) => !s.auditAsset && s.assetId)
-      .map((s) => s.assetId as string);
+    const assetIdsWithoutLink = (scans ?? [])
+      .filter((s: any) => !s.auditAsset && s.assetId)
+      .map((s: any) => s.assetId as string);
 
     const auditAssetsByAssetId = new Map<
       string,
       {
         id: string;
         expected: boolean;
-        _count: { notes: number; images: number };
       }
     >();
 
     if (assetIdsWithoutLink.length > 0) {
-      const auditAssets = await db.auditAsset.findMany({
-        where: {
-          auditSessionId,
-          assetId: { in: assetIdsWithoutLink },
-        },
-        select: {
-          id: true,
-          assetId: true,
-          expected: true,
-          _count: {
-            select: {
-              notes: {
-                where: { type: "COMMENT" },
-              },
-              images: true,
-            },
-          },
-        },
-      });
+      const { data: auditAssets, error: auditAssetsError } = await sbDb
+        .from("AuditAsset")
+        .select("id, assetId, expected")
+        .eq("auditSessionId", auditSessionId)
+        .in("assetId", assetIdsWithoutLink);
 
-      for (const aa of auditAssets) {
+      if (auditAssetsError) throw auditAssetsError;
+
+      for (const aa of auditAssets ?? []) {
         if (aa.assetId) {
           auditAssetsByAssetId.set(aa.assetId, {
             id: aa.id,
             expected: aa.expected,
-            _count: aa._count,
           });
         }
       }
     }
 
-    return scans.map((scan) => {
+    // Collect all audit asset IDs (from both direct relation and lookup)
+    const allAuditAssetIds = new Set<string>();
+    for (const scan of scans ?? []) {
+      const auditAsset =
+        (scan as any).auditAsset ??
+        ((scan as any).assetId
+          ? auditAssetsByAssetId.get((scan as any).assetId)
+          : undefined);
+      if (auditAsset?.id) {
+        allAuditAssetIds.add(auditAsset.id);
+      }
+    }
+
+    // Batch fetch notes and images counts for all audit assets
+    let notesCounts: Record<string, number> = {};
+    let imagesCounts: Record<string, number> = {};
+
+    if (allAuditAssetIds.size > 0) {
+      const auditAssetIdArray = Array.from(allAuditAssetIds);
+      const [notesResult, imagesResult] = await Promise.all([
+        sbDb
+          .from("AuditNote")
+          .select("auditAssetId")
+          .in("auditAssetId", auditAssetIdArray)
+          .eq("type", "COMMENT"),
+        sbDb
+          .from("AuditImage")
+          .select("auditAssetId")
+          .in("auditAssetId", auditAssetIdArray),
+      ]);
+
+      if (notesResult.data) {
+        for (const note of notesResult.data) {
+          if (note.auditAssetId) {
+            notesCounts[note.auditAssetId] =
+              (notesCounts[note.auditAssetId] || 0) + 1;
+          }
+        }
+      }
+
+      if (imagesResult.data) {
+        for (const img of imagesResult.data) {
+          if (img.auditAssetId) {
+            imagesCounts[img.auditAssetId] =
+              (imagesCounts[img.auditAssetId] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    return (scans ?? []).map((scan: any) => {
       // Use direct relation if available, otherwise fall back to lookup by assetId
       const auditAsset =
         scan.auditAsset ??
@@ -1284,12 +1238,12 @@ export async function getAuditScans({
         code: scan.code ?? "",
         assetId: scan.assetId ?? "",
         type: "asset" as const,
-        scannedAt: scan.scannedAt,
+        scannedAt: new Date(scan.scannedAt),
         isExpected: auditAsset?.expected ?? false,
         assetTitle: scan.asset?.title ?? "",
         auditAssetId: auditAsset?.id ?? null,
-        auditNotesCount: auditAsset?._count?.notes ?? 0,
-        auditImagesCount: auditAsset?._count?.images ?? 0,
+        auditNotesCount: auditAsset?.id ? notesCounts[auditAsset.id] ?? 0 : 0,
+        auditImagesCount: auditAsset?.id ? imagesCounts[auditAsset.id] ?? 0 : 0,
       };
     });
   } catch (cause) {
@@ -1323,179 +1277,168 @@ export async function completeAuditSession({
   hints: ClientHint;
 }): Promise<void> {
   try {
-    await db.$transaction(async (tx) => {
-      // Verify session exists and belongs to organization
-      const session = await tx.auditSession.findUnique({
-        where: { id: sessionId, organizationId },
-        select: { id: true, status: true },
+    // Verify session exists and belongs to organization
+    const { data: session, error: sessionError } = await sbDb
+      .from("AuditSession")
+      .select("id, status")
+      .eq("id", sessionId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (sessionError) throw sessionError;
+
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session not found",
+        additionalData: { sessionId, organizationId },
+        status: 404,
+        label,
       });
+    }
 
-      if (!session) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit session not found",
-          additionalData: { sessionId, organizationId },
-          status: 404,
-          label,
-        });
-      }
-
-      if (session.status === AuditStatus.COMPLETED) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit session is already completed",
-          additionalData: { sessionId },
-          status: 400,
-          label,
-        });
-      }
-
-      // Mark all expected assets that weren't scanned as MISSING
-      await tx.auditAsset.updateMany({
-        where: {
-          auditSessionId: sessionId,
-          expected: true,
-          status: "PENDING",
-        },
-        data: {
-          status: "MISSING",
-        },
+    if (session.status === AuditStatus.COMPLETED) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit session is already completed",
+        additionalData: { sessionId },
+        status: 400,
+        label,
       });
+    }
 
-      // Get all counts for completion note
-      const [expectedCount, foundCount, missingCount, unexpectedCount] =
-        await Promise.all([
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              expected: true,
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              status: "FOUND",
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              status: "MISSING",
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: sessionId,
-              expected: false,
-            },
-          }),
-        ]);
+    // Mark all expected assets that weren't scanned as MISSING
+    const { error: updateMissingError } = await sbDb
+      .from("AuditAsset")
+      .update({ status: "MISSING" })
+      .eq("auditSessionId", sessionId)
+      .eq("expected", true)
+      .eq("status", "PENDING");
 
-      // Update session to completed
-      await tx.auditSession.update({
-        where: { id: sessionId },
-        data: {
-          status: AuditStatus.COMPLETED,
-          completedAt: new Date(),
-          missingAssetCount: missingCount,
-        },
-      });
+    if (updateMissingError) throw updateMissingError;
 
-      // Create automatic completion note with stats and optional user message
-      await createAuditCompletedNote({
-        auditSessionId: sessionId,
-        userId,
-        expectedCount,
-        foundCount,
-        missingCount,
-        unexpectedCount,
-        completionNote,
-        tx,
-      });
+    // Get all counts for completion note
+    const [expectedResult, foundResult, missingResult, unexpectedResult] =
+      await Promise.all([
+        sbDb
+          .from("AuditAsset")
+          .select("*", { count: "exact", head: true })
+          .eq("auditSessionId", sessionId)
+          .eq("expected", true),
+        sbDb
+          .from("AuditAsset")
+          .select("*", { count: "exact", head: true })
+          .eq("auditSessionId", sessionId)
+          .eq("status", "FOUND"),
+        sbDb
+          .from("AuditAsset")
+          .select("*", { count: "exact", head: true })
+          .eq("auditSessionId", sessionId)
+          .eq("status", "MISSING"),
+        sbDb
+          .from("AuditAsset")
+          .select("*", { count: "exact", head: true })
+          .eq("auditSessionId", sessionId)
+          .eq("expected", false),
+      ]);
+
+    if (expectedResult.error) throw expectedResult.error;
+    if (foundResult.error) throw foundResult.error;
+    if (missingResult.error) throw missingResult.error;
+    if (unexpectedResult.error) throw unexpectedResult.error;
+
+    const expectedCount = expectedResult.count ?? 0;
+    const foundCount = foundResult.count ?? 0;
+    const missingCount = missingResult.count ?? 0;
+    const unexpectedCount = unexpectedResult.count ?? 0;
+
+    // Update session to completed
+    const { error: completeError } = await sbDb
+      .from("AuditSession")
+      .update({
+        status: AuditStatus.COMPLETED,
+        completedAt: new Date().toISOString(),
+        missingAssetCount: missingCount,
+      })
+      .eq("id", sessionId);
+
+    if (completeError) throw completeError;
+
+    // Create automatic completion note with stats and optional user message
+    await createAuditCompletedNote({
+      auditSessionId: sessionId,
+      userId,
+      expectedCount,
+      foundCount,
+      missingCount,
+      unexpectedCount,
+      completionNote,
     });
 
     // Fetch full audit details for email notification
-    const completedAudit = await db.auditSession.findUnique({
-      where: { id: sessionId },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        dueDate: true,
-        completedAt: true,
-        organizationId: true,
-        organization: {
-          select: {
-            name: true,
-            customEmailFooter: true,
-            owner: {
-              select: { email: true },
-            },
-          },
-        },
-        _count: {
-          select: { assets: true },
-        },
-        createdBy: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        assignments: {
-          include: {
-            user: {
-              select: {
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    const { data: completedAudit, error: completedError } = await sbDb
+      .from("AuditSession")
+      .select(
+        "id, name, description, dueDate, completedAt, organizationId, organization:Organization!organizationId(name, customEmailFooter, owner:User!ownerId(email)), createdBy:User!createdById(id, email, firstName, lastName), assignments:AuditAssignment(userId, user:User!userId(email, firstName, lastName))"
+      )
+      .eq("id", sessionId)
+      .single();
+
+    if (completedError) throw completedError;
+
+    // Get asset count separately
+    const { count: assetCount } = await sbDb
+      .from("AuditAsset")
+      .select("*", { count: "exact", head: true })
+      .eq("auditSessionId", sessionId);
 
     if (completedAudit && completedAudit.completedAt) {
+      const completedAt = new Date(completedAudit.completedAt);
+      const dueDate = completedAudit.dueDate
+        ? new Date(completedAudit.dueDate)
+        : null;
+
       // Calculate if audit was overdue
-      const wasOverdue =
-        completedAudit.dueDate &&
-        completedAudit.completedAt > completedAudit.dueDate;
+      const wasOverdue = dueDate && completedAt > dueDate;
 
       // Get assignees to notify (exclude the user who completed it)
       // Normalize assignments to email payload shape to allow creator injection.
-      const assigneesToNotify = completedAudit.assignments
-        .filter((assignment) => assignment.user.email)
-        .map((assignment) => ({
+      const assigneesToNotify = (completedAudit.assignments as unknown as any[])
+        .filter((assignment: any) => assignment.user.email)
+        .map((assignment: any) => ({
           userId: assignment.userId,
           user: assignment.user,
         }));
 
       // Always notify the audit creator even if they are not an assignee.
+      const createdBy = completedAudit.createdBy as any;
       if (
-        completedAudit.createdBy.email &&
+        createdBy.email &&
         !assigneesToNotify.some(
-          (assignment) => assignment.userId === completedAudit.createdBy.id
+          (assignment: any) => assignment.userId === createdBy.id
         )
       ) {
         assigneesToNotify.push({
-          userId: completedAudit.createdBy.id,
+          userId: createdBy.id,
           user: {
-            email: completedAudit.createdBy.email,
-            firstName: completedAudit.createdBy.firstName,
-            lastName: completedAudit.createdBy.lastName,
+            email: createdBy.email,
+            firstName: createdBy.firstName,
+            lastName: createdBy.lastName,
           },
         });
       }
 
       // Send completion email
       sendAuditCompletedEmail({
-        audit: completedAudit,
+        audit: {
+          ...completedAudit,
+          dueDate,
+          completedAt,
+          _count: { assets: assetCount ?? 0 },
+        } as any,
         assigneesToNotify,
         hints,
-        completedAt: completedAudit.completedAt,
+        completedAt,
         wasOverdue: Boolean(wasOverdue),
       });
     }
@@ -1547,42 +1490,126 @@ export async function getAuditsForOrganization(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8;
 
-    const where: Prisma.AuditSessionWhereInput = { organizationId };
+    // Build the main query
+    let query = sbDb
+      .from("AuditSession")
+      .select(AUDIT_LIST_SELECT)
+      .eq("organizationId", organizationId);
 
-    // Filter by assignee for BASE/SELF_SERVICE users
-    if (isSelfServiceOrBase && userId) {
-      where.assignments = {
-        some: {
-          userId,
-        },
-      };
-    }
+    // Build the count query
+    let countQuery = sbDb
+      .from("AuditSession")
+      .select("*", { count: "exact", head: true })
+      .eq("organizationId", organizationId);
 
     // Add search filter
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-      ];
+      const searchFilter = `name.ilike.%${search}%,description.ilike.%${search}%`;
+      query = query.or(searchFilter);
+      countQuery = countQuery.or(searchFilter);
     }
 
     // Add status filter
     if (status) {
-      where.status = status;
+      query = query.eq("status", status);
+      countQuery = countQuery.eq("status", status);
     }
 
-    const [audits, totalAudits] = await Promise.all([
-      db.auditSession.findMany({
-        skip,
-        take,
-        where,
-        orderBy: { [orderBy]: orderDirection },
-        include: AUDIT_LIST_INCLUDE,
-      }),
-      db.auditSession.count({ where }),
-    ]);
+    // Apply ordering and pagination
+    query = query
+      .order(orderBy, { ascending: orderDirection === "asc" })
+      .range(skip, skip + take - 1);
 
-    return { audits, totalAudits };
+    // For BASE/SELF_SERVICE users, we need to filter by assignment
+    // This requires a different approach since Supabase doesn't support
+    // filtering by related table existence directly in the same query
+    if (isSelfServiceOrBase && userId) {
+      // First get audit session IDs that the user is assigned to
+      const { data: assignedAudits, error: assignedError } = await sbDb
+        .from("AuditAssignment")
+        .select("auditSessionId")
+        .eq("userId", userId);
+
+      if (assignedError) throw assignedError;
+
+      const assignedAuditIds = (assignedAudits ?? []).map(
+        (a) => a.auditSessionId
+      );
+
+      if (assignedAuditIds.length === 0) {
+        return { audits: [], totalAudits: 0 };
+      }
+
+      query = query.in("id", assignedAuditIds);
+      countQuery = countQuery.in("id", assignedAuditIds);
+    }
+
+    const [auditsResult, countResult] = await Promise.all([query, countQuery]);
+
+    if (auditsResult.error) throw auditsResult.error;
+    if (countResult.error) throw countResult.error;
+
+    // Fetch asset/scan/assignment counts separately for each audit
+    const auditIds = (auditsResult.data ?? []).map((a: any) => a.id);
+    let countsByAuditId: Record<
+      string,
+      { assets: number; scans: number; assignments: number }
+    > = {};
+
+    if (auditIds.length > 0) {
+      const [assetsCountResult, scansCountResult] = await Promise.all([
+        sbDb
+          .from("AuditAsset")
+          .select("auditSessionId")
+          .in("auditSessionId", auditIds),
+        sbDb
+          .from("AuditScan")
+          .select("auditSessionId")
+          .in("auditSessionId", auditIds),
+      ]);
+
+      // Count per audit
+      for (const id of auditIds) {
+        countsByAuditId[id] = { assets: 0, scans: 0, assignments: 0 };
+      }
+
+      if (assetsCountResult.data) {
+        for (const row of assetsCountResult.data) {
+          if (countsByAuditId[row.auditSessionId]) {
+            countsByAuditId[row.auditSessionId].assets++;
+          }
+        }
+      }
+
+      if (scansCountResult.data) {
+        for (const row of scansCountResult.data) {
+          if (countsByAuditId[row.auditSessionId]) {
+            countsByAuditId[row.auditSessionId].scans++;
+          }
+        }
+      }
+
+      // Count assignments from the already-fetched data
+      for (const audit of auditsResult.data ?? []) {
+        if (countsByAuditId[(audit as any).id]) {
+          countsByAuditId[(audit as any).id].assignments = (
+            (audit as any).assignments ?? []
+          ).length;
+        }
+      }
+    }
+
+    // Enrich audits with _count
+    const audits = (auditsResult.data ?? []).map((audit: any) => ({
+      ...audit,
+      _count: countsByAuditId[audit.id] ?? {
+        assets: 0,
+        scans: 0,
+        assignments: 0,
+      },
+    }));
+
+    return { audits, totalAudits: countResult.count ?? 0 };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1701,39 +1728,16 @@ export async function cancelAuditSession({
 }) {
   try {
     // Fetch audit session with creator and assignee info
-    const auditSession = await db.auditSession.findUnique({
-      where: { id: auditSessionId, organizationId },
-      include: {
-        createdBy: {
-          select: {
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        organization: {
-          include: {
-            owner: {
-              select: { email: true },
-            },
-          },
-        },
-        assignments: {
-          include: {
-            user: {
-              select: {
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        _count: {
-          select: { assets: true },
-        },
-      },
-    });
+    const { data: auditSession, error: fetchError } = await sbDb
+      .from("AuditSession")
+      .select(
+        "*, createdBy:User!createdById(email, firstName, lastName), organization:Organization!organizationId(id, name, customEmailFooter, owner:User!ownerId(email)), assignments:AuditAssignment(userId, user:User!userId(email, firstName, lastName))"
+      )
+      .eq("id", auditSessionId)
+      .eq("organizationId", organizationId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
 
     if (!auditSession) {
       throw new ShelfError({
@@ -1774,30 +1778,49 @@ export async function cancelAuditSession({
       });
     }
 
+    // Get asset count separately
+    const { count: assetCount } = await sbDb
+      .from("AuditAsset")
+      .select("*", { count: "exact", head: true })
+      .eq("auditSessionId", auditSessionId);
+
     // Update audit status to CANCELLED
-    const updatedAudit = await db.auditSession.update({
-      where: { id: auditSessionId },
-      data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
-    });
+    const { data: updatedAudit, error: updateError } = await sbDb
+      .from("AuditSession")
+      .update({
+        status: AuditStatus.CANCELLED,
+        cancelledAt: new Date().toISOString(),
+      })
+      .eq("id", auditSessionId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
 
     // Create activity note for cancellation
-    await db.auditNote.create({
-      data: {
-        content: `${auditSession.createdBy.firstName} ${auditSession.createdBy.lastName} cancelled the audit`,
-        type: "UPDATE",
-        userId,
-        auditSessionId,
-      },
+    const createdBy = auditSession.createdBy as any;
+    const { error: noteError } = await sbDb.from("AuditNote").insert({
+      content: `${createdBy.firstName} ${createdBy.lastName} cancelled the audit`,
+      type: "UPDATE",
+      userId,
+      auditSessionId,
     });
 
+    if (noteError) throw noteError;
+
     // Send cancellation email to assignees (excluding creator)
-    const assigneesToNotify = auditSession.assignments.filter(
-      (assignment) => assignment.userId !== userId && assignment.user.email
+    const assigneesToNotify = (
+      auditSession.assignments as unknown as any[]
+    ).filter(
+      (assignment: any) => assignment.userId !== userId && assignment.user.email
     );
 
     // Use email helper to send cancellation emails with HTML template
     sendAuditCancelledEmails({
-      audit: auditSession,
+      audit: {
+        ...auditSession,
+        _count: { assets: assetCount ?? 0 },
+      } as any,
       assigneesToNotify,
       hints,
     });
@@ -1831,37 +1854,18 @@ export async function getPendingAuditsForOrganization({
 }: {
   organizationId: string;
 }) {
-  return db.auditSession.findMany({
-    where: {
-      organizationId,
-      status: AuditStatus.PENDING,
-    },
-    select: {
-      id: true,
-      name: true,
-      createdAt: true,
-      expectedAssetCount: true,
-      createdBy: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
-      assignments: {
-        select: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const { data, error } = await sbDb
+    .from("AuditSession")
+    .select(
+      "id, name, createdAt, expectedAssetCount, createdBy:User!createdById(firstName, lastName), assignments:AuditAssignment(user:User!userId(firstName, lastName))"
+    )
+    .eq("organizationId", organizationId)
+    .eq("status", AuditStatus.PENDING)
+    .order("createdAt", { ascending: false });
+
+  if (error) throw error;
+
+  return data;
 }
 
 /**
@@ -1883,102 +1887,110 @@ export async function addAssetsToAudit({
   addedCount: number;
   skippedCount: number;
 }> {
-  return db
-    .$transaction(async (tx) => {
-      // Verify audit exists and is PENDING
-      const audit = await tx.auditSession.findUnique({
-        where: { id: auditId, organizationId },
-        select: { id: true, name: true, status: true },
-      });
+  // Verify audit exists and is PENDING
+  const { data: audit, error: auditError } = await sbDb
+    .from("AuditSession")
+    .select("id, name, status")
+    .eq("id", auditId)
+    .eq("organizationId", organizationId)
+    .maybeSingle();
 
-      if (!audit) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
+  if (auditError) throw auditError;
 
-      if (audit.status !== AuditStatus.PENDING) {
-        throw new ShelfError({
-          cause: null,
-          message: "Can only add assets to pending audits",
-          additionalData: { auditId, status: audit.status },
-          label,
-          status: 400,
-        });
-      }
-
-      // Fetch existing audit assets to filter out duplicates
-      const existingAuditAssets = await tx.auditAsset.findMany({
-        where: {
-          auditSessionId: auditId,
-          assetId: { in: assetIds },
-        },
-        select: { assetId: true },
-      });
-
-      const existingAssetIds = new Set(
-        existingAuditAssets.map((aa) => aa.assetId)
-      );
-
-      // Filter out assets already in audit
-      const newAssetIds = assetIds.filter((id) => !existingAssetIds.has(id));
-
-      // Create new audit asset entries
-      if (newAssetIds.length > 0) {
-        await tx.auditAsset.createMany({
-          data: newAssetIds.map((assetId) => ({
-            auditSessionId: auditId,
-            assetId,
-            expected: true,
-            status: AuditAssetStatus.PENDING,
-          })),
-        });
-
-        // Update audit session counts
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { increment: newAssetIds.length },
-            missingAssetCount: { increment: newAssetIds.length },
-          },
-        });
-      }
-
-      const addedCount = newAssetIds.length;
-      const skippedCount = assetIds.length - addedCount;
-
-      // Create activity note with asset details
-      if (addedCount > 0) {
-        await createAssetsAddedToAuditNote({
-          auditSessionId: auditId,
-          userId,
-          addedAssetIds: newAssetIds,
-          skippedCount,
-          tx,
-        });
-      }
-
-      return { addedCount, skippedCount, newAssetIds, audit };
-    })
-    .then(async (result) => {
-      // Create asset notes outside the transaction
-      if (result.addedCount > 0) {
-        await createAssetNotesForAuditAddition({
-          assetIds: result.newAssetIds,
-          userId,
-          audit: result.audit,
-        });
-      }
-
-      return {
-        addedCount: result.addedCount,
-        skippedCount: result.skippedCount,
-      };
+  if (!audit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditId, organizationId },
+      label,
+      status: 404,
     });
+  }
+
+  if (audit.status !== AuditStatus.PENDING) {
+    throw new ShelfError({
+      cause: null,
+      message: "Can only add assets to pending audits",
+      additionalData: { auditId, status: audit.status },
+      label,
+      status: 400,
+    });
+  }
+
+  // Fetch existing audit assets to filter out duplicates
+  const { data: existingAuditAssets, error: existingError } = await sbDb
+    .from("AuditAsset")
+    .select("assetId")
+    .eq("auditSessionId", auditId)
+    .in("assetId", assetIds);
+
+  if (existingError) throw existingError;
+
+  const existingAssetIds = new Set(
+    (existingAuditAssets ?? []).map((aa) => aa.assetId)
+  );
+
+  // Filter out assets already in audit
+  const newAssetIds = assetIds.filter((id) => !existingAssetIds.has(id));
+
+  // Create new audit asset entries
+  if (newAssetIds.length > 0) {
+    const { error: insertError } = await sbDb.from("AuditAsset").insert(
+      newAssetIds.map((assetId) => ({
+        auditSessionId: auditId,
+        assetId,
+        expected: true,
+        status: AuditAssetStatus.PENDING,
+      }))
+    );
+
+    if (insertError) throw insertError;
+
+    // Update audit session counts (read-then-update)
+    const { data: currentSession, error: readError } = await sbDb
+      .from("AuditSession")
+      .select("expectedAssetCount, missingAssetCount")
+      .eq("id", auditId)
+      .single();
+
+    if (readError) throw readError;
+
+    const { error: updateError } = await sbDb
+      .from("AuditSession")
+      .update({
+        expectedAssetCount:
+          currentSession.expectedAssetCount + newAssetIds.length,
+        missingAssetCount:
+          currentSession.missingAssetCount + newAssetIds.length,
+      })
+      .eq("id", auditId);
+
+    if (updateError) throw updateError;
+  }
+
+  const addedCount = newAssetIds.length;
+  const skippedCount = assetIds.length - addedCount;
+
+  // Create activity note with asset details
+  if (addedCount > 0) {
+    await createAssetsAddedToAuditNote({
+      auditSessionId: auditId,
+      userId,
+      addedAssetIds: newAssetIds,
+      skippedCount,
+    });
+  }
+
+  // Create asset notes
+  if (addedCount > 0) {
+    await createAssetNotesForAuditAddition({
+      assetIds: newAssetIds,
+      userId,
+      audit,
+    });
+  }
+
+  return { addedCount, skippedCount };
 }
 
 /**
@@ -1998,85 +2010,98 @@ export async function removeAssetFromAudit({
   organizationId: string;
   userId: string;
 }): Promise<void> {
-  return db
-    .$transaction(async (tx) => {
-      // Verify audit exists and is PENDING
-      const audit = await tx.auditSession.findUnique({
-        where: { id: auditId, organizationId },
-        select: { id: true, name: true, status: true },
-      });
+  // Verify audit exists and is PENDING
+  const { data: audit, error: auditError } = await sbDb
+    .from("AuditSession")
+    .select("id, name, status")
+    .eq("id", auditId)
+    .eq("organizationId", organizationId)
+    .maybeSingle();
 
-      if (!audit) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
+  if (auditError) throw auditError;
 
-      if (audit.status !== AuditStatus.PENDING) {
-        throw new ShelfError({
-          cause: null,
-          message: "Can only remove assets from pending audits",
-          additionalData: { auditId, status: audit.status },
-          label,
-          status: 400,
-        });
-      }
-
-      // Fetch the audit asset to get the actual asset ID
-      const auditAsset = await tx.auditAsset.findUnique({
-        where: { id: auditAssetId },
-        select: { assetId: true, expected: true },
-      });
-
-      if (!auditAsset) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit asset not found",
-          additionalData: { auditAssetId },
-          label,
-          status: 404,
-        });
-      }
-
-      // Delete the audit asset (cascade will delete related scans)
-      await tx.auditAsset.delete({
-        where: { id: auditAssetId },
-      });
-
-      // Update audit session counts
-      // If it was an expected asset, decrement expectedAssetCount
-      if (auditAsset.expected) {
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: 1 },
-            missingAssetCount: { decrement: 1 },
-          },
-        });
-      }
-
-      // Create activity note
-      await createAssetRemovedFromAuditNote({
-        auditSessionId: auditId,
-        assetId: auditAsset.assetId,
-        userId,
-        tx,
-      });
-
-      return { assetId: auditAsset.assetId, audit };
-    })
-    .then(async (result) => {
-      // Create asset note outside the transaction
-      await createAssetNotesForAuditRemoval({
-        assetIds: [result.assetId],
-        userId,
-        audit: result.audit,
-      });
+  if (!audit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditId, organizationId },
+      label,
+      status: 404,
     });
+  }
+
+  if (audit.status !== AuditStatus.PENDING) {
+    throw new ShelfError({
+      cause: null,
+      message: "Can only remove assets from pending audits",
+      additionalData: { auditId, status: audit.status },
+      label,
+      status: 400,
+    });
+  }
+
+  // Fetch the audit asset to get the actual asset ID
+  const { data: auditAsset, error: fetchAssetError } = await sbDb
+    .from("AuditAsset")
+    .select("assetId, expected")
+    .eq("id", auditAssetId)
+    .maybeSingle();
+
+  if (fetchAssetError) throw fetchAssetError;
+
+  if (!auditAsset) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit asset not found",
+      additionalData: { auditAssetId },
+      label,
+      status: 404,
+    });
+  }
+
+  // Delete the audit asset (cascade will delete related scans)
+  const { error: deleteError } = await sbDb
+    .from("AuditAsset")
+    .delete()
+    .eq("id", auditAssetId);
+
+  if (deleteError) throw deleteError;
+
+  // Update audit session counts
+  // If it was an expected asset, decrement expectedAssetCount
+  if (auditAsset.expected) {
+    const { data: currentSession, error: readError } = await sbDb
+      .from("AuditSession")
+      .select("expectedAssetCount, missingAssetCount")
+      .eq("id", auditId)
+      .single();
+
+    if (readError) throw readError;
+
+    const { error: updateError } = await sbDb
+      .from("AuditSession")
+      .update({
+        expectedAssetCount: currentSession.expectedAssetCount - 1,
+        missingAssetCount: currentSession.missingAssetCount - 1,
+      })
+      .eq("id", auditId);
+
+    if (updateError) throw updateError;
+  }
+
+  // Create activity note
+  await createAssetRemovedFromAuditNote({
+    auditSessionId: auditId,
+    assetId: auditAsset.assetId,
+    userId,
+  });
+
+  // Create asset note
+  await createAssetNotesForAuditRemoval({
+    assetIds: [auditAsset.assetId],
+    userId,
+    audit,
+  });
 }
 
 /**
@@ -2096,83 +2121,95 @@ export async function removeAssetsFromAudit({
   organizationId: string;
   userId: string;
 }): Promise<{ removedCount: number }> {
-  return db
-    .$transaction(async (tx) => {
-      // Verify audit exists and is PENDING
-      const audit = await tx.auditSession.findUnique({
-        where: { id: auditId, organizationId },
-        select: { id: true, name: true, status: true },
-      });
+  // Verify audit exists and is PENDING
+  const { data: audit, error: auditError } = await sbDb
+    .from("AuditSession")
+    .select("id, name, status")
+    .eq("id", auditId)
+    .eq("organizationId", organizationId)
+    .maybeSingle();
 
-      if (!audit) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
+  if (auditError) throw auditError;
 
-      if (audit.status !== AuditStatus.PENDING) {
-        throw new ShelfError({
-          cause: null,
-          message: "Can only remove assets from pending audits",
-          additionalData: { auditId, status: audit.status },
-          label,
-          status: 400,
-        });
-      }
-
-      // Fetch the audit assets to get the actual asset IDs
-      const auditAssets = await tx.auditAsset.findMany({
-        where: { id: { in: auditAssetIds } },
-        select: { id: true, assetId: true, expected: true },
-      });
-
-      if (auditAssets.length === 0) {
-        return { removedCount: 0, assetIds: [], audit };
-      }
-
-      const assetIds = auditAssets.map((aa) => aa.assetId);
-      const expectedCount = auditAssets.filter((aa) => aa.expected).length;
-
-      // Delete the audit assets (cascade will delete related scans)
-      await tx.auditAsset.deleteMany({
-        where: { id: { in: auditAssetIds } },
-      });
-
-      // Update audit session counts
-      if (expectedCount > 0) {
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: expectedCount },
-            missingAssetCount: { decrement: expectedCount },
-          },
-        });
-      }
-
-      // Create activity note
-      await createAssetsRemovedFromAuditNote({
-        auditSessionId: auditId,
-        assetIds,
-        userId,
-        tx,
-      });
-
-      return { removedCount: auditAssets.length, assetIds, audit };
-    })
-    .then(async (result) => {
-      // Create asset notes outside the transaction
-      if (result.removedCount > 0) {
-        await createAssetNotesForAuditRemoval({
-          assetIds: result.assetIds,
-          userId,
-          audit: result.audit,
-        });
-      }
-
-      return { removedCount: result.removedCount };
+  if (!audit) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditId, organizationId },
+      label,
+      status: 404,
     });
+  }
+
+  if (audit.status !== AuditStatus.PENDING) {
+    throw new ShelfError({
+      cause: null,
+      message: "Can only remove assets from pending audits",
+      additionalData: { auditId, status: audit.status },
+      label,
+      status: 400,
+    });
+  }
+
+  // Fetch the audit assets to get the actual asset IDs
+  const { data: auditAssets, error: fetchError } = await sbDb
+    .from("AuditAsset")
+    .select("id, assetId, expected")
+    .in("id", auditAssetIds);
+
+  if (fetchError) throw fetchError;
+
+  if (!auditAssets || auditAssets.length === 0) {
+    return { removedCount: 0 };
+  }
+
+  const assetIds = auditAssets.map((aa) => aa.assetId);
+  const expectedCount = auditAssets.filter((aa) => aa.expected).length;
+
+  // Delete the audit assets (cascade will delete related scans)
+  const { error: deleteError } = await sbDb
+    .from("AuditAsset")
+    .delete()
+    .in("id", auditAssetIds);
+
+  if (deleteError) throw deleteError;
+
+  // Update audit session counts
+  if (expectedCount > 0) {
+    const { data: currentSession, error: readError } = await sbDb
+      .from("AuditSession")
+      .select("expectedAssetCount, missingAssetCount")
+      .eq("id", auditId)
+      .single();
+
+    if (readError) throw readError;
+
+    const { error: updateError } = await sbDb
+      .from("AuditSession")
+      .update({
+        expectedAssetCount: currentSession.expectedAssetCount - expectedCount,
+        missingAssetCount: currentSession.missingAssetCount - expectedCount,
+      })
+      .eq("id", auditId);
+
+    if (updateError) throw updateError;
+  }
+
+  // Create activity note
+  await createAssetsRemovedFromAuditNote({
+    auditSessionId: auditId,
+    assetIds,
+    userId,
+  });
+
+  // Create asset notes
+  if (auditAssets.length > 0) {
+    await createAssetNotesForAuditRemoval({
+      assetIds,
+      userId,
+      audit,
+    });
+  }
+
+  return { removedCount: auditAssets.length };
 }

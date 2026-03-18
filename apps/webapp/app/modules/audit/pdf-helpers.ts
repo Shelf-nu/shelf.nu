@@ -3,13 +3,12 @@ import type {
   Location,
   Category,
   Organization,
-  Prisma,
   OrganizationRoles,
   AuditImage,
   AuditNote,
   AuditAssetStatus,
 } from "@prisma/client";
-import { db } from "~/database/db.server";
+import { sbDb } from "~/database/supabase.server";
 import { ShelfError } from "~/utils/error";
 import { getQrCodeMaps } from "../qr/service.server";
 
@@ -32,31 +31,46 @@ export interface AssetWithAuditStatus extends Asset {
  */
 export interface AuditPdfDbResult {
   // Audit session with creator and assignees
-  session: Prisma.AuditSessionGetPayload<{
-    include: {
-      createdBy: {
-        select: {
-          firstName: true;
-          lastName: true;
-          email: true;
-          profilePicture: true;
-        };
-      };
-      assignments: {
-        include: {
-          user: {
-            select: {
-              id: true;
-              firstName: true;
-              lastName: true;
-              email: true;
-              profilePicture: true;
-            };
-          };
-        };
-      };
+  session: {
+    id: string;
+    name: string;
+    description: string | null;
+    status: string;
+    organizationId: string;
+    createdById: string;
+    createdAt: string;
+    updatedAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    cancelledAt: string | null;
+    dueDate: string | null;
+    expectedAssetCount: number;
+    foundAssetCount: number;
+    missingAssetCount: number;
+    unexpectedAssetCount: number;
+    scopeMeta: unknown;
+    activeSchedulerReference: string | null;
+    createdBy: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+      profilePicture: string | null;
     };
-  }>;
+    assignments: {
+      id: string;
+      userId: string;
+      auditSessionId: string;
+      role: string | null;
+      createdAt: string;
+      user: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+        profilePicture: string | null;
+      };
+    }[];
+  };
   // Assets with audit status and metadata
   assets: AssetWithAuditStatus[];
   // Organization details for header
@@ -112,35 +126,16 @@ export async function fetchAllAuditPdfRelatedData(
 ): Promise<AuditPdfDbResult> {
   try {
     // Fetch audit session with creator and assignee information
-    const session = await db.auditSession.findUnique({
-      where: {
-        id: auditSessionId,
-        organizationId,
-      },
-      include: {
-        createdBy: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-            profilePicture: true,
-          },
-        },
-        assignments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    const { data: session, error: sessionError } = await sbDb
+      .from("AuditSession")
+      .select(
+        "*, createdBy:User!createdById(firstName, lastName, email, profilePicture), assignments:AuditAssignment(*, user:User!userId(id, firstName, lastName, email, profilePicture))"
+      )
+      .eq("id", auditSessionId)
+      .eq("organizationId", organizationId)
+      .single();
+
+    if (sessionError) throw sessionError;
 
     if (!session) {
       throw new ShelfError({
@@ -153,8 +148,8 @@ export async function fetchAllAuditPdfRelatedData(
 
     // Permission check: BASE/SELF_SERVICE users can only view audits they're assigned to
     if (role && (role === "BASE" || role === "SELF_SERVICE")) {
-      const isAssignee = session.assignments.some(
-        (assignment) => assignment.user.id === userId
+      const isAssignee = (session.assignments as unknown as any[]).some(
+        (assignment: { user: { id: string } }) => assignment.user.id === userId
       );
 
       if (!isAssignee) {
@@ -169,100 +164,74 @@ export async function fetchAllAuditPdfRelatedData(
     }
 
     // Fetch all audit assets (both expected and unexpected)
-    const auditAssets = await db.auditAsset.findMany({
-      where: { auditSessionId },
-      select: {
-        assetId: true,
-        expected: true,
-        status: true,
-      },
-    });
+    const { data: auditAssets, error: auditAssetsError } = await sbDb
+      .from("AuditAsset")
+      .select("assetId, expected, status")
+      .eq("auditSessionId", auditSessionId);
 
-    const assetIds = auditAssets.map((aa) => aa.assetId);
+    if (auditAssetsError) throw auditAssetsError;
+
+    const assetIds = (auditAssets ?? []).map((aa) => aa.assetId);
 
     // Create lookup map for audit status data (expected flag + current status)
     const auditStatusMap = new Map(
-      auditAssets.map((aa) => [
+      (auditAssets ?? []).map((aa) => [
         aa.assetId,
         { expected: aa.expected, auditStatus: aa.status },
       ])
     );
 
     // Fetch all images for this audit with asset relationship
-    const images = await db.auditImage.findMany({
-      where: { auditSessionId },
-      include: {
-        auditAsset: {
-          select: {
-            id: true,
-            asset: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const { data: images, error: imagesError } = await sbDb
+      .from("AuditImage")
+      .select(
+        "*, auditAsset:AuditAsset!auditAssetId(id, asset:Asset!assetId(id, title))"
+      )
+      .eq("auditSessionId", auditSessionId)
+      .order("createdAt", { ascending: true });
+
+    if (imagesError) throw imagesError;
 
     // Split images into general and asset-specific groups
-    const generalImages = images.filter((img) => img.auditAssetId === null);
-    const assetImages = images.filter((img) => img.auditAssetId !== null);
+    const generalImages = (images ?? []).filter(
+      (img) => img.auditAssetId === null
+    );
+    const assetImages = (images ?? []).filter(
+      (img) => img.auditAssetId !== null
+    );
 
     // Fetch recent activity notes (limit to 15 most recent)
-    const activityNotes = await db.auditNote.findMany({
-      where: { auditSessionId },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 15,
-    });
+    const { data: activityNotes, error: notesError } = await sbDb
+      .from("AuditNote")
+      .select("*, user:User!userId(firstName, lastName, email)")
+      .eq("auditSessionId", auditSessionId)
+      .order("createdAt", { ascending: false })
+      .limit(15);
+
+    if (notesError) throw notesError;
 
     // Fetch assets and organization details in parallel for efficiency
-    const [assets, organization] = await Promise.all([
-      assetIds.length > 0
-        ? db.asset.findMany({
-            where: {
-              id: { in: assetIds },
-              organizationId,
-            },
-            include: {
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                  color: true,
-                },
-              },
-              location: {
-                select: {
-                  name: true,
-                },
-              },
-              qrCodes: true,
-            },
-          })
-        : Promise.resolve([]),
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: {
-          id: true,
-          name: true,
-          imageId: true,
-          currency: true,
-          updatedAt: true,
-        },
-      }),
-    ]);
+    let assets: any[] = [];
+    if (assetIds.length > 0) {
+      const { data: assetData, error: assetError } = await sbDb
+        .from("Asset")
+        .select(
+          "*, category:Category(id, name, color), location:Location(name), qrCodes:Qr(*)"
+        )
+        .eq("organizationId", organizationId)
+        .in("id", assetIds);
+
+      if (assetError) throw assetError;
+      assets = assetData ?? [];
+    }
+
+    const { data: organization, error: orgError } = await sbDb
+      .from("Organization")
+      .select("id, name, imageId, currency, updatedAt")
+      .eq("id", organizationId)
+      .single();
+
+    if (orgError) throw orgError;
 
     if (!organization) {
       throw new ShelfError({
@@ -293,13 +262,13 @@ export async function fetchAllAuditPdfRelatedData(
     });
 
     return {
-      session,
+      session: session as any,
       assets: assetsWithAuditStatus,
-      organization,
+      organization: organization as any,
       assetIdToQrCodeMap,
-      generalImages,
-      assetImages,
-      activityNotes,
+      generalImages: generalImages as any,
+      assetImages: assetImages as any,
+      activityNotes: activityNotes as any,
     };
   } catch (cause) {
     throw new ShelfError({

@@ -111,8 +111,12 @@ type UserWithSubscription = UserFromService & {
  * Admins need to see billing-relevant status for conversion tracking.
  */
 function getAccountStatus(user: UserWithSubscription): string {
+  const userOrgs = user.userOrganizations as unknown as Array<{
+    roles: string[];
+    organization: { type: string; userId: string };
+  }>;
   // Priority 1: Team workspace owner (billing decision maker)
-  const teamOrgWhereOwner = user.userOrganizations.find(
+  const teamOrgWhereOwner = userOrgs.find(
     (uo) =>
       uo.organization.type === OrganizationType.TEAM &&
       (uo.roles.includes(OrganizationRoles.OWNER) ||
@@ -124,7 +128,7 @@ function getAccountStatus(user: UserWithSubscription): string {
   }
 
   // Priority 2: Team workspace member (invited user)
-  const teamOrgWhereMember = user.userOrganizations.find(
+  const teamOrgWhereMember = userOrgs.find(
     (uo) =>
       uo.organization.type === OrganizationType.TEAM &&
       !uo.roles.includes(OrganizationRoles.OWNER)
@@ -225,7 +229,7 @@ const ListUserContent = ({ item }: { item: UserWithSubscription }) => (
     </Td>
     <Td>{item.email}</Td>
     <Td>
-      <span className="capitalize">{item.tier.name}</span>
+      <span className="capitalize">{(item.tier as any)?.name}</span>
     </Td>
     <Td>{getAccountStatus(item)}</Td>
     <Td>
