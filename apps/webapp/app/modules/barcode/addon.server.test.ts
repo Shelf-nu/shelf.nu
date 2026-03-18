@@ -392,6 +392,27 @@ describe("linkBarcodeAddonToOrganization", () => {
     );
   });
 
+  it("allows linking when subscription is already linked to the same org", async () => {
+    const sub = makeSubscription({
+      id: "sub_same_org",
+      status: "active" as any,
+      metadata: { organizationId: "org_1" } as any,
+    });
+    mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
+    mockStripe.products.retrieve.mockResolvedValue(makeBarcodeProduct());
+    mockOrgUpdate.mockResolvedValue({ id: "org_1" });
+
+    await linkBarcodeAddonToOrganization(linkParams);
+
+    expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_same_org",
+      expect.objectContaining({
+        metadata: expect.objectContaining({ organizationId: "org_1" }),
+      })
+    );
+    expect(mockOrgUpdate).toHaveBeenCalled();
+  });
+
   it("throws when no barcode subscription found", async () => {
     const sub = makeSubscription({ status: "active" as any });
     mockStripe.subscriptions.list.mockResolvedValue({ data: [sub] });
