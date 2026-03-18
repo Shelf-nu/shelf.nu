@@ -21,7 +21,7 @@ import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   payload,
@@ -63,7 +63,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { email, otp } = parseData(await request.formData(), OtpSchema);
+        let formData: FormData;
+        try {
+          formData = await request.formData();
+        } catch (cause) {
+          return data(
+            error(
+              new ShelfError({
+                cause,
+                message: "Invalid request body",
+                label: "Request validation",
+                shouldBeCaptured: false,
+                status: 400,
+              }),
+              false
+            ),
+            { status: 400 }
+          );
+        }
+
+        const { email, otp } = parseData(formData, OtpSchema);
 
         const authSession = await verifyOtpAndSignin(email, otp);
         const userExists = Boolean(await findUserByEmail(email));

@@ -467,22 +467,21 @@ const MAX_USERNAME_ATTEMPTS = 5;
  * @throws {ShelfError} If unable to generate unique username after max attempts
  */
 export async function generateUniqueUsername(email: string): Promise<string> {
-  let attempts = 0;
+  // Generate all candidate usernames upfront and check in a single query
+  const candidates = Array.from({ length: MAX_USERNAME_ATTEMPTS }, () =>
+    randomUsernameFromEmail(email)
+  );
 
-  while (attempts < MAX_USERNAME_ATTEMPTS) {
-    const username = randomUsernameFromEmail(email);
+  const existingUsers = await db.user.findMany({
+    where: { username: { in: candidates } },
+    select: { username: true },
+  });
 
-    // Check if username exists
-    const existingUser = await db.user.findUnique({
-      where: { username },
-      select: { id: true },
-    });
+  const takenUsernames = new Set(existingUsers.map((u) => u.username));
+  const availableUsername = candidates.find((u) => !takenUsernames.has(u));
 
-    if (!existingUser) {
-      return username;
-    }
-
-    attempts++;
+  if (availableUsername) {
+    return availableUsername;
   }
 
   throw new ShelfError({
