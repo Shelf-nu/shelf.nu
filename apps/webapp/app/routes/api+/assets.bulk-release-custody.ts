@@ -60,6 +60,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
             "Self service user can only release custody of assets assigned to their user.",
           additionalData: { userId, assetIds },
           label: "Assets",
+          status: 403,
+          shouldBeCaptured: false,
         });
       }
     }

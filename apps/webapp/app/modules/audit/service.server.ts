@@ -1512,11 +1512,15 @@ export async function completeAuditSession({
     // Cancel all scheduled reminder jobs
     await cancelAuditReminders(sessionId);
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: "Failed to complete audit session",
+      message: isShelfError
+        ? cause.message
+        : "Failed to complete audit session",
       additionalData: { sessionId, organizationId, userId },
       label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
     });
   }
 }
