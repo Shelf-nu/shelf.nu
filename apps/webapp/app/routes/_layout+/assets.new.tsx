@@ -189,14 +189,45 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       barcodes,
     });
 
-    // Not sure how to handle this failing as the asset is already created
-    await updateAssetMainImage({
-      request,
-      assetId: asset.id,
-      userId: authSession.userId,
-      organizationId,
-      isNewAsset: true,
+    const actor = wrapUserLinkForNote({
+      id: authSession.userId,
+      firstName: asset.user.firstName,
+      lastName: asset.user.lastName,
     });
+
+    // Run independent post-creation tasks in parallel
+    const notePromises: Promise<unknown>[] = [
+      updateAssetMainImage({
+        request,
+        assetId: asset.id,
+        userId: authSession.userId,
+        organizationId,
+        isNewAsset: true,
+      }),
+      createNote({
+        content: `Asset was created by ${actor}.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetId: asset.id,
+      }),
+    ];
+
+    if (asset.location) {
+      const locationLink = wrapLinkForNote(
+        `/locations/${asset.location.id}`,
+        asset.location.name.trim()
+      );
+      notePromises.push(
+        createNote({
+          content: `${actor} set the location  to ${locationLink}.`,
+          type: "UPDATE",
+          userId: authSession.userId,
+          assetId: asset.id,
+        })
+      );
+    }
+
+    await Promise.all(notePromises);
 
     sendNotification({
       title: "Asset created",
@@ -204,31 +235,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
-
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: asset.user.firstName,
-      lastName: asset.user.lastName,
-    });
-    await createNote({
-      content: `Asset was created by ${actor}.`,
-      type: "UPDATE",
-      userId: authSession.userId,
-      assetId: asset.id,
-    });
-
-    if (asset.location) {
-      const locationLink = wrapLinkForNote(
-        `/locations/${asset.location.id}`,
-        asset.location.name.trim()
-      );
-      await createNote({
-        content: `${actor} set the location  to ${locationLink}.`,
-        type: "UPDATE",
-        userId: authSession.userId,
-        assetId: asset.id,
-      });
-    }
 
     /** If the user used the add-another button, we reload the document to reset the form */
     if (addAnother) {

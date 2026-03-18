@@ -82,7 +82,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
           );
         }
 
-        const { email, otp } = parseData(formData, OtpSchema);
+        const { email, otp } = parseData(formData, OtpSchema, {
+          shouldBeCaptured: false,
+        });
 
         const authSession = await verifyOtpAndSignin(email, otp);
         const userExists = Boolean(await findUserByEmail(email));
