@@ -395,6 +395,9 @@ export async function createBooking({
         : "Something went wrong while trying to create or update the booking. Please try again or contact support.",
       additionalData: { booking, hints },
       label,
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : undefined,
     });
   }
 }

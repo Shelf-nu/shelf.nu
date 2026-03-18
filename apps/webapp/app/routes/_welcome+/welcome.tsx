@@ -9,10 +9,15 @@ import { z } from "zod";
 import { ChoosePurpose } from "~/components/welcome/choose-purpose";
 import { db } from "~/database/db.server";
 import { sendAuditTrialWelcomeEmail } from "~/emails/stripe/audit-trial-welcome";
+import { sendBarcodeTrialWelcomeEmail } from "~/emails/stripe/barcode-trial-welcome";
 import {
   createAuditAddonTrialSubscription,
   getAuditAddonPrices,
 } from "~/modules/audit/addon.server";
+import {
+  createBarcodeAddonTrialSubscription,
+  getBarcodeAddonPrices,
+} from "~/modules/barcode/addon.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -34,10 +39,14 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const auditPrices = await getAuditAddonPrices();
+    const [auditPrices, barcodePrices] = await Promise.all([
+      getAuditAddonPrices(),
+      getBarcodeAddonPrices(),
+    ]);
 
-    // Get personal org to check if audit trial was already used
+    // Get personal org to check if addon trials were already used
     let usedAuditTrial = false;
+    let usedBarcodeTrial = false;
     try {
       const personalOrg = await getOrganizationByUserId({
         userId,
@@ -45,9 +54,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
       });
       const orgData = await db.organization.findUnique({
         where: { id: personalOrg.id },
-        select: { usedAuditTrial: true },
+        select: { usedAuditTrial: true, usedBarcodeTrial: true },
       });
       usedAuditTrial = orgData?.usedAuditTrial ?? false;
+      usedBarcodeTrial = orgData?.usedBarcodeTrial ?? false;
     } catch {
       // Personal org not found yet - that's ok during onboarding
     }
@@ -55,7 +65,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
     return data(
       payload({
         auditPrices,
+        barcodePrices,
         usedAuditTrial,
+        usedBarcodeTrial,
       })
     );
   } catch (cause) {
@@ -69,22 +81,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    const { intent, auditPriceId } = parseData(
+    const { intent, auditPriceId, barcodePriceId } = parseData(
       await request.formData(),
       z.object({
-        intent: z.literal("personal-with-audits"),
-        auditPriceId: z.string().min(1, "Audit price is required"),
+        intent: z.literal("personal-with-addons"),
+        auditPriceId: z.string().optional(),
+        barcodePriceId: z.string().optional(),
       })
     );
 
-    if (intent !== "personal-with-audits") {
+    if (intent !== "personal-with-addons") {
       throw new Error("Invalid intent");
     }
 
-    // Get the personal org
-    const personalOrg = await getOrganizationByUserId({
-      userId,
-      orgType: "PERSONAL",
+    // Get the personal org with trial flags to prevent duplicate trials
+    const personalOrg = await db.organization.findFirstOrThrow({
+      where: { owner: { is: { id: userId } }, type: "PERSONAL" },
+      select: {
+        id: true,
+        usedAuditTrial: true,
+        usedBarcodeTrial: true,
+      },
     });
 
     const user = await getUserByID(userId, {
@@ -99,31 +116,57 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const customerId = await getOrCreateCustomerId(user);
 
-    // Create the audit trial subscription with user's chosen billing cycle
-    const { hasPaymentMethod } = await createAuditAddonTrialSubscription({
-      customerId,
-      priceId: auditPriceId,
-      userId,
-      organizationId: personalOrg.id,
-    });
+    // Create audit trial if selected (skip if already used)
+    if (auditPriceId && !personalOrg.usedAuditTrial) {
+      const { hasPaymentMethod } = await createAuditAddonTrialSubscription({
+        customerId,
+        priceId: auditPriceId,
+        userId,
+        organizationId: personalOrg.id,
+      });
 
-    // Enable audits on the personal org
-    await db.organization.update({
-      where: { id: personalOrg.id },
-      data: {
-        auditsEnabled: true,
-        usedAuditTrial: true,
-        auditsEnabledAt: new Date(),
-      },
-      select: { id: true },
-    });
+      await db.organization.update({
+        where: { id: personalOrg.id },
+        data: {
+          auditsEnabled: true,
+          usedAuditTrial: true,
+          auditsEnabledAt: new Date(),
+        },
+        select: { id: true },
+      });
 
-    // Send welcome email
-    void sendAuditTrialWelcomeEmail({
-      firstName: user.firstName,
-      email,
-      hasPaymentMethod,
-    });
+      void sendAuditTrialWelcomeEmail({
+        firstName: user.firstName,
+        email,
+        hasPaymentMethod,
+      });
+    }
+
+    // Create barcode trial if selected (skip if already used)
+    if (barcodePriceId && !personalOrg.usedBarcodeTrial) {
+      const { hasPaymentMethod } = await createBarcodeAddonTrialSubscription({
+        customerId,
+        priceId: barcodePriceId,
+        userId,
+        organizationId: personalOrg.id,
+      });
+
+      await db.organization.update({
+        where: { id: personalOrg.id },
+        data: {
+          barcodesEnabled: true,
+          usedBarcodeTrial: true,
+          barcodesEnabledAt: new Date(),
+        },
+        select: { id: true },
+      });
+
+      void sendBarcodeTrialWelcomeEmail({
+        firstName: user.firstName,
+        email,
+        hasPaymentMethod,
+      });
+    }
 
     return redirect("/assets");
   } catch (cause) {
@@ -139,7 +182,9 @@ export default function Welcome() {
     <div>
       <ChoosePurpose
         auditPrices={loaderData?.auditPrices ?? { month: null, year: null }}
+        barcodePrices={loaderData?.barcodePrices ?? { month: null, year: null }}
         usedAuditTrial={loaderData?.usedAuditTrial ?? false}
+        usedBarcodeTrial={loaderData?.usedBarcodeTrial ?? false}
       />
     </div>
   );

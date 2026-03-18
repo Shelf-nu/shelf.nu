@@ -36,16 +36,18 @@ export function useKitAvailabilityData(items: Items) {
       },
     }));
 
-    // Collect all unique bookings across all kits and their assets
+    // Collect all unique booking-kit combinations across all kits
+    // A booking can span multiple kits (via assets from different kits),
+    // so we use a composite key to ensure each kit gets its own event
     const allBookings = new Map();
 
     items.forEach((kit) => {
       kit.assets.forEach((asset) => {
         if (asset.bookings) {
           asset.bookings.forEach((booking) => {
-            // Use booking ID as key to ensure uniqueness
-            if (!allBookings.has(booking.id)) {
-              allBookings.set(booking.id, { ...booking, kitId: kit.id });
+            const key = `${booking.id}-${kit.id}`;
+            if (!allBookings.has(key)) {
+              allBookings.set(key, { ...booking, kitId: kit.id });
             }
           });
         }

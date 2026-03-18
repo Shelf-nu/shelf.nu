@@ -20,7 +20,12 @@ import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { error, parseData } from "~/utils/http.server";
+import { assertIsPost, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 import { getDomainUrl, getOrCreateCustomerId } from "~/utils/stripe.server";
 import { canUseAudits } from "~/utils/subscription.server";
 
@@ -92,6 +97,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
+    assertIsPost(request);
+
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.subscription,
+      action: PermissionAction.update,
+    });
+
     const { priceId, intent } = parseData(
       await request.formData(),
       z.object({

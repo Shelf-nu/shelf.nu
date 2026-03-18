@@ -158,7 +158,12 @@ export default function BulkPartialCheckinDialog({
           </div>
         }
       >
-        <Form method="post" className="px-6 pb-6" ref={formRef}>
+        <Form
+          method="post"
+          className="px-6 pb-6"
+          ref={formRef}
+          id="bulk-partial-checkin-form"
+        >
           <input type="hidden" name="returnJson" value="true" />
 
           {/* Filter out kit IDs - only send asset IDs to backend */}
@@ -314,6 +319,7 @@ export default function BulkPartialCheckinDialog({
                 variant="primary"
                 disabled={disabled}
                 portalContainer={formRef.current || undefined}
+                formId="bulk-partial-checkin-form"
                 onClose={handleCloseDialog}
                 specificAssetIds={selectedItems.map((item: any) => item.id)}
               />

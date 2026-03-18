@@ -3,11 +3,13 @@ import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
+import { sendBarcodeTrialEndsSoonEmail } from "~/emails/stripe/barcode-trial-ends-soon";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
 import { trialEndsSoonEmailText } from "~/emails/stripe/trial-ends-soon";
 import { unpaidInvoiceUserText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
+import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
 import {
@@ -74,6 +76,13 @@ export async function handleCheckoutCompleted(
         organizationId,
       });
     }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -116,6 +125,13 @@ export async function handleSubscriptionCreated(
     const organizationId = subscription?.metadata?.organizationId;
     if (product?.metadata?.addon_type === "audits" && organizationId) {
       await handleAuditAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
         eventType: event.type,
         subscription,
         organizationId,
@@ -231,6 +247,13 @@ export async function handleSubscriptionPaused(
         organizationId,
       });
     }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -293,6 +316,13 @@ export async function handleSubscriptionUpdated(
         organizationId,
       });
     }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -333,8 +363,8 @@ export async function handleSubscriptionDeleted(
 
   if (isAddonSubscription({ tierId, productType, event })) {
     const organizationId = subscription?.metadata?.organizationId;
-    // Skip audit disable when this cancellation is part of a subscription
-    // transfer — the new subscription's create webhook already enabled audits.
+    // Skip addon disable when this cancellation is part of a subscription
+    // transfer — the new subscription's create webhook already enabled the addon.
     const isTransferCancellation =
       !!subscription?.metadata?.transferred_to_subscription;
     if (
@@ -343,6 +373,16 @@ export async function handleSubscriptionDeleted(
       !isTransferCancellation
     ) {
       await handleAuditAddonWebhook({
+        eventType: event.type,
+        organizationId,
+      });
+    }
+    if (
+      product?.metadata?.addon_type === "barcodes" &&
+      organizationId &&
+      !isTransferCancellation
+    ) {
+      await handleBarcodeAddonWebhook({
         eventType: event.type,
         organizationId,
       });
@@ -515,6 +555,21 @@ export async function handleInvoicePaid(
             await db.organization.update({
               where: { id: organizationId },
               data: { auditsEnabled: true },
+              select: { id: true },
+            });
+          }
+        }
+
+        // Handle barcode add-on invoice paid as safety net
+        if (
+          productType === "addon" &&
+          product?.metadata?.addon_type === "barcodes"
+        ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (organizationId) {
+            await db.organization.update({
+              where: { id: organizationId },
+              data: { barcodesEnabled: true },
               select: { id: true },
             });
           }
@@ -709,6 +764,19 @@ export async function handleTrialWillEnd(
     if (subscription.trial_end && product?.metadata?.addon_type === "audits") {
       const hasPaymentMethod = await customerHasPaymentMethod(customerId);
       void sendAuditTrialEndsSoonEmail({
+        firstName: user.firstName,
+        email: user.email,
+        hasPaymentMethod,
+        trialEndDate: new Date(subscription.trial_end * 1000),
+      });
+    }
+    // Send trial ending email for barcode add-on
+    if (
+      subscription.trial_end &&
+      product?.metadata?.addon_type === "barcodes"
+    ) {
+      const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+      void sendBarcodeTrialEndsSoonEmail({
         firstName: user.firstName,
         email: user.email,
         hasPaymentMethod,

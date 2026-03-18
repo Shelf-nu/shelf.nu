@@ -8,8 +8,8 @@ import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
 
 const label: ErrorLabel = "Stripe";
 
-/** Creates a Stripe checkout session for the audit add-on */
-export async function createAuditAddonCheckoutSession({
+/** Creates a Stripe checkout session for the barcode add-on */
+export async function createBarcodeAddonCheckoutSession({
   priceId,
   userId,
   domainUrl,
@@ -36,8 +36,8 @@ export async function createAuditAddonCheckoutSession({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${domainUrl}/audits?success=true`,
-      cancel_url: `${domainUrl}/audits?canceled=true`,
+      success_url: `${domainUrl}/assets?success=true&addon=barcodes`,
+      cancel_url: `${domainUrl}/assets?canceled=true&addon=barcodes`,
       client_reference_id: userId,
       customer: customerId,
       subscription_data: {
@@ -58,15 +58,15 @@ export async function createAuditAddonCheckoutSession({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating audit add-on checkout session. Please try again later or contact support.",
+        "Something went wrong while creating barcode add-on checkout session. Please try again later or contact support.",
       additionalData: { priceId, userId, domainUrl, customerId },
       label,
     });
   }
 }
 
-/** Creates a trial subscription for the audit add-on directly via Stripe API */
-export async function createAuditAddonTrialSubscription({
+/** Creates a trial subscription for the barcode add-on directly via Stripe API */
+export async function createBarcodeAddonTrialSubscription({
   customerId,
   priceId,
   userId,
@@ -118,15 +118,15 @@ export async function createAuditAddonTrialSubscription({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating audit add-on trial. Please try again later or contact support.",
+        "Something went wrong while creating barcode add-on trial. Please try again later or contact support.",
       additionalData: { customerId, priceId, userId },
       label,
     });
   }
 }
 
-/** Fetches audit add-on prices from Stripe */
-export async function getAuditAddonPrices() {
+/** Fetches barcode add-on prices from Stripe */
+export async function getBarcodeAddonPrices() {
   try {
     if (!premiumIsEnabled || !stripe) {
       return { month: null, year: null };
@@ -139,37 +139,37 @@ export async function getAuditAddonPrices() {
       limit: 100,
     });
 
-    const auditPrices = pricesResponse.data.filter((p) => {
+    const barcodePrices = pricesResponse.data.filter((p) => {
       const product = p.product as Stripe.Product;
       return (
         product?.metadata?.product_type === "addon" &&
-        product?.metadata?.addon_type === "audits"
+        product?.metadata?.addon_type === "barcodes"
       );
     }) as PriceWithProduct[];
 
     const monthlyPrice =
-      auditPrices.find((p) => p.recurring?.interval === "month") || null;
+      barcodePrices.find((p) => p.recurring?.interval === "month") || null;
     const yearlyPrice =
-      auditPrices.find((p) => p.recurring?.interval === "year") || null;
+      barcodePrices.find((p) => p.recurring?.interval === "year") || null;
 
     return { month: monthlyPrice, year: yearlyPrice };
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching audit add-on prices.",
+      message: "Something went wrong while fetching barcode add-on prices.",
       label,
     });
   }
 }
 
 /**
- * Links an existing audit add-on subscription item to a newly created organization.
- * Used during workspace creation when the team checkout included audits.
+ * Links an existing barcode add-on subscription item to a newly created organization.
+ * Used during workspace creation when the team checkout included barcodes.
  *
- * Finds the customer's active/trialing subscription that contains an audit addon item,
- * updates the subscription metadata with the organizationId, and enables audits on the org.
+ * Finds the customer's active/trialing subscription that contains a barcode addon item,
+ * updates the subscription metadata with the organizationId, and enables barcodes on the org.
  */
-export async function linkAuditAddonToOrganization({
+export async function linkBarcodeAddonToOrganization({
   customerId,
   organizationId,
 }: {
@@ -198,7 +198,7 @@ export async function linkAuditAddonToOrganization({
     // Skip subscriptions linked to a *different* organization to avoid
     // overwriting another org's linkage. Allow re-linking to the same org
     // (both addons may share one subscription).
-    let auditSubscription: Stripe.Subscription | undefined;
+    let barcodeSubscription: Stripe.Subscription | undefined;
     for (const sub of subscriptions.data) {
       if (sub.status !== "active" && sub.status !== "trialing") continue;
       if (
@@ -217,42 +217,42 @@ export async function linkAuditAddonToOrganization({
         const product = await stripe.products.retrieve(productId);
         if (
           product.metadata?.product_type === "addon" &&
-          product.metadata?.addon_type === "audits"
+          product.metadata?.addon_type === "barcodes"
         ) {
-          auditSubscription = sub;
+          barcodeSubscription = sub;
           break;
         }
       }
-      if (auditSubscription) break;
+      if (barcodeSubscription) break;
     }
 
-    if (!auditSubscription) {
+    if (!barcodeSubscription) {
       throw new ShelfError({
         cause: null,
         message:
-          "No active subscription with audit addon found for this customer",
+          "No active subscription with barcode addon found for this customer",
         additionalData: { customerId, organizationId },
         label,
       });
     }
 
-    const isTrialing = auditSubscription.status === "trialing";
+    const isTrialing = barcodeSubscription.status === "trialing";
 
     // Update subscription metadata with the organizationId
-    await stripe.subscriptions.update(auditSubscription.id, {
+    await stripe.subscriptions.update(barcodeSubscription.id, {
       metadata: {
-        ...auditSubscription.metadata,
+        ...barcodeSubscription.metadata,
         organizationId,
       },
     });
 
-    // Enable audits on the organization
+    // Enable barcodes on the organization
     await db.organization.update({
       where: { id: organizationId },
       data: {
-        auditsEnabled: true,
-        auditsEnabledAt: new Date(),
-        ...(isTrialing && { usedAuditTrial: true }),
+        barcodesEnabled: true,
+        barcodesEnabledAt: new Date(),
+        ...(isTrialing && { usedBarcodeTrial: true }),
       },
       select: { id: true },
     });
@@ -260,7 +260,7 @@ export async function linkAuditAddonToOrganization({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while linking audit add-on to organization.",
+        "Something went wrong while linking barcode add-on to organization.",
       additionalData: { customerId, organizationId },
       label,
     });
@@ -268,10 +268,10 @@ export async function linkAuditAddonToOrganization({
 }
 
 /**
- * Fetches the current audit add-on subscription info for a customer.
+ * Fetches the current barcode add-on subscription info for a customer.
  * Returns the billing interval and price, or null if no subscription found.
  */
-export async function getAuditSubscriptionInfo({
+export async function getBarcodeSubscriptionInfo({
   customerId,
 }: {
   customerId: string;
@@ -301,7 +301,7 @@ export async function getAuditSubscriptionInfo({
         const product = await stripe.products.retrieve(productId);
         if (
           product.metadata?.product_type === "addon" &&
-          product.metadata?.addon_type === "audits"
+          product.metadata?.addon_type === "barcodes"
         ) {
           return {
             interval:
@@ -321,10 +321,10 @@ export async function getAuditSubscriptionInfo({
 }
 
 /**
- * Handles audit add-on subscription webhook events.
- * Sets auditsEnabled and usedAuditTrial flags on the Organization.
+ * Handles barcode add-on subscription webhook events.
+ * Sets barcodesEnabled and usedBarcodeTrial flags on the Organization.
  */
-export async function handleAuditAddonWebhook({
+export async function handleBarcodeAddonWebhook({
   eventType,
   subscription,
   organizationId,
@@ -344,10 +344,10 @@ export async function handleAuditAddonWebhook({
       await db.organization.update({
         where: { id: organizationId },
         data: {
-          auditsEnabled: true,
-          auditsEnabledAt: new Date(),
+          barcodesEnabled: true,
+          barcodesEnabledAt: new Date(),
           ...(isTrialSubscription &&
-            !isTransferredSubscription && { usedAuditTrial: true }),
+            !isTransferredSubscription && { usedBarcodeTrial: true }),
         },
         select: { id: true },
       });
@@ -359,7 +359,7 @@ export async function handleAuditAddonWebhook({
         subscription?.status === "trialing";
       await db.organization.update({
         where: { id: organizationId },
-        data: { auditsEnabled: isActive },
+        data: { barcodesEnabled: isActive },
         select: { id: true },
       });
       break;
@@ -368,7 +368,7 @@ export async function handleAuditAddonWebhook({
     case "customer.subscription.deleted": {
       await db.organization.update({
         where: { id: organizationId },
-        data: { auditsEnabled: false },
+        data: { barcodesEnabled: false },
         select: { id: true },
       });
       break;
