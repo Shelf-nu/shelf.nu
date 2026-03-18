@@ -19,6 +19,38 @@ if (window.env?.SENTRY_DSN) {
       "Error in input stream",
       /^false$/, // Non-Error promise rejection with value: false
     ],
+    beforeSendTransaction(event) {
+      const spans = event.spans || [];
+
+      // Suppress N+1 for asset image refresh — server-side batch handles this;
+      // client-side individual calls are an intentional safety net
+      const imageRefreshSpans = spans.filter(
+        (s) => s.description?.includes("/api/asset/refresh-main-image")
+      );
+      if (imageRefreshSpans.length > 3) {
+        return null;
+      }
+
+      // Suppress React Router internal manifest fetching — framework behavior
+      const manifestSpans = spans.filter(
+        (s) => s.description?.includes("/__manifest")
+      );
+      if (manifestSpans.length > 3) {
+        return null;
+      }
+
+      // Suppress consecutive HTTP on /assets/new — React Router form + revalidation
+      if (event.transaction === "/assets/new") {
+        const assetNewSpans = spans.filter(
+          (s) => s.description?.includes("/assets/new.data")
+        );
+        if (assetNewSpans.length > 1) {
+          return null;
+        }
+      }
+
+      return event;
+    },
     beforeSend(event) {
       const message = event.exception?.values?.[0]?.value || "";
 

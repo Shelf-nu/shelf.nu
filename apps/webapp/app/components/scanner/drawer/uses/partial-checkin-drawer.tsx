@@ -649,7 +649,12 @@ const CustomForm = ({
   const formRef = useRef<HTMLFormElement>(null);
 
   return (
-    <Form ref={formRef} className="mb-4 flex max-h-full w-full" method="post">
+    <Form
+      ref={formRef}
+      id="partial-checkin-form"
+      className="mb-4 flex max-h-full w-full"
+      method="post"
+    >
       <div className="flex w-full gap-2 p-3">
         {/* Hidden form fields */}
         {assetIdsForCheckin.map((assetId, index) => (
@@ -681,6 +686,7 @@ const CustomForm = ({
               isLoading || hasBlockers || assetIdsForCheckin.length === 0
             }
             portalContainer={formRef.current || undefined}
+            formId="partial-checkin-form"
             specificAssetIds={assetIdsForCheckin}
           />
         ) : (
