@@ -196,7 +196,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     });
 
     // Run independent post-creation tasks in parallel
-    const notePromises: Promise<unknown>[] = [
+    const postCreationTasks: Promise<unknown>[] = [
       updateAssetMainImage({
         request,
         assetId: asset.id,
@@ -217,9 +217,9 @@ export async function action({ context, request }: LoaderFunctionArgs) {
         `/locations/${asset.location.id}`,
         asset.location.name.trim()
       );
-      notePromises.push(
+      postCreationTasks.push(
         createNote({
-          content: `${actor} set the location  to ${locationLink}.`,
+          content: `${actor} set the location to ${locationLink}.`,
           type: "UPDATE",
           userId: authSession.userId,
           assetId: asset.id,
@@ -227,7 +227,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       );
     }
 
-    await Promise.all(notePromises);
+    await Promise.all(postCreationTasks);
 
     sendNotification({
       title: "Asset created",
