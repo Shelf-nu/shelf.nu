@@ -25,7 +25,8 @@ export function useAssetAvailabilityData(items: Items) {
   const { timeZone } = useHints();
 
   const { resources, events } = useMemo(() => {
-    const resources = items.map((item) => ({
+    const safeItems = items ?? [];
+    const resources = safeItems.map((item) => ({
       id: item.id,
       title: item.title,
       extendedProps: {
@@ -38,7 +39,7 @@ export function useAssetAvailabilityData(items: Items) {
       },
     }));
 
-    const events = items
+    const events = safeItems
       .map((asset) => {
         if (!asset.bookings) {
           return [];
@@ -59,7 +60,6 @@ export function useAssetAvailabilityData(items: Items) {
             return {
               title,
               resourceId: asset.id,
-              url: `/bookings/${booking.id}`,
               start: toIsoDateTimeToUserTimezone(booking.from, timeZone),
               end: toIsoDateTimeToUserTimezone(booking.to, timeZone),
               classNames: [
@@ -71,6 +71,7 @@ export function useAssetAvailabilityData(items: Items) {
                 ),
               ],
               extendedProps: {
+                url: `/bookings/${booking.id}`,
                 id: booking.id,
                 name: booking.name,
                 status: booking.status,

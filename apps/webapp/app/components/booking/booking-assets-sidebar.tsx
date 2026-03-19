@@ -116,6 +116,7 @@ export function BookingAssetsSidebar({
   const hasItems = booking.assets.length > 0;
   const defaultTrigger = (
     <Button
+      type="button"
       variant="link-gray"
       onClick={hasItems ? () => setIsOpen(true) : undefined}
       className={!hasItems ? "hover:text-gray cursor-default no-underline" : ""}
@@ -218,6 +219,7 @@ export function BookingAssetsSidebar({
                             <td className="px-6 py-4 pr-4 text-right align-middle">
                               <div className="flex items-center justify-end gap-5">
                                 <Button
+                                  type="button"
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
                                   className="text-center font-bold text-gray-600 hover:text-gray-900"

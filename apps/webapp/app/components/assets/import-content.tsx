@@ -281,6 +281,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
       >
         <AlertDialogTrigger asChild>
           <Button
+            type="button"
             title={"Confirm asset import"}
             disabled={!selectedFile}
             className="my-4"
@@ -459,7 +460,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             {isSuccessful ? (
               <div className="flex gap-2">
                 <AlertDialogCancel asChild>
-                  <Button variant="secondary" width="full">
+                  <Button type="button" variant="secondary" width="full">
                     Close
                   </Button>
                 </AlertDialogCancel>
@@ -470,7 +471,9 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             ) : (
               <>
                 <AlertDialogCancel asChild>
-                  <Button variant="secondary">Cancel</Button>
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
                 </AlertDialogCancel>
                 <Button
                   type="submit"

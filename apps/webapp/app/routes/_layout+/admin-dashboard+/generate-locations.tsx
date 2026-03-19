@@ -147,7 +147,9 @@ export default function GenerateLocations() {
           accept="image/png, image/jpeg, image/jpg, image/webp"
         />
 
-        <Button disabled={disabled}>Create</Button>
+        <Button type="submit" disabled={disabled}>
+          Create
+        </Button>
       </Form>
     </div>
   );

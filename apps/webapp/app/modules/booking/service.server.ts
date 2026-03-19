@@ -395,6 +395,9 @@ export async function createBooking({
         : "Something went wrong while trying to create or update the booking. Please try again or contact support.",
       additionalData: { booking, hints },
       label,
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : undefined,
     });
   }
 }
@@ -1395,128 +1398,123 @@ export async function checkinBooking({
       }).toJSDate();
     }
 
-    const updatedBooking = await db.$transaction(async (tx) => {
-      // Collect all linked booking IDs that are ONGOING or OVERDUE (excluding current booking)
-      const linkedActiveBookingIds = new Set<string>();
-      bookingFound.assets.forEach((asset) => {
-        (asset.bookings ?? []).forEach((linkedBooking) => {
-          if (
-            linkedBooking.id !== bookingFound.id &&
-            (linkedBooking.status === BookingStatus.ONGOING ||
-              linkedBooking.status === BookingStatus.OVERDUE)
-          ) {
-            linkedActiveBookingIds.add(linkedBooking.id);
-          }
-        });
-      });
-
-      // Query partial check-ins for all linked active bookings to find which assets were already checked in
-      const partialCheckinsForLinkedBookings =
-        linkedActiveBookingIds.size > 0
-          ? await tx.partialBookingCheckin.findMany({
-              where: { bookingId: { in: Array.from(linkedActiveBookingIds) } },
-              select: { bookingId: true, assetIds: true },
-            })
-          : [];
-
-      // Build a map of bookingId -> Set of asset IDs that were partially checked in
-      const partiallyCheckedInAssetsByBooking = new Map<string, Set<string>>();
-      partialCheckinsForLinkedBookings.forEach((checkin) => {
-        if (!partiallyCheckedInAssetsByBooking.has(checkin.bookingId)) {
-          partiallyCheckedInAssetsByBooking.set(checkin.bookingId, new Set());
+    // Pre-compute linked active booking IDs outside the transaction
+    const linkedActiveBookingIds = new Set<string>();
+    bookingFound.assets.forEach((asset) => {
+      (asset.bookings ?? []).forEach((linkedBooking) => {
+        if (
+          linkedBooking.id !== bookingFound.id &&
+          (linkedBooking.status === BookingStatus.ONGOING ||
+            linkedBooking.status === BookingStatus.OVERDUE)
+        ) {
+          linkedActiveBookingIds.add(linkedBooking.id);
         }
-        checkin.assetIds.forEach((assetId) => {
-          partiallyCheckedInAssetsByBooking
-            .get(checkin.bookingId)!
-            .add(assetId);
-        });
       });
+    });
 
-      const assetsToCheckin = bookingFound.assets
-        .filter((asset) => {
-          if (asset.status !== AssetStatus.CHECKED_OUT) {
-            return false;
-          }
+    // Pre-fetch partial check-ins for linked bookings outside the transaction
+    const partialCheckinsForLinkedBookings =
+      linkedActiveBookingIds.size > 0
+        ? await db.partialBookingCheckin.findMany({
+            where: {
+              bookingId: { in: Array.from(linkedActiveBookingIds) },
+            },
+            select: { bookingId: true, assetIds: true },
+          })
+        : [];
 
-          // Check if asset has conflicts with other active bookings
-          // An asset has a conflict only if it's in another active booking AND hasn't been checked in from that booking
-          const hasActiveBookingConflict = (asset.bookings ?? []).some(
-            (linkedBooking) => {
-              if (
-                linkedBooking.id === bookingFound.id ||
-                (linkedBooking.status !== BookingStatus.ONGOING &&
-                  linkedBooking.status !== BookingStatus.OVERDUE)
-              ) {
-                return false;
-              }
-
-              // Check if asset was already partially checked in from this linked booking
-              const checkedInAssets = partiallyCheckedInAssetsByBooking.get(
-                linkedBooking.id
-              );
-              if (checkedInAssets && checkedInAssets.has(asset.id)) {
-                // Asset was already checked in from this booking, so no conflict
-                return false;
-              }
-
-              // Asset is still active in this booking, so it's a conflict
-              return true;
-            }
-          );
-
-          if (hasActiveBookingConflict) {
-            return false;
-          }
-
-          // No other active booking is using this asset, so we can safely
-          // reset its status as part of completing the current booking.
-          return true;
-        })
-        .map((asset) => asset.id);
-
-      if (assetsToCheckin.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToCheckin } },
-          data: { status: AssetStatus.AVAILABLE },
-        });
+    // Build a map of bookingId -> Set of asset IDs that were partially checked in
+    const partiallyCheckedInAssetsByBooking = new Map<string, Set<string>>();
+    partialCheckinsForLinkedBookings.forEach((checkin) => {
+      if (!partiallyCheckedInAssetsByBooking.has(checkin.bookingId)) {
+        partiallyCheckedInAssetsByBooking.set(checkin.bookingId, new Set());
       }
-      /* If there are any kits associated with the booking, then update their status */
-      if (hasKits) {
-        // Determine which kits should be checked in based on their assets being checked in
-        const assetsToCheckinSet = new Set(assetsToCheckin);
-        const kitsToCheckin = kitIds.filter((kitId) => {
-          // Get all assets of this kit that are in this booking
+      checkin.assetIds.forEach((assetId) => {
+        partiallyCheckedInAssetsByBooking.get(checkin.bookingId)!.add(assetId);
+      });
+    });
+
+    // Pre-compute which assets to check in outside the transaction
+    const assetsToCheckin = bookingFound.assets
+      .filter((asset) => {
+        if (asset.status !== AssetStatus.CHECKED_OUT) {
+          return false;
+        }
+
+        const hasActiveBookingConflict = (asset.bookings ?? []).some(
+          (linkedBooking) => {
+            if (
+              linkedBooking.id === bookingFound.id ||
+              (linkedBooking.status !== BookingStatus.ONGOING &&
+                linkedBooking.status !== BookingStatus.OVERDUE)
+            ) {
+              return false;
+            }
+
+            const checkedInAssets = partiallyCheckedInAssetsByBooking.get(
+              linkedBooking.id
+            );
+            if (checkedInAssets && checkedInAssets.has(asset.id)) {
+              return false;
+            }
+
+            return true;
+          }
+        );
+
+        if (hasActiveBookingConflict) {
+          return false;
+        }
+
+        return true;
+      })
+      .map((asset) => asset.id);
+
+    // Pre-compute which kits to check in
+    const assetsToCheckinSet = new Set(assetsToCheckin);
+    const kitsToCheckin = hasKits
+      ? kitIds.filter((kitId) => {
           const kitAssetsInBooking = bookingFound.assets.filter(
             (asset) => asset.kitId === kitId
           );
-
-          // Check in the kit if ALL its assets in the booking will be AVAILABLE after this operation
-          // This includes: assets being checked in now OR assets already AVAILABLE (from partial check-ins)
           return kitAssetsInBooking.every(
             (asset) =>
               assetsToCheckinSet.has(asset.id) ||
               asset.status === AssetStatus.AVAILABLE
           );
-        });
+        })
+      : [];
 
-        if (kitsToCheckin.length > 0) {
-          await tx.kit.updateMany({
-            where: { id: { in: kitsToCheckin } },
-            data: { status: KitStatus.AVAILABLE },
+    const updatedBooking = await db.$transaction(
+      async (tx) => {
+        if (assetsToCheckin.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: assetsToCheckin } },
+            data: { status: AssetStatus.AVAILABLE },
           });
         }
-      }
+        /* If there are any kits associated with the booking, then update their status */
+        if (hasKits) {
+          if (kitsToCheckin.length > 0) {
+            await tx.kit.updateMany({
+              where: { id: { in: kitsToCheckin } },
+              data: { status: KitStatus.AVAILABLE },
+            });
+          }
+        }
 
-      /** Finally update the booking */
-      return tx.booking.update({
-        where: { id: bookingFound.id },
-        data: dataToUpdate,
-        include: {
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: true,
-        },
-      });
-    });
+        /** Finally update the booking */
+        return tx.booking.update({
+          where: { id: bookingFound.id },
+          data: dataToUpdate,
+          include: {
+            ...BOOKING_INCLUDE_FOR_EMAIL,
+            assets: true,
+          },
+        });
+      },
+      { timeout: 15000 }
+    );
 
     // Create status transition note
     if (userId) {
@@ -2024,13 +2022,47 @@ export async function updateBookingAssets({
         },
       });
 
+      // Dedupe assetIds so duplicate entries don't cause false validation failures
+      // (findMany returns unique rows, so duplicates would inflate the expected count)
+      const uniqueAssetIds = [...new Set(assetIds)];
+
+      // Validate that all asset IDs exist before inserting into the join table
+      // to prevent FK violations when assets are deleted between UI load and submission
+      const validAssets = await tx.asset.findMany({
+        where: { id: { in: uniqueAssetIds }, organizationId },
+        select: { id: true },
+      });
+      const validAssetIds = validAssets.map((a) => a.id);
+
+      if (validAssetIds.length === 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "None of the selected assets exist. They may have been deleted.",
+          label,
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
+      if (validAssetIds.length !== uniqueAssetIds.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some of the selected assets no longer exist. Please reload and try again.",
+          label,
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+
       await Promise.all([
         // Bulk insert into the join table in a single SQL statement instead of
         // N individual connect operations which cause transaction timeouts
         // for large bookings
         tx.$executeRaw`
           INSERT INTO "_AssetToBooking" ("A", "B")
-          SELECT unnest(${assetIds}::text[]), ${id}
+          SELECT unnest(${validAssetIds}::text[]), ${id}
           ON CONFLICT ("A", "B") DO NOTHING
         `,
         // Touch updatedAt since the raw INSERT doesn't update the booking row
@@ -2048,7 +2080,7 @@ export async function updateBookingAssets({
         b.status === BookingStatus.OVERDUE
       ) {
         await tx.asset.updateMany({
-          where: { id: { in: assetIds }, organizationId },
+          where: { id: { in: validAssetIds }, organizationId },
           data: { status: AssetStatus.CHECKED_OUT },
         });
 
@@ -3507,7 +3539,6 @@ export async function getBookingsForCalendar(params: {
           title,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
-          url: `/bookings/${booking.id}`,
           classNames: [
             `bookingId-${booking.id}`,
             ...getStatusClasses(
@@ -3516,6 +3547,7 @@ export async function getBookingsForCalendar(params: {
             ),
           ],
           extendedProps: {
+            url: `/bookings/${booking.id}`,
             status: booking.status,
             id: booking.id,
             name: booking.name,

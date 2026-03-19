@@ -33,6 +33,7 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
           cloneElement(trigger)
         ) : (
           <Button
+            type="button"
             variant="link"
             icon="trash"
             className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 outline-none  hover:bg-slate-100 hover:text-gray-700"
@@ -60,7 +61,7 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary" disabled={disabled}>
+              <Button type="button" variant="secondary" disabled={disabled}>
                 Cancel
               </Button>
             </AlertDialogCancel>
@@ -71,6 +72,7 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
               )}
               <input type="hidden" value="delete" name="intent" />
               <Button
+                type="submit"
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 disabled={disabled}
               >

@@ -79,6 +79,7 @@ export default function ExtendBookingDialog({
   return (
     <>
       <Button
+        type="button"
         variant="link"
         className="justify-start rounded px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
         width="full"
@@ -181,7 +182,7 @@ export default function ExtendBookingDialog({
                 >
                   Cancel
                 </Button>
-                <Button className="flex-1" disabled={disabled}>
+                <Button type="submit" className="flex-1" disabled={disabled}>
                   Submit
                 </Button>
               </div>

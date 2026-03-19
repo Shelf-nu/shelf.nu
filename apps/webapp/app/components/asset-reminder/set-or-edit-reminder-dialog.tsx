@@ -194,6 +194,7 @@ export default function SetOrEditReminderDialog({
           </div>
           <div className="flex items-center justify-end gap-2 border-t p-4 md:col-span-2">
             <Button
+              type="button"
               role="button"
               variant="secondary"
               disabled={disabled}
@@ -201,7 +202,7 @@ export default function SetOrEditReminderDialog({
             >
               Cancel
             </Button>
-            <Button role="button" disabled={disabled}>
+            <Button role="button" type="submit" disabled={disabled}>
               Confirm
             </Button>
           </div>

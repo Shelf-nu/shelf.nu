@@ -383,12 +383,17 @@ export default function ManageLocationKits() {
           <AlertDialogFooter>
             <div className="flex justify-center gap-2">
               <AlertDialogCancel asChild>
-                <Button variant="secondary" disabled={isSearching}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isSearching}
+                >
                   Cancel
                 </Button>
               </AlertDialogCancel>
 
               <Button
+                type="button"
                 onClick={() => {
                   setIsCascadeAlertOpen(false);
                   void submit(formRef.current);

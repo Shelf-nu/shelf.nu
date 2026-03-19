@@ -1220,6 +1220,91 @@ describe("updateBookingAssets", () => {
       updateBookingAssets(mockUpdateBookingAssetsParams)
     ).rejects.toThrow(ShelfError);
   });
+
+  it("should throw 400 ShelfError when all assets have been deleted", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: simulate all requested assets being deleted from DB
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    await expect(
+      updateBookingAssets(mockUpdateBookingAssetsParams)
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message:
+          "None of the selected assets exist. They may have been deleted.",
+        status: 400,
+      })
+    );
+
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("should throw 400 ShelfError when some assets have been deleted", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: simulate one of two requested assets being deleted from DB
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1" }]);
+
+    await expect(
+      updateBookingAssets(mockUpdateBookingAssetsParams)
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message:
+          "Some of the selected assets no longer exist. Please reload and try again.",
+        status: 400,
+      })
+    );
+
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("should handle duplicate asset IDs without false validation failures", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: simulate both unique assets existing — duplicates should be deduped
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+
+    const params = {
+      ...mockUpdateBookingAssetsParams,
+      assetIds: ["asset-1", "asset-2", "asset-1"], // duplicate
+    };
+
+    const result = await updateBookingAssets(params);
+
+    expect(result).toEqual(mockBooking);
+    expect(db.$executeRaw).toHaveBeenCalled();
+  });
 });
 
 describe("reserveBooking", () => {

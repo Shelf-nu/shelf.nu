@@ -88,6 +88,7 @@ export const Dialog = ({
           >
             {title}
             <Button
+              type="button"
               onClick={onClose}
               variant="link"
               className={"mt-2 leading-none text-gray-500 md:right-6"}
@@ -103,5 +104,7 @@ export const Dialog = ({
   ) : null;
 };
 
-export const DialogPortal = ({ children }: { children: ReactNode }) =>
-  ReactDOM.createPortal(children, document.body);
+export const DialogPortal = ({ children }: { children: ReactNode }) => {
+  if (typeof document === "undefined") return null;
+  return ReactDOM.createPortal(children, document.body);
+};

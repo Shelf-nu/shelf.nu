@@ -19,6 +19,7 @@ import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
+import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
 import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -224,14 +225,15 @@ export async function createUserOrAttachOrg({
   roles,
   password,
   firstName,
+  lastName,
   createdWithInvite = false,
-}: Pick<User, "email" | "firstName"> & {
-  organizationId: Organization["id"];
-  roles: OrganizationRoles[];
-  password: string;
-  /** We mark  */
-  createdWithInvite: boolean;
-}) {
+}: Pick<User, "email" | "firstName"> &
+  Partial<Pick<User, "lastName">> & {
+    organizationId: Organization["id"];
+    roles: OrganizationRoles[];
+    password: string;
+    createdWithInvite: boolean;
+  }) {
   try {
     const shelfUser = await db.user.findFirst({
       where: { email },
@@ -271,6 +273,7 @@ export async function createUserOrAttachOrg({
         organizationId,
         roles,
         firstName,
+        lastName,
         createdWithInvite,
       });
 
@@ -735,7 +738,10 @@ export async function createUser(
                      */
                     members: {
                       create: {
-                        name: `${firstName} ${lastName} (Owner)`,
+                        name: [
+                          ...[firstName, lastName].filter(Boolean),
+                          "(Owner)",
+                        ].join(" "),
                         user: { connect: { id: userId } },
                       },
                     },
@@ -1202,7 +1208,7 @@ export async function softDeleteUser(id: User["id"]) {
       await tx.user.update({
         where: { id },
         data: {
-          email: `deleted+${randomId}@deleted.shelf.nu`,
+          email: `deleted+${randomId}${SOFT_DELETED_EMAIL_DOMAIN}`,
           username: `deleted+${randomId}`,
           firstName: "Deleted",
           lastName: "User",

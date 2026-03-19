@@ -152,7 +152,11 @@ export default function KitImage({
                 <Button to={`/kits/${kitId}/edit`} variant="secondary">
                   Edit image(s)
                 </Button>
-                <Button variant="secondary" onClick={handleCloseDialog}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleCloseDialog}
+                >
                   Close
                 </Button>
               </div>

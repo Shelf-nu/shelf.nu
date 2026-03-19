@@ -53,3 +53,45 @@ describe("canHideShelfBranding", () => {
     expect(canHideShelfBranding({ canHideShelfBranding: false })).toBe(true);
   });
 });
+
+describe("canUseBarcodes", () => {
+  it("returns true when premium disabled (regardless of barcodesEnabled)", async () => {
+    const { canUseBarcodes } = await loadSubscriptionModule(false);
+
+    expect(canUseBarcodes({ barcodesEnabled: false })).toBe(true);
+    expect(canUseBarcodes({ barcodesEnabled: true })).toBe(true);
+  });
+
+  it("returns true when premium enabled and barcodesEnabled is true", async () => {
+    const { canUseBarcodes } = await loadSubscriptionModule(true);
+
+    expect(canUseBarcodes({ barcodesEnabled: true })).toBe(true);
+  });
+
+  it("returns false when premium enabled and barcodesEnabled is false", async () => {
+    const { canUseBarcodes } = await loadSubscriptionModule(true);
+
+    expect(canUseBarcodes({ barcodesEnabled: false })).toBe(false);
+  });
+});
+
+describe("canUseAudits", () => {
+  it("returns true when premium disabled (regardless of auditsEnabled)", async () => {
+    const { canUseAudits } = await loadSubscriptionModule(false);
+
+    expect(canUseAudits({ auditsEnabled: false })).toBe(true);
+    expect(canUseAudits({ auditsEnabled: true })).toBe(true);
+  });
+
+  it("returns true when premium enabled and auditsEnabled is true", async () => {
+    const { canUseAudits } = await loadSubscriptionModule(true);
+
+    expect(canUseAudits({ auditsEnabled: true })).toBe(true);
+  });
+
+  it("returns false when premium enabled and auditsEnabled is false", async () => {
+    const { canUseAudits } = await loadSubscriptionModule(true);
+
+    expect(canUseAudits({ auditsEnabled: false })).toBe(false);
+  });
+});

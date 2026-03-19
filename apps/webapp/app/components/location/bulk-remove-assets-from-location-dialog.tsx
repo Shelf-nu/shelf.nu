@@ -37,6 +37,7 @@ export default function BulkRemoveAssetsFromLocationDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -45,6 +46,7 @@ export default function BulkRemoveAssetsFromLocationDialog() {
               Cancel
             </Button>
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled}

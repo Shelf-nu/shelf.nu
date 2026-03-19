@@ -26,11 +26,12 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 
 ### Code Quality
 
+- `pnpm webapp:lint` - ESLint checking (webapp only)
 - `pnpm turbo lint` - ESLint checking (all packages)
 - `pnpm --filter @shelf/webapp lint:fix` - Fix ESLint issues automatically
 - `pnpm turbo typecheck` - TypeScript type checking (all packages)
 - `pnpm run format` - Prettier code formatting (root-level)
-- `pnpm --filter @shelf/webapp precommit` - Complete pre-commit validation
+- `pnpm --filter @shelf/webapp validate` - Complete pre-commit validation
 
 ### Database
 
@@ -74,7 +75,7 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 ### How packages connect
 
 - **Webapp → Database**: The webapp depends on `@shelf/database` (workspace dependency). Its `app/database/db.server.ts` is a thin wrapper that calls `createDatabaseClient()` from `@shelf/database`. All 135+ `~/database/db.server` imports in the webapp work unchanged.
-- **Webapp → Prisma types**: The webapp's `build`, `typecheck`, and `precommit` scripts run `prisma generate` to ensure types are available. In CI, this is done via `pnpm --filter @shelf/database run db:generate`.
+- **Webapp → Prisma types**: The webapp's `build`, `typecheck`, and `validate` scripts run `prisma generate` to ensure types are available. In CI, this is done via `pnpm --filter @shelf/database run db:generate`.
 - **Vite config**: The webapp's `vite.config.ts` includes `ssr.noExternal: ["@shelf/database"]` so Vite bundles it correctly, and aliases `.prisma/client/index-browser` for browser builds.
 
 ## Architecture Overview
@@ -161,6 +162,26 @@ All HTML emails must follow the design established in
 - **Both HTML and plain text exports**: HTML via `render()`, plain text as template literal
 - **Send wrapper function** with `try/catch` + `Logger.error` + `ShelfError`
 - **Closing**: `The Shelf Team`
+
+### Button Type Prop (Required)
+
+Every `<Button>` that renders as a native `<button>` element **must** have an explicit `type` prop. This is enforced by the `local-rules/require-button-type` ESLint rule.
+
+- Use `type="submit"` for buttons that submit a form
+- Use `type="button"` for all other buttons (modals, toggles, actions, etc.)
+- Buttons with `to=` (link buttons) or `as="a"`/`as="span"` do not need `type`
+
+```typescript
+// ❌ Bad - missing type
+<Button onClick={handler}>Cancel</Button>
+
+// ✅ Good
+<Button type="button" onClick={handler}>Cancel</Button>
+<Button type="submit" disabled={disabled}>Save</Button>
+<Button to="/home">Home</Button>  // Link button, no type needed
+```
+
+**Why:** The HTML spec defaults `<button>` to `type="submit"`, which can cause accidental form submissions. Explicit types prevent this and make intent clear.
 
 ### Disabled State for Form Submissions
 

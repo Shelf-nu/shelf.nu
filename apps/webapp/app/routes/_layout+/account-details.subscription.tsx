@@ -21,7 +21,6 @@ import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
-import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import { useUserData } from "~/hooks/use-user-data";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
@@ -174,15 +173,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    const { priceId, intent, shelfTier, auditPriceId } = parseData(
-      await request.formData(),
-      z.object({
-        priceId: z.string(),
-        intent: z.enum(["trial", "subscribe"]),
-        shelfTier: z.enum(["tier_1", "tier_2"]),
-        auditPriceId: z.string().optional(),
-      })
-    );
+    const { priceId, intent, shelfTier, auditPriceId, barcodePriceId } =
+      parseData(
+        await request.formData(),
+        z.object({
+          priceId: z.string(),
+          intent: z.enum(["trial", "subscribe"]),
+          shelfTier: z.enum(["tier_1", "tier_2"]),
+          auditPriceId: z.string().optional(),
+          barcodePriceId: z.string().optional(),
+        })
+      );
 
     const user = await getUserByID(userId, {
       select: {
@@ -219,6 +220,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         priceId,
         userId,
         auditPriceId,
+        barcodePriceId,
       });
 
       // Update user tier and mark trial as used
@@ -228,18 +230,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         select: { id: true },
       });
 
-      // Send welcome email (fire-and-forget)
-      void sendTeamTrialWelcomeEmail({
-        firstName: user.firstName,
-        email,
-      });
-
       const returnUrl = await generateReturnUrl({
         userId,
         shelfTier,
         intent,
         domainUrl,
         hasAuditAddon: !!auditPriceId,
+        hasBarcodeAddon: !!barcodePriceId,
       });
 
       return redirect(returnUrl);
@@ -254,6 +251,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       intent,
       shelfTier,
       auditPriceId,
+      barcodePriceId,
     });
 
     return redirect(stripeRedirectUrl);
@@ -385,6 +383,7 @@ export default function SubscriptionPage() {
                     </div>
                   </div>
                   <Button
+                    type="button"
                     variant="secondary"
                     className="whitespace-nowrap"
                     onClick={() => setPricingOpen(true)}

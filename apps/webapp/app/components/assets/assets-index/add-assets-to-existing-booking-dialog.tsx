@@ -138,7 +138,7 @@ export default function AddAssetsToExistingBookingDialog() {
                     <div className="mt-4">
                       <p>Already added assets are : </p>
                       <ul className="mb-2 list-inside list-disc">
-                        {fetcherErrorAdditionalData?.alreadyAddedAssets.map(
+                        {fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
                           (asset: Pick<Asset, "id" | "title">) => (
                             <li key={asset.id}>{asset.title}</li>
                           )
@@ -154,7 +154,11 @@ export default function AddAssetsToExistingBookingDialog() {
                       <When
                         truthy={!fetcherErrorAdditionalData?.allAssetsInBooking}
                       >
-                        <Button className="w-full" variant="secondary">
+                        <Button
+                          type="submit"
+                          className="w-full"
+                          variant="secondary"
+                        >
                           Add only the rest of the assets
                         </Button>
                       </When>
@@ -165,6 +169,7 @@ export default function AddAssetsToExistingBookingDialog() {
 
               <div className="flex items-center gap-3">
                 <Button
+                  type="button"
                   variant="secondary"
                   width="full"
                   disabled={disabled}

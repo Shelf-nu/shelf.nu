@@ -29,6 +29,7 @@ export const ViewButtonGroup = ({
     <ButtonGroup className={className}>
       {views.map(({ label, value }) => (
         <Button
+          type="button"
           key={value}
           variant={"secondary"}
           size={size}

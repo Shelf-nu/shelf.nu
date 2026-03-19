@@ -41,6 +41,7 @@ export function CameraSelector({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="secondary"
           disabled={disabled}
           className={tw(

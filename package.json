@@ -8,16 +8,20 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "prepare": "husky install || true",
+    "prepare": "git config --unset core.hooksPath || echo ok && npx lefthook install || echo ok",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
+    "webapp:dev:production": "pnpm --filter @shelf/webapp run production:dev",
     "webapp:build": "turbo run build --filter=@shelf/webapp",
     "webapp:test": "pnpm --filter @shelf/webapp test",
+    "webapp:lint": "pnpm --filter @shelf/webapp lint",
     "webapp:validate": "pnpm --filter @shelf/webapp validate",
     "webapp:start": "pnpm --filter @shelf/webapp start:local",
+    "webapp:setup": "pnpm --filter @shelf/webapp run setup",
+    "webapp:deploy:staging": "fly deploy --remote-only --app shelf-webapp-staging --dockerfile apps/webapp/Dockerfile",
+    "webapp:deploy:production": "fly deploy --remote-only --app shelf-webapp --dockerfile apps/webapp/Dockerfile",
     "docs:dev": "turbo run dev --filter=@shelf/docs",
     "docs:build": "turbo run build --filter=@shelf/docs",
     "docs:preview": "pnpm --filter @shelf/docs preview",
-    "webapp:setup": "pnpm --filter @shelf/webapp run setup",
     "db:generate": "pnpm --filter @shelf/database run db:generate",
     "db:prepare-migration": "pnpm --filter @shelf/database run db:prepare-migration",
     "db:deploy-migration": "pnpm --filter @shelf/database run db:deploy-migration",
@@ -25,24 +29,22 @@
     "db:deploy-migration:staging": "pnpm --filter @shelf/database run db:deploy-migration:staging",
     "db:deploy-migration:production": "pnpm --filter @shelf/database run db:deploy-migration:production",
     "db:reset": "pnpm --filter @shelf/database run db:reset",
-    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging",
-    "webapp:deploy:staging": "fly deploy --remote-only --app shelf-webapp-staging --dockerfile apps/webapp/Dockerfile",
-    "webapp:deploy:production": "fly deploy --remote-only --app shelf-webapp --dockerfile apps/webapp/Dockerfile"
+    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.1.0",
-    "@commitlint/config-conventional": "^20.0.0",
-    "husky": "^9.0.11",
+    "@commitlint/cli": "^20.4.3",
+    "@commitlint/config-conventional": "^20.4.3",
+    "@evilmartians/lefthook": "^1.13.6",
     "prettier": "3.0.3",
-    "turbo": "^2.4.4"
+    "turbo": "^2.8.13"
   },
   "pnpm": {
     "overrides": {
       "@docsearch/react>react": "19.2.1",
       "@docsearch/react>react-dom": "19.2.1",
       "@tremor/react>react": "19.2.1",
+      "@tremor/react>react-day-picker": "^9.14.0",
       "@tremor/react>react-dom": "19.2.1",
-      "@tremor/react>react-day-picker": "^9.12.0",
       "cross-spawn": "~7.0.6",
       "p-map": "4.0.0"
     }
@@ -50,5 +52,5 @@
   "engines": {
     "node": ">=22.20.0"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.9"
 }

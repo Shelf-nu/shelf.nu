@@ -18,7 +18,18 @@
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": [
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.ts",
+        "**/*.tsx",
+        ".eslintrc",
+        ".eslintrc.*",
+        "eslint.config.*",
+        ".eslintignore",
+        "tsconfig.json"
+      ]
     },
     "typecheck": {
       "dependsOn": ["^build"]

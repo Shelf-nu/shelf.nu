@@ -15,6 +15,8 @@ type CheckinDropdownProps = {
   disabled?: boolean;
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   portalContainer?: HTMLElement;
+  /** Form ID for explicit form association when buttons render in a portal */
+  formId?: string;
   requireExplicitCheckin?: boolean;
 };
 
@@ -22,6 +24,7 @@ export default function CheckinDropdown({
   disabled,
   booking,
   portalContainer,
+  formId,
   requireExplicitCheckin,
 }: CheckinDropdownProps) {
   const {
@@ -74,7 +77,7 @@ export default function CheckinDropdown({
           }}
           asChild
         >
-          <Button disabled={disabled} className="grow" size="sm">
+          <Button type="button" disabled={disabled} className="grow" size="sm">
             <span className="flex items-center gap-2">
               Check-in <ChevronRightIcon className="chev size-4 rotate-90" />
             </span>
@@ -83,6 +86,7 @@ export default function CheckinDropdown({
 
         {/* Mobile button */}
         <Button
+          type="button"
           className="flex-1 sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
@@ -119,6 +123,7 @@ export default function CheckinDropdown({
                 booking={booking}
                 disabled={disabled}
                 portalContainer={portalContainer}
+                formId={formId}
                 onClose={closeMenu}
                 label="Quick check-in"
                 variant="dropdown"

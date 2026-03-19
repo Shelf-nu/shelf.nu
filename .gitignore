@@ -41,7 +41,8 @@ test-results/
 desktop-app/shelf-installer
 desktop-app/portable
 
-.vscode
+.vscode/*
+!.vscode/settings.json
 .worktrees
 
 # Sentry Config File
@@ -56,3 +57,7 @@ apps/docs/.vitepress/dist
 
 # Turborepo
 .turbo
+
+# Lefthook local overrides
+lefthook-local.yml
+.worktrees/

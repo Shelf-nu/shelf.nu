@@ -3,6 +3,7 @@ import { ShelfError } from "./error";
 import {
   findShelfErrorInCause,
   isSupabaseRateLimitError,
+  isSupabaseServerError,
 } from "./storage.server";
 
 describe("isSupabaseRateLimitError", () => {
@@ -74,6 +75,97 @@ describe("isSupabaseRateLimitError", () => {
 
   it("returns false for empty object", () => {
     expect(isSupabaseRateLimitError({})).toBe(false);
+  });
+});
+
+describe("isSupabaseServerError", () => {
+  it("returns true for StorageApiError with status 504", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Gateway Timeout",
+      status: 504,
+    };
+    expect(isSupabaseServerError(error)).toBe(true);
+  });
+
+  it("returns true for StorageApiError with status 502", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Bad Gateway",
+      status: 502,
+    };
+    expect(isSupabaseServerError(error)).toBe(true);
+  });
+
+  it("returns true for StorageApiError with status 503", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Service Unavailable",
+      status: 503,
+    };
+    expect(isSupabaseServerError(error)).toBe(true);
+  });
+
+  it("returns true for StorageApiError with status 500", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Internal Server Error",
+      status: 500,
+    };
+    expect(isSupabaseServerError(error)).toBe(true);
+  });
+
+  it("returns true for StorageApiError with string statusCode '504'", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Gateway Timeout",
+      statusCode: "504",
+    };
+    expect(isSupabaseServerError(error)).toBe(true);
+  });
+
+  it("returns false for non-StorageApiError with 5xx status", () => {
+    const error = {
+      name: "StorageUnknownError",
+      message: "Some error",
+      status: 504,
+    };
+    expect(isSupabaseServerError(error)).toBe(false);
+  });
+
+  it("returns false for StorageApiError with 4xx status", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Not found",
+      status: 404,
+    };
+    expect(isSupabaseServerError(error)).toBe(false);
+  });
+
+  it("returns false for StorageApiError with status 429 (rate limit)", () => {
+    const error = {
+      name: "StorageApiError",
+      message: "Too many requests",
+      status: 429,
+    };
+    expect(isSupabaseServerError(error)).toBe(false);
+  });
+
+  it("returns false for null", () => {
+    expect(isSupabaseServerError(null)).toBe(false);
+  });
+
+  it("returns false for undefined", () => {
+    expect(isSupabaseServerError(undefined)).toBe(false);
+  });
+
+  it("returns false for non-object values", () => {
+    expect(isSupabaseServerError("error")).toBe(false);
+    expect(isSupabaseServerError(42)).toBe(false);
+  });
+
+  it("returns false for empty object", () => {
+    expect(isSupabaseServerError({})).toBe(false);
   });
 });
 

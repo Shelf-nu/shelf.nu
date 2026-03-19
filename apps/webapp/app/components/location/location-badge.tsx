@@ -3,7 +3,13 @@ import type { Location } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ListTree } from "lucide-react";
 import useApiQuery from "~/hooks/use-api-query";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { LocationTreePayload } from "~/routes/api+/locations.$locationId.tree";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { LocationTree, type LocationTreeNode } from "./location-tree";
 import { Button } from "../shared/button";
@@ -38,6 +44,13 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
     return `/api/locations/${location.id}/tree`;
   }, [location?.id]);
 
+  const { roles } = useUserRoleHelper();
+  const canReadLocations = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.read,
+  });
+
   // We only need to show icon/fetch hierarchy if there is a parent or child.
   const hasHierarchy =
     Boolean(location?.parentId) || (location?.childCount ?? 0) > 0;
@@ -51,7 +64,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
     return null;
   }
 
-  if (!hasHierarchy) {
+  if (!hasHierarchy || !canReadLocations) {
     return (
       <Tag className={tw("ml-2 inline-flex items-center gap-1", className)}>
         {location.name}

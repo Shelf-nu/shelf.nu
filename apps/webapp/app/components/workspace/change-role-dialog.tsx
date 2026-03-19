@@ -139,6 +139,7 @@ export function ChangeRoleDialog({
             </div>
             <AlertDialogFooter>
               <Button
+                type="button"
                 variant="secondary"
                 width="full"
                 onClick={() => onOpenChange(false)}

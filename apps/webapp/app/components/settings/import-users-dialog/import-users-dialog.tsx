@@ -74,6 +74,7 @@ export default function ImportUsersDialog({
         cloneElement(trigger, { onClick: openDialog })
       ) : (
         <Button
+          type="button"
           variant="secondary"
           className="mt-2 w-full md:mt-0 md:w-max"
           onClick={openDialog}
@@ -194,7 +195,9 @@ export default function ImportUsersDialog({
                   </p>
                 </When>
 
-                <Button disabled={!selectedFile || disabled}>Import now</Button>
+                <Button type="submit" disabled={!selectedFile || disabled}>
+                  Import now
+                </Button>
               </fetcher.Form>
             </div>
           )}

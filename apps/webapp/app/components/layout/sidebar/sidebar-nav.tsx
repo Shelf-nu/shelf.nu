@@ -1,5 +1,6 @@
 import { Fragment, useCallback } from "react";
 import type { CSSProperties } from "react";
+import FeedbackNavItem from "~/components/feedback/feedback-nav-item";
 import type { NavItem } from "~/hooks/use-sidebar-nav-items";
 import ChildNavItem from "./child-nav-item";
 import ParentNavItem from "./parent-nav-item";
@@ -87,6 +88,11 @@ export default function SidebarNav({
           // Special handling for Updates button
           if (navItem.title === "Updates") {
             return <UpdatesNavItem />;
+          }
+
+          // Special handling for Feedback button
+          if (navItem.title === "Questions/Feedback") {
+            return <FeedbackNavItem />;
           }
 
           return (
