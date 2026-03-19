@@ -33,13 +33,7 @@ importers:
         specifier: ^2.8.13
         version: 2.8.13
 
-  apps/docs:
-    devDependencies:
-      vitepress:
-        specifier: ^1.6.4
-        version: 1.6.4(@algolia/client-search@5.49.0)(@types/node@25.3.0)(fuse.js@7.1.0)(lightningcss@1.32.0)(nprogress@0.2.0)(postcss@8.5.8)(qrcode@1.5.4)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(search-insights@2.17.3)(terser@5.46.0)(typescript@5.9.3)
-
-  apps/mobile:
+  apps/companion:
     dependencies:
       '@expo/metro-runtime':
         specifier: ~6.1.2
@@ -144,6 +138,12 @@ importers:
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
+
+  apps/docs:
+    devDependencies:
+      vitepress:
+        specifier: ^1.6.4
+        version: 1.6.4(@algolia/client-search@5.49.0)(@types/node@25.3.0)(fuse.js@7.1.0)(lightningcss@1.32.0)(nprogress@0.2.0)(postcss@8.5.8)(qrcode@1.5.4)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(search-insights@2.17.3)(terser@5.46.0)(typescript@5.9.3)
 
   apps/webapp:
     dependencies:

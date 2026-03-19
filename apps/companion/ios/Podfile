@@ -60,24 +60,12 @@ target 'Shelf' do
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
 
-    # Suppress strict concurrency warnings promoted to errors in Xcode 26+
-    # Also fix script phases that break on paths with spaces
+    # Xcode 16.4+ enables Swift 6 strict concurrency by default,
+    # which breaks expo-image and other pods. Force minimal mode.
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
-        bc.build_settings['SWIFT_STRICT_CONCURRENCY'] ||= 'minimal'
-      end
-      # Fix paths with spaces in shell script phases.
-      # Problem: bash -c "$PODS_TARGET_SRCROOT/.../script.sh" word-splits on spaces
-      # Fix: bash -c '"$PODS_TARGET_SRCROOT/.../script.sh"' — single-quote the -c arg
-      #      so $PODS_TARGET_SRCROOT is expanded by the inner bash (where it's in env)
-      #      and double quotes prevent word-splitting.
-      target.shell_script_build_phases.each do |phase|
-        next unless phase.shell_script
-        # Handle bash -c with PODS_TARGET_SRCROOT (e.g. EXConstants get-app-config)
-        phase.shell_script = phase.shell_script.gsub(
-          /(bash\s+(?:-\w+\s+)*-c\s+)"(\$PODS_TARGET_SRCROOT[^"]*)"/) do
-          "#{$1}'\"#{$2}\"'"
-        end
+        bc.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+        bc.build_settings['SWIFT_VERSION'] = '5.0'
       end
     end
   end

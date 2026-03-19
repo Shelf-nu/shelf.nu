@@ -48,7 +48,8 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-quick-actions"
+      "expo-quick-actions",
+      "./plugins/swift-concurrency-fix"
     ],
     "experiments": {
       "typedRoutes": true
