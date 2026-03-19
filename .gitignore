@@ -70,4 +70,3 @@ lefthook-local.yml
 
 # Certificate backups
 *.cert.bak/
-MANUAL-TESTING-PLAN.md
