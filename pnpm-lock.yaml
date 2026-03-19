@@ -13,6 +13,11 @@ overrides:
   cross-spawn: ~7.0.6
   p-map: 4.0.0
 
+patchedDependencies:
+  expo-image@55.0.6:
+    hash: xoe2kq4thm7yyrn33j5i3h7acq
+    path: patches/expo-image@55.0.6.patch
+
 importers:
 
   .:
@@ -79,7 +84,7 @@ importers:
         version: 15.0.8(expo@54.0.33)
       expo-image:
         specifier: ^55.0.6
-        version: 55.0.6(expo@54.0.33)(react-native-web@0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
+        version: 55.0.6(patch_hash=xoe2kq4thm7yyrn33j5i3h7acq)(expo@54.0.33)(react-native-web@0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
       expo-image-picker:
         specifier: ~17.0.10
         version: 17.0.10(expo@54.0.33)
@@ -1702,7 +1707,6 @@ packages:
 
   '@evilmartians/lefthook@1.13.6':
     resolution: {integrity: sha512-79vplrUBWL4Fkt59YkEBdSpqBVhNrY8t5+jEp+wX5QbsmbQLcSULqwS7FmbNRyECa2LWMrUWpe6ENIfNwB4jiw==}
-    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -15966,7 +15970,7 @@ snapshots:
       expo: 54.0.33(@babel/core@7.29.0)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(graphql@16.12.0)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
       expo-image-loader: 6.0.0(expo@54.0.33)
 
-  expo-image@55.0.6(expo@54.0.33)(react-native-web@0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0):
+  expo-image@55.0.6(patch_hash=xoe2kq4thm7yyrn33j5i3h7acq)(expo@54.0.33)(react-native-web@0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0):
     dependencies:
       expo: 54.0.33(@babel/core@7.29.0)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(graphql@16.12.0)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
       react: 19.1.0

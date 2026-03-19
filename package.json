@@ -57,6 +57,9 @@
       "@tremor/react>react-dom": "19.2.1",
       "cross-spawn": "~7.0.6",
       "p-map": "4.0.0"
+    },
+    "patchedDependencies": {
+      "expo-image@55.0.6": "patches/expo-image@55.0.6.patch"
     }
   },
   "engines": {
