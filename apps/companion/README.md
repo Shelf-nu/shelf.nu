@@ -165,12 +165,39 @@ DISABLE_HTTPS=true pnpm webapp:dev
 # The mobile app cannot verify self-signed HTTPS certificates.
 # Alternative: rename apps/webapp/.cert to disable HTTPS.
 
-# 5. Start mobile (Terminal 2)
-cd apps/companion
-npx expo run:ios --clear          # For iOS Simulator
+# 5. Build and run (Terminal 2)
+pnpm companion:build:ios          # For iOS Simulator
 # OR
-npx expo run:ios --device --clear  # For physical iPhone via USB
+pnpm companion:build:ios:device   # For physical iPhone via USB
+
+# 6. Subsequent launches (no rebuild needed)
+pnpm companion:dev                # Start Metro, connect to existing build
+pnpm companion:dev:clear          # Same but clears cache (after env changes)
 ```
+
+### Available Scripts
+
+All scripts can be run from the **monorepo root**:
+
+| Command                           | What it does                                            |
+| --------------------------------- | ------------------------------------------------------- |
+| `pnpm companion:dev`              | Start Metro dev server (connects to existing build)     |
+| `pnpm companion:dev:clear`        | Same but clears Metro cache (use after env var changes) |
+| `pnpm companion:dev:tunnel`       | Start via Expo tunnel (when LAN connectivity fails)     |
+| `pnpm companion:build:ios`        | Build native iOS + run on Simulator                     |
+| `pnpm companion:build:ios:device` | Build native iOS + run on physical iPhone via USB       |
+| `pnpm companion:build:android`    | Build native Android + run on emulator/device           |
+| `pnpm companion:prebuild`         | Regenerate native projects from Expo config             |
+| `pnpm companion:prebuild:clean`   | Clean regenerate iOS native project (wipes ios/)        |
+| `pnpm companion:test:e2e`         | Run all Maestro E2E flows                               |
+| `pnpm companion:test:e2e:suite`   | Run a specific E2E test suite                           |
+
+**Typical workflow:**
+
+1. First time: `pnpm companion:build:ios:device` (builds native app + starts Metro)
+2. Subsequent launches: `pnpm companion:dev` (just starts Metro, reuses existing build)
+3. After changing `.env.local`: `pnpm companion:dev:clear` (clears bundler cache)
+4. After changing native code or `app.json`: rebuild with `pnpm companion:build:ios:device`
 
 ### Physical Device Setup
 
@@ -180,7 +207,7 @@ If testing on a real iPhone (not simulator):
 2. **Connect via USB** and select your device when Expo prompts
 3. **Trust the developer profile** after first install: Settings > General > VPN & Device Management > tap your Apple ID > Trust
 4. **Xcode device support**: If Xcode prompts to download support files for your iOS version, let it complete before building
-5. After the first build, you can start Metro separately: `npx expo start --dev-client`
+5. After the first build, you only need `pnpm companion:dev` to start Metro
 
 ### Important Notes
 
