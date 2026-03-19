@@ -66,11 +66,11 @@ export default function ForgotPasswordScreen() {
             </View>
             <Text style={styles.successTitle}>Check your email</Text>
             <Text style={styles.successText}>
-              We've sent a password reset link to{"\n"}
+              We&apos;ve sent a password reset link to{"\n"}
               <Text style={styles.emailHighlight}>{email.trim()}</Text>
             </Text>
             <Text style={styles.successHint}>
-              If you don't see the email, check your spam folder.
+              If you don&apos;t see the email, check your spam folder.
             </Text>
             <TouchableOpacity
               testID="back-to-signin-button"
@@ -109,8 +109,8 @@ export default function ForgotPasswordScreen() {
           <View style={styles.header}>
             <Text style={styles.title}>Forgot password?</Text>
             <Text style={styles.subtitle}>
-              Enter the email associated with your Shelf account and we'll send
-              you a link to reset your password.
+              Enter the email associated with your Shelf account and we&apos;ll
+              send you a link to reset your password.
             </Text>
           </View>
 

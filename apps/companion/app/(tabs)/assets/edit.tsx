@@ -629,7 +629,8 @@ export default function EditAssetScreen() {
                   color={colors.muted}
                 />
                 <Text style={styles.kitWarningText}>
-                  Location is managed by kit "{originalAsset.kit.name}"
+                  Location is managed by kit &quot;{originalAsset.kit.name}
+                  &quot;
                 </Text>
               </View>
             ) : (
