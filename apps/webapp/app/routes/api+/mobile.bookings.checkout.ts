@@ -2,10 +2,15 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * POST /api/mobile/bookings/checkout
@@ -22,6 +27,13 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.checkout,
+    });
 
     const body = await request.json();
     const { bookingId, timeZone } = z

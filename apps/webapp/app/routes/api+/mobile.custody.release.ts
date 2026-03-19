@@ -1,17 +1,18 @@
-import { AssetStatus } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { makeShelfError } from "~/utils/error";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
-  wrapUserLinkForNote,
-  wrapCustodianForNote,
-} from "~/utils/markdoc-wrappers";
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * POST /api/mobile/custody/release
@@ -24,6 +25,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.custody,
+    });
+
     const body = await request.json();
     const { assetId } = z
       .object({
@@ -31,62 +39,7 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    // Verify asset exists, belongs to org, and has custody
-    const asset = await db.asset.findUnique({
-      where: { id: assetId, organizationId },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        custody: {
-          select: {
-            custodian: {
-              select: {
-                id: true,
-                name: true,
-                user: {
-                  select: { id: true, firstName: true, lastName: true },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!asset) {
-      return data({ error: { message: "Asset not found" } }, { status: 404 });
-    }
-
-    if (!asset.custody) {
-      return data(
-        { error: { message: "Asset does not have custody assigned" } },
-        { status: 400 }
-      );
-    }
-
-    const { custodian } = asset.custody;
-
-    // Release custody: update status + delete custody record
-    const updatedAsset = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        status: AssetStatus.AVAILABLE,
-        custody: {
-          delete: true,
-        },
-      },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        custody: {
-          select: {
-            custodian: { select: { id: true, name: true } },
-          },
-        },
-      },
-    });
+    const asset = await releaseCustody({ assetId, organizationId });
 
     // Create a note for the activity log (matches webapp format)
     const actor = wrapUserLinkForNote({
@@ -95,27 +48,14 @@ export async function action({ request }: ActionFunctionArgs) {
       lastName: user.lastName,
     });
 
-    const custodianDisplay = wrapCustodianForNote({
-      teamMember: {
-        name: custodian.name,
-        user: custodian.user
-          ? {
-              id: custodian.user.id,
-              firstName: custodian.user.firstName,
-              lastName: custodian.user.lastName,
-            }
-          : null,
-      },
-    });
-
     await createNote({
-      content: `${actor} released ${custodianDisplay}'s custody via mobile app.`,
+      content: `${actor} released custody via mobile app.`,
       type: "UPDATE",
       userId: user.id,
       assetId: asset.id,
     });
 
-    return data({ asset: updatedAsset });
+    return data({ asset });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

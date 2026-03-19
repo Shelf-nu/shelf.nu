@@ -1,9 +1,17 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  requireMobileAuth,
+  requireMobilePermission,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
 import { createNote } from "~/modules/note/service.server";
 import { makeShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * POST /api/mobile/asset/add-note
@@ -14,6 +22,14 @@ import { makeShelfError } from "~/utils/error";
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
+    const organizationId = await requireOrganizationAccess(request, user.id);
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
 
     const body = await request.json();
     const { assetId, content } = z
@@ -23,29 +39,14 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    // Verify asset exists and user has access
+    // Verify asset exists and belongs to the organization
     const asset = await db.asset.findUnique({
-      where: { id: assetId },
-      select: { id: true, organizationId: true },
+      where: { id: assetId, organizationId },
+      select: { id: true },
     });
 
     if (!asset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
-    }
-
-    // Verify user has access to the asset's org
-    const membership = await db.userOrganization.findUnique({
-      where: {
-        userId_organizationId: {
-          userId: user.id,
-          organizationId: asset.organizationId,
-        },
-      },
-      select: { id: true },
-    });
-
-    if (!membership) {
-      return data({ error: { message: "Access denied" } }, { status: 403 });
     }
 
     const note = await createNote({

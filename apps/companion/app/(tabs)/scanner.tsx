@@ -3,6 +3,7 @@ import {
   useEffect,
   useCallback,
   useRef,
+  useMemo,
   type ReactNode,
 } from "react";
 import {
@@ -36,6 +37,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
 import { announce, useReducedMotion } from "@/lib/a11y";
+import { userHasPermission } from "@/lib/permissions";
 
 // ── Error Boundary ──────────────────────────────────────
 import React from "react";
@@ -93,15 +95,41 @@ type ScannerAction =
   | "release_custody"
   | "update_location";
 
+type PermissionRequirement = {
+  entity: "asset";
+  action: "read" | "custody" | "update";
+};
+
 const SCANNER_ACTIONS: {
   key: ScannerAction;
   label: string;
   icon: string;
+  permission: PermissionRequirement;
 }[] = [
-  { key: "view", label: "View", icon: "eye-outline" },
-  { key: "assign_custody", label: "Assign", icon: "person-add-outline" },
-  { key: "release_custody", label: "Release", icon: "person-remove-outline" },
-  { key: "update_location", label: "Location", icon: "location-outline" },
+  {
+    key: "view",
+    label: "View",
+    icon: "eye-outline",
+    permission: { entity: "asset", action: "read" },
+  },
+  {
+    key: "assign_custody",
+    label: "Assign",
+    icon: "person-add-outline",
+    permission: { entity: "asset", action: "custody" },
+  },
+  {
+    key: "release_custody",
+    label: "Release",
+    icon: "person-remove-outline",
+    permission: { entity: "asset", action: "custody" },
+  },
+  {
+    key: "update_location",
+    label: "Location",
+    icon: "location-outline",
+    permission: { entity: "asset", action: "update" },
+  },
 ];
 
 const isBatchAction = (a: ScannerAction) => a !== "view";
@@ -138,6 +166,19 @@ function ScannerContent() {
 
   // Booking check-in mode
   const isBookingMode = !!bookingId;
+
+  // Filter scanner actions based on the user's role in the current org
+  const availableActions = useMemo(
+    () =>
+      SCANNER_ACTIONS.filter(({ permission: perm }) =>
+        userHasPermission({
+          roles: currentOrg?.roles,
+          entity: perm.entity,
+          action: perm.action,
+        })
+      ),
+    [currentOrg?.roles]
+  );
 
   // Action state
   const [action, setAction] = useState<ScannerAction>("view");
@@ -287,7 +328,7 @@ function ScannerContent() {
   }, [scannedItems.length]);
 
   useEffect(() => {
-    const idx = SCANNER_ACTIONS.findIndex((a) => a.key === action);
+    const idx = availableActions.findIndex((a) => a.key === action);
     actionIndexRef.current = idx >= 0 ? idx : 0;
   }, [action]);
 
@@ -404,13 +445,14 @@ function ScannerContent() {
         if (!swipedLeft && !swipedRight) return;
 
         const currentIdx = actionIndexRef.current;
+        const len = availableActions.length;
         const nextIdx = swipedLeft
-          ? (currentIdx + 1) % SCANNER_ACTIONS.length
-          : (currentIdx - 1 + SCANNER_ACTIONS.length) % SCANNER_ACTIONS.length;
+          ? (currentIdx + 1) % len
+          : (currentIdx - 1 + len) % len;
 
         if (nextIdx === currentIdx) return;
 
-        const nextAction = SCANNER_ACTIONS[nextIdx].key;
+        const nextAction = availableActions[nextIdx].key;
         const direction = swipedLeft ? -1 : 1;
         // Call triggerSwipeTransition via a ref since PanResponder is created once
         triggerSwipeRef.current?.(nextAction, direction);
@@ -1115,7 +1157,7 @@ function ScannerContent() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.actionPickerScroll}
               >
-                {SCANNER_ACTIONS.map((a) => (
+                {availableActions.map((a) => (
                   <TouchableOpacity
                     key={a.key}
                     style={[
@@ -1223,7 +1265,7 @@ function ScannerContent() {
           {/* Mode indicator dots */}
           {!isBookingMode && (
             <View style={styles.modeDotsContainer}>
-              {SCANNER_ACTIONS.map((a) => (
+              {availableActions.map((a) => (
                 <View
                   key={a.key}
                   style={[

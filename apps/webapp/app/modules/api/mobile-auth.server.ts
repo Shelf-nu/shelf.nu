@@ -1,3 +1,4 @@
+import type { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
@@ -171,4 +172,37 @@ export async function requireMobilePermission({
     entity,
     action,
   });
+}
+
+/**
+ * Fetches the user's role and org barcode settings for a given organization.
+ *
+ * Used by mobile routes that call service layer functions requiring
+ * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody).
+ */
+export async function getMobileUserContext(
+  userId: string,
+  organizationId: string
+): Promise<{ role: OrganizationRoles; canUseBarcodes: boolean }> {
+  const userOrg = await db.userOrganization.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: {
+      roles: true,
+      organization: { select: { barcodesEnabled: true } },
+    },
+  });
+
+  if (!userOrg) {
+    throw new ShelfError({
+      cause: null,
+      message: "User organization membership not found",
+      label: "Auth",
+      status: 403,
+    });
+  }
+
+  return {
+    role: userOrg.roles[0],
+    canUseBarcodes: userOrg.organization.barcodesEnabled,
+  };
 }
