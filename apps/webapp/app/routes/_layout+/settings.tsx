@@ -60,6 +60,7 @@ export default function SettingsPage() {
   let items = [
     { to: "general", content: "General" },
     ...(!_isPersonalOrg ? [{ to: "bookings", content: "Bookings" }] : []),
+    ...(!_isPersonalOrg ? [{ to: "calendar", content: "Calendar" }] : []),
     ...(!_isPersonalOrg ? [{ to: "emails", content: "Emails" }] : []),
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },

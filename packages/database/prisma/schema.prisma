@@ -110,6 +110,9 @@ model User {
 
   assetFilterPresets AssetFilterPreset[]
 
+  // Calendar feed subscriptions
+  calendarFeeds CalendarFeed[]
+
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
   roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
@@ -743,6 +746,7 @@ model Organization {
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   roleChangeLogs     RoleChangeLog[]
+  calendarFeeds      CalendarFeed[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1663,4 +1667,26 @@ model RoleChangeLog {
 
   @@index([userId, organizationId])
   @@index([organizationId, createdAt])
+}
+
+model CalendarFeed {
+  id    String @id @default(cuid())
+  token String @unique
+
+  // Which user owns this feed
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  // Which organization's bookings to include
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  // Feed metadata
+  name      String   @default("My bookings")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
 }

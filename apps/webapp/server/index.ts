@@ -158,6 +158,7 @@ export default createHonoServer<ServerEnv>({
           "/qr/:qrId",
           "/qr/:qrId/not-logged-in",
           "/qr/:qrId/contact-owner",
+          "/api/ical/:token",
         ],
       })
     );
