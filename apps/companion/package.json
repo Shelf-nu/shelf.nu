@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@types/react": "~19.1.17",
+    "@types/react": "^19.2.14",
     "typescript": "~5.9.3"
   }
 }

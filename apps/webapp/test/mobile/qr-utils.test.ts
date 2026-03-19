@@ -5,7 +5,7 @@
  * code is a Shelf QR code or a barcode. When it returns null, the
  * scanner falls back to barcode lookup.
  */
-import { extractQrId } from "../../../mobile/lib/qr-utils";
+import { extractQrId } from "../../../companion/lib/qr-utils";
 
 // @vitest-environment node
 
