@@ -145,7 +145,7 @@ function HomeContent() {
         <RefreshControl
           refreshing={isRefreshing}
           onRefresh={onRefresh}
-          tintColor={colors.primary}
+          tintColor={colors.muted}
           accessibilityLabel="Pull to refresh"
         />
       }
@@ -598,7 +598,7 @@ const AuditCard = memo(function AuditCard({
             {
               width: `${progressPercent}%`,
               backgroundColor:
-                progressPercent === 100 ? colors.success : colors.primary,
+                progressPercent === 100 ? colors.success : colors.progressBar,
             },
           ]}
         />
@@ -779,7 +779,7 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   viewAllLink: {
     fontSize: fontSize.base,
-    color: colors.primary,
+    color: colors.buttonGhostText,
     fontWeight: "600",
   },
 

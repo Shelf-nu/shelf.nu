@@ -50,6 +50,24 @@ export const lightColors = {
   // Placeholder text — dedicated token for input placeholders (3.6:1 on white)
   placeholderText: "#767F8D",
 
+  // Buttons — secondary and ghost variants (reserve primary for main CTAs)
+  buttonSecondaryBg: "#F2F4F7",
+  buttonSecondaryText: "#344054",
+  buttonSecondaryBorder: "#D0D5DD",
+  buttonGhostText: "#475467",
+
+  // Icons — neutral defaults (use primary only for key brand moments)
+  iconDefault: "#667085",
+  iconActive: "#344054",
+
+  // Filters — neutral pill colors
+  filterPillBg: "#F2F4F7",
+  filterPillActiveBg: "#344054",
+  filterPillActiveText: "#FFFFFF",
+
+  // Progress — green instead of orange
+  progressBar: "#2E7D32",
+
   // Overlays
   overlayDark: "rgba(0,0,0,0.4)",
 };
@@ -100,6 +118,24 @@ export const darkColors: Colors = {
 
   // Placeholder text — reuse mutedLight for dark mode (already compliant)
   placeholderText: "#6E7681",
+
+  // Buttons — secondary and ghost variants
+  buttonSecondaryBg: "#1D2939",
+  buttonSecondaryText: "#D0D5DD",
+  buttonSecondaryBorder: "#344054",
+  buttonGhostText: "#98A2B3",
+
+  // Icons — neutral defaults
+  iconDefault: "#98A2B3",
+  iconActive: "#D0D5DD",
+
+  // Filters — neutral pill colors
+  filterPillBg: "#1D2939",
+  filterPillActiveBg: "#D0D5DD",
+  filterPillActiveText: "#1D2939",
+
+  // Progress — green
+  progressBar: "#4CAF50",
 
   // Overlays — slightly more opaque on dark
   overlayDark: "rgba(0,0,0,0.6)",

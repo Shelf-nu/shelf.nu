@@ -417,7 +417,7 @@ export default function EditAssetScreen() {
       <>
         <Stack.Screen options={{ title: "Edit Asset" }} />
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={colors.muted} />
         </View>
       </>
     );
@@ -525,8 +525,7 @@ export default function EditAssetScreen() {
                     style={[
                       styles.categoryDot,
                       {
-                        backgroundColor:
-                          selectedCategory.color || colors.primary,
+                        backgroundColor: selectedCategory.color || colors.muted,
                       },
                     ]}
                   />
@@ -559,7 +558,7 @@ export default function EditAssetScreen() {
                 {isCategoriesLoading ? (
                   <ActivityIndicator
                     style={styles.pickerLoading}
-                    color={colors.primary}
+                    color={colors.muted}
                   />
                 ) : filteredCategories.length === 0 ? (
                   <Text style={styles.pickerEmpty}>No categories found</Text>
@@ -587,7 +586,7 @@ export default function EditAssetScreen() {
                         <View
                           style={[
                             styles.categoryDot,
-                            { backgroundColor: cat.color || colors.primary },
+                            { backgroundColor: cat.color || colors.muted },
                           ]}
                         />
                         <Text style={styles.pickerItemText}>{cat.name}</Text>
@@ -595,7 +594,7 @@ export default function EditAssetScreen() {
                           <Ionicons
                             name="checkmark"
                             size={18}
-                            color={colors.primary}
+                            color={colors.iconActive}
                           />
                         )}
                       </TouchableOpacity>
@@ -653,7 +652,7 @@ export default function EditAssetScreen() {
                       <Ionicons
                         name="location-outline"
                         size={16}
-                        color={colors.primary}
+                        color={colors.iconDefault}
                       />
                       <Text style={styles.pickerSelectedText}>
                         {selectedLocation.name}
@@ -684,7 +683,7 @@ export default function EditAssetScreen() {
                     {isLocationsLoading ? (
                       <ActivityIndicator
                         style={styles.pickerLoading}
-                        color={colors.primary}
+                        color={colors.muted}
                       />
                     ) : filteredLocations.length === 0 ? (
                       <Text style={styles.pickerEmpty}>No locations found</Text>
@@ -721,7 +720,7 @@ export default function EditAssetScreen() {
                               <Ionicons
                                 name="checkmark"
                                 size={18}
-                                color={colors.primary}
+                                color={colors.iconActive}
                               />
                             )}
                           </TouchableOpacity>

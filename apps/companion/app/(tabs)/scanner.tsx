@@ -1023,7 +1023,7 @@ function ScannerContent() {
   if (!permission) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={colors.muted} />
       </View>
     );
   }
@@ -1713,8 +1713,8 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: "rgba(255,255,255,0.2)",
   },
   actionPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
+    borderColor: colors.filterPillActiveBg,
   },
   actionPillText: {
     color: "rgba(255,255,255,0.7)",
@@ -1722,7 +1722,7 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "600",
   },
   actionPillTextActive: {
-    color: "#fff",
+    color: colors.filterPillActiveText,
   },
   bookingModeHeader: {
     flexDirection: "row",
@@ -1768,7 +1768,7 @@ const useStyles = createStyles((colors, shadows) => ({
     backgroundColor: "rgba(255,255,255,0.3)",
   },
   modeDotActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.foreground,
     width: 18,
     borderRadius: 3,
   },
@@ -1783,7 +1783,7 @@ const useStyles = createStyles((colors, shadows) => ({
     position: "absolute",
     width: 30,
     height: 30,
-    borderColor: colors.primary,
+    borderColor: "#FFFFFF",
   },
   cornerTL: {
     top: 0,
@@ -1818,7 +1818,7 @@ const useStyles = createStyles((colors, shadows) => ({
     left: 8,
     right: 8,
     height: 2,
-    backgroundColor: colors.primaryLight,
+    backgroundColor: "rgba(255,255,255,0.7)",
     borderRadius: 1,
     top: 8,
   },

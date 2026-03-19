@@ -279,7 +279,7 @@ function AssetsListContent() {
       <View style={styles.centered}>
         <ActivityIndicator
           size="large"
-          color={colors.primary}
+          color={colors.muted}
           accessibilityLabel="Loading assets"
         />
       </View>
@@ -448,7 +448,7 @@ function AssetsListContent() {
                 <RefreshControl
                   refreshing={isRefreshing}
                   onRefresh={onRefresh}
-                  tintColor={colors.primary}
+                  tintColor={colors.muted}
                   accessibilityLabel="Pull to refresh"
                 />
               }
@@ -458,7 +458,7 @@ function AssetsListContent() {
                 isLoadingMore ? (
                   <ActivityIndicator
                     style={styles.footer}
-                    color={colors.primary}
+                    color={colors.muted}
                     accessibilityLabel="Loading more assets"
                   />
                 ) : null
@@ -544,8 +544,8 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   filterPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
+    borderColor: colors.filterPillActiveBg,
   },
   filterPillText: {
     fontSize: fontSize.sm,
@@ -553,7 +553,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
   },
   filterPillTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   // List

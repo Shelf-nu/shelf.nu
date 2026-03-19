@@ -207,7 +207,7 @@ function MyCustodyContent() {
   if (orgLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={colors.muted} />
       </View>
     );
   }
@@ -311,7 +311,7 @@ function MyCustodyContent() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={onRefresh}
-              tintColor={colors.primary}
+              tintColor={colors.muted}
               accessibilityLabel="Pull to refresh"
             />
           }
@@ -319,7 +319,7 @@ function MyCustodyContent() {
           onEndReachedThreshold={0.5}
           ListFooterComponent={
             isLoadingMore ? (
-              <ActivityIndicator style={styles.footer} color={colors.primary} />
+              <ActivityIndicator style={styles.footer} color={colors.muted} />
             ) : null
           }
         />

@@ -182,7 +182,9 @@ export default function SettingsScreen() {
                   <Ionicons
                     name={option.icon}
                     size={18}
-                    color={isActive ? colors.primaryForeground : colors.muted}
+                    color={
+                      isActive ? colors.filterPillActiveText : colors.muted
+                    }
                   />
                   <Text
                     style={[
@@ -224,7 +226,9 @@ export default function SettingsScreen() {
                   <Ionicons
                     name={option.icon}
                     size={18}
-                    color={isActive ? colors.primaryForeground : colors.muted}
+                    color={
+                      isActive ? colors.filterPillActiveText : colors.muted
+                    }
                   />
                   <Text
                     style={[
@@ -311,7 +315,7 @@ const useStyles = createStyles((colors, shadows) => ({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.gray700,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -382,7 +386,7 @@ const useStyles = createStyles((colors, shadows) => ({
     backgroundColor: "transparent",
   },
   themeOptionActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
   },
   themeOptionText: {
     fontSize: fontSize.sm,
@@ -390,7 +394,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
   },
   themeOptionTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   // Start page picker (segmented control — 4 options)
@@ -410,7 +414,7 @@ const useStyles = createStyles((colors, shadows) => ({
     backgroundColor: "transparent",
   },
   startPageOptionActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
   },
   startPageOptionText: {
     fontSize: fontSize.xs,
@@ -418,7 +422,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
   },
   startPageOptionTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   signOutButton: {

@@ -82,12 +82,12 @@ const useStyles = createStyles((colors, shadows) => ({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.gray700,
     justifyContent: "center",
     alignItems: "center",
   },
   avatarText: {
-    color: colors.primaryForeground,
+    color: "#FFFFFF",
     fontSize: fontSize.sm,
     fontWeight: "600",
   },
@@ -301,7 +301,7 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
           </View>
         ) : isLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <ActivityIndicator size="large" color={colors.muted} />
           </View>
         ) : members.length === 0 ? (
           <View style={styles.centered}>

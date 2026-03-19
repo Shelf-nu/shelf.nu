@@ -464,7 +464,7 @@ export default function AssetDetailScreen() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={onRefresh}
-              tintColor={colors.primary}
+              tintColor={colors.muted}
               accessibilityLabel="Pull to refresh"
             />
           }
@@ -550,7 +550,7 @@ export default function AssetDetailScreen() {
           <View style={styles.actionsSection}>
             {isActionLoading ? (
               <View style={styles.actionLoading}>
-                <ActivityIndicator size="small" color={colors.primary} />
+                <ActivityIndicator size="small" color={colors.muted} />
                 <Text style={styles.actionLoadingText}>Updating...</Text>
               </View>
             ) : (
@@ -1412,7 +1412,7 @@ const useStyles = createStyles((colors, shadows) => ({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.iconDefault,
     justifyContent: "center",
     alignItems: "center",
   },

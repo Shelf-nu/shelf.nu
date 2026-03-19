@@ -893,7 +893,7 @@ function AuditScannerContent() {
   if (!permission) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={colors.muted} />
       </View>
     );
   }
@@ -936,7 +936,7 @@ function AuditScannerContent() {
   if (isInitializing) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={colors.muted} />
         <Text style={styles.messageBody}>Loading audit data...</Text>
       </View>
     );
@@ -1197,7 +1197,9 @@ function AuditScannerContent() {
                     outputRange: ["0%", "100%"],
                   }),
                   backgroundColor:
-                    progressPercent === 100 ? colors.success : colors.primary,
+                    progressPercent === 100
+                      ? colors.success
+                      : colors.progressBar,
                 },
               ]}
             />
@@ -1623,7 +1625,7 @@ const useStyles = createStyles((colors, shadows) => ({
   progressPercent: {
     fontSize: fontSize.sm,
     fontWeight: "700",
-    color: colors.primary,
+    color: colors.progressBar,
     marginLeft: "auto",
   },
   progressTrack: {
@@ -1701,7 +1703,7 @@ const useStyles = createStyles((colors, shadows) => ({
     borderRadius: borderRadius.sm,
   },
   segmentedOptionActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
   },
   segmentedOptionText: {
     fontSize: fontSize.sm,
@@ -1709,7 +1711,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
   },
   segmentedOptionTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   // Remaining items

@@ -210,7 +210,9 @@ function AuditsListContent() {
                   {
                     width: `${progressPercent}%`,
                     backgroundColor:
-                      progressPercent === 100 ? colors.success : colors.primary,
+                      progressPercent === 100
+                        ? colors.success
+                        : colors.progressBar,
                   },
                 ]}
               />
@@ -272,7 +274,11 @@ function AuditsListContent() {
 
           {isActive && (
             <View style={styles.actionHint}>
-              <Ionicons name="scan-outline" size={14} color={colors.primary} />
+              <Ionicons
+                name="scan-outline"
+                size={14}
+                color={colors.iconDefault}
+              />
               <Text style={styles.actionHintText}>Tap to scan</Text>
             </View>
           )}
@@ -287,7 +293,7 @@ function AuditsListContent() {
       <View style={styles.centered}>
         <ActivityIndicator
           size="large"
-          color={colors.primary}
+          color={colors.muted}
           accessibilityLabel="Loading audits"
         />
       </View>
@@ -408,7 +414,7 @@ function AuditsListContent() {
                 <RefreshControl
                   refreshing={isRefreshing}
                   onRefresh={onRefresh}
-                  tintColor={colors.primary}
+                  tintColor={colors.muted}
                   accessibilityLabel="Pull to refresh"
                 />
               }
@@ -418,7 +424,7 @@ function AuditsListContent() {
                 isLoadingMore ? (
                   <ActivityIndicator
                     style={styles.footer}
-                    color={colors.primary}
+                    color={colors.muted}
                   />
                 ) : null
               }
@@ -464,8 +470,8 @@ const useStyles = createStyles((colors) => ({
     borderColor: colors.border,
   },
   filterPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
+    borderColor: colors.filterPillActiveBg,
   },
   filterPillText: {
     fontSize: fontSize.sm,
@@ -473,7 +479,7 @@ const useStyles = createStyles((colors) => ({
     color: colors.muted,
   },
   filterPillTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   // List
@@ -566,7 +572,7 @@ const useStyles = createStyles((colors) => ({
   },
   actionHintText: {
     fontSize: fontSize.sm,
-    color: colors.primary,
+    color: colors.buttonGhostText,
     fontWeight: "500",
   },
 

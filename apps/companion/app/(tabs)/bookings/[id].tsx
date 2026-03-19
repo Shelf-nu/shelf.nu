@@ -373,7 +373,7 @@ export default function BookingDetailScreen() {
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={onRefresh}
-            tintColor={colors.primary}
+            tintColor={colors.muted}
             accessibilityLabel="Pull to refresh"
           />
         }
@@ -498,7 +498,11 @@ export default function BookingDetailScreen() {
                   accessibilityLabel="Scan assets to check in"
                   accessibilityRole="button"
                 >
-                  <Ionicons name="scan" size={18} color={colors.primary} />
+                  <Ionicons
+                    name="scan"
+                    size={18}
+                    color={colors.buttonSecondaryText}
+                  />
                   <Text style={styles.actionButtonOutlineText}>
                     Scan to Check In
                   </Text>
@@ -523,7 +527,9 @@ export default function BookingDetailScreen() {
                   <Ionicons
                     name={isSelectMode ? "close" : "checkbox-outline"}
                     size={18}
-                    color={isSelectMode ? colors.error : colors.primary}
+                    color={
+                      isSelectMode ? colors.error : colors.buttonSecondaryText
+                    }
                   />
                   <Text
                     style={[
@@ -706,7 +712,7 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingVertical: 12,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.buttonSecondaryBorder,
     gap: spacing.sm,
   },
   actionButtonOutlineActive: {
@@ -715,7 +721,7 @@ const useStyles = createStyles((colors, shadows) => ({
   actionButtonOutlineText: {
     fontSize: fontSize.md,
     fontWeight: "600",
-    color: colors.primary,
+    color: colors.buttonSecondaryText,
   },
 
   // Section

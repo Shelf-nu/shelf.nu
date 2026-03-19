@@ -241,7 +241,7 @@ function BookingsListContent() {
                     : "log-in-outline"
                 }
                 size={14}
-                color={colors.primary}
+                color={colors.iconDefault}
               />
               <Text style={styles.actionHintText}>
                 {item.status === "RESERVED"
@@ -261,7 +261,7 @@ function BookingsListContent() {
       <View style={styles.centered}>
         <ActivityIndicator
           size="large"
-          color={colors.primary}
+          color={colors.muted}
           accessibilityLabel="Loading bookings"
         />
       </View>
@@ -383,7 +383,7 @@ function BookingsListContent() {
                 <RefreshControl
                   refreshing={isRefreshing}
                   onRefresh={onRefresh}
-                  tintColor={colors.primary}
+                  tintColor={colors.muted}
                   accessibilityLabel="Pull to refresh"
                 />
               }
@@ -393,7 +393,7 @@ function BookingsListContent() {
                 isLoadingMore ? (
                   <ActivityIndicator
                     style={styles.footer}
-                    color={colors.primary}
+                    color={colors.muted}
                   />
                 ) : null
               }
@@ -439,8 +439,8 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   filterPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
+    borderColor: colors.filterPillActiveBg,
   },
   filterPillText: {
     fontSize: fontSize.sm,
@@ -448,7 +448,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
   },
   filterPillTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   // List
@@ -528,7 +528,7 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   actionHintText: {
     fontSize: fontSize.sm,
-    color: colors.primary,
+    color: colors.buttonGhostText,
     fontWeight: "500",
   },
 

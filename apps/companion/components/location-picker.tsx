@@ -163,7 +163,7 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
   },
   iconCircleCurrent: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.iconActive,
   },
   iconCircleChild: {
     width: 30,
@@ -447,7 +447,7 @@ export function LocationPicker({
           </View>
         ) : isLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <ActivityIndicator size="large" color={colors.muted} />
           </View>
         ) : displayLocations.length === 0 ? (
           <View style={styles.centered}>

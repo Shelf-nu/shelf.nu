@@ -267,7 +267,7 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   forgotText: {
     fontSize: fontSize.sm,
-    color: colors.primary,
+    color: colors.buttonGhostText,
     fontWeight: "500",
   },
   button: {

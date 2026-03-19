@@ -421,7 +421,7 @@ function AuditDetailContent() {
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={onRefresh}
-            tintColor={colors.primary}
+            tintColor={colors.muted}
             accessibilityLabel="Pull to refresh"
           />
         }
@@ -606,7 +606,7 @@ function AuditDetailContent() {
                       backgroundColor:
                         progressPercent === 100
                           ? colors.success
-                          : colors.primary,
+                          : colors.progressBar,
                     },
                   ]}
                 />
@@ -654,7 +654,7 @@ function AuditDetailContent() {
                 <Ionicons
                   name="checkmark-done-outline"
                   size={18}
-                  color={colors.primary}
+                  color={colors.buttonSecondaryText}
                 />
                 <Text style={styles.actionButtonOutlineText}>
                   Complete Audit
@@ -879,7 +879,7 @@ const useStyles = createStyles((colors, shadows) => ({
   progressPercent: {
     fontSize: fontSize.md,
     fontWeight: "700",
-    color: colors.primary,
+    color: colors.progressBar,
   },
   progressTrack: {
     height: 8,
@@ -920,13 +920,13 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingVertical: 12,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.buttonSecondaryBorder,
     gap: spacing.sm,
   },
   actionButtonOutlineText: {
     fontSize: fontSize.md,
     fontWeight: "600",
-    color: colors.primary,
+    color: colors.buttonSecondaryText,
   },
 
   // Asset filter
@@ -953,8 +953,8 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   filterPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: colors.filterPillActiveBg,
+    borderColor: colors.filterPillActiveBg,
   },
   filterPillText: {
     fontSize: fontSize.xs,
@@ -962,7 +962,7 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
   },
   filterPillTextActive: {
-    color: colors.primaryForeground,
+    color: colors.filterPillActiveText,
   },
 
   // Asset cards
