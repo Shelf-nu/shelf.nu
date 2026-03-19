@@ -120,19 +120,21 @@ The monorepo approach is what Expo recommends for apps that share a backend.
 
 ### Prerequisites
 
-| Tool      | Version    | Install                                                      |
-| --------- | ---------- | ------------------------------------------------------------ |
-| Node.js   | >= 22.20.0 | `nvm install 22`                                             |
-| pnpm      | 9.15.9     | `corepack enable && corepack prepare pnpm@9.15.9 --activate` |
-| Xcode     | Latest     | App Store                                                    |
-| CocoaPods | Any        | `sudo gem install cocoapods`                                 |
+| Tool      | Version        | Install                                                      |
+| --------- | -------------- | ------------------------------------------------------------ |
+| Node.js   | >= 22.20.0     | `nvm install 22`                                             |
+| pnpm      | 9.15.9         | `corepack enable && corepack prepare pnpm@9.15.9 --activate` |
+| Xcode     | 16.4+ (stable) | App Store                                                    |
+| CocoaPods | Any            | `sudo gem install cocoapods`                                 |
+
+> **Xcode compatibility:** The project includes a `swift-concurrency-fix` Expo config plugin that automatically patches the Podfile for Xcode 16.4+ compatibility. This fixes Swift 6 strict concurrency errors in `expo-image` that prevent compilation on stable Xcode. The plugin runs automatically during `expo prebuild` — no manual steps needed.
 
 ### Quick Start
 
 ```bash
 # 1. Clone and install
 git clone <this-repo>
-cd shelf-companion-app
+cd shelf
 git checkout feat/mobile-companion-app
 pnpm install
 
@@ -140,20 +142,28 @@ pnpm install
 cp .env.example .env
 # Fill in: DATABASE_URL, DIRECT_URL, SUPABASE_URL, SUPABASE_ANON_PUBLIC,
 #          SUPABASE_SERVICE_ROLE, SESSION_SECRET
-# (Ask Carlos for the dev values)
 
-# 3. Set up mobile environment
+# 3. Set up companion app environment
+# Get your Mac's LAN IP:
+ipconfig getifaddr en0   # e.g. 192.168.1.100
+
 cat > apps/companion/.env.local << 'EOF'
-EXPO_PUBLIC_SUPABASE_URL="https://luouuvatmygcrxkhcxmg.supabase.co"
-EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx1b3V1dmF0bXlnY3J4a2hjeG1nIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NzYzODI4MjYsImV4cCI6MTk5MTk1ODgyNn0.KN7sOuHn1tZzQEUX0miNKWSYA2w13C31jume0EIFk0E"
-EXPO_PUBLIC_API_URL=http://<YOUR_LOCAL_IP>:3000
+EXPO_PUBLIC_SUPABASE_URL="http://<YOUR_LAN_IP>:54321"
+EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="<your-supabase-anon-key>"
+EXPO_PUBLIC_API_URL="http://<YOUR_LAN_IP>:3000"
 EOF
-# Replace <YOUR_LOCAL_IP> with: ipconfig getifaddr en0
-# If using iOS Simulator, use: http://localhost:3000
+# Replace <YOUR_LAN_IP> with your actual LAN IP from step above
+# Get the anon key from: supabase status (Publishable key)
+#
+# IMPORTANT: All 3 URLs must use your LAN IP, NOT 127.0.0.1 or localhost.
+# Your phone cannot reach localhost — it's a different device.
+# For iOS Simulator only: localhost works fine.
 
-# 4. Start webapp (Terminal 1)
-pnpm webapp:dev
-# Wait for "VITE ready" on port 3000
+# 4. Start webapp in HTTP mode (Terminal 1)
+DISABLE_HTTPS=true pnpm webapp:dev
+# NOTE: DISABLE_HTTPS must be a shell env var, not in .env file.
+# The mobile app cannot verify self-signed HTTPS certificates.
+# Alternative: rename apps/webapp/.cert to disable HTTPS.
 
 # 5. Start mobile (Terminal 2)
 cd apps/companion
@@ -162,22 +172,40 @@ npx expo run:ios --clear          # For iOS Simulator
 npx expo run:ios --device --clear  # For physical iPhone via USB
 ```
 
+### Physical Device Setup
+
+If testing on a real iPhone (not simulator):
+
+1. **Enable Developer Mode** on iPhone: Settings > Privacy & Security > Developer Mode > toggle ON > restart phone
+2. **Connect via USB** and select your device when Expo prompts
+3. **Trust the developer profile** after first install: Settings > General > VPN & Device Management > tap your Apple ID > Trust
+4. **Xcode device support**: If Xcode prompts to download support files for your iOS version, let it complete before building
+5. After the first build, you can start Metro separately: `npx expo start --dev-client`
+
 ### Important Notes
 
-- **Both terminals must stay open** — Terminal 2 runs Metro bundler + USB tunnel
+- **Both terminals must stay open** — Terminal 1 runs the webapp, Terminal 2 runs Metro bundler
+- The mobile app connects to **Supabase directly for authentication** (login/password reset) and to the **webapp API for all data operations** — that's why both URLs are needed
 - If you see "Port 3000 is in use": `kill $(lsof -ti :3000)`
 - If CocoaPods gives UTF-8 errors: `export LANG=en_US.UTF-8` before the expo command
 - First iOS build takes ~5-10 min (compiling native code). Subsequent launches are fast
 - Login with your regular Shelf account credentials
+- Env vars starting with `EXPO_PUBLIC_` are baked in at Metro bundle time — restart Metro with `--clear` after changing them
 
 ### Troubleshooting
 
-| Symptom                              | Fix                                                            |
-| ------------------------------------ | -------------------------------------------------------------- |
-| MIME type error on phone             | Metro died — restart Terminal 2                                |
-| `AbortError: Aborted` / fetch errors | Wrong IP in `.env.local` — check with `ipconfig getifaddr en0` |
-| "Port 3000 is in use"                | `kill $(lsof -ti :3000)` then restart webapp                   |
-| Stale env vars                       | Restart Metro with `--clear` flag                              |
+| Symptom                              | Fix                                                                        |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| "Network request failed" on login    | Check `EXPO_PUBLIC_SUPABASE_URL` uses LAN IP, not 127.0.0.1                |
+| "Network request failed" on data     | Check `EXPO_PUBLIC_API_URL` uses LAN IP; check webapp is running in HTTP   |
+| MIME type error on phone             | Metro died — restart Terminal 2                                            |
+| `AbortError: Aborted` / fetch errors | Wrong IP in `.env.local` — check with `ipconfig getifaddr en0`             |
+| "Port 3000 is in use"                | `kill $(lsof -ti :3000)` then restart webapp                               |
+| Stale env vars                       | Restart Metro with `--clear` flag                                          |
+| "Device is busy" in Xcode            | Unplug/replug USB; run `sudo killall usbmuxd`                              |
+| "Untrusted developer" on phone       | Settings > General > VPN & Device Management > Trust your profile          |
+| Build errors on Xcode 16.4           | Run `cd ios && pod install` — the swift-concurrency-fix plugin should help |
+| expo prebuild wiped my Podfile fix   | This is expected — the plugin re-applies automatically on each prebuild    |
 
 ---
 
