@@ -31,27 +31,28 @@ vi.mock("~/utils/env", () => ({
 }));
 
 import {
-  barcodeTrialEndsSoonEmailText,
-  sendBarcodeTrialEndsSoonEmail,
-} from "./barcode-trial-ends-soon";
+  auditTrialEndsTomorrowEmailText,
+  sendAuditTrialEndsTomorrowEmail,
+} from "./audit-trial-ends-tomorrow";
 
-describe("barcodeTrialEndsSoonEmailText", () => {
+describe("auditTrialEndsTomorrowEmailText", () => {
   const trialEndDate = new Date("2026-03-24T00:00:00Z");
 
-  it("shows auto-charge warning when hasPaymentMethod is true", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+  it("shows urgent auto-charge warning when hasPaymentMethod is true", () => {
+    const text = auditTrialEndsTomorrowEmailText({
       firstName: "Alice",
       hasPaymentMethod: true,
       trialEndDate,
     });
     expect(text).toContain("ACTION REQUIRED");
+    expect(text).toContain("charged tomorrow");
     expect(text).toContain(
       "automatically charged at the regular subscription rate"
     );
   });
 
   it("shows paused/add-payment message when hasPaymentMethod is false", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+    const text = auditTrialEndsTomorrowEmailText({
       firstName: "Alice",
       hasPaymentMethod: false,
       trialEndDate,
@@ -61,7 +62,7 @@ describe("barcodeTrialEndsSoonEmailText", () => {
   });
 
   it("formats trialEndDate correctly", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+    const text = auditTrialEndsTomorrowEmailText({
       firstName: "Alice",
       hasPaymentMethod: true,
       trialEndDate,
@@ -70,7 +71,7 @@ describe("barcodeTrialEndsSoonEmailText", () => {
   });
 
   it("includes firstName in greeting when provided", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+    const text = auditTrialEndsTomorrowEmailText({
       firstName: "Bob",
       hasPaymentMethod: true,
       trialEndDate,
@@ -79,13 +80,13 @@ describe("barcodeTrialEndsSoonEmailText", () => {
   });
 });
 
-describe("sendBarcodeTrialEndsSoonEmail", () => {
+describe("sendAuditTrialEndsTomorrowEmail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("calls sendEmail with correct params", async () => {
-    await sendBarcodeTrialEndsSoonEmail({
+  it("calls sendEmail with auto-charge subject when hasPaymentMethod is true", async () => {
+    await sendAuditTrialEndsTomorrowEmail({
       firstName: "Alice",
       email: "alice@example.com",
       hasPaymentMethod: true,
@@ -96,7 +97,23 @@ describe("sendBarcodeTrialEndsSoonEmail", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "alice@example.com",
-        subject: "Your Barcodes trial ends in 3 days — auto-charge reminder",
+        subject: "Your Audits trial ends tomorrow — auto-charge reminder",
+      })
+    );
+  });
+
+  it("calls sendEmail with generic subject when hasPaymentMethod is false", async () => {
+    await sendAuditTrialEndsTomorrowEmail({
+      firstName: "Alice",
+      email: "alice@example.com",
+      hasPaymentMethod: false,
+      trialEndDate: new Date("2026-03-24T00:00:00Z"),
+    });
+
+    expect(mockSendEmail).toHaveBeenCalledOnce();
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Your Audits trial ends tomorrow",
       })
     );
   });
@@ -107,7 +124,7 @@ describe("sendBarcodeTrialEndsSoonEmail", () => {
     });
 
     await expect(
-      sendBarcodeTrialEndsSoonEmail({
+      sendAuditTrialEndsTomorrowEmail({
         firstName: "Alice",
         email: "alice@example.com",
         hasPaymentMethod: true,

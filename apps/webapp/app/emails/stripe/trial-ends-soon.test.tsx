@@ -31,64 +31,81 @@ vi.mock("~/utils/env", () => ({
 }));
 
 import {
-  barcodeTrialEndsSoonEmailText,
-  sendBarcodeTrialEndsSoonEmail,
-} from "./barcode-trial-ends-soon";
+  trialEndsSoonEmailText,
+  sendTrialEndsSoonEmail,
+} from "./trial-ends-soon";
 
-describe("barcodeTrialEndsSoonEmailText", () => {
+describe("trialEndsSoonEmailText", () => {
   const trialEndDate = new Date("2026-03-24T00:00:00Z");
 
   it("shows auto-charge warning when hasPaymentMethod is true", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+    const text = trialEndsSoonEmailText({
       firstName: "Alice",
       hasPaymentMethod: true,
+      planName: "Team",
       trialEndDate,
     });
     expect(text).toContain("ACTION REQUIRED");
     expect(text).toContain(
       "automatically charged at the regular subscription rate"
     );
+    expect(text).toContain("Shelf Team");
   });
 
-  it("shows paused/add-payment message when hasPaymentMethod is false", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+  it("shows upgrade message when hasPaymentMethod is false", () => {
+    const text = trialEndsSoonEmailText({
       firstName: "Alice",
       hasPaymentMethod: false,
+      planName: "Team",
       trialEndDate,
     });
-    expect(text).toContain("paused");
-    expect(text).toContain("add a payment method");
+    expect(text).not.toContain("ACTION REQUIRED");
+    expect(text).toContain("Shelf Team trial");
+    expect(text).toContain("upgrade to a paid plan");
+  });
+
+  it("includes planName in the text", () => {
+    const text = trialEndsSoonEmailText({
+      firstName: "Alice",
+      hasPaymentMethod: false,
+      planName: "Plus",
+      trialEndDate,
+    });
+    expect(text).toContain("Shelf Plus trial");
   });
 
   it("formats trialEndDate correctly", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+    const text = trialEndsSoonEmailText({
       firstName: "Alice",
       hasPaymentMethod: true,
+      planName: "Team",
       trialEndDate,
     });
     expect(text).toContain("March 24, 2026");
   });
 
   it("includes firstName in greeting when provided", () => {
-    const text = barcodeTrialEndsSoonEmailText({
+    const text = trialEndsSoonEmailText({
       firstName: "Bob",
-      hasPaymentMethod: true,
+      hasPaymentMethod: false,
+      planName: "Team",
       trialEndDate,
     });
     expect(text).toMatch(/^Hey Bob,/);
   });
 });
 
-describe("sendBarcodeTrialEndsSoonEmail", () => {
+describe("sendTrialEndsSoonEmail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("calls sendEmail with correct params", async () => {
-    await sendBarcodeTrialEndsSoonEmail({
+  it("calls sendEmail with auto-charge subject when hasPaymentMethod is true", async () => {
+    await sendTrialEndsSoonEmail({
       firstName: "Alice",
       email: "alice@example.com",
       hasPaymentMethod: true,
+      planName: "Team",
       trialEndDate: new Date("2026-03-24T00:00:00Z"),
     });
 
@@ -96,7 +113,24 @@ describe("sendBarcodeTrialEndsSoonEmail", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "alice@example.com",
-        subject: "Your Barcodes trial ends in 3 days — auto-charge reminder",
+        subject: "Your Shelf Team trial ends in 3 days — auto-charge reminder",
+      })
+    );
+  });
+
+  it("calls sendEmail with generic subject when hasPaymentMethod is false", async () => {
+    await sendTrialEndsSoonEmail({
+      firstName: "Alice",
+      email: "alice@example.com",
+      hasPaymentMethod: false,
+      planName: "Plus",
+      trialEndDate: new Date("2026-03-24T00:00:00Z"),
+    });
+
+    expect(mockSendEmail).toHaveBeenCalledOnce();
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Your Shelf Plus trial is ending soon",
       })
     );
   });
@@ -107,10 +141,11 @@ describe("sendBarcodeTrialEndsSoonEmail", () => {
     });
 
     await expect(
-      sendBarcodeTrialEndsSoonEmail({
+      sendTrialEndsSoonEmail({
         firstName: "Alice",
         email: "alice@example.com",
         hasPaymentMethod: true,
+        planName: "Team",
         trialEndDate: new Date("2026-03-24T00:00:00Z"),
       })
     ).resolves.toBeUndefined();

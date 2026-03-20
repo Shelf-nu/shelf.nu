@@ -5,13 +5,15 @@ import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
 import { sendBarcodeTrialEndsSoonEmail } from "~/emails/stripe/barcode-trial-ends-soon";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
-import { trialEndsSoonEmailText } from "~/emails/stripe/trial-ends-soon";
+import { sendTrialEndsSoonEmail } from "~/emails/stripe/trial-ends-soon";
 import { unpaidInvoiceUserText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { scheduleTrialEndsTomorrowEmail } from "~/modules/addon-trial/scheduler.server";
 import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   customerHasPaymentMethod,
   fetchStripeSubscription,
@@ -760,28 +762,63 @@ export async function handleTrialWillEnd(
       additionalData: { subscription },
     })
   ) {
-    // Send trial ending email for audit add-on
-    if (subscription.trial_end && product?.metadata?.addon_type === "audits") {
+    const addonType = product?.metadata?.addon_type as
+      | "audits"
+      | "barcodes"
+      | undefined;
+
+    if (subscription.trial_end && addonType) {
       const hasPaymentMethod = await customerHasPaymentMethod(customerId);
-      void sendAuditTrialEndsSoonEmail({
-        firstName: user.firstName,
-        email: user.email,
-        hasPaymentMethod,
-        trialEndDate: new Date(subscription.trial_end * 1000),
-      });
-    }
-    // Send trial ending email for barcode add-on
-    if (
-      subscription.trial_end &&
-      product?.metadata?.addon_type === "barcodes"
-    ) {
-      const hasPaymentMethod = await customerHasPaymentMethod(customerId);
-      void sendBarcodeTrialEndsSoonEmail({
-        firstName: user.firstName,
-        email: user.email,
-        hasPaymentMethod,
-        trialEndDate: new Date(subscription.trial_end * 1000),
-      });
+      const trialEndDate = new Date(subscription.trial_end * 1000);
+
+      // Send 3-day warning email
+      if (addonType === "audits") {
+        void sendAuditTrialEndsSoonEmail({
+          firstName: user.firstName,
+          email: user.email,
+          hasPaymentMethod,
+          trialEndDate,
+        });
+      } else {
+        void sendBarcodeTrialEndsSoonEmail({
+          firstName: user.firstName,
+          email: user.email,
+          hasPaymentMethod,
+          trialEndDate,
+        });
+      }
+
+      // Schedule 1-day warning email (only for users with payment method)
+      if (hasPaymentMethod) {
+        const oneDayBefore = new Date(
+          trialEndDate.getTime() - 24 * 60 * 60 * 1000
+        );
+        scheduleTrialEndsTomorrowEmail({
+          data: {
+            addonType,
+            userId: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            customerId,
+            subscriptionId: subscription.id,
+            trialEndDate: trialEndDate.toISOString(),
+          },
+          when: oneDayBefore,
+        }).catch((cause) => {
+          // Log but don't fail the webhook — the 1-day email is best-effort
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Failed to schedule trial ends tomorrow email",
+              additionalData: {
+                addonType,
+                subscriptionId: subscription.id,
+              },
+              label: "Stripe",
+            })
+          );
+        });
+      }
     }
     return OK();
   }
@@ -790,13 +827,13 @@ export async function handleTrialWillEnd(
     subscription.trial_end && subscription.trial_start;
 
   if (isTrialSubscription) {
-    sendEmail({
-      to: user.email,
-      subject: "Your shelf.nu free trial is ending soon",
-      text: trialEndsSoonEmailText({
-        firstName: user?.firstName ?? null,
-        trialEndDate: new Date((subscription.trial_end as number) * 1000),
-      }),
+    const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+    void sendTrialEndsSoonEmail({
+      firstName: user.firstName,
+      email: user.email,
+      hasPaymentMethod,
+      planName: product?.name || "Shelf",
+      trialEndDate: new Date((subscription.trial_end as number) * 1000),
     });
   }
 
