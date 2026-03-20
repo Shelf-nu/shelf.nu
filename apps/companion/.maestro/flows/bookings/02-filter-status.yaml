@@ -1,0 +1,35 @@
+appId: com.shelf.companion
+name: "Bookings - Filter by Status"
+tags:
+  - bookings
+
+---
+# Test: Booking filter pills change displayed bookings
+# Verifies each filter pill updates the list
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Bookings via tab bar
+- tapOn: "Bookings"
+
+# Use tapOn on page title for tree refresh
+- tapOn:
+    text: "Bookings"
+
+# Test filter: Active (should be default — already selected)
+- takeScreenshot: bookings-filter-active
+
+# Switch to Completed (a11y: "Filter: Completed")
+- tapOn: "Filter: Completed.*"
+- takeScreenshot: bookings-filter-completed
+
+# Switch to All (a11y: "Filter: All")
+- tapOn: "Filter: All.*"
+- takeScreenshot: bookings-filter-all
+
+# Switch back to Active
+- tapOn: "Filter: Active.*"

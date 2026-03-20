@@ -3424,7 +3424,17 @@ export async function bulkDeleteAssets({
   }
 }
 
-export async function bulkCheckOutAssets({
+/**
+ * Assigns custody of multiple assets to a team member.
+ *
+ * Sets each asset's status to IN_CUSTODY, creates custody records linking
+ * them to the custodian, and logs activity notes. Only AVAILABLE assets
+ * can be assigned — throws if any selected asset is unavailable.
+ *
+ * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
+ * (via `currentSearchParams` + `settings`).
+ */
+export async function bulkAssignCustody({
   userId,
   assetIds,
   custodianId,
@@ -3544,7 +3554,7 @@ export async function bulkCheckOutAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking out assets.";
+        : "Something went wrong while assigning custody.";
 
     throw new ShelfError({
       cause,
@@ -3555,7 +3565,17 @@ export async function bulkCheckOutAssets({
   }
 }
 
-export async function bulkCheckInAssets({
+/**
+ * Releases custody of multiple assets, returning them to AVAILABLE status.
+ *
+ * Deletes custody records, sets each asset's status to AVAILABLE, and logs
+ * activity notes. Only assets that currently have custody can be released —
+ * throws if any selected asset has no custody.
+ *
+ * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
+ * (via `currentSearchParams` + `settings`).
+ */
+export async function bulkReleaseCustody({
   userId,
   assetIds,
   organizationId,
@@ -3668,7 +3688,7 @@ export async function bulkCheckInAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking in assSets.";
+        : "Something went wrong while releasing custody.";
 
     throw new ShelfError({
       cause,

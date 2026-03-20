@@ -19,6 +19,16 @@
     "webapp:setup": "pnpm --filter @shelf/webapp run setup",
     "webapp:deploy:staging": "fly deploy --remote-only --app shelf-webapp-staging --dockerfile apps/webapp/Dockerfile",
     "webapp:deploy:production": "fly deploy --remote-only --app shelf-webapp --dockerfile apps/webapp/Dockerfile",
+    "companion:dev": "pnpm --filter @shelf/companion dev",
+    "companion:dev:clear": "pnpm --filter @shelf/companion dev:clear",
+    "companion:dev:tunnel": "pnpm --filter @shelf/companion dev:tunnel",
+    "companion:build:ios": "pnpm --filter @shelf/companion build:ios",
+    "companion:build:ios:device": "pnpm --filter @shelf/companion build:ios:device",
+    "companion:build:android": "pnpm --filter @shelf/companion build:android",
+    "companion:prebuild": "pnpm --filter @shelf/companion prebuild",
+    "companion:prebuild:clean": "pnpm --filter @shelf/companion prebuild:clean",
+    "companion:test:e2e": "pnpm --filter @shelf/companion test:e2e",
+    "companion:test:e2e:suite": "pnpm --filter @shelf/companion test:e2e:suite --",
     "docs:dev": "turbo run dev --filter=@shelf/docs",
     "docs:build": "turbo run build --filter=@shelf/docs",
     "docs:preview": "pnpm --filter @shelf/docs preview",
@@ -47,6 +57,9 @@
       "@tremor/react>react-dom": "19.2.1",
       "cross-spawn": "~7.0.6",
       "p-map": "4.0.0"
+    },
+    "patchedDependencies": {
+      "expo-image@55.0.6": "patches/expo-image@55.0.6.patch"
     }
   },
   "engines": {

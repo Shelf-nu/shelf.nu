@@ -1,0 +1,26 @@
+appId: com.shelf.companion
+name: "Settings - Organization Switch"
+tags:
+  - settings
+
+---
+# Test: Organization/workspace switching
+# Verifies workspace selection works (if multiple orgs available)
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Settings tab
+- tapOn: "Settings"
+
+- takeScreenshot: settings-org-switch
+
+# Tap workspace section to open switcher (if multi-org)
+- tapOn:
+    text: "workspaces available"
+    optional: true
+
+- takeScreenshot: settings-org-picker

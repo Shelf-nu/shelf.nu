@@ -1,0 +1,56 @@
+appId: com.shelf.companion
+name: "Scanner - Action Modes with Barcode Support"
+tags:
+  - scanner
+  - barcode
+
+---
+# Test: Scanner action modes render correctly after barcode support
+# Cycles through View, Assign, Release, Location modes to verify
+# the scanner UI works with expanded barcode types. Each mode should
+# render without errors. On simulator, we verify UI elements only.
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+
+# Handle camera permission
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Take screenshot in default View mode
+- takeScreenshot: scanner-barcode-view-mode
+
+# Switch to Assign mode (if action buttons are visible)
+- tapOn:
+    text: "Assign"
+    optional: true
+
+- takeScreenshot: scanner-barcode-assign-mode
+
+# Switch to Release mode
+- tapOn:
+    text: "Release"
+    optional: true
+
+- takeScreenshot: scanner-barcode-release-mode
+
+# Switch to Location mode
+- tapOn:
+    text: "Location"
+    optional: true
+
+- takeScreenshot: scanner-barcode-location-mode
+
+# Switch back to View mode
+- tapOn:
+    text: "View"
+    optional: true
+
+- takeScreenshot: scanner-barcode-back-to-view

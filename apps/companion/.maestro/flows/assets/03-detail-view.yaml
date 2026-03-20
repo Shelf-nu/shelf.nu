@@ -1,0 +1,25 @@
+appId: com.shelf.companion
+name: "Assets - Detail View"
+tags:
+  - assets
+
+---
+# Test: Asset detail view via deep link
+# Uses deep link to navigate directly to a known asset
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Open asset detail via deep link
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+
+# Use tapOn on a known detail element to force tree refresh
+# Asset detail should show "Status" section
+- tapOn:
+    text: "Status"
+    optional: true
+
+- takeScreenshot: assets-detail-view

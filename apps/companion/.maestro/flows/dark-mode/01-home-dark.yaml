@@ -1,0 +1,36 @@
+appId: com.shelf.companion
+name: "Dark Mode - Home Screen"
+tags:
+  - dark-mode
+  - visual
+
+---
+# Test: Home screen in dark mode
+# Captures screenshots for visual regression review
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Switch app theme to Dark via Settings
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "APPEARANCE"
+    timeout: 8000
+- tapOn: "Theme: Dark"
+
+# Go back to home
+- tapOn: "Home"
+
+# Use tapOn for tree refresh on home screen
+- tapOn:
+    text: "Quick Actions"
+
+# Screenshot the dark mode home screen
+- takeScreenshot: dark-mode-home
+
+# Scroll down for more content
+- scroll
+- takeScreenshot: dark-mode-home-scrolled
