@@ -1,4 +1,4 @@
-import { action } from "~/routes/api+/mobile.bookings.checkin";
+import { action } from "~/routes/api+/mobile+/bookings.checkin";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node

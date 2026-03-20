@@ -1,4 +1,4 @@
-import { loader } from "~/routes/api+/mobile.barcode.$value";
+import { loader } from "~/routes/api+/mobile+/barcode.$value";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node

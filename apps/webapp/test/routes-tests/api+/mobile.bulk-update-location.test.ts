@@ -1,4 +1,4 @@
-import { action } from "~/routes/api+/mobile.bulk-update-location";
+import { action } from "~/routes/api+/mobile+/bulk-update-location";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node

@@ -1,4 +1,4 @@
-import { action } from "~/routes/api+/mobile.bulk-assign-custody";
+import { action } from "~/routes/api+/mobile+/bulk-assign-custody";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node

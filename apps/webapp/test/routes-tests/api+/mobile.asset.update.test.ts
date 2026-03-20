@@ -1,4 +1,4 @@
-import { action } from "~/routes/api+/mobile.asset.update";
+import { action } from "~/routes/api+/mobile+/asset.update";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node

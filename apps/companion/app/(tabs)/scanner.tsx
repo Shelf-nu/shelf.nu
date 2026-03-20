@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,33 +8,34 @@ import {
   Animated,
   Linking,
   Platform,
-  ScrollView,
   Alert,
-  FlatList,
-  PanResponder,
-  Dimensions,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type QrResponse, type BookingDetail } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
-import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
+import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
-import { announce, useReducedMotion } from "@/lib/a11y";
+import { announce } from "@/lib/a11y";
 import { userHasPermission } from "@/lib/permissions";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
+import { useScannerGestures } from "@/hooks/use-scanner-gestures";
+import { useScanProcessing } from "@/hooks/use-scan-processing";
+import { ScanFrame } from "@/components/scanner/scan-frame";
+import { ScanResultCard } from "@/components/scanner/scan-result-card";
+import { ActionPills, ModeDots } from "@/components/scanner/action-pills";
+import { BatchDrawer } from "@/components/scanner/batch-drawer";
 
 // ── Action Types ────────────────────────────────────────
 
@@ -83,8 +84,6 @@ const SCANNER_ACTIONS: {
 
 const isBatchAction = (a: ScannerAction) => a !== "view";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
-
 // ── Scanned Item Type ───────────────────────────────────
 
 type ScannedItem = {
@@ -129,15 +128,6 @@ function ScannerContent() {
   // Action state
   const [action, setAction] = useState<ScannerAction>("view");
 
-  // Single-scan state (for "view" mode)
-  const [isProcessing, setIsProcessing] = useState(false);
-  const isProcessingRef = useRef(false); // ref guard for race condition
-  const [scanResult, setScanResult] = useState<{
-    type: "success" | "error" | "not_found";
-    title: string;
-    message: string;
-  } | null>(null);
-
   // Batch state (for assign/release/location modes)
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -145,20 +135,6 @@ function ScannerContent() {
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
-
-  // Flashlight
-  const [torchEnabled, setTorchEnabled] = useState(false);
-
-  // Pause/freeze camera (inspired by Scandit freeze pattern)
-  const [isPaused, setIsPaused] = useState(false);
-
-  // Frame highlight on scan (inspired by Scandit/Scanbot frame animation)
-  const [frameHighlight, setFrameHighlight] = useState<
-    "success" | "error" | null
-  >(null);
-  const frameHighlightTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
 
   // Booking check-in items (separate from batch scan)
   const [bookingCheckinItems, setBookingCheckinItems] = useState<ScannedItem[]>(
@@ -173,74 +149,55 @@ function ScannerContent() {
     lastScanRef,
   } = useScanCooldown();
 
+  // Scan processing state (extracted hook) -- created first so
+  // its setIsPaused can be referenced by the inactivity callback.
+  const setIsPausedRef = useRef<(v: boolean) => void>(() => {});
+  const onInactivityTimeout = useCallback(
+    () => setIsPausedRef.current(true),
+    []
+  );
+
+  // Placeholder resetTimer -- will be replaced after useInactivityTimer
+  const resetTimerRef = useRef<() => void>(() => {});
+  const scanProcessing = useScanProcessing({
+    resetTimer: () => resetTimerRef.current(),
+  });
+
+  const {
+    isProcessing,
+    setIsProcessing,
+    isProcessingRef,
+    scanResult,
+    setScanResult,
+    frameHighlight,
+    flashFrame,
+    isPaused,
+    togglePause,
+    torchEnabled,
+    toggleTorch,
+    dismissResult: dismissResultBase,
+  } = scanProcessing;
+
+  // Wire up the ref so inactivity timeout can call setIsPaused
+  setIsPausedRef.current = scanProcessing.setIsPaused;
+
   // Inactivity auto-pause (shared hook)
-  const onInactivityTimeout = useCallback(() => setIsPaused(true), []);
   const { resetTimer: resetInactivityTimer } = useInactivityTimer({
     isFocused,
     isPaused,
     onTimeout: onInactivityTimeout,
   });
 
-  // Toggle pause handler
-  const togglePause = useCallback(() => {
-    setIsPaused((prev) => {
-      if (prev) {
-        // Resuming — restart inactivity timer
-        resetInactivityTimer();
-      }
-      return !prev;
-    });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [resetInactivityTimer]);
+  // Wire up the resetTimer ref so useScanProcessing.togglePause can call it
+  resetTimerRef.current = resetInactivityTimer;
 
-  // Flash frame corners on scan result
-  const flashFrame = useCallback((type: "success" | "error") => {
-    if (frameHighlightTimer.current) clearTimeout(frameHighlightTimer.current);
-    setFrameHighlight(type);
-    frameHighlightTimer.current = setTimeout(() => {
-      setFrameHighlight(null);
-    }, 500);
-  }, []);
+  const dismissResult = useCallback(() => {
+    dismissResultBase();
+    lastScanRef.current = "";
+  }, [dismissResultBase, lastScanRef]);
 
   // Animation for scan line (shared hook)
-  const reduceMotion = useReducedMotion();
   const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
-
-  useEffect(() => {
-    return () => {
-      if (frameHighlightTimer.current)
-        clearTimeout(frameHighlightTimer.current);
-    };
-  }, []);
-
-  // ── Swipe Gesture (Instagram-style mode switching) ──────────
-  const swipeTranslateX = useRef(new Animated.Value(0)).current;
-  const swipeOpacity = useRef(new Animated.Value(1)).current;
-  const isSwipingRef = useRef(false);
-  const actionIndexRef = useRef(0);
-
-  // Keep refs in sync for the PanResponder (avoids stale closures)
-  const isBookingModeRef = useRef(isBookingMode);
-  useEffect(() => {
-    isBookingModeRef.current = isBookingMode;
-  }, [isBookingMode]);
-  const isPausedRef = useRef(isPaused);
-  useEffect(() => {
-    isPausedRef.current = isPaused;
-  }, [isPaused]);
-  const isSubmittingRef = useRef(isSubmitting);
-  useEffect(() => {
-    isSubmittingRef.current = isSubmitting;
-  }, [isSubmitting]);
-  const scannedItemsCountRef = useRef(scannedItems.length);
-  useEffect(() => {
-    scannedItemsCountRef.current = scannedItems.length;
-  }, [scannedItems.length]);
-
-  useEffect(() => {
-    const idx = availableActions.findIndex((a) => a.key === action);
-    actionIndexRef.current = idx >= 0 ? idx : 0;
-  }, [action]);
 
   // Clear batch items when switching actions
   const handleActionChange = useCallback(
@@ -269,115 +226,20 @@ function ScannerContent() {
         setAction(newAction);
       }
     },
-    [action, scannedItems.length]
+    [action, scannedItems.length, setScanResult, lastScanRef]
   );
 
-  // ── Swipe transition animation ─────────────────────────
-  const triggerSwipeTransition = useCallback(
-    (nextAction: ScannerAction, direction: number) => {
-      if (isSwipingRef.current) return;
-      isSwipingRef.current = true;
-
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-      // If batch items exist, skip animation and delegate to existing Alert flow
-      if (scannedItemsCountRef.current > 0) {
-        handleActionChange(nextAction);
-        isSwipingRef.current = false;
-        return;
-      }
-
-      // Skip animation when reduced motion is enabled
-      if (reduceMotion) {
-        setAction(nextAction);
-        swipeTranslateX.setValue(0);
-        swipeOpacity.setValue(1);
-        isSwipingRef.current = false;
-        return;
-      }
-
-      // Smooth 2-phase slide: out → change → in
-      Animated.parallel([
-        Animated.timing(swipeTranslateX, {
-          toValue: direction * SCREEN_WIDTH * 0.3,
-          duration: 150,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-        Animated.timing(swipeOpacity, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-      ]).start(() => {
-        // Midpoint: switch mode
-        setAction(nextAction);
-
-        // Position text on opposite side, then slide in
-        swipeTranslateX.setValue(-direction * SCREEN_WIDTH * 0.3);
-
-        Animated.parallel([
-          Animated.timing(swipeTranslateX, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: Platform.OS !== "web",
-          }),
-          Animated.timing(swipeOpacity, {
-            toValue: 1,
-            duration: 200,
-            useNativeDriver: Platform.OS !== "web",
-          }),
-        ]).start(() => {
-          isSwipingRef.current = false;
-        });
-      });
-    },
-    [handleActionChange, swipeTranslateX, swipeOpacity, reduceMotion]
-  );
-
-  // ── Swipe PanResponder ──────────────────────────────────
-  const swipePanResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, { dx, dy }) => {
-        if (isBookingModeRef.current) return false;
-        if (isProcessingRef.current) return false;
-        if (isPausedRef.current) return false;
-        if (isSubmittingRef.current) return false;
-        if (isSwipingRef.current) return false;
-        // Require clearly horizontal gesture
-        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5;
-      },
-      onPanResponderRelease: (_evt, { dx, vx }) => {
-        const SWIPE_THRESHOLD = 50;
-        const VELOCITY_THRESHOLD = 0.3;
-
-        const swipedLeft = dx < -SWIPE_THRESHOLD || vx < -VELOCITY_THRESHOLD;
-        const swipedRight = dx > SWIPE_THRESHOLD || vx > VELOCITY_THRESHOLD;
-        if (!swipedLeft && !swipedRight) return;
-
-        const currentIdx = actionIndexRef.current;
-        const len = availableActions.length;
-        const nextIdx = swipedLeft
-          ? (currentIdx + 1) % len
-          : (currentIdx - 1 + len) % len;
-
-        if (nextIdx === currentIdx) return;
-
-        const nextAction = availableActions[nextIdx].key;
-        const direction = swipedLeft ? -1 : 1;
-        // Call triggerSwipeTransition via a ref since PanResponder is created once
-        triggerSwipeRef.current?.(nextAction, direction);
-      },
-      onPanResponderTerminationRequest: () => true,
-    })
-  ).current;
-
-  // Ref to always hold the latest triggerSwipeTransition callback
-  const triggerSwipeRef = useRef(triggerSwipeTransition);
-  useEffect(() => {
-    triggerSwipeRef.current = triggerSwipeTransition;
-  }, [triggerSwipeTransition]);
-
-  // startCooldown is provided by useScanCooldown hook
+  // Swipe gestures (extracted hook)
+  const { panResponder, swipeTranslateX, swipeOpacity } = useScannerGestures({
+    availableActions,
+    action,
+    handleActionChange,
+    isBookingMode,
+    isPaused,
+    isProcessing,
+    isSubmitting,
+    scannedItemsCount: scannedItems.length,
+  });
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = () => {
@@ -450,7 +312,6 @@ function ScannerContent() {
           asset = qrData.qr?.asset ?? null;
         } else {
           // ── Barcode fallback path ──
-          // Code isn't a Shelf QR — try looking it up as a barcode
 
           if (!currentOrg) {
             flashFrame("error");
@@ -600,11 +461,9 @@ function ScannerContent() {
           setScanResult({
             type: "success",
             title: asset.title,
-            message: `${asset.category?.name || "Asset"} • ${statusLabel}`,
+            message: `${asset.category?.name || "Asset"} \u2022 ${statusLabel}`,
           });
 
-          // Brief confirmation delay (Scandit UX research: brief pause
-          // lets visual feedback register before transitioning)
           setTimeout(() => {
             router.push(`/(tabs)/assets/${asset.id}`);
             setScanResult(null);
@@ -614,7 +473,6 @@ function ScannerContent() {
         }
 
         // ── BATCH mode: add to list ──
-        // Dedup by assetId (catches same asset via QR + barcode)
         if (scannedItems.some((item) => item.assetId === asset.id)) {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -645,7 +503,6 @@ function ScannerContent() {
           message: `Added to list (${scannedItems.length + 1} items)`,
         });
 
-        // Clear result quickly so scanner stays active
         setTimeout(() => {
           setScanResult(null);
         }, 1200);
@@ -674,11 +531,6 @@ function ScannerContent() {
       resetInactivityTimer,
     ]
   );
-
-  const dismissResult = useCallback(() => {
-    setScanResult(null);
-    lastScanRef.current = "";
-  }, []);
 
   // ── Batch Actions ──────────────────────────────────
 
@@ -969,11 +821,6 @@ function ScannerContent() {
 
   // ── Camera view ──────────────────────────────────────
 
-  const scanLineTranslate = scanLineAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 220],
-  });
-
   const showBatchDrawer =
     !isBookingMode && isBatchAction(action) && scannedItems.length > 0;
   const showBookingDrawer = isBookingMode && bookingCheckinItems.length > 0;
@@ -1057,102 +904,23 @@ function ScannerContent() {
             </View>
           ) : (
             <View style={styles.actionPickerContainer}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.actionPickerScroll}
-              >
-                {availableActions.map((a) => (
-                  <TouchableOpacity
-                    key={a.key}
-                    style={[
-                      styles.actionPill,
-                      action === a.key && styles.actionPillActive,
-                    ]}
-                    onPress={() => handleActionChange(a.key)}
-                    activeOpacity={0.7}
-                    accessibilityLabel={`Scanner action: ${a.label}${
-                      action === a.key ? ", selected" : ""
-                    }`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: action === a.key }}
-                  >
-                    <Ionicons
-                      name={a.icon as any}
-                      size={16}
-                      color={
-                        action === a.key ? "#fff" : "rgba(255,255,255,0.7)"
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.actionPillText,
-                        action === a.key && styles.actionPillTextActive,
-                      ]}
-                    >
-                      {a.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <ActionPills
+                actions={availableActions}
+                currentAction={action}
+                onActionChange={handleActionChange}
+              />
             </View>
           )}
         </View>
 
-        {/* Middle row — swipe gesture target */}
-        <View style={styles.middleRow} {...swipePanResponder.panHandlers}>
+        {/* Middle row -- swipe gesture target */}
+        <View style={styles.middleRow} {...panResponder.panHandlers}>
           <View style={styles.overlaySection} />
-          <View style={styles.scanFrame}>
-            {/* Frame corners flash green/red on detect (Scandit/Scanbot pattern) */}
-            <View
-              style={[
-                styles.corner,
-                styles.cornerTL,
-                frameHighlight && {
-                  borderColor:
-                    frameHighlight === "success" ? "#4CAF50" : "#F04438",
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.corner,
-                styles.cornerTR,
-                frameHighlight && {
-                  borderColor:
-                    frameHighlight === "success" ? "#4CAF50" : "#F04438",
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.corner,
-                styles.cornerBL,
-                frameHighlight && {
-                  borderColor:
-                    frameHighlight === "success" ? "#4CAF50" : "#F04438",
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.corner,
-                styles.cornerBR,
-                frameHighlight && {
-                  borderColor:
-                    frameHighlight === "success" ? "#4CAF50" : "#F04438",
-                },
-              ]}
-            />
-            {!scanResult && !isPaused && (
-              <Animated.View
-                style={[
-                  styles.scanLine,
-                  { transform: [{ translateY: scanLineTranslate }] },
-                ]}
-              />
-            )}
-          </View>
+          <ScanFrame
+            scanLineAnim={scanLineAnim}
+            frameHighlight={frameHighlight}
+            showScanLine={!scanResult && !isPaused}
+          />
           <View style={styles.overlaySection} />
         </View>
 
@@ -1169,20 +937,10 @@ function ScannerContent() {
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
-            <View style={styles.modeDotsContainer}>
-              {availableActions.map((a) => (
-                <View
-                  key={a.key}
-                  style={[
-                    styles.modeDot,
-                    action === a.key && styles.modeDotActive,
-                  ]}
-                />
-              ))}
-            </View>
+            <ModeDots actions={availableActions} currentAction={action} />
           )}
 
-          {/* Status / instruction text — animated for swipe transitions */}
+          {/* Status / instruction text -- animated for swipe transitions */}
           <Animated.View
             style={[
               styles.instructionContainer,
@@ -1198,39 +956,7 @@ function ScannerContent() {
                 <Text style={styles.instructionText}>Looking up asset...</Text>
               </View>
             ) : scanResult ? (
-              <TouchableOpacity
-                style={[
-                  styles.resultCard,
-                  scanResult.type === "success" && styles.resultCardSuccess,
-                  scanResult.type === "error" && styles.resultCardError,
-                  scanResult.type === "not_found" && styles.resultCardWarning,
-                ]}
-                onPress={dismissResult}
-                activeOpacity={0.8}
-              >
-                <Ionicons
-                  name={
-                    scanResult.type === "success"
-                      ? "checkmark-circle"
-                      : scanResult.type === "error"
-                      ? "alert-circle"
-                      : "help-circle"
-                  }
-                  size={24}
-                  color="#fff"
-                />
-                <View style={styles.resultTextContainer}>
-                  <Text style={styles.resultTitle}>{scanResult.title}</Text>
-                  <Text style={styles.resultMessage}>{scanResult.message}</Text>
-                </View>
-                {scanResult.type !== "success" && (
-                  <Ionicons
-                    name="close"
-                    size={20}
-                    color="rgba(255,255,255,0.7)"
-                  />
-                )}
-              </TouchableOpacity>
+              <ScanResultCard result={scanResult} onDismiss={dismissResult} />
             ) : (
               <Text style={styles.instructionText}>
                 {isBookingMode
@@ -1240,7 +966,7 @@ function ScannerContent() {
             )}
           </Animated.View>
 
-          {/* Camera controls — positioned in the thumb-friendly bottom zone */}
+          {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
           <View style={styles.controlButtons}>
             {/* Pause/Resume toggle */}
             <TouchableOpacity
@@ -1265,7 +991,7 @@ function ScannerContent() {
                 styles.controlButton,
                 torchEnabled && styles.controlButtonActive,
               ]}
-              onPress={() => setTorchEnabled((prev) => !prev)}
+              onPress={toggleTorch}
               accessibilityLabel={
                 torchEnabled ? "Turn off flashlight" : "Turn on flashlight"
               }
@@ -1283,195 +1009,42 @@ function ScannerContent() {
 
         {/* ── Batch Drawer ────────────────────────────── */}
         {showBatchDrawer && (
-          <View style={styles.batchDrawer}>
-            {/* Drawer header */}
-            <View style={styles.drawerHeader}>
-              <Text style={styles.drawerTitle}>
-                {scannedItems.length} asset
-                {scannedItems.length > 1 ? "s" : ""} scanned
-              </Text>
-              <TouchableOpacity
-                onPress={clearAll}
-                accessibilityLabel="Clear all scanned items"
-                accessibilityRole="button"
-              >
-                <Text style={styles.drawerClear}>Clear all</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Item list */}
-            <FlatList
-              data={scannedItems}
-              keyExtractor={(item) => item.qrId}
-              style={styles.drawerList}
-              renderItem={({ item }) => (
-                <View style={styles.drawerItem}>
-                  {item.mainImage ? (
-                    <Image
-                      source={{ uri: item.mainImage }}
-                      style={styles.drawerItemImage}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.drawerItemImage,
-                        styles.drawerItemImagePlaceholder,
-                      ]}
-                    >
-                      <Ionicons
-                        name="cube-outline"
-                        size={16}
-                        color={colors.muted}
-                      />
-                    </View>
-                  )}
-                  <View style={styles.drawerItemInfo}>
-                    <Text style={styles.drawerItemTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.drawerItemMeta}>
-                      {item.category || "Asset"} •{" "}
-                      {item.status === "IN_CUSTODY"
-                        ? "In Custody"
-                        : item.status === "AVAILABLE"
-                        ? "Available"
-                        : item.status.replace(/_/g, " ")}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => removeItem(item.qrId)}
-                    hitSlop={hitSlop.md}
-                    accessibilityLabel={`Remove ${item.title}`}
-                    accessibilityRole="button"
-                  >
-                    <Ionicons
-                      name="close-circle"
-                      size={22}
-                      color={colors.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-              )}
-            />
-
-            {/* Submit button */}
-            <TouchableOpacity
-              style={[styles.drawerSubmitBtn, isSubmitting && { opacity: 0.6 }]}
-              onPress={handleBatchSubmit}
-              disabled={isSubmitting}
-              activeOpacity={0.7}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons
-                    name={
-                      (SCANNER_ACTIONS.find((a) => a.key === action)?.icon ||
-                        "checkmark") as any
-                    }
-                    size={20}
-                    color="#fff"
-                  />
-                  <Text style={styles.drawerSubmitText}>
-                    {submitLabelMap[action]}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
+          <BatchDrawer
+            items={scannedItems}
+            keyField="qrId"
+            title={`${scannedItems.length} asset${
+              scannedItems.length > 1 ? "s" : ""
+            } scanned`}
+            submitLabel={submitLabelMap[action]}
+            submitIcon={
+              SCANNER_ACTIONS.find((a) => a.key === action)?.icon || "checkmark"
+            }
+            isSubmitting={isSubmitting}
+            onRemove={removeItem}
+            onClear={clearAll}
+            onSubmit={handleBatchSubmit}
+            showStatus
+          />
         )}
 
         {/* ── Booking Check-in Drawer ──────────────────── */}
         {showBookingDrawer && (
-          <View style={styles.batchDrawer}>
-            <View style={styles.drawerHeader}>
-              <Text style={styles.drawerTitle}>
-                {bookingCheckinItems.length} asset
-                {bookingCheckinItems.length > 1 ? "s" : ""} to check in
-              </Text>
-              <TouchableOpacity
-                onPress={clearBookingItems}
-                accessibilityLabel="Clear all check-in items"
-                accessibilityRole="button"
-              >
-                <Text style={styles.drawerClear}>Clear all</Text>
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={bookingCheckinItems}
-              keyExtractor={(item) => item.assetId}
-              style={styles.drawerList}
-              renderItem={({ item }) => (
-                <View style={styles.drawerItem}>
-                  {item.mainImage ? (
-                    <Image
-                      source={{ uri: item.mainImage }}
-                      style={styles.drawerItemImage}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.drawerItemImage,
-                        styles.drawerItemImagePlaceholder,
-                      ]}
-                    >
-                      <Ionicons
-                        name="cube-outline"
-                        size={16}
-                        color={colors.muted}
-                      />
-                    </View>
-                  )}
-                  <View style={styles.drawerItemInfo}>
-                    <Text style={styles.drawerItemTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.drawerItemMeta}>
-                      {item.category || "Asset"}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => removeBookingItem(item.assetId)}
-                    hitSlop={hitSlop.md}
-                    accessibilityLabel={`Remove ${item.title}`}
-                    accessibilityRole="button"
-                  >
-                    <Ionicons
-                      name="close-circle"
-                      size={22}
-                      color={colors.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-              )}
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.drawerSubmitBtn,
-                isBookingSubmitting && { opacity: 0.6 },
-              ]}
-              onPress={handleBookingCheckin}
-              disabled={isBookingSubmitting}
-              activeOpacity={0.7}
-            >
-              {isBookingSubmitting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="log-in-outline" size={20} color="#fff" />
-                  <Text style={styles.drawerSubmitText}>
-                    Check In {bookingCheckinItems.length}{" "}
-                    {bookingCheckinItems.length === 1 ? "Asset" : "Assets"}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
+          <BatchDrawer
+            items={bookingCheckinItems}
+            keyField="assetId"
+            title={`${bookingCheckinItems.length} asset${
+              bookingCheckinItems.length > 1 ? "s" : ""
+            } to check in`}
+            submitLabel={`Check In ${bookingCheckinItems.length} ${
+              bookingCheckinItems.length === 1 ? "Asset" : "Assets"
+            }`}
+            submitIcon="log-in-outline"
+            isSubmitting={isBookingSubmitting}
+            onRemove={removeBookingItem}
+            onClear={clearBookingItems}
+            onSubmit={handleBookingCheckin}
+            showStatus={false}
+          />
         )}
       </View>
 
@@ -1510,7 +1083,7 @@ export default function ScannerScreen() {
 
 const FRAME_SIZE = 240;
 
-const useStyles = createStyles((colors, shadows) => ({
+const useStyles = createStyles((colors) => ({
   container: {
     flex: 1,
     backgroundColor: "#000",
@@ -1602,33 +1175,6 @@ const useStyles = createStyles((colors, shadows) => ({
     left: 0,
     right: 0,
   },
-  actionPickerScroll: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-  },
-  actionPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  actionPillActive: {
-    backgroundColor: colors.filterPillActiveBg,
-    borderColor: colors.filterPillActiveBg,
-  },
-  actionPillText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  actionPillTextActive: {
-    color: colors.filterPillActiveText,
-  },
   bookingModeHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1659,75 +1205,6 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingTop: spacing.lg,
   },
 
-  // Mode indicator dots (Instagram-style position indicators)
-  modeDotsContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
-    paddingBottom: spacing.md,
-  },
-  modeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  modeDotActive: {
-    backgroundColor: colors.foreground,
-    width: 18,
-    borderRadius: 3,
-  },
-
-  // Scan frame
-  scanFrame: {
-    width: FRAME_SIZE,
-    height: FRAME_SIZE,
-    position: "relative",
-  },
-  corner: {
-    position: "absolute",
-    width: 30,
-    height: 30,
-    borderColor: "#FFFFFF",
-  },
-  cornerTL: {
-    top: 0,
-    left: 0,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
-    borderTopLeftRadius: 6,
-  },
-  cornerTR: {
-    top: 0,
-    right: 0,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
-    borderTopRightRadius: 6,
-  },
-  cornerBL: {
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-    borderBottomLeftRadius: 6,
-  },
-  cornerBR: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-    borderBottomRightRadius: 6,
-  },
-  scanLine: {
-    position: "absolute",
-    left: 8,
-    right: 8,
-    height: 2,
-    backgroundColor: "rgba(255,255,255,0.7)",
-    borderRadius: 1,
-    top: 8,
-  },
-
   // Instructions / results
   instructionContainer: {
     alignItems: "center",
@@ -1746,119 +1223,5 @@ const useStyles = createStyles((colors, shadows) => ({
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
-  },
-
-  // Result card
-  resultCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    borderRadius: borderRadius.xl,
-    padding: spacing.md,
-    gap: spacing.md,
-    width: "100%",
-    maxWidth: 340,
-  },
-  resultCardSuccess: {
-    backgroundColor: "rgba(46,125,50,0.9)",
-  },
-  resultCardError: {
-    backgroundColor: "rgba(240,68,56,0.9)",
-  },
-  resultCardWarning: {
-    backgroundColor: "rgba(239,104,32,0.9)",
-  },
-  resultTextContainer: {
-    flex: 1,
-  },
-  resultTitle: {
-    color: "#fff",
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  resultMessage: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: fontSize.sm,
-    marginTop: 2,
-  },
-
-  // ── Batch Drawer ──────────────────────────────────
-  batchDrawer: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: 280,
-    ...shadows.md,
-  },
-  drawerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  drawerTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-    color: colors.foreground,
-  },
-  drawerClear: {
-    fontSize: fontSize.sm,
-    color: colors.error,
-    fontWeight: "600",
-  },
-  drawerList: {
-    maxHeight: 140,
-  },
-  drawerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  drawerItemImage: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    backgroundColor: colors.backgroundTertiary,
-  },
-  drawerItemImagePlaceholder: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  drawerItemInfo: {
-    flex: 1,
-  },
-  drawerItemTitle: {
-    fontSize: fontSize.base,
-    fontWeight: "600",
-    color: colors.foreground,
-  },
-  drawerItemMeta: {
-    fontSize: fontSize.xs,
-    color: colors.muted,
-    marginTop: 1,
-  },
-  drawerSubmitBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.primary,
-    marginHorizontal: spacing.lg,
-    marginVertical: spacing.sm,
-    paddingVertical: 12,
-    borderRadius: borderRadius.lg,
-  },
-  drawerSubmitText: {
-    color: "#fff",
-    fontSize: fontSize.lg,
-    fontWeight: "700",
   },
 }));

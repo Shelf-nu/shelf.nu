@@ -1,4 +1,4 @@
-import { action } from "~/routes/api+/mobile.audits.record-scan";
+import { action } from "~/routes/api+/mobile+/audits.record-scan";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node

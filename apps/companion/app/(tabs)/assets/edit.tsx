@@ -1,52 +1,28 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Switch,
 } from "react-native";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { useNavigation } from "@react-navigation/native";
-import { usePreventRemove } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type AssetDetail, type Category, type Location } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
-
-/** Extract a displayable string value from a custom field's stored value */
-function extractCustomFieldValue(cf: AssetDetail["customFields"][0]): string {
-  const val = cf.value;
-  if (val === null || val === undefined) return "";
-
-  switch (cf.customField.type) {
-    case "BOOLEAN":
-      return val?.raw === true || val?.raw === "true" ? "true" : "false";
-    case "DATE":
-      return val?.raw ? String(val.raw) : "";
-    case "OPTION":
-      return val?.valueText || val?.raw || "";
-    case "MULTILINE_TEXT":
-      return val?.raw || val?.valueText || "";
-    case "AMOUNT":
-    case "NUMBER": {
-      const num = val?.raw ?? val?.valueText;
-      return num != null ? String(num) : "";
-    }
-    default:
-      return val?.raw ?? val?.valueText ?? (typeof val === "string" ? val : "");
-  }
-}
+import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
+import { useFormValidation } from "@/hooks/use-form-validation";
+import { PickerField } from "@/components/asset-edit/picker-field";
+import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
+import { ValuationField } from "@/components/asset-edit/valuation-field";
 
 /** Build the JSON value payload for a custom field update */
 function buildCustomFieldPayloadValue(type: string, value: string): any {
@@ -69,270 +45,71 @@ function buildCustomFieldPayloadValue(type: string, value: string): any {
 
 export default function EditAssetScreen() {
   const router = useRouter();
-  const navigation = useNavigation();
   const { id: assetId } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
 
-  // ── Loading / error state ───────────────────────
-  const [isLoadingAsset, setIsLoadingAsset] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [originalAsset, setOriginalAsset] = useState<AssetDetail | null>(null);
+  const form = useEditAssetForm(assetId, currentOrg?.id);
 
-  // ── Form state ──────────────────────────────────
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<Category | null>(
-    null
-  );
-  const [selectedLocation, setSelectedLocation] = useState<Location | null>(
-    null
-  );
-  const [valuation, setValuation] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // ── Custom fields state ───────────────────────
-  type CustomFieldState = {
-    id: string; // customField.id
-    name: string;
-    type: string;
-    helpText: string | null;
-    value: string; // string representation for editing
-    originalValue: string;
-  };
-  const [customFields, setCustomFields] = useState<CustomFieldState[]>([]);
-
-  // ── Picker data ─────────────────────────────────
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
-  const [isLocationsLoading, setIsLocationsLoading] = useState(false);
-
-  // ── Picker visibility ───────────────────────────
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [showLocationPicker, setShowLocationPicker] = useState(false);
-  const [categorySearch, setCategorySearch] = useState("");
-  const [locationSearch, setLocationSearch] = useState("");
-
-  // ── Load existing asset ─────────────────────────
-  useEffect(() => {
-    if (!assetId) return;
-    setIsLoadingAsset(true);
-    api.asset(assetId).then(({ data, error }) => {
-      if (error || !data) {
-        setLoadError(error || "Failed to load asset");
-      } else {
-        const a = data.asset;
-        setOriginalAsset(a);
-        setTitle(a.title);
-        setDescription(a.description || "");
-        if (a.category) {
-          setSelectedCategory({
-            id: a.category.id,
-            name: a.category.name,
-            color: a.category.color,
-            assetCount: 0,
-          });
-        }
-        if (a.location) {
-          setSelectedLocation({
-            id: a.location.id,
-            name: a.location.name,
-            description: null,
-            image: null,
-            parentId: null,
-          });
-        }
-        if (a.valuation != null && a.valuation > 0) {
-          setValuation(String(a.valuation));
-        }
-
-        // Populate custom fields
-        if (a.customFields?.length) {
-          const cfStates: CustomFieldState[] = a.customFields
-            .filter((cf) => cf.customField.active !== false)
-            .map((cf) => {
-              const rawVal = extractCustomFieldValue(cf);
-              return {
-                id: cf.customField.id,
-                name: cf.customField.name,
-                type: cf.customField.type,
-                helpText: cf.customField.helpText,
-                value: rawVal,
-                originalValue: rawVal,
-              };
-            });
-          setCustomFields(cfStates);
-        }
-      }
-      setIsLoadingAsset(false);
-    });
-  }, [assetId]);
-
-  // ── Load categories & locations ─────────────────
-  const loadCategories = useCallback(async () => {
-    if (!currentOrg) return;
-    setIsCategoriesLoading(true);
-    const { data } = await api.categories(currentOrg.id);
-    if (data?.categories) setCategories(data.categories);
-    setIsCategoriesLoading(false);
-  }, [currentOrg]);
-
-  const loadLocations = useCallback(async () => {
-    if (!currentOrg) return;
-    setIsLocationsLoading(true);
-    const { data } = await api.locations(currentOrg.id);
-    if (data?.locations) setLocations(data.locations);
-    setIsLocationsLoading(false);
-  }, [currentOrg]);
-
-  useEffect(() => {
-    loadCategories();
-    loadLocations();
-  }, [loadCategories, loadLocations]);
-
-  // ── Filtered picker lists ───────────────────────
-  const filteredCategories = categorySearch
-    ? categories.filter((c) =>
-        c.name.toLowerCase().includes(categorySearch.toLowerCase())
-      )
-    : categories;
-
-  const filteredLocations = locationSearch
-    ? locations.filter((l) =>
-        l.name.toLowerCase().includes(locationSearch.toLowerCase())
-      )
-    : locations;
-
-  // ── Custom field helpers ────────────────────────
-  const updateCustomField = (cfId: string, newValue: string) => {
-    setCustomFields((prev) =>
-      prev.map((cf) => (cf.id === cfId ? { ...cf, value: newValue } : cf))
-    );
-  };
-
-  const renderCustomFieldInput = (cf: CustomFieldState) => {
-    switch (cf.type) {
-      case "BOOLEAN":
-        return (
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>
-              {cf.value === "true" ? "Yes" : "No"}
-            </Text>
-            <Switch
-              value={cf.value === "true"}
-              onValueChange={(val) =>
-                updateCustomField(cf.id, val ? "true" : "false")
-              }
-              trackColor={{ true: colors.primary, false: colors.gray300 }}
-              thumbColor={colors.white}
-              accessibilityLabel={`${cf.name}: ${
-                cf.value === "true" ? "Yes" : "No"
-              }`}
-            />
-          </View>
-        );
-      case "MULTILINE_TEXT":
-        return (
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={cf.value}
-            onChangeText={(val) => updateCustomField(cf.id, val)}
-            placeholder={`Enter ${cf.name.toLowerCase()}...`}
-            placeholderTextColor={colors.placeholderText}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            accessibilityLabel={cf.name}
-          />
-        );
-      case "DATE":
-        return (
-          <TextInput
-            style={styles.input}
-            value={cf.value}
-            onChangeText={(val) => updateCustomField(cf.id, val)}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.placeholderText}
-            accessibilityLabel={cf.name}
-          />
-        );
-      case "AMOUNT":
-      case "NUMBER":
-        return (
-          <TextInput
-            style={styles.input}
-            value={cf.value}
-            onChangeText={(val) => {
-              const cleaned = val.replace(/[^0-9.-]/g, "");
-              updateCustomField(cf.id, cleaned);
-            }}
-            placeholder="0"
-            placeholderTextColor={colors.placeholderText}
-            keyboardType="decimal-pad"
-            accessibilityLabel={cf.name}
-          />
-        );
-      default: // TEXT, OPTION, etc.
-        return (
-          <TextInput
-            style={styles.input}
-            value={cf.value}
-            onChangeText={(val) => updateCustomField(cf.id, val)}
-            placeholder={`Enter ${cf.name.toLowerCase()}...`}
-            placeholderTextColor={colors.placeholderText}
-            accessibilityLabel={cf.name}
-          />
-        );
-    }
-  };
+  const { isDirty } = useFormValidation({
+    title: form.title,
+    description: form.description,
+    selectedCategory: form.selectedCategory,
+    selectedLocation: form.selectedLocation,
+    valuation: form.valuation,
+    customFields: form.customFields,
+    originalAsset: form.originalAsset,
+    isSubmitting: form.isSubmitting,
+  });
 
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
-    const trimmedTitle = title.trim();
+    const trimmedTitle = form.title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
       return;
     }
     if (!currentOrg || !assetId) return;
 
-    setIsSubmitting(true);
+    form.setIsSubmitting(true);
 
     // Build payload with only changed fields
     const payload: Record<string, any> = { assetId };
 
-    if (trimmedTitle !== originalAsset?.title) {
+    if (trimmedTitle !== form.originalAsset?.title) {
       payload.title = trimmedTitle;
     }
-    if (description.trim() !== (originalAsset?.description || "")) {
-      payload.description = description.trim();
+    if (form.description.trim() !== (form.originalAsset?.description || "")) {
+      payload.description = form.description.trim();
     }
 
     // Category: send "uncategorized" to clear, or the ID to set
-    const origCatId = originalAsset?.category?.id || null;
-    const newCatId = selectedCategory?.id || null;
+    const origCatId = form.originalAsset?.category?.id || null;
+    const newCatId = form.selectedCategory?.id || null;
     if (newCatId !== origCatId) {
       payload.categoryId = newCatId || "uncategorized";
     }
 
     // Location: send the new and current IDs so the server can detect changes
-    const origLocId = originalAsset?.location?.id || null;
-    const newLocId = selectedLocation?.id || null;
+    const origLocId = form.originalAsset?.location?.id || null;
+    const newLocId = form.selectedLocation?.id || null;
     if (newLocId !== origLocId) {
       payload.newLocationId = newLocId || "";
       payload.currentLocationId = origLocId || "";
     }
 
     // Valuation
-    const numVal = valuation.trim() ? parseFloat(valuation.trim()) : null;
-    const origVal = originalAsset?.valuation ?? null;
+    const numVal = form.valuation.trim()
+      ? parseFloat(form.valuation.trim())
+      : null;
+    const origVal = form.originalAsset?.valuation ?? null;
     if (numVal !== origVal) {
       payload.valuation = numVal;
     }
 
     // Custom fields — include all changed fields
-    const changedCustomFields = customFields
+    const changedCustomFields = form.customFields
       .filter((cf) => cf.value !== cf.originalValue)
       .map((cf) => ({
         id: cf.id,
@@ -346,7 +123,7 @@ export default function EditAssetScreen() {
     const hasChanges = Object.keys(payload).length > 1; // > 1 because assetId is always there
     if (!hasChanges) {
       Alert.alert("No Changes", "Nothing was modified.");
-      setIsSubmitting(false);
+      form.setIsSubmitting(false);
       return;
     }
 
@@ -354,7 +131,7 @@ export default function EditAssetScreen() {
       currentOrg.id,
       payload as any
     );
-    setIsSubmitting(false);
+    form.setIsSubmitting(false);
 
     if (error || !data) {
       Alert.alert("Error", error || "Failed to update asset.");
@@ -370,49 +147,10 @@ export default function EditAssetScreen() {
     ]);
   };
 
-  const canSubmit = title.trim().length >= 2 && !isSubmitting;
-
-  // ── Dirty state detection ─────────────────────────
-  const isDirty = useMemo(() => {
-    if (!originalAsset) return false;
-    if (title.trim() !== originalAsset.title) return true;
-    if (description.trim() !== (originalAsset.description || "")) return true;
-    if ((selectedCategory?.id || null) !== (originalAsset.category?.id || null))
-      return true;
-    if ((selectedLocation?.id || null) !== (originalAsset.location?.id || null))
-      return true;
-    const numVal = valuation.trim() ? parseFloat(valuation.trim()) : null;
-    if (numVal !== (originalAsset.valuation ?? null)) return true;
-    if (customFields.some((cf) => cf.value !== cf.originalValue)) return true;
-    return false;
-  }, [
-    title,
-    description,
-    selectedCategory,
-    selectedLocation,
-    valuation,
-    customFields,
-    originalAsset,
-  ]);
-
-  // Warn on back navigation if there are unsaved changes
-  usePreventRemove(isDirty && !isSubmitting, ({ data }) => {
-    Alert.alert(
-      "Discard Changes?",
-      "You have unsaved changes. Are you sure you want to go back?",
-      [
-        { text: "Keep Editing", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => navigation.dispatch(data.action),
-        },
-      ]
-    );
-  });
+  const canSubmit = form.title.trim().length >= 2 && !form.isSubmitting;
 
   // ── Loading state ───────────────────────────────
-  if (isLoadingAsset) {
+  if (form.isLoadingAsset) {
     return (
       <>
         <Stack.Screen options={{ title: "Edit Asset" }} />
@@ -423,7 +161,7 @@ export default function EditAssetScreen() {
     );
   }
 
-  if (loadError || !originalAsset) {
+  if (form.loadError || !form.originalAsset) {
     return (
       <>
         <Stack.Screen options={{ title: "Error" }} />
@@ -433,7 +171,9 @@ export default function EditAssetScreen() {
             size={48}
             color={colors.error}
           />
-          <Text style={styles.errorText}>{loadError || "Asset not found"}</Text>
+          <Text style={styles.errorText}>
+            {form.loadError || "Asset not found"}
+          </Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => router.back()}
@@ -449,7 +189,7 @@ export default function EditAssetScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: `Edit: ${originalAsset.title}` }} />
+      <Stack.Screen options={{ title: `Edit: ${form.originalAsset.title}` }} />
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -467,15 +207,15 @@ export default function EditAssetScreen() {
             </Text>
             <TextInput
               style={styles.input}
-              value={title}
-              onChangeText={setTitle}
+              value={form.title}
+              onChangeText={form.setTitle}
               placeholder="Asset title"
               placeholderTextColor={colors.placeholderText}
               returnKeyType="next"
               maxLength={100}
               accessibilityLabel={labelForRequired("Title")}
             />
-            {title.length > 0 && title.trim().length < 2 && (
+            {form.title.length > 0 && form.title.trim().length < 2 && (
               <Text
                 style={styles.errorHint}
                 accessibilityRole="alert"
@@ -491,8 +231,8 @@ export default function EditAssetScreen() {
             <Text style={styles.label}>Description</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              value={description}
-              onChangeText={setDescription}
+              value={form.description}
+              onChangeText={form.setDescription}
               placeholder="Optional description..."
               placeholderTextColor={colors.placeholderText}
               multiline
@@ -504,123 +244,38 @@ export default function EditAssetScreen() {
           </View>
 
           {/* ── Category Picker ──────────────────────── */}
-          <View style={styles.field}>
-            <Text style={styles.label}>Category</Text>
-            <TouchableOpacity
-              style={styles.pickerButton}
-              onPress={() => {
-                setShowCategoryPicker(!showCategoryPicker);
-                setShowLocationPicker(false);
-              }}
-              accessibilityLabel={
-                selectedCategory
-                  ? `Category: ${selectedCategory.name}, tap to change`
-                  : "Select a category"
-              }
-              accessibilityRole="button"
-            >
-              {selectedCategory ? (
-                <View style={styles.pickerSelected}>
-                  <View
-                    style={[
-                      styles.categoryDot,
-                      {
-                        backgroundColor: selectedCategory.color || colors.muted,
-                      },
-                    ]}
-                  />
-                  <Text style={styles.pickerSelectedText}>
-                    {selectedCategory.name}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.pickerPlaceholder}>No category</Text>
-              )}
-              <Ionicons
-                name={showCategoryPicker ? "chevron-up" : "chevron-down"}
-                size={18}
-                color={colors.mutedLight}
+          <PickerField
+            label="Category"
+            items={form.categories}
+            selectedId={form.selectedCategory?.id ?? null}
+            onSelect={(cat) => form.setSelectedCategory(cat)}
+            onClear={() => form.setSelectedCategory(null)}
+            isLoading={form.isCategoriesLoading}
+            searchPlaceholder="Search categories..."
+            renderItemIcon={(cat) => (
+              <View
+                style={[
+                  styles.categoryDot,
+                  { backgroundColor: cat.color || colors.muted },
+                ]}
               />
-            </TouchableOpacity>
-
-            {showCategoryPicker && (
-              <View style={styles.pickerDropdown}>
-                {categories.length > 5 && (
-                  <TextInput
-                    style={styles.pickerSearch}
-                    value={categorySearch}
-                    onChangeText={setCategorySearch}
-                    placeholder="Search categories..."
-                    placeholderTextColor={colors.placeholderText}
-                    accessibilityLabel="Search categories"
-                  />
-                )}
-                {isCategoriesLoading ? (
-                  <ActivityIndicator
-                    style={styles.pickerLoading}
-                    color={colors.muted}
-                  />
-                ) : filteredCategories.length === 0 ? (
-                  <Text style={styles.pickerEmpty}>No categories found</Text>
-                ) : (
-                  <ScrollView
-                    nestedScrollEnabled
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {filteredCategories.map((cat) => (
-                      <TouchableOpacity
-                        key={cat.id}
-                        style={[
-                          styles.pickerItem,
-                          selectedCategory?.id === cat.id &&
-                            styles.pickerItemSelected,
-                        ]}
-                        onPress={() => {
-                          setSelectedCategory(
-                            selectedCategory?.id === cat.id ? null : cat
-                          );
-                          setShowCategoryPicker(false);
-                          setCategorySearch("");
-                        }}
-                      >
-                        <View
-                          style={[
-                            styles.categoryDot,
-                            { backgroundColor: cat.color || colors.muted },
-                          ]}
-                        />
-                        <Text style={styles.pickerItemText}>{cat.name}</Text>
-                        {selectedCategory?.id === cat.id && (
-                          <Ionicons
-                            name="checkmark"
-                            size={18}
-                            color={colors.iconActive}
-                          />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                )}
-                {selectedCategory && (
-                  <TouchableOpacity
-                    style={styles.pickerClear}
-                    onPress={() => {
-                      setSelectedCategory(null);
-                      setShowCategoryPicker(false);
-                      setCategorySearch("");
-                    }}
-                  >
-                    <Text style={styles.pickerClearText}>Clear category</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
             )}
-          </View>
+            renderSelected={(cat) => (
+              <>
+                <View
+                  style={[
+                    styles.categoryDot,
+                    { backgroundColor: cat.color || colors.muted },
+                  ]}
+                />
+              </>
+            )}
+          />
 
           {/* ── Location Picker ──────────────────────── */}
-          <View style={styles.field}>
-            <Text style={styles.label}>Location</Text>
-            {originalAsset.kit ? (
+          {form.originalAsset.kit ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>Location</Text>
               <View style={styles.kitWarning}>
                 <Ionicons
                   name="information-circle-outline"
@@ -628,158 +283,50 @@ export default function EditAssetScreen() {
                   color={colors.muted}
                 />
                 <Text style={styles.kitWarningText}>
-                  Location is managed by kit &quot;{originalAsset.kit.name}
+                  Location is managed by kit &quot;
+                  {form.originalAsset.kit.name}
                   &quot;
                 </Text>
               </View>
-            ) : (
-              <>
-                <TouchableOpacity
-                  style={styles.pickerButton}
-                  onPress={() => {
-                    setShowLocationPicker(!showLocationPicker);
-                    setShowCategoryPicker(false);
-                  }}
-                  accessibilityLabel={
-                    selectedLocation
-                      ? `Location: ${selectedLocation.name}, tap to change`
-                      : "Select a location"
-                  }
-                  accessibilityRole="button"
-                >
-                  {selectedLocation ? (
-                    <View style={styles.pickerSelected}>
-                      <Ionicons
-                        name="location-outline"
-                        size={16}
-                        color={colors.iconDefault}
-                      />
-                      <Text style={styles.pickerSelectedText}>
-                        {selectedLocation.name}
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.pickerPlaceholder}>No location</Text>
-                  )}
-                  <Ionicons
-                    name={showLocationPicker ? "chevron-up" : "chevron-down"}
-                    size={18}
-                    color={colors.mutedLight}
-                  />
-                </TouchableOpacity>
-
-                {showLocationPicker && (
-                  <View style={styles.pickerDropdown}>
-                    {locations.length > 5 && (
-                      <TextInput
-                        style={styles.pickerSearch}
-                        value={locationSearch}
-                        onChangeText={setLocationSearch}
-                        placeholder="Search locations..."
-                        placeholderTextColor={colors.placeholderText}
-                        accessibilityLabel="Search locations"
-                      />
-                    )}
-                    {isLocationsLoading ? (
-                      <ActivityIndicator
-                        style={styles.pickerLoading}
-                        color={colors.muted}
-                      />
-                    ) : filteredLocations.length === 0 ? (
-                      <Text style={styles.pickerEmpty}>No locations found</Text>
-                    ) : (
-                      <ScrollView
-                        nestedScrollEnabled
-                        keyboardShouldPersistTaps="handled"
-                      >
-                        {filteredLocations.map((loc) => (
-                          <TouchableOpacity
-                            key={loc.id}
-                            style={[
-                              styles.pickerItem,
-                              selectedLocation?.id === loc.id &&
-                                styles.pickerItemSelected,
-                            ]}
-                            onPress={() => {
-                              setSelectedLocation(
-                                selectedLocation?.id === loc.id ? null : loc
-                              );
-                              setShowLocationPicker(false);
-                              setLocationSearch("");
-                            }}
-                          >
-                            <Ionicons
-                              name="location-outline"
-                              size={16}
-                              color={colors.muted}
-                            />
-                            <Text style={styles.pickerItemText}>
-                              {loc.name}
-                            </Text>
-                            {selectedLocation?.id === loc.id && (
-                              <Ionicons
-                                name="checkmark"
-                                size={18}
-                                color={colors.iconActive}
-                              />
-                            )}
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    )}
-                    {selectedLocation && (
-                      <TouchableOpacity
-                        style={styles.pickerClear}
-                        onPress={() => {
-                          setSelectedLocation(null);
-                          setShowLocationPicker(false);
-                          setLocationSearch("");
-                        }}
-                      >
-                        <Text style={styles.pickerClearText}>
-                          Clear location
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
-              </>
-            )}
-          </View>
+            </View>
+          ) : (
+            <PickerField
+              label="Location"
+              items={form.locations}
+              selectedId={form.selectedLocation?.id ?? null}
+              onSelect={(loc) => form.setSelectedLocation(loc)}
+              onClear={() => form.setSelectedLocation(null)}
+              isLoading={form.isLocationsLoading}
+              searchPlaceholder="Search locations..."
+              renderItemIcon={() => (
+                <Ionicons
+                  name="location-outline"
+                  size={16}
+                  color={colors.muted}
+                />
+              )}
+              renderSelected={() => (
+                <Ionicons
+                  name="location-outline"
+                  size={16}
+                  color={colors.iconDefault}
+                />
+              )}
+            />
+          )}
 
           {/* ── Valuation ──────────────────────────────── */}
-          <View style={styles.field}>
-            <Text style={styles.label}>Value</Text>
-            <View style={styles.valuationRow}>
-              <Text style={styles.currencyLabel}>
-                {originalAsset.organization?.currency || "USD"}
-              </Text>
-              <TextInput
-                style={[styles.input, styles.valuationInput]}
-                value={valuation}
-                onChangeText={(text) => {
-                  // Allow only numbers and one decimal point
-                  const cleaned = text.replace(/[^0-9.]/g, "");
-                  const parts = cleaned.split(".");
-                  if (parts.length > 2) return;
-                  setValuation(cleaned);
-                }}
-                placeholder="0.00"
-                placeholderTextColor={colors.placeholderText}
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-                accessibilityLabel={`Value in ${
-                  originalAsset.organization?.currency || "USD"
-                }`}
-              />
-            </View>
-          </View>
+          <ValuationField
+            value={form.valuation}
+            onChange={form.setValuation}
+            currency={form.originalAsset.organization?.currency || "USD"}
+          />
 
           {/* ── Custom Fields ──────────────────────────── */}
-          {customFields.length > 0 && (
+          {form.customFields.length > 0 && (
             <View style={styles.customFieldsSection}>
               <Text style={styles.sectionLabel}>Custom Fields</Text>
-              {customFields.map((cf) => (
+              {form.customFields.map((cf) => (
                 <View key={cf.id} style={styles.field}>
                   <Text style={styles.label}>
                     {cf.name}
@@ -787,7 +334,11 @@ export default function EditAssetScreen() {
                       <Text style={styles.helpText}> — {cf.helpText}</Text>
                     ) : null}
                   </Text>
-                  {renderCustomFieldInput(cf)}
+                  <CustomFieldInput
+                    field={cf}
+                    value={cf.value}
+                    onChange={(val) => form.updateCustomField(cf.id, val)}
+                  />
                 </View>
               ))}
             </View>
@@ -829,11 +380,11 @@ export default function EditAssetScreen() {
             disabled={!canSubmit}
             onPress={handleSubmit}
             accessibilityLabel={
-              isSubmitting ? "Saving changes" : "Save changes"
+              form.isSubmitting ? "Saving changes" : "Save changes"
             }
             accessibilityRole="button"
           >
-            {isSubmitting ? (
+            {form.isSubmitting ? (
               <ActivityIndicator
                 color={colors.primaryForeground}
                 size="small"
@@ -926,22 +477,6 @@ const useStyles = createStyles((colors, shadows) => ({
     marginTop: 4,
   },
 
-  // ── Valuation ─────────────────────────────────
-  valuationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  currencyLabel: {
-    fontSize: fontSize.lg,
-    fontWeight: "600",
-    color: colors.muted,
-    minWidth: 40,
-  },
-  valuationInput: {
-    flex: 1,
-  },
-
   // ── Kit warning ───────────────────────────────
   kitWarning: {
     flexDirection: "row",
@@ -961,88 +496,7 @@ const useStyles = createStyles((colors, shadows) => ({
     fontStyle: "italic",
   },
 
-  // ── Picker ────────────────────────────────────
-  pickerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.gray300,
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    ...shadows.sm,
-  },
-  pickerPlaceholder: {
-    fontSize: fontSize.lg,
-    color: colors.mutedLight,
-  },
-  pickerSelected: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  pickerSelectedText: {
-    fontSize: fontSize.lg,
-    color: colors.foreground,
-    fontWeight: "500",
-  },
-  pickerDropdown: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.gray300,
-    borderRadius: borderRadius.sm,
-    marginTop: spacing.xs,
-    maxHeight: 220,
-    ...shadows.md,
-  },
-  pickerSearch: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: fontSize.base,
-    color: colors.foreground,
-  },
-  pickerLoading: {
-    padding: spacing.lg,
-  },
-  pickerEmpty: {
-    padding: spacing.lg,
-    textAlign: "center",
-    color: colors.mutedLight,
-    fontSize: fontSize.base,
-  },
-  pickerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    gap: spacing.sm,
-  },
-  pickerItemSelected: {
-    backgroundColor: colors.backgroundTertiary,
-  },
-  pickerItemText: {
-    flex: 1,
-    fontSize: fontSize.base,
-    color: colors.foreground,
-  },
-  pickerClear: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    alignItems: "center",
-  },
-  pickerClearText: {
-    fontSize: fontSize.sm,
-    color: colors.error,
-    fontWeight: "500",
-  },
+  // ── Category dot (used by picker renderItemIcon) ──
   categoryDot: {
     width: 10,
     height: 10,
@@ -1114,21 +568,5 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "400",
     color: colors.mutedLight,
     fontSize: fontSize.sm,
-  },
-  switchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.gray300,
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    ...shadows.sm,
-  },
-  switchLabel: {
-    fontSize: fontSize.lg,
-    color: colors.foreground,
   },
 }));

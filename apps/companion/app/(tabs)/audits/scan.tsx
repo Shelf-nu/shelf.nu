@@ -8,79 +8,42 @@ import {
   Animated,
   Linking,
   Platform,
-  FlatList,
   Alert,
-  Dimensions,
-  Modal,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  api,
-  type AuditDetailResponse,
-  type AuditExpectedAsset,
-  type AuditScanData,
-  type RecordScanResponse,
-} from "@/lib/api";
+import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
 import { announce } from "@/lib/a11y";
-import {
-  loadAuditScanState,
-  saveAuditScanState,
-  clearAuditScanState,
-  createDebouncedSaver,
-} from "@/lib/audit-scan-persistence";
+import { clearAuditScanState } from "@/lib/audit-scan-persistence";
 import React from "react";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
-
-// ── Constants ────────────────────────────────────────────
-
-const scanKeyExtractor = (item: ScannedItem) => item.assetId;
-const remainingKeyExtractor = (item: RemainingAsset) => item.id;
-const TOAST_DURATION_MS = 1_500;
-const SCANNED_ITEM_HEIGHT = 52; // Fixed height for getItemLayout
-const REMAINING_ITEM_HEIGHT = 52; // Match scanned item height
-const MAX_QUEUE_RETRIES = 3;
-const RETRY_DELAYS = [2_000, 5_000, 15_000];
-
-// ── Types ────────────────────────────────────────────────
-
-type ScanResult = "found" | "unexpected" | "duplicate" | "error";
-
-type ScannedItem = {
-  assetId: string;
-  name: string;
-  isExpected: boolean;
-  scannedAt: string;
-};
-
-type ScanQueueEntry = {
-  auditSessionId: string;
-  qrId: string;
-  assetId: string;
-  isExpected: boolean;
-  retryCount?: number;
-};
-
-type ListTab = "scanned" | "remaining";
-
-type RemainingAsset = {
-  id: string;
-  name: string;
-  thumbnailImage: string | null;
-  mainImage: string | null;
-};
+import { useAuditInit } from "@/hooks/use-audit-init";
+import { useScanQueue } from "@/hooks/use-scan-queue";
+import {
+  useToastNotification,
+  type ScanResult,
+} from "@/hooks/use-toast-notification";
+import { ProgressHeader } from "@/components/audit/progress-header";
+import { ScannedItemsList } from "@/components/audit/scanned-items-list";
+import {
+  RemainingAssetsList,
+  type RemainingAsset,
+} from "@/components/audit/remaining-assets-list";
+import {
+  SegmentedControl,
+  type ListTab,
+} from "@/components/audit/segmented-control";
 
 // ── Main Export ──────────────────────────────────────────
 
@@ -102,25 +65,6 @@ function AuditScannerContent() {
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
-
-  // ── Audit data state ─────────────────────────────────
-
-  const [auditName, setAuditName] = useState("");
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [initError, setInitError] = useState<string | null>(null);
-
-  // O(1) lookup sets
-  const expectedAssetIdsRef = useRef(new Set<string>());
-  const expectedAssetMapRef = useRef(new Map<string, AuditExpectedAsset>());
-  const scannedAssetIdsRef = useRef(new Set<string>());
-
-  // Counters (optimistic)
-  const [foundCount, setFoundCount] = useState(0);
-  const [unexpectedCount, setUnexpectedCount] = useState(0);
-  const [expectedTotal, setExpectedTotal] = useState(0);
-
-  // Scanned items list (most recent first)
-  const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
 
   // ── Camera state ─────────────────────────────────────
 
@@ -144,17 +88,79 @@ function AuditScannerContent() {
     null
   );
 
-  // ── Toast state ──────────────────────────────────────
+  // ── Toast (extracted hook) ───────────────────────────
 
-  const [toast, setToast] = useState<{
-    type: ScanResult;
-    title: string;
-    subtitle: string;
-  } | null>(null);
-  const toastAnim = useRef(new Animated.Value(0)).current;
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { toast, toastAnim, toastTimerRef, showToast } = useToastNotification();
+
+  // ── Progress bar animation ───────────────────────────
+
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   // ── Scan line animation (shared hook) ───────────────
+
+  const animateProgress = useCallback(
+    (newFound: number) => {
+      // Need expectedTotal, but it's from auditInit — we'll use a ref
+      const total = expectedTotalRef.current;
+      if (total === 0) return;
+      const progress = Math.min(newFound / total, 1);
+      Animated.timing(progressAnim, {
+        toValue: progress,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    },
+    [progressAnim]
+  );
+
+  // ── Background scan queue (extracted hook) ──────────
+
+  // We need scannedItemsRef before calling useScanQueue, but useAuditInit
+  // provides it. We solve this by creating a stable ref that useAuditInit
+  // populates. useScanQueue only reads .current at call time, so this works.
+  const stableScannedItemsRef = useRef<
+    { assetId: string; name: string; isExpected: boolean; scannedAt: string }[]
+  >([]);
+
+  const { scanQueueRef, enqueueScan, processQueue, retryTimerRef } =
+    useScanQueue({
+      orgId: currentOrg?.id,
+      scannedItemsRef: stableScannedItemsRef,
+    });
+
+  // ── Audit init (extracted hook) ─────────────────────
+
+  const {
+    auditName,
+    isInitializing,
+    initError,
+    expectedAssetIdsRef,
+    expectedAssetMapRef,
+    scannedAssetIdsRef,
+    foundCount,
+    setFoundCount,
+    unexpectedCount,
+    setUnexpectedCount,
+    expectedTotal,
+    scannedItems,
+    setScannedItems,
+    scannedItemsRef,
+    debouncedSaverRef,
+  } = useAuditInit({
+    auditId,
+    orgId: currentOrg?.id,
+    progressAnim,
+    animateProgress,
+    processQueue,
+    scanQueueRef,
+  });
+
+  // Keep the stable ref in sync with the audit init ref
+  stableScannedItemsRef.current = scannedItemsRef.current;
+
+  // Track expectedTotal in a ref for animateProgress
+  const expectedTotalRef = useRef(expectedTotal);
+  expectedTotalRef.current = expectedTotal;
 
   const scanLineAnim = useScanLineAnimation(
     isFocused,
@@ -162,172 +168,9 @@ function AuditScannerContent() {
     !isInitializing
   );
 
-  // ── Progress bar animation ───────────────────────────
-
-  const progressAnim = useRef(new Animated.Value(0)).current;
-
-  // ── Background scan queue ────────────────────────────
-
-  const scanQueueRef = useRef<ScanQueueEntry[]>([]);
-  const isProcessingQueueRef = useRef(false);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── Persistence (crash recovery) ───────────────────
-
-  const scannedItemsRef = useRef<ScannedItem[]>([]);
-  const debouncedSaverRef = useRef<ReturnType<
-    typeof createDebouncedSaver
-  > | null>(null);
-
   // ── List tab toggle (scanned / remaining) ──────────
 
   const [activeTab, setActiveTab] = useState<ListTab>("scanned");
-
-  // ── Image preview modal ────────────────────────────
-
-  const [previewAsset, setPreviewAsset] = useState<RemainingAsset | null>(null);
-
-  // ── Init: fetch audit data ───────────────────────────
-
-  useEffect(() => {
-    if (!auditId || !currentOrg) return;
-
-    (async () => {
-      setIsInitializing(true);
-      setInitError(null);
-
-      const { data, error } = await api.audit(auditId, currentOrg.id);
-      if (error || !data) {
-        setInitError(error || "Failed to load audit");
-        setIsInitializing(false);
-        return;
-      }
-
-      setAuditName(data.audit.name);
-      setExpectedTotal(data.audit.expectedAssetCount);
-      setFoundCount(data.audit.foundAssetCount);
-      setUnexpectedCount(data.audit.unexpectedAssetCount);
-
-      // Build O(1) lookup sets
-      const expectedIds = new Set<string>();
-      const expectedMap = new Map<string, AuditExpectedAsset>();
-      for (const asset of data.expectedAssets) {
-        expectedIds.add(asset.id);
-        expectedMap.set(asset.id, asset);
-      }
-      expectedAssetIdsRef.current = expectedIds;
-      expectedAssetMapRef.current = expectedMap;
-
-      // Restore existing scans from server
-      const scannedIds = new Set<string>();
-      const restoredItems: ScannedItem[] = [];
-      for (const scan of data.existingScans) {
-        scannedIds.add(scan.assetId);
-        restoredItems.push({
-          assetId: scan.assetId,
-          name: scan.assetTitle,
-          isExpected: scan.isExpected,
-          scannedAt: scan.scannedAt,
-        });
-      }
-      scannedAssetIdsRef.current = scannedIds;
-      setScannedItems(restoredItems);
-      scannedItemsRef.current = restoredItems;
-
-      // Set initial progress
-      const progress =
-        data.audit.expectedAssetCount > 0
-          ? data.audit.foundAssetCount / data.audit.expectedAssetCount
-          : 0;
-      progressAnim.setValue(Math.min(progress, 1));
-
-      // Initialize debounced saver
-      debouncedSaverRef.current = createDebouncedSaver(auditId);
-
-      // ── Crash recovery ───────────────────────────────
-      const persisted = await loadAuditScanState(auditId);
-      if (persisted && persisted.scannedItems.length > 0) {
-        // Find items that were scanned locally but not yet on the server
-        const serverScannedIds = new Set(
-          data.existingScans.map((s) => s.assetId)
-        );
-        const recoveredItems = persisted.scannedItems.filter(
-          (item) => !serverScannedIds.has(item.assetId)
-        );
-        const pendingQueue = persisted.pendingQueue || [];
-
-        if (recoveredItems.length > 0 || pendingQueue.length > 0) {
-          // Show recovery dialog (don't block init)
-          setIsInitializing(false);
-          Alert.alert(
-            "Resume Previous Session?",
-            `Found ${recoveredItems.length} unsynced scan${
-              recoveredItems.length !== 1 ? "s" : ""
-            } from a previous session.`,
-            [
-              {
-                text: "Discard",
-                style: "destructive",
-                onPress: () => clearAuditScanState(auditId),
-              },
-              {
-                text: "Resume",
-                onPress: () => {
-                  // Merge recovered items into state
-                  for (const item of recoveredItems) {
-                    scannedIds.add(item.assetId);
-                  }
-                  scannedAssetIdsRef.current = scannedIds;
-
-                  const merged = [...recoveredItems, ...restoredItems];
-                  setScannedItems(merged);
-                  scannedItemsRef.current = merged;
-
-                  // Requeue pending items for submission
-                  if (pendingQueue.length > 0) {
-                    scanQueueRef.current = pendingQueue.map((e) => ({
-                      ...e,
-                      retryCount: 0,
-                    }));
-                    // processQueue will be called after this callback
-                    setTimeout(() => processQueue(), 100);
-                  }
-
-                  // Recalculate counters
-                  let extraFound = 0;
-                  let extraUnexpected = 0;
-                  for (const item of recoveredItems) {
-                    if (item.isExpected) extraFound++;
-                    else extraUnexpected++;
-                  }
-                  if (extraFound > 0) {
-                    setFoundCount((prev) => prev + extraFound);
-                    animateProgress(data.audit.foundAssetCount + extraFound);
-                  }
-                  if (extraUnexpected > 0) {
-                    setUnexpectedCount((prev) => prev + extraUnexpected);
-                  }
-
-                  announce(
-                    `Resumed ${recoveredItems.length} scan${
-                      recoveredItems.length !== 1 ? "s" : ""
-                    } from previous session`
-                  );
-                },
-              },
-            ]
-          );
-          return; // Skip the setIsInitializing below
-        } else {
-          // Server already has everything — clear stale state
-          clearAuditScanState(auditId);
-        }
-      }
-
-      setIsInitializing(false);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auditId, currentOrg, progressAnim]);
 
   // ── Inactivity timer (shared hook) ──────────────────
 
@@ -345,13 +188,13 @@ function AuditScannerContent() {
     return () => {
       if (frameHighlightTimer.current)
         clearTimeout(frameHighlightTimer.current);
-      if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       // Normal exit — clear persisted state (crash recovery not needed)
       debouncedSaverRef.current?.cancel();
       if (auditId) clearAuditScanState(auditId);
     };
-  }, [auditId]);
+  }, [auditId, toastTimerRef, retryTimerRef, debouncedSaverRef]);
 
   // ── Helpers ──────────────────────────────────────────
 
@@ -371,105 +214,12 @@ function AuditScannerContent() {
     }, 500);
   }, []);
 
-  const showToast = useCallback(
-    (type: ScanResult, title: string, subtitle: string) => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      setToast({ type, title, subtitle });
-
-      // Slide in
-      Animated.timing(toastAnim, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: Platform.OS !== "web",
-      }).start();
-
-      // Auto-dismiss
-      toastTimer.current = setTimeout(() => {
-        Animated.timing(toastAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: Platform.OS !== "web",
-        }).start(() => setToast(null));
-      }, TOAST_DURATION_MS);
-    },
-    [toastAnim]
-  );
-
-  // startCooldown is provided by useScanCooldown hook
-
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = useCallback(() => {
     isProcessingRef.current = false;
     setIsProcessing(false);
     startCooldown();
   }, [startCooldown]);
-
-  const animateProgress = useCallback(
-    (newFound: number) => {
-      if (expectedTotal === 0) return;
-      const progress = Math.min(newFound / expectedTotal, 1);
-      Animated.timing(progressAnim, {
-        toValue: progress,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    },
-    [expectedTotal, progressAnim]
-  );
-
-  // ── Background scan queue processor ──────────────────
-
-  const processQueue = useCallback(async () => {
-    if (isProcessingQueueRef.current || !currentOrg) return;
-    if (scanQueueRef.current.length === 0) return;
-
-    isProcessingQueueRef.current = true;
-
-    while (scanQueueRef.current.length > 0) {
-      const entry = scanQueueRef.current[0];
-      try {
-        await api.recordAuditScan(currentOrg.id, entry);
-        // Success — remove from queue and persist immediately
-        scanQueueRef.current.shift();
-        saveAuditScanState(
-          entry.auditSessionId,
-          scannedItemsRef.current,
-          scanQueueRef.current
-        );
-      } catch {
-        // Network error — retry with backoff
-        const retries = (entry.retryCount ?? 0) + 1;
-        if (retries >= MAX_QUEUE_RETRIES) {
-          // Max retries reached — skip this item, move to next
-          // It stays in persisted queue for recovery on next launch
-          scanQueueRef.current.shift();
-          if (__DEV__)
-            console.warn(
-              `[AuditQueue] Giving up on scan after ${MAX_QUEUE_RETRIES} retries:`,
-              entry.assetId
-            );
-        } else {
-          // Move to end of queue with incremented retry count
-          scanQueueRef.current.shift();
-          scanQueueRef.current.push({ ...entry, retryCount: retries });
-          // Schedule retry with backoff
-          const delay = RETRY_DELAYS[retries - 1] ?? 15_000;
-          retryTimerRef.current = setTimeout(() => processQueue(), delay);
-        }
-        break;
-      }
-    }
-
-    isProcessingQueueRef.current = false;
-  }, [currentOrg]);
-
-  const enqueueScan = useCallback(
-    (entry: ScanQueueEntry) => {
-      scanQueueRef.current.push(entry);
-      processQueue();
-    },
-    [processQueue]
-  );
 
   // ── Barcode scan handler ─────────────────────────────
 
@@ -485,7 +235,7 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
-        // 1. Resolve code → asset (QR or barcode)
+        // 1. Resolve code -> asset (QR or barcode)
         const qrId = extractQrId(data);
         let codeId: string;
         let codeOrgId: string | null;
@@ -575,7 +325,7 @@ function AuditScannerContent() {
         // 4. Optimistic update — instant feedback
         scannedAssetIdsRef.current.add(asset.id);
 
-        const newItem: ScannedItem = {
+        const newItem = {
           assetId: asset.id,
           name: asset.title,
           isExpected,
@@ -643,6 +393,17 @@ function AuditScannerContent() {
       resetInactivityTimer,
       animateProgress,
       enqueueScan,
+      finalizeScan,
+      scannedAssetIdsRef,
+      expectedAssetIdsRef,
+      setScannedItems,
+      scannedItemsRef,
+      setFoundCount,
+      setUnexpectedCount,
+      debouncedSaverRef,
+      scanQueueRef,
+      shouldSkipScan,
+      lastScanRef,
     ]
   );
 
@@ -699,37 +460,15 @@ function AuditScannerContent() {
         },
       ]
     );
-  }, [auditId, currentOrg, auditName, expectedTotal, foundCount, router]);
-
-  // ── Render scanned item ──────────────────────────────
-
-  const renderScannedItem = useCallback(
-    ({ item }: { item: ScannedItem }) => (
-      <View style={styles.scannedItem}>
-        <Ionicons
-          name={item.isExpected ? "checkmark-circle" : "alert-circle"}
-          size={18}
-          color={item.isExpected ? colors.success : colors.warning}
-        />
-        <Text style={styles.scannedItemName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.scannedItemBadge}>
-          {item.isExpected ? "Found" : "Unexpected"}
-        </Text>
-      </View>
-    ),
-    [colors, styles]
-  );
-
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: SCANNED_ITEM_HEIGHT,
-      offset: SCANNED_ITEM_HEIGHT * index,
-      index,
-    }),
-    []
-  );
+  }, [
+    auditId,
+    currentOrg,
+    auditName,
+    expectedTotal,
+    foundCount,
+    router,
+    debouncedSaverRef,
+  ]);
 
   // ── Remaining assets (expected but not yet scanned) ──
 
@@ -749,62 +488,8 @@ function AuditScannerContent() {
       }
     }
     return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, scannedItems]); // scannedItems triggers recalc
-
-  const handlePreviewImage = useCallback((item: RemainingAsset) => {
-    const imageUri = item.mainImage || item.thumbnailImage;
-    if (imageUri) {
-      setPreviewAsset(item);
-    }
-  }, []);
-
-  const renderRemainingItem = useCallback(
-    ({ item }: { item: RemainingAsset }) => {
-      const hasImage = !!(item.mainImage || item.thumbnailImage);
-      return (
-        <View style={styles.remainingItem}>
-          {item.thumbnailImage ? (
-            <TouchableOpacity
-              onPress={() => handlePreviewImage(item)}
-              activeOpacity={0.7}
-              accessibilityLabel={`View larger image of ${item.name}`}
-              accessibilityRole="imagebutton"
-            >
-              <Image
-                source={{ uri: item.thumbnailImage }}
-                style={styles.remainingImage}
-                contentFit="cover"
-              />
-              {hasImage && (
-                <View style={styles.remainingImageZoomBadge}>
-                  <Ionicons name="expand-outline" size={10} color="#fff" />
-                </View>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <View
-              style={[styles.remainingImage, styles.remainingImagePlaceholder]}
-            >
-              <Ionicons name="cube-outline" size={16} color={colors.gray300} />
-            </View>
-          )}
-          <Text style={styles.remainingItemName} numberOfLines={1}>
-            {item.name}
-          </Text>
-        </View>
-      );
-    },
-    [colors, styles, handlePreviewImage]
-  );
-
-  const getRemainingItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: REMAINING_ITEM_HEIGHT,
-      offset: REMAINING_ITEM_HEIGHT * index,
-      index,
-    }),
-    []
-  );
 
   // ── Permission states ────────────────────────────────
 
@@ -1092,131 +777,28 @@ function AuditScannerContent() {
 
       {/* Bottom 40%: Progress + scanned list */}
       <View style={styles.bottomPanel}>
-        {/* Progress bar */}
-        <View style={styles.progressSection}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>
-              {foundCount}/{expectedTotal} found
-            </Text>
-            {unexpectedCount > 0 && (
-              <Text style={styles.progressUnexpected}>
-                +{unexpectedCount} unexpected
-              </Text>
-            )}
-            <Text style={styles.progressPercent}>{progressPercent}%</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <Animated.View
-              style={[
-                styles.progressFill,
-                {
-                  width: progressAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ["0%", "100%"],
-                  }),
-                  backgroundColor:
-                    progressPercent === 100
-                      ? colors.success
-                      : colors.progressBar,
-                },
-              ]}
-            />
-          </View>
-        </View>
+        <ProgressHeader
+          foundCount={foundCount}
+          expectedCount={expectedTotal}
+          unexpectedCount={unexpectedCount}
+          progressAnim={progressAnim}
+          progressPercent={progressPercent}
+        />
 
         {/* Scanned / Remaining toggle + list */}
         <View style={styles.scannedListSection}>
-          {/* Segmented control */}
-          <View style={styles.segmentedControl} accessibilityRole="tablist">
-            <TouchableOpacity
-              style={[
-                styles.segmentedOption,
-                activeTab === "scanned" && styles.segmentedOptionActive,
-              ]}
-              onPress={() => setActiveTab("scanned")}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "scanned" }}
-              accessibilityLabel={`Scanned ${scannedItems.length}`}
-            >
-              <Text
-                style={[
-                  styles.segmentedOptionText,
-                  activeTab === "scanned" && styles.segmentedOptionTextActive,
-                ]}
-              >
-                Scanned ({scannedItems.length})
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.segmentedOption,
-                activeTab === "remaining" && styles.segmentedOptionActive,
-              ]}
-              onPress={() => setActiveTab("remaining")}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "remaining" }}
-              accessibilityLabel={`Remaining ${remainingCount}`}
-            >
-              <Text
-                style={[
-                  styles.segmentedOptionText,
-                  activeTab === "remaining" && styles.segmentedOptionTextActive,
-                ]}
-              >
-                Remaining ({remainingCount})
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <SegmentedControl
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            scannedCount={scannedItems.length}
+            remainingCount={remainingCount}
+          />
 
           {/* List content */}
           {activeTab === "scanned" ? (
-            scannedItems.length === 0 ? (
-              <View style={styles.scannedListEmpty}>
-                <Ionicons name="scan-outline" size={24} color={colors.border} />
-                <Text style={styles.scannedListEmptyText}>
-                  Scan a code to begin
-                </Text>
-              </View>
-            ) : (
-              <FlatList
-                data={scannedItems}
-                renderItem={renderScannedItem}
-                keyExtractor={scanKeyExtractor}
-                getItemLayout={getItemLayout}
-                removeClippedSubviews
-                maxToRenderPerBatch={10}
-                windowSize={5}
-                initialNumToRender={10}
-                style={styles.scannedList}
-                showsVerticalScrollIndicator={false}
-              />
-            )
-          ) : remainingAssets.length === 0 ? (
-            <View style={styles.scannedListEmpty}>
-              <Ionicons
-                name="checkmark-done-outline"
-                size={24}
-                color={colors.success}
-              />
-              <Text style={styles.scannedListEmptyText}>
-                All expected assets found!
-              </Text>
-            </View>
+            <ScannedItemsList items={scannedItems} />
           ) : (
-            <FlatList
-              data={remainingAssets}
-              renderItem={renderRemainingItem}
-              keyExtractor={remainingKeyExtractor}
-              getItemLayout={getRemainingItemLayout}
-              removeClippedSubviews
-              maxToRenderPerBatch={10}
-              windowSize={5}
-              initialNumToRender={10}
-              style={styles.scannedList}
-              showsVerticalScrollIndicator={false}
-            />
+            <RemainingAssetsList items={remainingAssets} />
           )}
         </View>
 
@@ -1237,50 +819,6 @@ function AuditScannerContent() {
           </TouchableOpacity>
         )}
       </View>
-
-      {/* ── Image Preview Modal ─────────────────────────── */}
-      <Modal
-        visible={!!previewAsset}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPreviewAsset(null)}
-      >
-        <TouchableOpacity
-          style={styles.previewOverlay}
-          activeOpacity={1}
-          onPress={() => setPreviewAsset(null)}
-          accessibilityViewIsModal={true}
-          accessibilityLabel="Close image preview"
-        >
-          <TouchableOpacity
-            style={styles.previewCloseBtn}
-            onPress={() => setPreviewAsset(null)}
-            accessibilityLabel="Close"
-            accessibilityRole="button"
-          >
-            <Ionicons name="close" size={28} color="#fff" />
-          </TouchableOpacity>
-
-          {previewAsset && (
-            <View
-              style={styles.previewContent}
-              onStartShouldSetResponder={() => true}
-            >
-              <Image
-                source={{
-                  uri:
-                    previewAsset.mainImage || previewAsset.thumbnailImage || "",
-                }}
-                style={styles.previewImage}
-                contentFit="contain"
-              />
-              <Text style={styles.previewAssetName} numberOfLines={2}>
-                {previewAsset.name}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </Modal>
     </View>
   );
 }
@@ -1521,192 +1059,10 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: spacing.sm,
   },
 
-  // Progress section
-  progressSection: {
-    gap: spacing.xs,
-  },
-  progressHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  progressLabel: {
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-    color: colors.foreground,
-  },
-  progressUnexpected: {
-    fontSize: fontSize.xs,
-    color: colors.warning,
-    fontWeight: "500",
-  },
-  progressPercent: {
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-    color: colors.progressBar,
-    marginLeft: "auto",
-  },
-  progressTrack: {
-    height: 6,
-    backgroundColor: colors.borderLight,
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-
   // Scanned items list
   scannedListSection: {
     flex: 1,
     gap: spacing.xs,
-  },
-  scannedListTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-    color: colors.foreground,
-  },
-  scannedList: {
-    flex: 1,
-  },
-  scannedListEmpty: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  scannedListEmptyText: {
-    fontSize: fontSize.sm,
-    color: colors.muted,
-  },
-  scannedItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.sm,
-    height: SCANNED_ITEM_HEIGHT,
-  },
-  scannedItemName: {
-    flex: 1,
-    fontSize: fontSize.sm,
-    fontWeight: "500",
-    color: colors.foreground,
-  },
-  scannedItemBadge: {
-    fontSize: fontSize.xs,
-    fontWeight: "500",
-    color: colors.muted,
-  },
-
-  // Segmented control
-  segmentedControl: {
-    flexDirection: "row",
-    backgroundColor: colors.borderLight,
-    borderRadius: borderRadius.md,
-    padding: 2,
-    gap: 2,
-  },
-  segmentedOption: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    borderRadius: borderRadius.sm,
-  },
-  segmentedOptionActive: {
-    backgroundColor: colors.filterPillActiveBg,
-  },
-  segmentedOptionText: {
-    fontSize: fontSize.sm,
-    fontWeight: "600" as const,
-    color: colors.muted,
-  },
-  segmentedOptionTextActive: {
-    color: colors.filterPillActiveText,
-  },
-
-  // Remaining items
-  remainingItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.sm,
-    height: REMAINING_ITEM_HEIGHT,
-  },
-  remainingImage: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.sm,
-  },
-  remainingImagePlaceholder: {
-    backgroundColor: colors.backgroundTertiary,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  remainingItemName: {
-    flex: 1,
-    fontSize: fontSize.sm,
-    fontWeight: "500" as const,
-    color: colors.foreground,
-  },
-  remainingImageZoomBadge: {
-    position: "absolute",
-    bottom: -2,
-    right: -2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  // Image preview modal
-  previewOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.92)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  previewCloseBtn: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  previewContent: {
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  previewImage: {
-    width: Dimensions.get("window").width - 40,
-    height: Dimensions.get("window").height * 0.55,
-  },
-  previewAssetName: {
-    fontSize: fontSize.lg,
-    fontWeight: "600",
-    color: "#fff",
-    textAlign: "center",
-    paddingHorizontal: spacing.xxl,
   },
 
   // Complete button
