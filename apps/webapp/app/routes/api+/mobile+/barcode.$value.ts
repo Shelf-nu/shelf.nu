@@ -4,24 +4,11 @@ import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  MOBILE_ASSET_SELECT,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
-
-/**
- * Shared asset select shape for mobile scanner endpoints.
- * Used by both mobile.qr.$qrId.ts and mobile.barcode.$value.ts
- * to return consistent asset data to the mobile client.
- */
-export const MOBILE_ASSET_SELECT = {
-  id: true,
-  title: true,
-  status: true,
-  mainImage: true,
-  category: { select: { name: true } },
-  location: { select: { name: true } },
-} as const;
 
 /**
  * GET /api/mobile/barcode/:value?orgId=<orgId>

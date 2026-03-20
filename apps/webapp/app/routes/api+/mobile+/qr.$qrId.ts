@@ -1,8 +1,10 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
-import { MOBILE_ASSET_SELECT } from "~/routes/api+/mobile.barcode.$value";
+import {
+  requireMobileAuth,
+  MOBILE_ASSET_SELECT,
+} from "~/modules/api/mobile-auth.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 

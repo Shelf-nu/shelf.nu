@@ -206,3 +206,16 @@ export async function getMobileUserContext(
     canUseBarcodes: userOrg.organization.barcodesEnabled,
   };
 }
+
+/**
+ * Shared Prisma select shape for asset data returned by mobile scanner endpoints.
+ * Used by both QR and barcode resolution routes for consistent responses.
+ */
+export const MOBILE_ASSET_SELECT = {
+  id: true,
+  title: true,
+  status: true,
+  mainImage: true,
+  category: { select: { name: true } },
+  location: { select: { name: true } },
+} as const;
