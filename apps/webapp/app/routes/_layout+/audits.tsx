@@ -55,11 +55,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ? { month: null, year: null }
       : await getAuditAddonPrices();
 
-    // Resolve customer when we need payment method info or subscription info
     const canStartTrial =
       isOwner && !currentOrganization.usedAuditTrial && !hasAccess;
     const trialExpired = currentOrganization.usedAuditTrial && !hasAccess;
-    const needsCustomer = canStartTrial || trialExpired;
 
     let hasPaymentMethod = false;
     let auditSubInfo: {
@@ -69,7 +67,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       status: string;
     } | null = null;
 
-    if (needsCustomer) {
+    // For trial CTA, check payment method without creating a Stripe customer
+    if (canStartTrial) {
+      const user = await getUserByID(userId, {
+        select: { customerId: true } satisfies Prisma.UserSelect,
+      });
+      if (user.customerId) {
+        hasPaymentMethod = await customerHasPaymentMethod(user.customerId);
+      }
+    }
+
+    // For expired trial, we need the full customer to fetch subscription info
+    if (trialExpired) {
       const user = await getUserByID(userId, {
         select: {
           id: true,
@@ -83,12 +92,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         ...user,
         email: user.email || email,
       });
-
-      hasPaymentMethod = await customerHasPaymentMethod(customerId);
-
-      if (trialExpired) {
-        auditSubInfo = await getAuditSubscriptionInfo({ customerId });
-      }
+      auditSubInfo = await getAuditSubscriptionInfo({ customerId });
     }
 
     return data({

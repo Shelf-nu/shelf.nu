@@ -13,6 +13,7 @@ import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   customerHasPaymentMethod,
   fetchStripeSubscription,
@@ -792,7 +793,7 @@ export async function handleTrialWillEnd(
         const oneDayBefore = new Date(
           trialEndDate.getTime() - 24 * 60 * 60 * 1000
         );
-        void scheduleTrialEndsTomorrowEmail({
+        scheduleTrialEndsTomorrowEmail({
           data: {
             addonType,
             userId: user.id,
@@ -803,6 +804,19 @@ export async function handleTrialWillEnd(
             trialEndDate: trialEndDate.toISOString(),
           },
           when: oneDayBefore,
+        }).catch((cause) => {
+          // Log but don't fail the webhook — the 1-day email is best-effort
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Failed to schedule trial ends tomorrow email",
+              additionalData: {
+                addonType,
+                subscriptionId: subscription.id,
+              },
+              label: "Stripe",
+            })
+          );
         });
       }
     }

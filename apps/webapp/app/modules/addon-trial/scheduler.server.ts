@@ -22,7 +22,12 @@ export async function scheduleTrialEndsTomorrowEmail({
   when: Date;
 }) {
   try {
-    await scheduler.sendAfter(QueueNames.addonTrialQueue, data, {}, when);
+    await scheduler.sendAfter(
+      QueueNames.addonTrialQueue,
+      data,
+      { singletonKey: `trial-ends-tomorrow:${data.subscriptionId}` },
+      when
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,

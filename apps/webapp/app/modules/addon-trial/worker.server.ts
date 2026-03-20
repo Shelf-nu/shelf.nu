@@ -37,9 +37,9 @@ async function handleAddonTrialJob(
    * If the subscription was cancelled or otherwise changed, skip the email.
    */
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  if (subscription.status !== "trialing") {
+  if (subscription.status !== "trialing" || subscription.cancel_at_period_end) {
     Logger.info(
-      `Skipping trial ends tomorrow email for user ${userId} - subscription ${subscriptionId} status is "${subscription.status}", not "trialing"`
+      `Skipping trial ends tomorrow email for user ${userId} - subscription ${subscriptionId} status is "${subscription.status}", cancel_at_period_end: ${subscription.cancel_at_period_end}`
     );
     return;
   }
