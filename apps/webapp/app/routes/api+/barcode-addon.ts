@@ -17,7 +17,11 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { getDomainUrl, getOrCreateCustomerId } from "~/utils/stripe.server";
+import {
+  customerHasPaymentMethod,
+  getDomainUrl,
+  getOrCreateCustomerId,
+} from "~/utils/stripe.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -33,11 +37,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { priceId, intent } = parseData(
+    const { priceId, intent, consentAcknowledged } = parseData(
       await request.formData(),
       z.object({
         priceId: z.string(),
         intent: z.enum(["trial", "subscribe"]),
+        consentAcknowledged: z
+          .string()
+          .transform((v) => v === "true")
+          .optional(),
       })
     );
 
@@ -64,6 +72,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
         throw new ShelfError({
           cause: null,
           message: "This workspace has already used the free barcode trial.",
+          status: 400,
+          label: "Stripe",
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Server-side consent validation when payment method exists
+      const hasPaymentMethodOnFile = await customerHasPaymentMethod(customerId);
+      if (hasPaymentMethodOnFile && !consentAcknowledged) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "You must acknowledge the auto-charge terms before starting a trial.",
           status: 400,
           label: "Stripe",
           shouldBeCaptured: false,

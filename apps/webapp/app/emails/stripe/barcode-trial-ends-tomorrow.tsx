@@ -15,35 +15,31 @@ import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
 import { styles } from "../styles";
 
-interface TrialEndsSoonProps {
+interface BarcodeTrialEndsTomorrowProps {
   firstName?: string | null;
   email: string;
   hasPaymentMethod: boolean;
-  planName: string;
   trialEndDate: Date;
 }
 
-export const sendTrialEndsSoonEmail = async ({
+export const sendBarcodeTrialEndsTomorrowEmail = async ({
   firstName,
   email,
   hasPaymentMethod,
-  planName,
   trialEndDate,
-}: TrialEndsSoonProps) => {
+}: BarcodeTrialEndsTomorrowProps) => {
   try {
     const subject = hasPaymentMethod
-      ? `Your Shelf ${planName} trial ends in 3 days — auto-charge reminder`
-      : `Your Shelf ${planName} trial is ending soon`;
-    const html = await trialEndsSoonEmailHtml({
+      ? "Your Barcodes trial ends tomorrow — auto-charge reminder"
+      : "Your Barcodes trial ends tomorrow";
+    const html = await barcodeTrialEndsTomorrowEmailHtml({
       firstName,
       hasPaymentMethod,
-      planName,
       trialEndDate,
     });
-    const text = trialEndsSoonEmailText({
+    const text = barcodeTrialEndsTomorrowEmailText({
       firstName,
       hasPaymentMethod,
-      planName,
       trialEndDate,
     });
 
@@ -57,7 +53,8 @@ export const sendTrialEndsSoonEmail = async ({
     Logger.error(
       new ShelfError({
         cause,
-        message: "Something went wrong while sending the trial ends soon email",
+        message:
+          "Something went wrong while sending the barcode trial ends tomorrow email",
         additionalData: { email },
         label: "User",
       })
@@ -65,15 +62,13 @@ export const sendTrialEndsSoonEmail = async ({
   }
 };
 
-export const trialEndsSoonEmailText = ({
+export const barcodeTrialEndsTomorrowEmailText = ({
   firstName,
   hasPaymentMethod,
-  planName,
   trialEndDate,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
-  planName: string;
   trialEndDate: Date;
 }) => {
   const dateStr = trialEndDate.toLocaleDateString("en-US", {
@@ -85,11 +80,9 @@ export const trialEndsSoonEmailText = ({
   if (hasPaymentMethod) {
     return `Hey${firstName ? ` ${firstName}` : ""},
 
-ACTION REQUIRED: You will be automatically charged when your trial ends.
+ACTION REQUIRED: You will be charged tomorrow. Your 7-day Barcodes trial ends tomorrow (${dateStr}). Because you have a payment method on file, you will be automatically charged at the regular subscription rate. To avoid being charged, cancel now from your subscription settings: ${SERVER_URL}/account-details/subscription
 
-Your Shelf ${planName} trial ends on ${dateStr}. Because you have a payment method on file, you will be automatically charged at the regular subscription rate when the trial ends. To avoid being charged, cancel from your subscription settings before the trial ends: ${SERVER_URL}/account-details/subscription
-
-If you'd like to keep your Shelf ${planName} plan, no action is needed - everything will transition seamlessly.
+If you'd like to keep using Barcodes, no action is needed - everything will transition seamlessly.
 
 If you have any questions, feel free to reach out to us at ${SUPPORT_EMAIL}. We're happy to help!
 
@@ -99,9 +92,11 @@ The Shelf Team
 
   return `Hey${firstName ? ` ${firstName}` : ""},
 
-Your Shelf ${planName} trial ends on ${dateStr}. To keep access to your premium features, upgrade to a paid plan before the trial expires: ${SERVER_URL}/account-details/subscription
+Your 7-day Barcodes trial ends tomorrow (${dateStr}). Since you don't have a payment method on file, your Barcodes access will be paused when the trial ends.
 
-Don't worry - your data won't be deleted. Once you subscribe, everything will be right where you left it.
+To keep using Barcodes without interruption, add a payment method before the trial expires: ${SERVER_URL}/account-details/subscription
+
+Don't worry - your barcode data won't be deleted. Once you subscribe, everything will be right where you left it.
 
 If you have any questions, feel free to reach out to us at ${SUPPORT_EMAIL}. We're happy to help!
 
@@ -109,15 +104,13 @@ The Shelf Team
 `;
 };
 
-function TrialEndsSoonEmailTemplate({
+function BarcodeTrialEndsTomorrowEmailTemplate({
   firstName,
   hasPaymentMethod,
-  planName,
   trialEndDate,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
-  planName: string;
   trialEndDate: Date;
 }) {
   const { emailPrimaryColor } = config;
@@ -131,7 +124,7 @@ function TrialEndsSoonEmailTemplate({
   return (
     <Html>
       <Head>
-        <title>Your Shelf {planName} trial is ending soon</title>
+        <title>Your Barcodes trial ends tomorrow</title>
       </Head>
 
       <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
@@ -153,20 +146,18 @@ function TrialEndsSoonEmailTemplate({
                   padding: "16px",
                 }}
               >
-                <strong>
-                  Action required if you don't want to be charged.
-                </strong>{" "}
-                Your Shelf {planName} trial ends on <strong>{dateStr}</strong>.
-                Because you have a payment method on file, you will be
-                automatically charged at the regular subscription rate when the
-                trial ends. To avoid being charged, cancel from your{" "}
+                <strong>You will be charged tomorrow.</strong> Your 7-day
+                Barcodes trial ends tomorrow ({dateStr}). Because you have a
+                payment method on file, you will be automatically charged at the
+                regular subscription rate. To avoid being charged, cancel now
+                from your{" "}
                 <Link
                   href={`${SERVER_URL}/account-details/subscription`}
                   style={{ color: emailPrimaryColor }}
                 >
                   subscription settings
-                </Link>{" "}
-                before the trial ends.
+                </Link>
+                .
               </Text>
 
               <Button
@@ -182,20 +173,25 @@ function TrialEndsSoonEmailTemplate({
               </Button>
 
               <Text style={{ ...styles.p }}>
-                If you'd like to keep your Shelf {planName} plan, no action is
-                needed — everything will transition seamlessly.
+                If you'd like to keep using Barcodes, no action is needed —
+                everything will transition seamlessly.
               </Text>
             </>
           ) : (
             <>
               <Text style={{ ...styles.p }}>
-                Your <strong>Shelf {planName} trial</strong> ends on{" "}
-                <strong>{dateStr}</strong>.
+                Your <strong>7-day Barcodes trial</strong> ends{" "}
+                <strong>tomorrow</strong> ({dateStr}).
               </Text>
 
               <Text style={{ ...styles.p }}>
-                To keep access to your premium features, upgrade to a paid plan
-                before the trial expires:
+                Since you don't have a payment method on file, your Barcodes
+                access will be <strong>paused</strong> when the trial ends.
+              </Text>
+
+              <Text style={{ ...styles.p }}>
+                To keep using Barcodes without interruption, add a payment
+                method before the trial expires:
               </Text>
 
               <Button
@@ -203,16 +199,16 @@ function TrialEndsSoonEmailTemplate({
                 style={{
                   ...styles.button,
                   textAlign: "center" as const,
-                  maxWidth: "200px",
+                  maxWidth: "250px",
                   marginBottom: "24px",
                 }}
               >
-                View plans
+                Add payment method
               </Button>
 
               <Text style={{ ...styles.p }}>
-                Don't worry — your data won't be deleted. Once you subscribe,
-                everything will be right where you left it.
+                Don't worry — your barcode data won't be deleted. Once you
+                subscribe, everything will be right where you left it.
               </Text>
             </>
           )}
@@ -229,22 +225,19 @@ function TrialEndsSoonEmailTemplate({
   );
 }
 
-export const trialEndsSoonEmailHtml = ({
+export const barcodeTrialEndsTomorrowEmailHtml = ({
   firstName,
   hasPaymentMethod,
-  planName,
   trialEndDate,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
-  planName: string;
   trialEndDate: Date;
 }) =>
   render(
-    <TrialEndsSoonEmailTemplate
+    <BarcodeTrialEndsTomorrowEmailTemplate
       firstName={firstName}
       hasPaymentMethod={hasPaymentMethod}
-      planName={planName}
       trialEndDate={trialEndDate}
     />
   );
