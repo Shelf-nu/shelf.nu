@@ -8,6 +8,7 @@ import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
 import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
+import { runWithTabId } from "~/utils/tab-id.server";
 
 import { logger } from "./logger";
 import {
@@ -79,6 +80,11 @@ export default createHonoServer<ServerEnv>({
 
     // Attach a per-request AsyncLocalStorage cache for downstream loaders/actions.
     server.use("*", async (_c, next) => runWithRequestCache(() => next()));
+
+    // Store the X-Tab-Id header so sendNotification() can tag toasts per tab.
+    server.use("*", async (c, next) =>
+      runWithTabId(c.req.header("X-Tab-Id"), () => next())
+    );
 
     // Apply URL shortener middleware only when host matches
     // In v2, we check the host inside middleware instead of using getPath
