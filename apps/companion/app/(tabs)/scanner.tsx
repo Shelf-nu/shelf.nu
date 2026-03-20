@@ -1,11 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-  type ReactNode,
-} from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -38,54 +31,10 @@ import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
 import { announce, useReducedMotion } from "@/lib/a11y";
 import { userHasPermission } from "@/lib/permissions";
-
-// ── Error Boundary ──────────────────────────────────────
-import React from "react";
-
-/** Functional fallback component that can use hooks for theming */
-function ScannerErrorFallback({ onRetry }: { onRetry: () => void }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-
-  return (
-    <View style={styles.centered}>
-      <Ionicons name="warning-outline" size={48} color={colors.error} />
-      <Text style={styles.messageTitle}>Camera Error</Text>
-      <Text style={styles.messageBody}>
-        Something went wrong with the camera.
-      </Text>
-      <TouchableOpacity style={styles.actionButton} onPress={onRetry}>
-        <Text style={styles.actionButtonText}>Try Again</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-class ScannerErrorBoundary extends React.Component<
-  { children: ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.warn("[Scanner] Error boundary caught:", error.message);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <ScannerErrorFallback
-          onRetry={() => this.setState({ hasError: false })}
-        />
-      );
-    }
-    return this.props.children;
-  }
-}
+import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
+import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
+import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
+import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 
 // ── Action Types ────────────────────────────────────────
 
@@ -133,9 +82,6 @@ const SCANNER_ACTIONS: {
 ];
 
 const isBatchAction = (a: ScannerAction) => a !== "view";
-
-/** Cooldown period (ms) before the same code can be re-scanned */
-const SCAN_COOLDOWN_MS = 3_000;
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
@@ -220,30 +166,20 @@ function ScannerContent() {
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
 
-  // Cooldown
-  const lastScanRef = useRef<string>("");
-  const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cooldown (shared hook)
+  const {
+    shouldSkip: shouldSkipScan,
+    startCooldown,
+    lastScanRef,
+  } = useScanCooldown();
 
-  // Inactivity auto-pause (inspired by Scandit's 8-10s camera timeout)
-  const INACTIVITY_TIMEOUT_MS = 30_000;
-  const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const resetInactivityTimer = useCallback(() => {
-    if (inactivityRef.current) clearTimeout(inactivityRef.current);
-    inactivityRef.current = setTimeout(() => {
-      setIsPaused(true);
-    }, INACTIVITY_TIMEOUT_MS);
-  }, []);
-
-  // Start/restart inactivity timer when focused & not paused
-  useEffect(() => {
-    if (isFocused && !isPaused) {
-      resetInactivityTimer();
-    }
-    return () => {
-      if (inactivityRef.current) clearTimeout(inactivityRef.current);
-    };
-  }, [isFocused, isPaused, resetInactivityTimer]);
+  // Inactivity auto-pause (shared hook)
+  const onInactivityTimeout = useCallback(() => setIsPaused(true), []);
+  const { resetTimer: resetInactivityTimer } = useInactivityTimer({
+    isFocused,
+    isPaused,
+    onTimeout: onInactivityTimeout,
+  });
 
   // Toggle pause handler
   const togglePause = useCallback(() => {
@@ -266,40 +202,14 @@ function ScannerContent() {
     }, 500);
   }, []);
 
-  // Animation for scan line
+  // Animation for scan line (shared hook)
   const reduceMotion = useReducedMotion();
-  const scanLineAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!isFocused || isPaused) return;
-    if (reduceMotion) {
-      scanLineAnim.setValue(0.5); // Static midpoint position
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scanLineAnim, {
-          toValue: 1,
-          duration: 2500,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-        Animated.timing(scanLineAnim, {
-          toValue: 0,
-          duration: 2500,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [isFocused, isPaused, scanLineAnim, reduceMotion]);
+  const scanLineAnim = useScanLineAnimation(isFocused, isPaused);
 
   useEffect(() => {
     return () => {
-      if (cooldownRef.current) clearTimeout(cooldownRef.current);
       if (frameHighlightTimer.current)
         clearTimeout(frameHighlightTimer.current);
-      if (inactivityRef.current) clearTimeout(inactivityRef.current);
     };
   }, []);
 
@@ -467,12 +377,7 @@ function ScannerContent() {
     triggerSwipeRef.current = triggerSwipeTransition;
   }, [triggerSwipeTransition]);
 
-  const startCooldown = () => {
-    if (cooldownRef.current) clearTimeout(cooldownRef.current);
-    cooldownRef.current = setTimeout(() => {
-      lastScanRef.current = "";
-    }, SCAN_COOLDOWN_MS);
-  };
+  // startCooldown is provided by useScanCooldown hook
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = () => {
@@ -485,7 +390,7 @@ function ScannerContent() {
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || data === lastScanRef.current) return;
+      if (isProcessingRef.current || shouldSkipScan(data)) return;
 
       isProcessingRef.current = true;
       lastScanRef.current = data;
@@ -1595,7 +1500,7 @@ function ScannerContent() {
 
 export default function ScannerScreen() {
   return (
-    <ScannerErrorBoundary>
+    <ScannerErrorBoundary label="Scanner">
       <ScannerContent />
     </ScannerErrorBoundary>
   );

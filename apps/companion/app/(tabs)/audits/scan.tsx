@@ -1,11 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-  type ReactNode,
-} from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -46,13 +39,15 @@ import {
   createDebouncedSaver,
 } from "@/lib/audit-scan-persistence";
 import React from "react";
+import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
+import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
+import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
+import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 
 // ── Constants ────────────────────────────────────────────
 
 const scanKeyExtractor = (item: ScannedItem) => item.assetId;
 const remainingKeyExtractor = (item: RemainingAsset) => item.id;
-const SCAN_COOLDOWN_MS = 3_000;
-const INACTIVITY_TIMEOUT_MS = 30_000;
 const TOAST_DURATION_MS = 1_500;
 const SCANNED_ITEM_HEIGHT = 52; // Fixed height for getItemLayout
 const REMAINING_ITEM_HEIGHT = 52; // Match scanned item height
@@ -87,59 +82,13 @@ type RemainingAsset = {
   mainImage: string | null;
 };
 
-// ── Error Boundary ───────────────────────────────────────
-
-function ScannerErrorFallback({ onRetry }: { onRetry: () => void }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-
-  return (
-    <View style={styles.centered}>
-      <Ionicons name="warning-outline" size={48} color={colors.error} />
-      <Text style={styles.messageTitle}>Camera Error</Text>
-      <Text style={styles.messageBody}>
-        Something went wrong with the camera.
-      </Text>
-      <TouchableOpacity style={styles.primaryButton} onPress={onRetry}>
-        <Text style={styles.primaryButtonText}>Try Again</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-class AuditScannerErrorBoundary extends React.Component<
-  { children: ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.warn("[AuditScanner] Error boundary caught:", error.message);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <ScannerErrorFallback
-          onRetry={() => this.setState({ hasError: false })}
-        />
-      );
-    }
-    return this.props.children;
-  }
-}
-
 // ── Main Export ──────────────────────────────────────────
 
 export default function AuditScanScreen() {
   return (
-    <AuditScannerErrorBoundary>
+    <ScannerErrorBoundary label="AuditScanner">
       <AuditScannerContent />
-    </AuditScannerErrorBoundary>
+    </ScannerErrorBoundary>
   );
 }
 
@@ -180,11 +129,13 @@ function AuditScannerContent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(false);
 
-  // ── Cooldown & inactivity ────────────────────────────
+  // ── Cooldown (shared hook) ───────────────────────────
 
-  const lastScanRef = useRef("");
-  const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    shouldSkip: shouldSkipScan,
+    startCooldown,
+    lastScanRef,
+  } = useScanCooldown();
 
   // ── Frame highlight ──────────────────────────────────
 
@@ -203,9 +154,13 @@ function AuditScannerContent() {
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Scan line animation ──────────────────────────────
+  // ── Scan line animation (shared hook) ───────────────
 
-  const scanLineAnim = useRef(new Animated.Value(0)).current;
+  const scanLineAnim = useScanLineAnimation(
+    isFocused,
+    isPaused,
+    !isInitializing
+  );
 
   // ── Progress bar animation ───────────────────────────
 
@@ -374,54 +329,22 @@ function AuditScannerContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auditId, currentOrg, progressAnim]);
 
-  // ── Scan line animation ──────────────────────────────
+  // ── Inactivity timer (shared hook) ──────────────────
 
-  useEffect(() => {
-    if (!isFocused || isPaused || isInitializing) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scanLineAnim, {
-          toValue: 1,
-          duration: 2500,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-        Animated.timing(scanLineAnim, {
-          toValue: 0,
-          duration: 2500,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [isFocused, isPaused, isInitializing, scanLineAnim]);
-
-  // ── Inactivity timer ─────────────────────────────────
-
-  const resetInactivityTimer = useCallback(() => {
-    if (inactivityRef.current) clearTimeout(inactivityRef.current);
-    inactivityRef.current = setTimeout(() => {
-      setIsPaused(true);
-    }, INACTIVITY_TIMEOUT_MS);
-  }, []);
-
-  useEffect(() => {
-    if (isFocused && !isPaused && !isInitializing) {
-      resetInactivityTimer();
-    }
-    return () => {
-      if (inactivityRef.current) clearTimeout(inactivityRef.current);
-    };
-  }, [isFocused, isPaused, isInitializing, resetInactivityTimer]);
+  const onInactivityTimeout = useCallback(() => setIsPaused(true), []);
+  const { resetTimer: resetInactivityTimer } = useInactivityTimer({
+    isFocused,
+    isPaused,
+    onTimeout: onInactivityTimeout,
+    extraConditions: [!isInitializing],
+  });
 
   // ── Cleanup ──────────────────────────────────────────
 
   useEffect(() => {
     return () => {
-      if (cooldownRef.current) clearTimeout(cooldownRef.current);
       if (frameHighlightTimer.current)
         clearTimeout(frameHighlightTimer.current);
-      if (inactivityRef.current) clearTimeout(inactivityRef.current);
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       // Normal exit — clear persisted state (crash recovery not needed)
@@ -472,12 +395,7 @@ function AuditScannerContent() {
     [toastAnim]
   );
 
-  const startCooldown = useCallback(() => {
-    if (cooldownRef.current) clearTimeout(cooldownRef.current);
-    cooldownRef.current = setTimeout(() => {
-      lastScanRef.current = "";
-    }, SCAN_COOLDOWN_MS);
-  }, []);
+  // startCooldown is provided by useScanCooldown hook
 
   /** Release the processing lock and start the cooldown timer */
   const finalizeScan = useCallback(() => {
@@ -557,7 +475,7 @@ function AuditScannerContent() {
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { data: string }) => {
-      if (isProcessingRef.current || data === lastScanRef.current) return;
+      if (isProcessingRef.current || shouldSkipScan(data)) return;
       if (!auditId || !currentOrg) return;
 
       isProcessingRef.current = true;
