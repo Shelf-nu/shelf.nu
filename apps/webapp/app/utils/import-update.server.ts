@@ -144,6 +144,12 @@ const IDENTIFIER_COLUMNS: {
   { header: "ID", internalField: "id", dbField: "id" },
 ];
 
+interface IdentifierColumn {
+  index: number;
+  dbField: "sequentialId" | "id";
+  header: string;
+}
+
 interface HeaderAnalysis {
   /** Columns that will be used for updates */
   updatableColumns: ParsedColumn[];
@@ -151,12 +157,14 @@ interface HeaderAnalysis {
   ignoredColumns: string[];
   /** User-added columns that don't match any known or custom field */
   unrecognizedColumns: string[];
-  /** Index of the identifier column in the CSV — used as row matcher */
+  /** Primary identifier column in the CSV — used as row matcher */
   idColumnIndex: number;
   /** Which database field the identifier maps to */
   idDbField: "sequentialId" | "id";
   /** The CSV header name used as identifier (for display) */
   idColumnHeader: string;
+  /** Fallback identifier column (if both Asset ID and ID are present) */
+  fallbackId: IdentifierColumn | null;
   /** Map from column CSV index → ParsedColumn (for updatable only) */
   columnIndexMap: Map<number, ParsedColumn>;
 }
@@ -181,21 +189,27 @@ export function analyzeUpdateHeaders(
   const ignoredColumns: string[] = [];
   const unrecognizedColumns: string[] = [];
 
-  // Find the best available identifier column (priority order)
-  let idColumnIndex = -1;
-  let idDbField: HeaderAnalysis["idDbField"] = "sequentialId";
-  let idColumnHeader = "";
-
+  // Find all available identifier columns (priority order)
   const headersTrimmed = headers.map((h) => h.trim());
+  const foundIdCols: IdentifierColumn[] = [];
   for (const idCol of IDENTIFIER_COLUMNS) {
     const idx = headersTrimmed.indexOf(idCol.header);
     if (idx >= 0) {
-      idColumnIndex = idx;
-      idDbField = idCol.dbField;
-      idColumnHeader = idCol.header;
-      break; // use first (highest priority) match
+      foundIdCols.push({
+        index: idx,
+        dbField: idCol.dbField,
+        header: idCol.header,
+      });
     }
   }
+
+  // Primary = highest priority; fallback = next available
+  const primaryId = foundIdCols[0];
+  const idColumnIndex = primaryId?.index ?? -1;
+  const idDbField: HeaderAnalysis["idDbField"] =
+    primaryId?.dbField ?? "sequentialId";
+  const idColumnHeader = primaryId?.header ?? "";
+  const fallbackId = foundIdCols.length > 1 ? foundIdCols[1] : null;
 
   // Set of internal field names used as identifiers — skip them during
   // column classification so they aren't treated as updatable or ignored
@@ -280,6 +294,7 @@ export function analyzeUpdateHeaders(
     idColumnIndex,
     idDbField,
     idColumnHeader,
+    fallbackId,
     columnIndexMap,
   };
 }
@@ -388,10 +403,13 @@ export function computeAssetDiffs({
   csvData,
   headerAnalysis,
   existingAssets,
+  fallbackAssets,
 }: {
   csvData: string[][];
   headerAnalysis: HeaderAnalysis;
   existingAssets: Map<string, AssetForUpdate>;
+  /** Assets keyed by fallback identifier (e.g. UUID when primary is Asset ID) */
+  fallbackAssets?: Map<string, AssetForUpdate>;
 }): Pick<
   UpdatePreview,
   "totalRows" | "assetsToUpdate" | "skippedAssets" | "failedRows"
@@ -408,8 +426,21 @@ export function computeAssetDiffs({
     const row = dataRows[rowIdx];
     const rowNumber = rowIdx + 2; // 1-based, accounting for header row
 
-    // Extract asset ID
-    const assetId = row[headerAnalysis.idColumnIndex]?.trim();
+    // Extract asset ID — try primary identifier, fall back to secondary
+    let assetId = row[headerAnalysis.idColumnIndex]?.trim() ?? "";
+    let existingAsset = assetId ? existingAssets.get(assetId) : undefined;
+
+    // If primary is blank or not found, try fallback identifier (e.g. UUID)
+    if (!existingAsset && headerAnalysis.fallbackId && fallbackAssets) {
+      const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
+      if (fallbackValue) {
+        existingAsset = fallbackAssets.get(fallbackValue);
+        if (existingAsset) {
+          assetId = fallbackValue; // use fallback as the match key
+        }
+      }
+    }
+
     if (!assetId) {
       failedRows.push({
         rowNumber,
@@ -431,8 +462,6 @@ export function computeAssetDiffs({
     }
     seenIds.set(assetId, rowNumber);
 
-    // Look up existing asset
-    const existingAsset = existingAssets.get(assetId);
     if (!existingAsset) {
       failedRows.push({
         rowNumber,
@@ -669,9 +698,18 @@ function compareCustomField(
       // Current raw value is also stored as the date string
       const currentDate = currentStr ? currentStr.substring(0, 10) : "";
       if (csvValue !== currentDate) {
-        const isValidDate =
-          /^\d{4}-\d{2}-\d{2}$/.test(csvValue) &&
-          !isNaN(new Date(csvValue).getTime());
+        // Validate format AND that the date is a real calendar date
+        // (new Date normalizes overflow — e.g. Feb 31 → Mar 3 — so we
+        // must check that the parsed date matches the original input)
+        let isValidDate = false;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(csvValue)) {
+          const [y, m, d] = csvValue.split("-").map(Number);
+          const parsed = new Date(Date.UTC(y, m - 1, d));
+          isValidDate =
+            parsed.getUTCFullYear() === y &&
+            parsed.getUTCMonth() === m - 1 &&
+            parsed.getUTCDate() === d;
+        }
         return {
           field: displayName,
           currentValue: currentDate || "(empty)",
@@ -760,11 +798,28 @@ export async function buildUpdatePreview({
     headerAnalysis.idDbField
   );
 
+  // If a fallback identifier column exists, also fetch by that
+  // so rows with blank primary IDs can still match
+  let fallbackAssets: Map<string, AssetForUpdate> | undefined;
+  if (headerAnalysis.fallbackId) {
+    const fallbackIds = dataRows
+      .map((row) => row[headerAnalysis.fallbackId!.index]?.trim())
+      .filter(Boolean) as string[];
+    if (fallbackIds.length > 0) {
+      fallbackAssets = await fetchAssetsForUpdate(
+        fallbackIds,
+        organizationId,
+        headerAnalysis.fallbackId.dbField
+      );
+    }
+  }
+
   // Compute diffs
   const diffs = computeAssetDiffs({
     csvData,
     headerAnalysis,
     existingAssets,
+    fallbackAssets,
   });
 
   // Compute field change stats
@@ -1043,10 +1098,26 @@ export async function applyBulkUpdatesFromImport({
     headerAnalysis.idDbField
   );
 
+  // Fetch by fallback identifier if available
+  let fallbackAssets: Map<string, AssetForUpdate> | undefined;
+  if (headerAnalysis.fallbackId) {
+    const fallbackIds = dataRows
+      .map((row) => row[headerAnalysis.fallbackId!.index]?.trim())
+      .filter(Boolean) as string[];
+    if (fallbackIds.length > 0) {
+      fallbackAssets = await fetchAssetsForUpdate(
+        fallbackIds,
+        organizationId,
+        headerAnalysis.fallbackId.dbField
+      );
+    }
+  }
+
   const diffs = computeAssetDiffs({
     csvData,
     headerAnalysis,
     existingAssets,
+    fallbackAssets,
   });
 
   // Build a full custom field map (name → CustomField) for building values
@@ -1245,19 +1316,17 @@ export async function applyBulkUpdatesFromImport({
           } as UpdateAssetPayload);
           changesApplied++;
         } catch (cause) {
-          // If location fails due to kit, record partial success
+          // If location fails due to kit, record partial failure
           const msg = isLikeShelfError(cause)
             ? (cause as { message: string }).message
             : "Location update failed";
           if (msg.includes("kit")) {
-            // Partial success — other fields updated, location skipped
             failed.push({
               id: matchId,
               title: assetTitle,
               rowNumber,
               error: `Location change skipped: ${msg}`,
             });
-            // Still count as updated for the other fields
           } else {
             throw cause; // Re-throw non-kit errors
           }
@@ -1283,16 +1352,18 @@ export async function applyBulkUpdatesFromImport({
           title: assetTitle,
           changesApplied,
         });
-      } else {
-        // All changes for this asset had warnings — nothing was applied
+      } else if (!failed.some((f) => f.id === matchId)) {
+        // Only mark as skipped if we didn't already record a failure
         const warnedCount = changes.filter((c) => c.warning).length;
-        skipped.push({
-          id: matchId,
-          title: assetTitle,
-          reason: `${warnedCount} field${
-            warnedCount !== 1 ? "s" : ""
-          } had invalid values and were skipped`,
-        });
+        if (warnedCount > 0) {
+          skipped.push({
+            id: matchId,
+            title: assetTitle,
+            reason: `${warnedCount} field${
+              warnedCount !== 1 ? "s" : ""
+            } had invalid values and were skipped`,
+          });
+        }
       }
     } catch (cause) {
       const msg = isLikeShelfError(cause)
