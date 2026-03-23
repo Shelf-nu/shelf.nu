@@ -21,6 +21,7 @@ tags:
     text: "Shelf"
 
 # Verify we're on the login screen
-- assertVisible: "Companion App"
+- assertVisible:
+    id: "email-input"
 
 - takeScreenshot: settings-logout-success

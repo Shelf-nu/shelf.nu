@@ -24,6 +24,6 @@ tags:
 # Verify Quick Actions section and buttons
 - assertVisible: "Quick Actions"
 - assertVisible: "New Asset"
-- assertVisible: "Scan QR"
+- assertVisible: "Scan Code"
 
 - takeScreenshot: auth-login-success
