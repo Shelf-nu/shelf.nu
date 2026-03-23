@@ -152,4 +152,13 @@ describe("resolveTeamMemberName", () => {
       )
     ).toBe("John Doe (john@example.com)");
   });
+
+  it("falls back to teamMember name when user has no name fields", () => {
+    expect(
+      resolveTeamMemberName({
+        name: "Stored Name",
+        user: {},
+      })
+    ).toBe("Stored Name");
+  });
 });

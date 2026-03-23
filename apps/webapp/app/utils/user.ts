@@ -24,7 +24,7 @@ export function resolveUserDisplayName(
   return `${first} ${last}`.trim();
 }
 
-/** Resolves the team member name and inlcudes an email if needed */
+/** Resolves the team member name and includes an email if needed */
 export const resolveTeamMemberName = (
   teamMember: {
     name: string;
@@ -34,12 +34,14 @@ export const resolveTeamMemberName = (
   },
   includeEmail?: boolean
 ): string => {
+  const displayName = teamMember?.user
+    ? resolveUserDisplayName(teamMember.user)
+    : "";
+  const name = displayName || teamMember.name;
+
   if (includeEmail && teamMember?.user?.email) {
-    return `${resolveUserDisplayName(teamMember.user)} (${teamMember?.user
-      ?.email})`;
+    return `${name} (${teamMember.user.email})`;
   }
 
-  return teamMember?.user
-    ? resolveUserDisplayName(teamMember.user)
-    : teamMember.name;
+  return name;
 };
