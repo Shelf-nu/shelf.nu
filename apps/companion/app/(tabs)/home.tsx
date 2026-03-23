@@ -71,6 +71,12 @@ function HomeContent() {
   const hasFetchedRef = useRef(false);
   const lastFetchedAt = useRef(0);
 
+  // Reset cache when org changes so useFocusEffect refetches
+  useEffect(() => {
+    lastFetchedAt.current = 0;
+    hasFetchedRef.current = false;
+  }, [currentOrg?.id]);
+
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;

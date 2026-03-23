@@ -112,6 +112,15 @@ function BookingsListContent() {
   // Refresh on tab focus — skip if data is fresh (< 60s old)
   const hasFetchedBookings = useRef(false);
   const lastFetchedAt = useRef(0);
+
+  // Reset cache when org changes so useFocusEffect refetches
+  useEffect(() => {
+    lastFetchedAt.current = 0;
+    hasFetchedBookings.current = false;
+    setBookings([]);
+    setError(null);
+    nextPage.current = 1;
+  }, [currentOrg?.id]);
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;

@@ -102,6 +102,15 @@ function MyCustodyContent() {
   // Refresh on tab focus — skip if data is fresh (< 60s old)
   const hasFetchedCustody = useRef(false);
   const lastFetchedAt = useRef(0);
+
+  // Reset cache when org changes so useFocusEffect refetches
+  useEffect(() => {
+    lastFetchedAt.current = 0;
+    hasFetchedCustody.current = false;
+    setAssets([]);
+    setError(null);
+    nextPage.current = 1;
+  }, [currentOrg?.id]);
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;

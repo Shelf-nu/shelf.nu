@@ -142,6 +142,15 @@ function AssetsListContent() {
   const hasFetchedAssets = useRef(false);
   const lastFetchedAt = useRef(0);
 
+  // Reset cache when org changes so useFocusEffect refetches
+  useEffect(() => {
+    lastFetchedAt.current = 0;
+    hasFetchedAssets.current = false;
+    setAssets([]);
+    setError(null);
+    nextPage.current = 1;
+  }, [currentOrg?.id]);
+
   // Refresh on search/filter change — resets the stale timer so useFocusEffect picks it up
   const isFirstRender = useRef(true);
   useEffect(() => {

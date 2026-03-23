@@ -104,6 +104,15 @@ function AuditsListContent() {
   // Stale-while-revalidate: skeleton on first load, skip refetch if data is fresh (< 60s old)
   const hasFetchedAudits = useRef(false);
   const lastFetchedAt = useRef(0);
+
+  // Reset cache when org changes so useFocusEffect refetches
+  useEffect(() => {
+    lastFetchedAt.current = 0;
+    hasFetchedAudits.current = false;
+    setAudits([]);
+    setError(null);
+    nextPage.current = 1;
+  }, [currentOrg?.id]);
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
