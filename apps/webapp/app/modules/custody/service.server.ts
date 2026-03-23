@@ -24,6 +24,7 @@ export async function releaseCustody({
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
         custody: true,

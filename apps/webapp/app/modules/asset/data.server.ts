@@ -27,6 +27,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
@@ -178,6 +179,7 @@ export async function simpleModeLoader({
                       id: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -227,8 +229,8 @@ export async function simpleModeLoader({
 
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
+      ? resolveUserDisplayName(user)
+        ? `${resolveUserDisplayName(user)}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
@@ -487,8 +489,8 @@ export async function advancedModeLoader({
 
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
+      ? resolveUserDisplayName(user)
+        ? `${resolveUserDisplayName(user)}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`

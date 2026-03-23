@@ -1,4 +1,5 @@
 import { Container, Head, Html, render, Text } from "@react-email/components";
+import { resolveUserDisplayName } from "~/utils/user";
 import { styles } from "./styles";
 
 /**
@@ -9,10 +10,13 @@ export const changeEmailAddressTextEmail = ({
   user,
 }: {
   otp: string;
-  user: { firstName?: string | null; lastName?: string | null; email: string };
-}) => `Howdy ${user.firstName ? user.firstName : ""} ${
-  user.lastName ? user.lastName : ""
-},
+  user: {
+    firstName?: string | null;
+    lastName?: string | null;
+    displayName?: string | null;
+    email: string;
+  };
+}) => `Howdy ${resolveUserDisplayName(user)},
 
 Your verification code for email change is: ${otp}
 
@@ -27,7 +31,12 @@ function ChangeEmailAddressHtmlEmailTemplate({
   user,
 }: {
   otp: string;
-  user: { firstName?: string | null; lastName?: string | null; email: string };
+  user: {
+    firstName?: string | null;
+    lastName?: string | null;
+    displayName?: string | null;
+    email: string;
+  };
 }) {
   return (
     <Html>
@@ -38,11 +47,7 @@ function ChangeEmailAddressHtmlEmailTemplate({
       <Container style={{ maxWidth: "100%" }}>
         <div style={{ paddingTop: "8px" }}>
           <Text style={{ ...styles.p }}>
-            Howdy{" "}
-            {`${user.firstName ? user.firstName : ""} ${
-              user.lastName ? user.lastName : ""
-            }`}
-            ,
+            Howdy {resolveUserDisplayName(user)},
           </Text>
           <Text style={{ ...styles.p }}>
             Your verification code for email change is:
@@ -75,5 +80,10 @@ function ChangeEmailAddressHtmlEmailTemplate({
  */
 export const changeEmailAddressHtmlEmail = (
   otp: string,
-  user: { firstName?: string | null; lastName?: string | null; email: string }
+  user: {
+    firstName?: string | null;
+    lastName?: string | null;
+    displayName?: string | null;
+    email: string;
+  }
 ) => render(<ChangeEmailAddressHtmlEmailTemplate otp={otp} user={user} />);

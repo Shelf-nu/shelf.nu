@@ -7,6 +7,7 @@ import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
 import { CategoryBadge } from "../assets/category-badge";
@@ -167,9 +168,9 @@ const AuditPDFContent = ({
 
   // Format creator name from user data or fallback to email
   const creatorName =
-    session.createdBy?.firstName && session.createdBy?.lastName
-      ? `${session.createdBy.firstName} ${session.createdBy.lastName}`
-      : session.createdBy?.email || "Unknown";
+    resolveUserDisplayName(session.createdBy) ||
+    session.createdBy?.email ||
+    "Unknown";
 
   // Format assignee names as comma-separated list
   const assigneeNames =
@@ -177,9 +178,7 @@ const AuditPDFContent = ({
       ? session.assignments
           .map((a) => {
             const user = a.user;
-            return user.firstName && user.lastName
-              ? `${user.firstName} ${user.lastName}`
-              : user.email;
+            return resolveUserDisplayName(user) || user.email;
           })
           .join(", ")
       : "Not assigned";
@@ -539,9 +538,7 @@ const AuditPDFContent = ({
             {activityNotes.map((note, index) => {
               // Format user name from note data
               const userName = note.user
-                ? note.user.firstName && note.user.lastName
-                  ? `${note.user.firstName} ${note.user.lastName}`
-                  : note.user.email
+                ? resolveUserDisplayName(note.user) || note.user.email
                 : "System";
 
               // Note content is already sanitized server-side to remove markdoc tags

@@ -5,6 +5,7 @@ export const USER_WITH_SSO_DETAILS_SELECT = {
   email: true,
   firstName: true,
   lastName: true,
+  displayName: true,
   sso: true,
   userOrganizations: {
     select: {

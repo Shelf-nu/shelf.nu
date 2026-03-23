@@ -13,6 +13,7 @@ import {
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
+import { resolveUserDisplayName } from "~/utils/user";
 import { CustomEmailFooter } from "./components/custom-footer";
 import { AdminFooter, UserFooter } from "./components/footers";
 import { LogoForEmail } from "./logo";
@@ -87,7 +88,7 @@ export function BookingUpdatesEmailTemplate({
             <span style={{ color: "#101828", fontWeight: "600" }}>
               Custodian:
             </span>{" "}
-            {`${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+            {resolveUserDisplayName(booking.custodianUser) ||
               booking.custodianTeamMember?.name}
           </p>
           <p style={{ ...styles.p }}>

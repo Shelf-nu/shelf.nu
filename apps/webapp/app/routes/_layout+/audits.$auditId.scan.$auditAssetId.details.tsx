@@ -41,6 +41,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -125,6 +126,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             profilePicture: true,
           },
@@ -216,6 +218,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               email: true,
               profilePicture: true,
             },
@@ -544,12 +547,7 @@ export default function AuditAssetDetails() {
         type: note.type,
         user: {
           id: note.user?.id ?? "",
-          name:
-            `${note.user?.firstName || ""} ${
-              note.user?.lastName || ""
-            }`.trim() ||
-            note.user?.email ||
-            "",
+          name: resolveUserDisplayName(note.user) || note.user?.email || "",
           img: note.user?.profilePicture ?? null,
         },
         needsServerSync: false,

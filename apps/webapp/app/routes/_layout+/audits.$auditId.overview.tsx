@@ -58,6 +58,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 const label = "Audit";
 
@@ -416,10 +417,9 @@ export default function AuditOverview() {
                 <div className="mt-1 w-3/5 text-[14px] text-gray-600 md:mt-0">
                   <UserBadge
                     name={
-                      session.createdBy?.firstName &&
-                      session.createdBy?.lastName
-                        ? `${session.createdBy.firstName} ${session.createdBy.lastName}`
-                        : session.createdBy?.email || "Unknown"
+                      resolveUserDisplayName(session.createdBy) ||
+                      session.createdBy?.email ||
+                      "Unknown"
                     }
                     img={
                       session.createdBy?.profilePicture ||
@@ -439,10 +439,9 @@ export default function AuditOverview() {
                         <UserBadge
                           key={assignment.id}
                           name={
-                            assignment.user?.firstName &&
-                            assignment.user?.lastName
-                              ? `${assignment.user.firstName} ${assignment.user.lastName}`
-                              : assignment.user?.email || "Unknown"
+                            resolveUserDisplayName(assignment.user) ||
+                            assignment.user?.email ||
+                            "Unknown"
                           }
                           img={
                             assignment.user?.profilePicture ||

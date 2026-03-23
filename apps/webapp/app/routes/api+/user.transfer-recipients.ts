@@ -10,6 +10,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -46,6 +47,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
           },
         },
@@ -55,7 +57,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     return data(
       userOrgs.map((uo) => ({
         id: uo.user.id,
-        name: `${uo.user.firstName ?? ""} ${uo.user.lastName ?? ""}`.trim(),
+        name: resolveUserDisplayName(uo.user),
         email: uo.user.email,
         isOwner: uo.roles.includes(OrganizationRoles.OWNER),
       }))

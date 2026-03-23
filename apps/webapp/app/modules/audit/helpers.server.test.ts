@@ -66,6 +66,7 @@ describe("audit helpers", () => {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       });
 
@@ -207,6 +208,7 @@ describe("audit helpers", () => {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       });
 
@@ -386,6 +388,7 @@ describe("audit helpers", () => {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       });
 
@@ -473,6 +476,7 @@ describe("audit helpers", () => {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       });
 
@@ -816,6 +820,7 @@ describe("audit helpers", () => {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       });
 

@@ -171,6 +171,7 @@ describe("location note service", () => {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },

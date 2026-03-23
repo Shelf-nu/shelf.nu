@@ -577,6 +577,7 @@ describe("getPartialCheckinHistory", () => {
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
           },
         },
