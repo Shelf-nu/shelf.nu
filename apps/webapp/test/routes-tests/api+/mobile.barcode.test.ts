@@ -29,6 +29,14 @@ vitest.mock("react-router", async () => {
 vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn(),
   requireOrganizationAccess: vitest.fn(),
+  MOBILE_ASSET_SELECT: {
+    id: true,
+    title: true,
+    status: true,
+    mainImage: true,
+    category: { select: { name: true } },
+    location: { select: { name: true } },
+  },
 }));
 
 // why: external database — we don't want to hit the real database in tests

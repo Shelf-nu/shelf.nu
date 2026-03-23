@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Animated, Platform } from "react-native";
 
 // ── Constants ────────────────────────────────────────────
@@ -28,6 +28,12 @@ export function useToastNotification(): ToastNotificationResult {
   const [toast, setToast] = useState<ToastData | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const showToast = useCallback(
     (type: ScanResult, title: string, subtitle: string) => {

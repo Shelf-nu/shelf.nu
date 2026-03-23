@@ -14,12 +14,7 @@ import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  api,
-  type BookingDetail,
-  type BookingAsset,
-  type BookingDetailResponse,
-} from "@/lib/api";
+import { api, type BookingDetail, type BookingAsset } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
   fontSize,
@@ -113,7 +108,7 @@ export default function BookingDetailScreen() {
           text: "Check Out",
           onPress: async () => {
             setIsActioning(true);
-            const { data, error: err } = await api.checkoutBooking(
+            const { error: err } = await api.checkoutBooking(
               currentOrg.id,
               booking.id,
               getTimeZone()
@@ -144,7 +139,7 @@ export default function BookingDetailScreen() {
           text: "Check In All",
           onPress: async () => {
             setIsActioning(true);
-            const { data, error: err } = await api.checkinBooking(
+            const { error: err } = await api.checkinBooking(
               currentOrg.id,
               booking.id,
               getTimeZone()

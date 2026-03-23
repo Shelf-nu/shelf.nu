@@ -1,7 +1,7 @@
 import { View, Text, TextInput, Switch } from "react-native";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, borderRadius } from "@/lib/constants";
 
 type CustomFieldInputProps = {
   field: {

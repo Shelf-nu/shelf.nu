@@ -26,17 +26,22 @@ export function useCustodyActions({
   const performAssign = async (custodianId: string) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
-    const { error: err } = await api.assignCustody(
-      currentOrg.id,
-      asset.id,
-      custodianId
-    );
-    if (err) Alert.alert("Error", err);
-    else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await fetchAsset();
+    try {
+      const { error: err } = await api.assignCustody(
+        currentOrg.id,
+        asset.id,
+        custodianId
+      );
+      if (err) Alert.alert("Error", err);
+      else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await fetchAsset();
+      }
+    } catch {
+      Alert.alert("Error", "Something went wrong");
+    } finally {
+      setIsActionLoading(false);
     }
-    setIsActionLoading(false);
   };
 
   const handleAssignCustody = (member: TeamMember) => {
@@ -59,13 +64,18 @@ export function useCustodyActions({
   const performRelease = async () => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
-    const { error: err } = await api.releaseCustody(currentOrg.id, asset.id);
-    if (err) Alert.alert("Error", err);
-    else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await fetchAsset();
+    try {
+      const { error: err } = await api.releaseCustody(currentOrg.id, asset.id);
+      if (err) Alert.alert("Error", err);
+      else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await fetchAsset();
+      }
+    } catch {
+      Alert.alert("Error", "Something went wrong");
+    } finally {
+      setIsActionLoading(false);
     }
-    setIsActionLoading(false);
   };
 
   const handleReleaseCustody = () => {

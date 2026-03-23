@@ -20,7 +20,6 @@ import {
   type AuditDetailResponse,
   type AuditExpectedAsset,
   type AuditScanData,
-  type AuditStatus,
   type AuditAssetStatus,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";

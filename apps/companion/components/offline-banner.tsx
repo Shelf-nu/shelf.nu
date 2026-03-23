@@ -8,7 +8,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useReducedMotion } from "@/lib/a11y";
 
-const useStyles = createStyles((colors, shadows) => ({
+const useStyles = createStyles((colors) => ({
   banner: {
     position: "absolute",
     top: 0,

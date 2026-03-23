@@ -1,6 +1,5 @@
 import { View, Animated } from "react-native";
 import { createStyles } from "@/lib/create-styles";
-import { borderRadius } from "@/lib/constants";
 
 const FRAME_SIZE = 240;
 

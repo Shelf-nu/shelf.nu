@@ -24,11 +24,7 @@ try {
 } catch {
   // Will render graceful fallback instead of QR code
 }
-import {
-  api,
-  type AssetDetail,
-  type Location as LocationType,
-} from "@/lib/api";
+import { api, type Location as LocationType } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
   fontSize,
@@ -60,7 +56,7 @@ export default function AssetDetailScreen() {
   // Asset data
   const {
     asset,
-    setAsset,
+    setAsset: _setAsset,
     isLoading,
     isRefreshing,
     error,

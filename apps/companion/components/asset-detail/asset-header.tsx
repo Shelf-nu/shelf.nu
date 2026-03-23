@@ -36,7 +36,7 @@ export const AssetHeader = memo(function AssetHeader({
           onPress={onImagePress}
           activeOpacity={0.9}
           accessibilityLabel="View full-size image"
-          accessibilityRole="imagebutton"
+          accessibilityRole="button"
         >
           <Image
             source={{ uri: asset.mainImage }}

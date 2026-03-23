@@ -50,7 +50,7 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
               onPress={() => handlePreviewImage(item)}
               activeOpacity={0.7}
               accessibilityLabel={`View larger image of ${item.name}`}
-              accessibilityRole="imagebutton"
+              accessibilityRole="button"
             >
               <Image
                 source={{ uri: item.thumbnailImage }}

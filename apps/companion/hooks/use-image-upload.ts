@@ -86,21 +86,25 @@ export function useImageUpload({
     const pickedImage = result.assets[0];
     setIsUploadingImage(true);
 
-    const { error: uploadErr } = await api.updateImage(
-      orgId,
-      assetId,
-      pickedImage.uri,
-      pickedImage.mimeType || "image/jpeg"
-    );
+    try {
+      const { error: uploadErr } = await api.updateImage(
+        orgId,
+        assetId,
+        pickedImage.uri,
+        pickedImage.mimeType || "image/jpeg"
+      );
 
-    if (uploadErr) {
-      Alert.alert("Upload Failed", uploadErr);
-    } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await fetchAsset();
+      if (uploadErr) {
+        Alert.alert("Upload Failed", uploadErr);
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await fetchAsset();
+      }
+    } catch {
+      Alert.alert("Error", "Something went wrong");
+    } finally {
+      setIsUploadingImage(false);
     }
-
-    setIsUploadingImage(false);
   };
 
   const handleImagePress = () => {

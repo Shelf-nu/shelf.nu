@@ -101,55 +101,62 @@ export function useEditAssetForm(
   useEffect(() => {
     if (!assetId) return;
     setIsLoadingAsset(true);
-    api.asset(assetId).then(({ data, error }) => {
-      if (error || !data) {
-        setLoadError(error || "Failed to load asset");
-      } else {
-        const a = data.asset;
-        setOriginalAsset(a);
-        setTitle(a.title);
-        setDescription(a.description || "");
-        if (a.category) {
-          setSelectedCategory({
-            id: a.category.id,
-            name: a.category.name,
-            color: a.category.color,
-            assetCount: 0,
-          });
-        }
-        if (a.location) {
-          setSelectedLocation({
-            id: a.location.id,
-            name: a.location.name,
-            description: null,
-            image: null,
-            parentId: null,
-          });
-        }
-        if (a.valuation != null && a.valuation > 0) {
-          setValuation(String(a.valuation));
-        }
-
-        // Populate custom fields
-        if (a.customFields?.length) {
-          const cfStates: CustomFieldState[] = a.customFields
-            .filter((cf) => cf.customField.active !== false)
-            .map((cf) => {
-              const rawVal = extractCustomFieldValue(cf);
-              return {
-                id: cf.customField.id,
-                name: cf.customField.name,
-                type: cf.customField.type,
-                helpText: cf.customField.helpText,
-                value: rawVal,
-                originalValue: rawVal,
-              };
+    api
+      .asset(assetId)
+      .then(({ data, error }) => {
+        if (error || !data) {
+          setLoadError(error || "Failed to load asset");
+        } else {
+          const a = data.asset;
+          setOriginalAsset(a);
+          setTitle(a.title);
+          setDescription(a.description || "");
+          if (a.category) {
+            setSelectedCategory({
+              id: a.category.id,
+              name: a.category.name,
+              color: a.category.color,
+              assetCount: 0,
             });
-          setCustomFields(cfStates);
+          }
+          if (a.location) {
+            setSelectedLocation({
+              id: a.location.id,
+              name: a.location.name,
+              description: null,
+              image: null,
+              parentId: null,
+            });
+          }
+          if (a.valuation != null && a.valuation > 0) {
+            setValuation(String(a.valuation));
+          }
+
+          // Populate custom fields
+          if (a.customFields?.length) {
+            const cfStates: CustomFieldState[] = a.customFields
+              .filter((cf) => cf.customField.active !== false)
+              .map((cf) => {
+                const rawVal = extractCustomFieldValue(cf);
+                return {
+                  id: cf.customField.id,
+                  name: cf.customField.name,
+                  type: cf.customField.type,
+                  helpText: cf.customField.helpText,
+                  value: rawVal,
+                  originalValue: rawVal,
+                };
+              });
+            setCustomFields(cfStates);
+          }
         }
-      }
-      setIsLoadingAsset(false);
-    });
+      })
+      .catch(() => {
+        setLoadError("Failed to load asset");
+      })
+      .finally(() => {
+        setIsLoadingAsset(false);
+      });
   }, [assetId]);
 
   // ── Load categories & locations ─────────────────

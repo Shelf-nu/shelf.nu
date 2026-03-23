@@ -12,7 +12,7 @@ import { useReducedMotion } from "@/lib/a11y";
 
 const ShimmerContext = createContext<Animated.Value | null>(null);
 
-const useStyles = createStyles((colors, shadows) => ({
+const useStyles = createStyles((colors) => ({
   block: {
     backgroundColor: colors.border,
     borderRadius: borderRadius.sm,

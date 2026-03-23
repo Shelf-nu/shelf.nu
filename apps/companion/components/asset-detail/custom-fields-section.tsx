@@ -1,7 +1,6 @@
 import { memo } from "react";
 import { View, Text } from "react-native";
 import type { AssetDetail } from "@/lib/api";
-import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius, formatDate } from "@/lib/constants";
 
@@ -38,7 +37,7 @@ function formatCustomFieldValue(cf: CustomField): string {
 
 export const CustomFieldsSection = memo(function CustomFieldsSection({
   customFields,
-  currency,
+  _currency,
 }: CustomFieldsSectionProps) {
   const styles = useStyles();
 

@@ -52,13 +52,18 @@ export function useScanQueue({
         const retries = (entry.retryCount ?? 0) + 1;
         if (retries >= MAX_QUEUE_RETRIES) {
           // Max retries reached — skip this item, move to next
-          // It stays in persisted queue for recovery on next launch
           scanQueueRef.current.shift();
+          saveAuditScanState(
+            entry.auditSessionId,
+            scannedItemsRef.current,
+            scanQueueRef.current
+          );
           if (__DEV__)
             console.warn(
               `[AuditQueue] Giving up on scan after ${MAX_QUEUE_RETRIES} retries:`,
               entry.assetId
             );
+          continue;
         } else {
           // Move to end of queue with incremented retry count
           scanQueueRef.current.shift();
@@ -66,8 +71,8 @@ export function useScanQueue({
           // Schedule retry with backoff
           const delay = RETRY_DELAYS[retries - 1] ?? 15_000;
           retryTimerRef.current = setTimeout(() => processQueue(), delay);
+          break;
         }
-        break;
       }
     }
 

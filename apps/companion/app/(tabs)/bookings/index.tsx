@@ -12,7 +12,7 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type BookingListItem, type BookingStatus } from "@/lib/api";
+import { api, type BookingListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
   fontSize,
@@ -405,7 +405,7 @@ function BookingsListContent() {
   );
 }
 
-const useStyles = createStyles((colors, shadows) => ({
+const useStyles = createStyles((colors) => ({
   flexFill: {
     flex: 1,
   },
