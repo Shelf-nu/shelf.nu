@@ -269,10 +269,10 @@ export function BookingUpdatesEmailTemplate({
           footerText={booking.organization.customEmailFooter}
         />
 
-        {recipientReason ? (
+        {recipientReason && recipientEmail ? (
           <NotificationReasonFooter
             booking={booking}
-            recipientEmail={recipientEmail || ""}
+            recipientEmail={recipientEmail}
             reason={recipientReason}
           />
         ) : isAdminEmail ? (

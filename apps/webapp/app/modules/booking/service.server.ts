@@ -859,7 +859,7 @@ export async function reserveBooking({
   description,
   organizationId,
   hints,
-  isSelfServiceOrBase: _isSelfServiceOrBase,
+  isSelfServiceOrBase,
   tags,
   userId,
 }: Partial<
@@ -1047,12 +1047,15 @@ export async function reserveBooking({
       });
     }
 
-    // Resolve notification recipients and send emails
+    // Resolve notification recipients and send emails.
+    // Pass isSelfServiceOrBase so admin broadcast only fires for
+    // reservations made by base/self-service users (pickup requests).
     const recipients = await getBookingNotificationRecipients({
       booking: bookingFound,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
+      isSelfServiceOrBase,
     });
 
     if (recipients.length > 0) {

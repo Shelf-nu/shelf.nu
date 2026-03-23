@@ -102,12 +102,18 @@ export async function getBookingNotificationRecipients({
   organizationId,
   editorUserId,
   isScheduledJob,
+  isSelfServiceOrBase,
 }: {
   booking: BookingForEmail;
   eventType: BookingEventType;
   organizationId: string;
   editorUserId?: string;
   isScheduledJob?: boolean;
+  /** When true, the booking was created by a base/self-service user.
+   *  Admin broadcast only fires for reservations made by these roles
+   *  (preserving current behavior where admins are alerted to "pickup"
+   *  requests from lower-role users). */
+  isSelfServiceOrBase?: boolean;
 }): Promise<NotificationRecipient[]> {
   try {
     const recipients = new Map<string, NotificationRecipient>();
@@ -140,10 +146,15 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 4. Notify admins only on new reservations — other event types
-    //    (checkin, cancel, etc.) don't trigger admin notifications to
-    //    avoid excessive email volume for admin users.
-    if (settings.notifyAdminsOnNewBooking && eventType === "RESERVATION") {
+    // 4. Notify admins only on reservation requests from base/self-service
+    //    users. This is the "pickup" broadcast — admins are alerted so someone
+    //    can handle the request. Admins reserving their own bookings don't
+    //    trigger this broadcast (preserving current behavior).
+    if (
+      settings.notifyAdminsOnNewBooking &&
+      eventType === "RESERVATION" &&
+      isSelfServiceOrBase
+    ) {
       const admins = await getOrganizationAdminsForNotification({
         organizationId,
       });

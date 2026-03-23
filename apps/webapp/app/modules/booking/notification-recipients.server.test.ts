@@ -176,6 +176,7 @@ describe("getBookingNotificationRecipients", () => {
       booking,
       eventType: "RESERVATION",
       organizationId: "org-1",
+      isSelfServiceOrBase: true,
     });
 
     const adminRecipients = recipients.filter((r) => r.reason === "admin");
@@ -204,6 +205,25 @@ describe("getBookingNotificationRecipients", () => {
       booking,
       eventType: "CHECKIN",
       organizationId: "org-1",
+    });
+
+    expect(mockedGetAdmins).not.toHaveBeenCalled();
+    const adminRecipients = recipients.filter((r) => r.reason === "admin");
+    expect(adminRecipients).toHaveLength(0);
+  });
+
+  it("excludes admins for RESERVATION when custodian is admin (not self-service)", async () => {
+    mockedGetSettings.mockResolvedValue({
+      ...defaultSettings(),
+      notifyAdminsOnNewBooking: true,
+    });
+    const booking = buildMockBooking();
+
+    const recipients = await getBookingNotificationRecipients({
+      booking,
+      eventType: "RESERVATION",
+      organizationId: "org-1",
+      isSelfServiceOrBase: false,
     });
 
     expect(mockedGetAdmins).not.toHaveBeenCalled();

@@ -9,10 +9,9 @@ import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
  * differ from the full Prisma model shape. Deriving from the loader ensures
  * type-safety matches what the client actually receives.
  */
+type LayoutData = ReturnType<typeof useRouteLoaderData<LayoutLoaderResponse>>;
 type BookingSettingsLoaderData = NonNullable<
-  NonNullable<
-    ReturnType<typeof useRouteLoaderData<LayoutLoaderResponse>>
-  >["bookingSettings"]
+  NonNullable<LayoutData>["bookingSettings"]
 >;
 
 /**

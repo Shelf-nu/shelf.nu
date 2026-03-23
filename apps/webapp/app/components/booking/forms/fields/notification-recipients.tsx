@@ -96,31 +96,34 @@ export function NotificationRecipientsField({
   //   4. Per-booking recipients — from the multi-select (defaultSelected)
   const previewRecipients = useMemo(() => {
     const recipients: Array<{ name: string; reason: string }> = [];
-    const seen = new Set<string>();
+    // Deduplicate by stable team member ID (not display name) to avoid
+    // collapsing different people who share the same formatted name
+    const seenIds = new Set<string>();
 
     // Custodian is always notified (this is a system-level guarantee)
+    // Uses name string as key since we don't have custodian's TM ID here
     if (custodianName) {
       recipients.push({ name: custodianName, reason: "custodian" });
-      seen.add(custodianName);
     }
 
     // Creator — only shown when the workspace setting `notifyBookingCreator` is on
     if (
       bookingSettings?.notifyBookingCreator &&
       creatorName &&
-      !seen.has(creatorName)
+      creatorName !== custodianName
     ) {
       recipients.push({ name: creatorName, reason: "creator" });
-      seen.add(creatorName);
     }
 
     // Always-notify team members — configured at the workspace level in Settings > Bookings
     if (bookingSettings?.alwaysNotifyTeamMembers) {
       for (const tm of bookingSettings.alwaysNotifyTeamMembers) {
-        const name = formatTeamMemberLabel(tm);
-        if (!seen.has(name)) {
-          recipients.push({ name, reason: "always_notify" });
-          seen.add(name);
+        if (!seenIds.has(tm.id)) {
+          recipients.push({
+            name: formatTeamMemberLabel(tm),
+            reason: "always_notify",
+          });
+          seenIds.add(tm.id);
         }
       }
     }
@@ -128,11 +131,12 @@ export function NotificationRecipientsField({
     // Per-booking recipients — manually added to this specific booking via the multi-select
     if (defaultSelected) {
       for (const tm of defaultSelected) {
-        const name = formatTeamMemberLabel(tm);
-        if (!seen.has(name)) {
-          recipients.push({ name, reason: "booking_recipient" });
-          seen.add(name);
-        }
+        if (seenIds.has(tm.id)) continue;
+        recipients.push({
+          name: formatTeamMemberLabel(tm),
+          reason: "booking_recipient",
+        });
+        seenIds.add(tm.id);
       }
     }
 
