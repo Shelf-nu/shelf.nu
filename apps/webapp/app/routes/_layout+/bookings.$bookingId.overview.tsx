@@ -46,6 +46,7 @@ import {
   reserveBooking,
   revertBookingToDraft,
   updateBasicBooking,
+  updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -129,7 +130,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     // Get the booking with basic asset information
-    const [booking, tags] = await Promise.all([
+    const [booking, tags, teamMembersForNotify] = await Promise.all([
       getBooking({
         id: bookingId,
         organizationId: organizationId,
@@ -144,6 +145,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               profilePicture: true,
             },
           },
+          // Include per-booking notification recipients so the edit form can
+          // pre-populate the NotificationRecipientsField multi-select with
+          // previously selected team members.
+          notificationRecipients: {
+            select: {
+              id: true,
+              name: true,
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
         },
       }),
       db.tag.findMany({
@@ -156,6 +174,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
+      // Fetch team members for the per-booking notification recipients field.
+      // Skipped for self-service/base users since they cannot see or modify
+      // notification recipients. Filters to members with a linked user account
+      // so only those who can receive emails are shown.
+      isSelfServiceOrBase
+        ? Promise.resolve([])
+        : db.teamMember.findMany({
+            where: { organizationId, deletedAt: null, user: { isNot: null } },
+            select: {
+              id: true,
+              name: true,
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+            orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+          }),
     ]);
     // DEPRECATED for now
     //  * if the booking is ongoing and there is no status param, we need to set it to
@@ -484,6 +524,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         partialCheckinDetails,
         // Asset search tooltip
         searchFieldLabel: "Search by asset name",
+        teamMembersForNotify,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -633,7 +674,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       const deletedBooking = await deleteBooking(
         { id, organizationId },
-        getClientHint(request)
+        getClientHint(request),
+        userId
       );
 
       const actor = wrapUserLinkForNote({
@@ -721,6 +763,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
         });
 
+        // Sync per-booking notification recipients on save.
+        // Replaces the full set of recipients so removals are handled
+        // automatically. Only admin/owner users can modify recipients.
+        if (isAdminOrOwner) {
+          const recipientIdsRaw = formData.get("notificationRecipientIds") as
+            | string
+            | null;
+          const recipientIds = recipientIdsRaw
+            ? recipientIdsRaw.split(",").filter(Boolean)
+            : [];
+          await updateBookingNotificationRecipients({
+            bookingId: id,
+            organizationId,
+            teamMemberIds: recipientIds,
+          });
+        }
+
         sendNotification({
           title: "Booking saved",
           message: "Your booking has been saved successfully",
@@ -765,6 +824,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               zone: hints.timeZone,
             }).toJSDate()
           : undefined;
+
+        // Sync per-booking notification recipients BEFORE reserving so the
+        // reservation email (which triggers immediately) includes the correct
+        // set of recipients. This must happen before `reserveBooking()`.
+        if (isAdminOrOwner) {
+          const recipientIdsRaw = formData.get("notificationRecipientIds") as
+            | string
+            | null;
+          const recipientIds = recipientIdsRaw
+            ? recipientIdsRaw.split(",").filter(Boolean)
+            : [];
+          await updateBookingNotificationRecipients({
+            bookingId: id,
+            organizationId,
+            teamMemberIds: recipientIds,
+          });
+        }
 
         const booking = await reserveBooking({
           id,

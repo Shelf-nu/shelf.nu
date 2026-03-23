@@ -9,6 +9,7 @@ import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { BOOKING_INCLUDE_FOR_EMAIL } from "./constants";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
 
 type BasicEmailContentArgs = {
   bookingName: string;
@@ -96,38 +97,74 @@ export const checkinReminderEmailContent = (args: BasicEmailContentArgs) =>
     )}.`,
   });
 
+/**
+ * Sends a check-in reminder email to all resolved notification recipients.
+ *
+ * Unlike the original implementation (which sent only to the custodian),
+ * this function now resolves the full recipient list via
+ * `getBookingNotificationRecipients()` and sends a personalized email
+ * to each recipient with their specific reason footer.
+ *
+ * Called from the `checkinReminder` scheduled job handler in
+ * `worker.server.ts`, which handles the booking status guard.
+ *
+ * @param booking - The booking with all email-required relations included
+ * @param assetCount - Number of assets in the booking (for display)
+ * @param hints - Client hints for date/time formatting
+ * @param organizationId - Used to resolve org-level notification settings
+ */
 export async function sendCheckinReminder(
   booking: BookingForEmail,
   assetCount: number,
-  hints: ClientHint
+  hints: ClientHint,
+  organizationId: string
 ) {
-  const html = await bookingUpdatesTemplateString({
+  const recipients = await getBookingNotificationRecipients({
     booking,
-    heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
-      new Date(booking.to!),
-      new Date()
-    )}.`,
-    assetCount,
-    hints,
+    eventType: "CHECKIN_REMINDER",
+    organizationId,
+    isScheduledJob: true, // Don't exclude editor for scheduled reminders
   });
 
-  sendEmail({
-    to: booking.custodianUser!.email,
-    subject: `🔔 Checkin reminder (${booking.name}) - shelf.nu`,
-    text: checkinReminderEmailContent({
-      hints,
-      bookingName: booking.name,
-      assetsCount: assetCount,
-      custodian:
-        `${booking.custodianUser!.firstName} ${booking.custodianUser
-          ?.lastName}` || (booking.custodianTeamMember?.name as string),
-      from: booking.from!,
-      to: booking.to!,
-      bookingId: booking.id,
-      customEmailFooter: booking.organization.customEmailFooter,
-    }),
-    html,
+  if (recipients.length === 0) return;
+
+  const custodian =
+    `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+    (booking.custodianTeamMember?.name as string);
+
+  const subject = `🔔 Checkin reminder (${booking.name}) - shelf.nu`;
+
+  const text = checkinReminderEmailContent({
+    hints,
+    bookingName: booking.name,
+    assetsCount: assetCount,
+    custodian,
+    from: booking.from!,
+    to: booking.to!,
+    bookingId: booking.id,
+    customEmailFooter: booking.organization.customEmailFooter,
   });
+
+  for (const recipient of recipients) {
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
+        new Date(booking.to!),
+        new Date()
+      )}.`,
+      assetCount,
+      hints,
+      recipientReason: recipient.reason,
+      recipientEmail: recipient.email,
+    });
+
+    sendEmail({
+      to: recipient.email,
+      subject,
+      text,
+      html,
+    });
+  }
 }
 
 /**
@@ -218,11 +255,19 @@ export const bookingUpdatedEmailContent = (
   });
 
 /**
- * Sends a "Booking Updated" email to the custodian(s).
+ * Sends a "Booking Updated" email to all resolved notification recipients.
  *
- * Skips sending if the custodian is the editor,
- * or if there are no changes, or if custodian has no email.
- * On custodian change, notifies both old and new custodians.
+ * Resolves recipients via `getBookingNotificationRecipients()` with the
+ * `UPDATE` event type, which excludes the editing user from the list.
+ * Each recipient gets a personalized email with their reason footer.
+ *
+ * **Special case — custodian change:** When `oldCustodianEmail` is provided,
+ * the old custodian may no longer appear in the resolved recipient list
+ * (since they're no longer the booking's custodian). This function
+ * explicitly checks and sends them a notification if they weren't already
+ * included and aren't the editor.
+ *
+ * Skips sending entirely if `changes` is empty (no meaningful update).
  */
 export async function sendBookingUpdatedEmail({
   bookingId,
@@ -234,12 +279,9 @@ export async function sendBookingUpdatedEmail({
 }: {
   bookingId: string;
   organizationId: string;
-  /** The user who made the edit */
   userId: string;
-  /** Plain-text change descriptions */
   changes: string[];
   hints: ClientHint;
-  /** Email of old custodian (for custodian change scenarios) */
   oldCustodianEmail?: string;
 }) {
   try {
@@ -271,42 +313,61 @@ export async function sendBookingUpdatedEmail({
 
     const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
 
-    const html = await bookingUpdatesTemplateString({
+    // Resolve all recipients
+    const recipients = await getBookingNotificationRecipients({
       booking,
-      heading: `Your booking "${booking.name}" has been updated`,
-      assetCount: booking._count.assets,
-      hints,
-      changes,
+      eventType: "UPDATE",
+      organizationId,
+      editorUserId: userId,
     });
 
-    // Send to current custodian if they have an email
-    // and they're not the one who made the edit
-    if (booking.custodianUser?.email && booking.custodianUser.id !== userId) {
+    // Send to all resolved recipients
+    for (const recipient of recipients) {
+      const html = await bookingUpdatesTemplateString({
+        booking,
+        heading: `Your booking "${booking.name}" has been updated`,
+        assetCount: booking._count.assets,
+        hints,
+        changes,
+        recipientReason: recipient.reason,
+        recipientEmail: recipient.email,
+      });
+
       sendEmail({
-        to: booking.custodianUser.email,
+        to: recipient.email,
         subject,
         text,
         html,
       });
     }
 
-    // Send to old custodian if provided and they're not the editor
-    // (the old custodian's userId was already disconnected,
-    // so we use the email directly)
+    // Special case: if custodian changed, notify the OLD custodian too
+    // (they might not be in the recipient list anymore since they're no longer the custodian)
     if (oldCustodianEmail) {
-      // Look up the old custodian's user to check if they are the editor
-      const oldCustodianUser = await db.user.findUnique({
-        where: { email: oldCustodianEmail },
-        select: { id: true },
-      });
-
-      if (!oldCustodianUser || oldCustodianUser.id !== userId) {
-        sendEmail({
-          to: oldCustodianEmail,
-          subject,
-          text,
-          html,
+      const alreadySent = recipients.some((r) => r.email === oldCustodianEmail);
+      if (!alreadySent) {
+        // Check the old custodian is not the editor
+        const oldCustodianUser = await db.user.findUnique({
+          where: { email: oldCustodianEmail },
+          select: { id: true },
         });
+
+        if (!oldCustodianUser || oldCustodianUser.id !== userId) {
+          const html = await bookingUpdatesTemplateString({
+            booking,
+            heading: `Your booking "${booking.name}" has been updated`,
+            assetCount: booking._count.assets,
+            hints,
+            changes,
+          });
+
+          sendEmail({
+            to: oldCustodianEmail,
+            subject,
+            text,
+            html,
+          });
+        }
       }
     }
   } catch (cause) {

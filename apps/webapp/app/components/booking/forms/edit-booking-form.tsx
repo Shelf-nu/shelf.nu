@@ -27,6 +27,8 @@ import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
+import { NotificationRecipientsField } from "./fields/notification-recipients";
+import type { NotificationRecipientTeamMember } from "./fields/notification-recipients";
 import TagField from "./fields/tag-field";
 import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-positioned-header-actions";
 import { Button } from "../../shared/button";
@@ -57,6 +59,9 @@ type BookingFormData = {
     description: string | null;
     status: BookingStatus;
     tags: Pick<Tag, "id" | "name">[];
+    notificationRecipients?: NotificationRecipientTeamMember[];
+    custodianName?: string;
+    creatorName?: string;
   };
 
   /**
@@ -78,11 +83,19 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     description,
     status,
     tags,
+    notificationRecipients,
+    custodianName,
+    creatorName,
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, teamMembersForForm, userId, currentOrganization } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    teamMembers,
+    teamMembersForForm,
+    userId,
+    currentOrganization,
+    teamMembersForNotify,
+  } = useLoaderData<BookingPageLoaderData>();
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -438,6 +451,24 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 />
               </div>
             </div>
+          </div>
+          <div className="overflow-visible">
+            <NotificationRecipientsField
+              key={`${id}-notification-recipients`}
+              teamMembers={teamMembersForNotify ?? []}
+              defaultSelected={notificationRecipients}
+              disabled={
+                disabled ||
+                isLoadingWorkingHours ||
+                bookingStatus?.isCompleted ||
+                bookingStatus?.isCancelled ||
+                bookingStatus?.isArchived ||
+                !canSeeActions
+              }
+              isAdminOrOwner={isAdministratorOrOwner}
+              custodianName={custodianName}
+              creatorName={creatorName}
+            />
           </div>
         </div>
       </div>

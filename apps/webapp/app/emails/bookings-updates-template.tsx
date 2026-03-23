@@ -14,7 +14,11 @@ import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { CustomEmailFooter } from "./components/custom-footer";
-import { AdminFooter, UserFooter } from "./components/footers";
+import {
+  AdminFooter,
+  NotificationReasonFooter,
+  UserFooter,
+} from "./components/footers";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 import type { BookingForEmail } from "./types";
@@ -30,6 +34,21 @@ interface Props {
   changes?: string[];
   /** Only provided for reservation emails */
   assets?: ReservationEmailAsset[];
+  /**
+   * The reason why this recipient is receiving the notification
+   * (e.g., "custodian", "creator", "admin"). When provided, the email
+   * renders a `NotificationReasonFooter` instead of the legacy
+   * `UserFooter`/`AdminFooter`. Optional for backward compatibility
+   * with callers that haven't adopted the granular notification system.
+   */
+  recipientReason?: string;
+  /**
+   * The email address of the specific recipient. Displayed in the
+   * `NotificationReasonFooter` so the user knows which address
+   * received the email. Optional for backward compatibility — only
+   * meaningful when `recipientReason` is also provided.
+   */
+  recipientEmail?: string;
 }
 
 export function BookingUpdatesEmailTemplate({
@@ -42,6 +61,8 @@ export function BookingUpdatesEmailTemplate({
   cancellationReason,
   changes,
   assets,
+  recipientReason,
+  recipientEmail,
 }: Props) {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -248,7 +269,13 @@ export function BookingUpdatesEmailTemplate({
           footerText={booking.organization.customEmailFooter}
         />
 
-        {isAdminEmail ? (
+        {recipientReason ? (
+          <NotificationReasonFooter
+            booking={booking}
+            recipientEmail={recipientEmail || ""}
+            reason={recipientReason}
+          />
+        ) : isAdminEmail ? (
           <AdminFooter booking={booking} />
         ) : (
           <UserFooter booking={booking} />
@@ -272,6 +299,8 @@ export const bookingUpdatesTemplateString = ({
   cancellationReason,
   changes,
   assets,
+  recipientReason,
+  recipientEmail,
 }: Props) =>
   render(
     <BookingUpdatesEmailTemplate
@@ -284,5 +313,7 @@ export const bookingUpdatesTemplateString = ({
       cancellationReason={cancellationReason}
       changes={changes}
       assets={assets}
+      recipientReason={recipientReason}
+      recipientEmail={recipientEmail}
     />
   );

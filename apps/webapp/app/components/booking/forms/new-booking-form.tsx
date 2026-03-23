@@ -22,6 +22,7 @@ import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
+import { NotificationRecipientsField } from "./fields/notification-recipients";
 import { BookingFormSchema, type BookingFormSchemaType } from "./forms-schema";
 import { Button } from "../../shared/button";
 import { Card } from "../../shared/card";
@@ -43,8 +44,14 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
   const { custodianRef, assetIds } = booking;
 
-  const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
-    useLoaderData<NewBookingLoaderReturnType>();
+  const {
+    teamMembers,
+    teamMembersForForm,
+    userId,
+    currentOrganization,
+    tags,
+    teamMembersForNotify,
+  } = useLoaderData<NewBookingLoaderReturnType>();
   const tagsSuggestions = tags.map((tag) => ({
     label: tag.name,
     value: tag.id,
@@ -181,6 +188,14 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                     validationErrors?.description?.message ||
                     zo.errors.description()?.message
                   }
+                />
+              </Card>
+              <Card className="field-card m-0 overflow-visible">
+                <NotificationRecipientsField
+                  teamMembers={teamMembersForNotify ?? []}
+                  disabled={disabled}
+                  isAdminOrOwner={isAdministratorOrOwner}
+                  creatorName="You"
                 />
               </Card>
             </div>

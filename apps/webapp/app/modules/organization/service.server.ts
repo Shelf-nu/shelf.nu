@@ -446,6 +446,57 @@ export async function getOrganizationAdminsEmails({
   }
 }
 
+/**
+ * Returns admin and owner users for an organization with their full
+ * notification-relevant fields: `id`, `email`, `firstName`, `lastName`.
+ *
+ * This differs from `getOrganizationAdminsEmails()` (which returns only
+ * email strings) because the notification recipient resolver needs the
+ * `userId` to perform editor exclusion — if the admin performing an action
+ * is also in the recipient list, they should be filtered out so they don't
+ * email themselves. Returning bare email strings would not support that
+ * matching.
+ *
+ * @param organizationId - The organization to fetch admins for
+ * @returns Array of user objects with id, email, firstName, lastName
+ */
+export async function getOrganizationAdminsForNotification({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  try {
+    const admins = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        roles: {
+          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
+        },
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return admins.map((a) => a.user);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching organization admins for notification. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
 export async function toggleOrganizationSso({
   organizationId,
   enabledSso,

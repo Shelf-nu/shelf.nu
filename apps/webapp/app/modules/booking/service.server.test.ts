@@ -166,6 +166,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
   getOrganizationAdminsEmails: vitest
     .fn()
     .mockResolvedValue(["admin@example.com"]),
+  getOrganizationAdminsForNotification: vitest.fn().mockResolvedValue([
+    {
+      id: "admin-1",
+      email: "admin@example.com",
+      firstName: "Admin",
+      lastName: "User",
+    },
+  ]),
 }));
 
 // why: preventing actual job scheduling and queue operations during tests
@@ -2098,7 +2106,8 @@ describe("deleteBooking", () => {
 
     await deleteBooking(
       { id: "booking-1", organizationId: "org-1" },
-      mockClientHints
+      mockClientHints,
+      "user-1"
     );
 
     expect(db.booking.findUnique).toHaveBeenCalled();
