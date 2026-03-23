@@ -83,7 +83,7 @@ export function AuditUpdatesEmailTemplate({
   return (
     <Html>
       <Head>
-        <title>Audit update from Shelf.nu</title>
+        <title>Mise à jour d'audit depuis Shelf.nu</title>
       </Head>
 
       <Container
@@ -104,18 +104,18 @@ export function AuditUpdatesEmailTemplate({
             {heading}
           </Heading>
           <Heading as="h2" style={{ ...styles.h2 }}>
-            {audit.name} | {assetCount} {assetCount === 1 ? "asset" : "assets"}
+            {audit.name} | {assetCount} {assetCount === 1 ? "actif" : "actifs"}
           </Heading>
           <p style={{ ...styles.p }}>
             <span style={{ color: "#101828", fontWeight: "600" }}>
-              Created by:
+              Créé par :
             </span>{" "}
             {creatorName}
           </p>
           {dueDateFormatted && (
             <p style={{ ...styles.p }}>
               <span style={{ color: "#101828", fontWeight: "600" }}>
-                Due date:
+                Date d'échéance :
               </span>{" "}
               {dueDateFormatted}
             </p>
@@ -123,7 +123,7 @@ export function AuditUpdatesEmailTemplate({
           {completedAt && (
             <p style={{ ...styles.p }}>
               <span style={{ color: "#101828", fontWeight: "600" }}>
-                Completed on:
+                Terminé le :
               </span>{" "}
               {getDateTimeFormatFromHints(hints, {
                 dateStyle: "medium",
@@ -140,7 +140,7 @@ export function AuditUpdatesEmailTemplate({
           {audit.description && (
             <p style={{ ...styles.p }}>
               <span style={{ color: "#101828", fontWeight: "600" }}>
-                Description:
+                Description :
               </span>{" "}
               {audit.description}
             </p>
@@ -161,7 +161,7 @@ export function AuditUpdatesEmailTemplate({
                 maxWidth: "240px",
               }}
             >
-              View audit in app
+              Voir l'audit dans l'application
             </Button>
             {receiptUrl && (
               <Button
@@ -175,7 +175,7 @@ export function AuditUpdatesEmailTemplate({
                   maxWidth: "240px",
                 }}
               >
-                Download receipt
+                Télécharger le reçu
               </Button>
             )}
           </div>
@@ -199,13 +199,13 @@ export function AuditUpdatesEmailTemplate({
                 color: "#344054",
               }}
             >
-              This email was sent to you because you are the OWNER or ADMIN of
-              the workspace{" "}
+              Cet email vous a été envoyé car vous êtes le PROPRIÉTAIRE ou ADMIN
+              de l'espace de travail{" "}
               <span style={{ color: "#101828", fontWeight: "600" }}>
                 "{audit.organization.name}"
               </span>
-              . <br /> If you think you weren't supposed to have received this
-              email please contact support.
+              . <br /> Si vous pensez que vous n'auriez pas dû recevoir cet
+              email, veuillez contacter le support.
             </p>
           ) : (
             <p
@@ -216,9 +216,9 @@ export function AuditUpdatesEmailTemplate({
                 color: "#71717A",
               }}
             >
-              Thanks,
+              Merci,
               <br />
-              The Shelf Team
+              L'équipe Shelf
             </p>
           )}
           <p

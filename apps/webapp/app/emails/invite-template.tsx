@@ -29,7 +29,7 @@ export function InvitationEmailTemplate({
   return (
     <Html>
       <Head>
-        <title>Invitation to join Shelf</title>
+        <title>Invitation à rejoindre Shelf</title>
       </Head>
 
       <Container
@@ -39,11 +39,12 @@ export function InvitationEmailTemplate({
 
         <div style={{ paddingTop: "8px" }}>
           <Text style={{ marginBottom: "24px", ...styles.p }}>
-            Howdy,
+            Bonjour,
             <br />
-            {invite.inviter.firstName} {invite.inviter.lastName} invites you to
-            join Shelf as a member of {invite.organization.name}
-            's workspace. Click the link to accept the invite:
+            {invite.inviter.firstName} {invite.inviter.lastName} vous invite à
+            rejoindre Shelf en tant que membre de l'espace de travail{" "}
+            {invite.organization.name}. Cliquez sur le lien pour accepter
+            l'invitation :
           </Text>
 
           {extraMessage ? (
@@ -64,8 +65,8 @@ export function InvitationEmailTemplate({
                   margin: "0 0 8px 0",
                 }}
               >
-                Message from {invite.inviter.firstName}{" "}
-                {invite.inviter.lastName}:
+                Message de {invite.inviter.firstName} {invite.inviter.lastName}{" "}
+                :
               </Text>
 
               <Text
@@ -86,19 +87,20 @@ export function InvitationEmailTemplate({
             href={`${SERVER_URL}/accept-invite/${invite.id}?token=${token}`}
             style={{ ...styles.button, textAlign: "center" }}
           >
-            Accept the invite
+            Accepter l'invitation
           </Button>
           <Text style={{ ...styles.p, marginBottom: "24px" }}>
-            Once you’re done setting up your account, you'll be able to access
-            the workspace and start exploring features like Asset Explorer,
-            Location Tracking, Collaboration, Custom fields and more. If you
-            have any questions or need assistance, please don't hesitate to
-            contact our support team at {SUPPORT_EMAIL}.
+            Une fois votre compte configuré, vous pourrez accéder à l'espace de
+            travail et commencer à explorer des fonctionnalités telles que
+            l'explorateur d'actifs, le suivi de localisation, la collaboration,
+            les champs personnalisés et bien plus encore. Si vous avez des
+            questions ou besoin d'assistance, n'hésitez pas à contacter notre
+            équipe de support à {SUPPORT_EMAIL}.
           </Text>
 
           <Text style={{ marginBottom: "32px", ...styles.p }}>
-            Thanks, <br />
-            The Shelf team
+            Merci, <br />
+            L'équipe Shelf
           </Text>
 
           <CustomEmailFooter
@@ -106,7 +108,7 @@ export function InvitationEmailTemplate({
           />
 
           <Text style={{ fontSize: "14px", color: "#344054" }}>
-            This is an automatic email sent from shelf.nu to{" "}
+            Ceci est un email automatique envoyé par shelf.nu à{" "}
             <span style={{ color: emailPrimaryColor }}>
               {invite.inviteeEmail}
             </span>
