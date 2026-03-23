@@ -350,7 +350,7 @@ export const buildCustomFieldValue = (
     switch (def.type) {
       case "BOOLEAN": {
         const finalValue =
-          typeof raw === "string" ? raw === "yes" : Boolean(raw);
+          typeof raw === "string" ? raw.toLowerCase() === "yes" : Boolean(raw);
         return { raw, valueBoolean: finalValue };
       }
       case "DATE": {

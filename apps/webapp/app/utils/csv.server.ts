@@ -328,12 +328,33 @@ export async function exportAssetsFromIndexToCsv({
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
   // Pass both assets and columns to the build function
+  // Build column list: force-include `name` and `id` so every export
+  // has at least the asset name and a stable identifier for bulk-update.
+  // Deduplicate in case the user already has these columns visible.
+  const userColumns = (settings.columns ?? []) as Column[];
+  const seenColumnNames = new Set<string>();
+  const deduplicatedColumns: Column[] = [];
+
+  // Force-included columns first (guaranteed in every export)
+  for (const forced of [
+    { name: "name" as const, visible: true, position: 0 },
+    { name: "id" as const, visible: true, position: 1 },
+  ] satisfies Column[]) {
+    seenColumnNames.add(forced.name);
+    deduplicatedColumns.push(forced);
+  }
+
+  // Then user columns, skipping any we already force-included
+  for (const col of userColumns) {
+    if (!seenColumnNames.has(col.name)) {
+      seenColumnNames.add(col.name);
+      deduplicatedColumns.push(col);
+    }
+  }
+
   const csvData = buildCsvExportDataFromAssets({
     assets,
-    columns: [
-      { name: "name", visible: true, position: 0 },
-      ...(settings.columns as Column[]),
-    ],
+    columns: deduplicatedColumns,
     currentOrganization,
     request,
   });
