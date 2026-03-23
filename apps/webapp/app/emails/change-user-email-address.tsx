@@ -16,7 +16,7 @@ export const changeEmailAddressTextEmail = ({
     displayName?: string | null;
     email: string;
   };
-}) => `Howdy ${resolveUserDisplayName(user)},
+}) => `Howdy ${resolveUserDisplayName(user) || "there"},
 
 Your verification code for email change is: ${otp}
 
@@ -47,7 +47,7 @@ function ChangeEmailAddressHtmlEmailTemplate({
       <Container style={{ maxWidth: "100%" }}>
         <div style={{ paddingTop: "8px" }}>
           <Text style={{ ...styles.p }}>
-            Howdy {resolveUserDisplayName(user)},
+            Howdy {resolveUserDisplayName(user) || "there"},
           </Text>
           <Text style={{ ...styles.p }}>
             Your verification code for email change is:

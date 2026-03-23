@@ -184,9 +184,29 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (parsedData.type !== "updateDisplayName")
           throw new Error("Invalid payload type");
 
+        const currentUser = await getUserByID(userId, {
+          select: {
+            sso: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+
+        if (!currentUser.sso) {
+          throw new ShelfError({
+            cause: null,
+            message: "Display name can only be set by SSO users.",
+            label: "User",
+          });
+        }
+
+        const trimmedDisplayName = parsedData.displayName?.trim() || null;
+
         await updateUser({
           id: userId,
-          displayName: parsedData.displayName || null,
+          displayName: trimmedDisplayName,
+          firstName: currentUser.firstName,
+          lastName: currentUser.lastName,
         });
 
         sendNotification({

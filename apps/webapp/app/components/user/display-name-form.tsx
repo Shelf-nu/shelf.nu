@@ -12,7 +12,7 @@ import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 
 export const DisplayNameFormSchema = z.object({
-  displayName: z.string().optional(),
+  displayName: z.string().trim().optional(),
 });
 
 export function DisplayNameForm({

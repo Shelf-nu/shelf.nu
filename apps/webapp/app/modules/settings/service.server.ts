@@ -95,9 +95,15 @@ export async function getPaginatedAndFilterableSettingUsers({
     const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
       userMembers.map((um) => ({
         id: um.user.id,
-        name:
-          `${um.user.firstName || ""} ${um.user.lastName || ""}`.trim() +
-          (um.user.displayName ? ` (${um.user.displayName})` : ""),
+        name: (() => {
+          const baseName = `${um.user.firstName || ""} ${
+            um.user.lastName || ""
+          }`.trim();
+          if (!baseName && um.user.displayName) return um.user.displayName;
+          return (
+            baseName + (um.user.displayName ? ` (${um.user.displayName})` : "")
+          );
+        })(),
         img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
         email: um.user.email,
         status: "ACCEPTED",
