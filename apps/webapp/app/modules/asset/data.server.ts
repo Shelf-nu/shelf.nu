@@ -227,10 +227,11 @@ export async function simpleModeLoader({
     );
   }
 
+  const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? resolveUserDisplayName(user)
-        ? `${resolveUserDisplayName(user)}'s inventory`
+      ? userName
+        ? `${userName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
@@ -487,10 +488,11 @@ export async function advancedModeLoader({
     );
   }
 
+  const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? resolveUserDisplayName(user)
-        ? `${resolveUserDisplayName(user)}'s inventory`
+      ? userName
+        ? `${userName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
