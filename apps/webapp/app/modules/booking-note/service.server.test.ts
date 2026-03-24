@@ -196,6 +196,7 @@ describe("BookingNote Service", () => {
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },

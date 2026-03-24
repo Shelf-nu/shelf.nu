@@ -13,6 +13,10 @@ import {
   UserDetailsForm,
   UserDetailsFormSchema,
 } from "~/components/user/details-form";
+import {
+  DisplayNameForm,
+  DisplayNameFormSchema,
+} from "~/components/user/display-name-form";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import { RequestDeleteUser } from "~/components/user/request-delete-user";
 import {
@@ -56,6 +60,7 @@ const IntentSchema = z.object({
   intent: z.enum([
     "resetPassword",
     "updateUser",
+    "updateDisplayName",
     "deleteUser",
     "initiateEmailChange",
     "verifyEmailChange",
@@ -71,6 +76,10 @@ const ActionSchemas = {
 
   updateUser: UserDetailsFormSchema.extend({
     type: z.literal("updateUser"),
+  }),
+
+  updateDisplayName: DisplayNameFormSchema.extend({
+    type: z.literal("updateDisplayName"),
   }),
 
   updateUserContact: UserContactDetailsFormSchema.extend({
@@ -171,6 +180,44 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return payload({ success: true });
       }
+      case "updateDisplayName": {
+        if (parsedData.type !== "updateDisplayName")
+          throw new Error("Invalid payload type");
+
+        const currentUser = await getUserByID(userId, {
+          select: {
+            sso: true,
+            firstName: true,
+            lastName: true,
+          } satisfies Prisma.UserSelect,
+        });
+
+        if (!currentUser.sso) {
+          throw new ShelfError({
+            cause: null,
+            message: "Display name can only be set by SSO users.",
+            label: "User",
+          });
+        }
+
+        const trimmedDisplayName = parsedData.displayName?.trim() || null;
+
+        await updateUser({
+          id: userId,
+          displayName: trimmedDisplayName,
+          firstName: currentUser.firstName,
+          lastName: currentUser.lastName,
+        });
+
+        sendNotification({
+          title: "Display name updated",
+          message: "Your display name has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
       case "updateUserContact": {
         if (parsedData.type !== "updateUserContact")
           throw new ShelfError({
@@ -241,6 +288,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
           } satisfies Prisma.UserSelect,
         });
@@ -404,6 +452,7 @@ export default function UserPage() {
   return (
     <div className="mb-2.5 flex flex-col justify-between gap-3">
       <UserDetailsForm user={user} />
+      {user.sso ? <DisplayNameForm user={user} /> : null}
       <UserContactDetailsForm user={user} />
       {!user.sso && (
         <>

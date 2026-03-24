@@ -9,6 +9,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import {
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
@@ -60,7 +61,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         bookingName: booking.name,
         assetsCount: booking._count.assets,
         custodian:
-          `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+          resolveUserDisplayName(booking.custodianUser) ||
           (booking.custodianTeamMember?.name as string),
         from: booking.from,
         to: booking.to,
@@ -174,7 +175,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         bookingName: booking.name,
         assetsCount: booking._count.assets,
         custodian:
-          `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+          resolveUserDisplayName(booking.custodianUser) ||
           (booking.custodianTeamMember?.name as string),
         from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it must have a from and to date
         to: booking.to as Date,

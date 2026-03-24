@@ -155,7 +155,7 @@ export async function handleSubscriptionCreated(
           tierId: tierId as TierId,
           usedFreeTrial: true,
         },
-        select: { email: true, firstName: true },
+        select: { email: true, firstName: true, displayName: true },
       })
       .catch((cause) => {
         throw new ShelfError({

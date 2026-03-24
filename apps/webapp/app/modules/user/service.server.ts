@@ -840,11 +840,11 @@ export async function updateUser<T extends Prisma.UserInclude>(
           updateMany: {
             where: { userId: updateUserPayload.id },
             data: {
-              name: `${
-                updateUserPayload.firstName ? updateUserPayload.firstName : ""
-              } ${
-                updateUserPayload.lastName ? updateUserPayload.lastName : ""
-              }`,
+              name:
+                updateUserPayload.displayName ||
+                `${updateUserPayload.firstName || ""} ${
+                  updateUserPayload.lastName || ""
+                }`.trim(),
             },
           },
         },

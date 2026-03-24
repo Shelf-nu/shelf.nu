@@ -9,6 +9,7 @@ import { useHints } from "~/utils/client-hints";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { resolveUserDisplayName } from "~/utils/user";
 
 type Items = NonNullable<
   ReturnType<typeof useLoaderData<AssetIndexLoaderData>>["items"]
@@ -49,7 +50,7 @@ export function useAssetAvailabilityData(items: Items) {
           ...asset.bookings.map((b) => {
             const booking = b as AdvancedAssetBooking;
             const custodianName = booking?.custodianUser
-              ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+              ? resolveUserDisplayName(booking.custodianUser)
               : booking.custodianTeamMember?.name;
 
             let title = booking.name;
@@ -93,7 +94,7 @@ export function useAssetAvailabilityData(items: Items) {
                 creator: booking.creator
                   ? {
                       name: booking.creator
-                        ? `${booking.creator.firstName} ${booking.creator.lastName}`.trim()
+                        ? resolveUserDisplayName(booking.creator)
                         : "Unknown",
                       user: booking.creator
                         ? {

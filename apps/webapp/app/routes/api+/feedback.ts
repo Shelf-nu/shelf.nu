@@ -28,6 +28,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
           username: true,
           email: true,
         } satisfies Prisma.UserSelect,

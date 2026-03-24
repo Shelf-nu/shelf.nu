@@ -90,6 +90,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         username: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         profilePicture: true,
         onboarded: true,
         customerId: true,

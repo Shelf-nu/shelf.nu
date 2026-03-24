@@ -26,6 +26,7 @@ import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -45,6 +46,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         select: {
           firstName: true,
+          displayName: true,
           tier: true,
           userOrganizations: {
             include: {
@@ -62,6 +64,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                       id: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -278,7 +281,7 @@ const OrganizationRow = ({
       <Td>
         <UserBadge
           img={item.owner.profilePicture}
-          name={`${item.owner.firstName} ${item.owner.lastName}`}
+          name={resolveUserDisplayName(item.owner)}
         />
       </Td>
 

@@ -63,6 +63,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
           email: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           customerId: true,
           tierId: true,
           usedFreeTrial: true,
@@ -190,6 +191,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         usedFreeTrial: true,
       } satisfies Prisma.UserSelect,
     });

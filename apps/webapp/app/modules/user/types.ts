@@ -6,6 +6,7 @@ export interface UpdateUserPayload {
   email?: User["email"];
   firstName?: User["firstName"];
   lastName?: User["lastName"];
+  displayName?: User["displayName"];
   profilePicture?: User["profilePicture"];
   onboarded?: User["onboarded"];
   password?: string;

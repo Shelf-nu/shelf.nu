@@ -14,9 +14,10 @@ import { CustomEmailFooter } from "~/emails/components/custom-footer";
 import { LogoForEmail } from "~/emails/logo";
 import { styles } from "~/emails/styles";
 import { SERVER_URL } from "~/utils/env";
+import { resolveUserDisplayName } from "~/utils/user";
 
 type AssetAlertEmailProps = {
-  user: Pick<User, "email" | "firstName" | "lastName" | "email">;
+  user: Pick<User, "email" | "firstName" | "lastName" | "displayName">;
   asset: Pick<Asset, "id" | "title" | "mainImage" | "mainImageExpiration">;
   reminder: AssetReminder;
   workspaceName: string;
@@ -32,7 +33,7 @@ export function assetAlertEmailText({
   isOwner,
   customEmailFooter,
 }: AssetAlertEmailProps) {
-  const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+  const userName = resolveUserDisplayName(user);
 
   const note = isOwner
     ? `You are receiving this email because the original person was removed from workspace ${workspaceName}.`
@@ -79,7 +80,7 @@ function AssetAlertEmailTemplate({
   isOwner,
   customEmailFooter,
 }: AssetAlertEmailProps) {
-  const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+  const userName = resolveUserDisplayName(user);
 
   const isEmailExpired = isAssetImageExpired(asset.mainImageExpiration);
 

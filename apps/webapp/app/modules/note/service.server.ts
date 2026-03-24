@@ -143,7 +143,7 @@ export async function createBulkKitChangeNotes({
     const user = await db.user
       .findFirstOrThrow({
         where: { id: userId },
-        select: { firstName: true, lastName: true },
+        select: { firstName: true, lastName: true, displayName: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -498,7 +498,7 @@ export async function createAssetNotesForAuditAddition({
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, displayName: true },
     });
 
     if (!user || assetIds.length === 0) return;
@@ -548,7 +548,7 @@ export async function createAssetNotesForAuditRemoval({
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, displayName: true },
     });
 
     if (!user || assetIds.length === 0) return;

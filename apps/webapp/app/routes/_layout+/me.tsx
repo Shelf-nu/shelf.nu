@@ -9,6 +9,7 @@ import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -17,7 +18,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     const user = await getUserWithContact(userId);
 
-    const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+    const userName = resolveUserDisplayName(user);
 
     const header = { title: userName };
 

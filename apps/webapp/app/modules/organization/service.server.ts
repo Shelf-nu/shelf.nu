@@ -21,6 +21,7 @@ import {
   premiumIsEnabled,
   transferSubscriptionToCustomer,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
@@ -155,6 +156,7 @@ export async function createOrganization({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     });
 
@@ -183,7 +185,7 @@ export async function createOrganization({
        */
       members: {
         create: {
-          name: `${owner.firstName} ${owner.lastName} (Owner)`,
+          name: `${resolveUserDisplayName(owner)} (Owner)`,
           user: { connect: { id: owner.id } },
         },
       },
@@ -637,7 +639,13 @@ export async function getOrganizationAdmins({
       where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
       select: {
         user: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            email: true,
+          },
         },
       },
     });
@@ -711,6 +719,7 @@ export async function transferOwnership({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             roles: true,
             customerId: true,
@@ -835,7 +844,7 @@ export async function transferOwnership({
           if (!newOwnerCustomerId) {
             newOwnerCustomerId = await createStripeCustomer({
               email: newOwnerUserOrg.user.email,
-              name: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+              name: resolveUserDisplayName(newOwnerUserOrg.user),
               userId: newOwnerId,
             });
           }
@@ -894,7 +903,7 @@ export async function transferOwnership({
       subject: `🎉 You're now the Owner of ${currentOrganization.name} - Shelf`,
       to: newOwnerUserOrg.user.email,
       text: newOwnerEmailText({
-        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        newOwnerName: resolveUserDisplayName(newOwnerUserOrg.user),
         workspaceName: currentOrganization.name,
         subscriptionTransferred,
       }),
@@ -905,8 +914,8 @@ export async function transferOwnership({
       subject: `🔁 You've Transferred Ownership of ${currentOrganization.name}`,
       to: currentOwnerUserOrg.user.email,
       text: previousOwnerEmailText({
-        previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
-        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        previousOwnerName: resolveUserDisplayName(currentOwnerUserOrg.user),
+        newOwnerName: resolveUserDisplayName(newOwnerUserOrg.user),
         workspaceName: currentOrganization.name,
         subscriptionTransferred,
       }),
@@ -930,12 +939,12 @@ export async function transferOwnership({
 Workspace: ${currentOrganization.name}
 Workspace ID: ${currentOrganization.id}
 
-Previous Owner: ${currentOwnerUserOrg.user.firstName} ${
-          currentOwnerUserOrg.user.lastName
-        } (${currentOwnerUserOrg.user.email})
-New Owner: ${newOwnerUserOrg.user.firstName} ${
-          newOwnerUserOrg.user.lastName
-        } (${newOwnerUserOrg.user.email})
+Previous Owner: ${resolveUserDisplayName(currentOwnerUserOrg.user)} (${
+          currentOwnerUserOrg.user.email
+        })
+New Owner: ${resolveUserDisplayName(newOwnerUserOrg.user)} (${
+          newOwnerUserOrg.user.email
+        })
 
 Subscription transferred: ${subscriptionStatus}
 ${

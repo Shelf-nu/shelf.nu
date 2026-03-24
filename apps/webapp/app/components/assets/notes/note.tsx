@@ -5,6 +5,7 @@ import { DateS } from "~/components/shared/date";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
 import { timeAgo } from "~/utils/time-ago";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * Generic note type that works for both asset notes and booking notes
@@ -78,9 +79,7 @@ const Comment = ({
           <DateS date={note.createdAt} includeTime />
         </Tag>{" "}
         <span className="commentator font-medium text-gray-900">
-          {note.user
-            ? `${note.user.firstName} ${note.user.lastName}`
-            : "Unknown"}
+          {note.user ? resolveUserDisplayName(note.user) : "Unknown"}
         </span>{" "}
         <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
         {note.auditAsset && assetLinkBase && (

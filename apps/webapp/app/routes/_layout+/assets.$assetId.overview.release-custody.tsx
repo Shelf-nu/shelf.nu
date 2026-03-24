@@ -60,6 +60,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   select: {
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     profilePicture: true,
                     email: true,
                   },
@@ -113,6 +114,7 @@ export const action = async ({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -134,6 +136,7 @@ export const action = async ({
                     id: true,
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                   },
                 },
               },
