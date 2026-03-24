@@ -281,30 +281,52 @@ describe("team member note service", () => {
   });
 
   describe("deleteTeamMemberNote", () => {
-    it("only deletes notes authored by the requesting user", async () => {
+    it("deletes note scoped by id, author, and workspace", async () => {
       teamMemberNoteDeleteManyMock.mockResolvedValue({ count: 1 });
 
       const result = await deleteTeamMemberNote({
         id: "tmnote-1",
         userId: "admin-1",
+        organizationId: "org-1",
       });
 
-      /* Both id and userId in the where clause ensures only the author can delete */
+      /* id + userId + organizationId in the where clause enforces both authorship AND workspace isolation */
       expect(teamMemberNoteDeleteManyMock).toHaveBeenCalledWith({
-        where: { id: "tmnote-1", userId: "admin-1" },
+        where: { id: "tmnote-1", userId: "admin-1", organizationId: "org-1" },
       });
       expect(result).toEqual({ count: 1 });
     });
 
-    it("returns count of 0 when note does not exist or user is not the author", async () => {
+    it("throws 403 when note does not exist or user is not the author", async () => {
       teamMemberNoteDeleteManyMock.mockResolvedValue({ count: 0 });
 
-      const result = await deleteTeamMemberNote({
-        id: "nonexistent-note",
-        userId: "admin-1",
-      });
+      await expect(
+        deleteTeamMemberNote({
+          id: "nonexistent-note",
+          userId: "admin-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toThrow(
+        "Note not found or you don't have permission to delete it."
+      );
+    });
 
-      expect(result.count).toBe(0);
+    it("throws 403 when note exists in a different workspace", async () => {
+      /* Simulates cross-workspace deletion attempt: note exists but not in org-other */
+      teamMemberNoteDeleteManyMock.mockResolvedValue({ count: 0 });
+
+      try {
+        await deleteTeamMemberNote({
+          id: "tmnote-1",
+          userId: "admin-1",
+          organizationId: "org-other",
+        });
+      } catch (error: any) {
+        expect(error.status).toBe(403);
+        expect(error.message).toBe(
+          "Note not found or you don't have permission to delete it."
+        );
+      }
     });
 
     it("throws ShelfError when database operation fails", async () => {
@@ -316,6 +338,7 @@ describe("team member note service", () => {
         deleteTeamMemberNote({
           id: "tmnote-1",
           userId: "admin-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -323,6 +346,7 @@ describe("team member note service", () => {
         deleteTeamMemberNote({
           id: "tmnote-1",
           userId: "admin-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(
         "Something went wrong while deleting the team member note."

@@ -28,8 +28,10 @@ interface Props {
  */
 export const UserNoteActionsDropdown = ({ noteId }: Props) => (
   <DropdownMenu modal={false}>
-    <DropdownMenuTrigger>
-      <HorizontalDotsIcon />
+    <DropdownMenuTrigger asChild>
+      <button type="button" aria-label="Note actions">
+        <HorizontalDotsIcon aria-hidden="true" />
+      </button>
     </DropdownMenuTrigger>
     <DropdownMenuContent
       align="end"

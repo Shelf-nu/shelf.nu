@@ -140,30 +140,54 @@ export async function getTeamMemberNotes({
 }
 
 /**
- * Deletes a team member note. Only the original author can delete their own notes.
+ * Deletes a team member note. Only the original author can delete their own notes,
+ * and only within the current workspace.
  *
- * Uses `deleteMany` with both `id` and `userId` in the where clause
- * to ensure the requesting user is the note author. If the userId
- * doesn't match, zero rows are deleted (no error thrown).
+ * Uses `deleteMany` with `id`, `userId`, and `organizationId` in the where clause
+ * to enforce both authorship AND workspace scoping. This prevents cross-workspace
+ * deletion — an admin who authored notes in multiple workspaces cannot delete
+ * a note from Workspace A while operating in Workspace B.
+ *
+ * Throws a 403 if no matching note was found (wrong author, wrong workspace,
+ * or non-existent note) to avoid silent no-ops.
  *
  * @param args.id - The note ID to delete
  * @param args.userId - The requesting user's ID (must be the note author)
+ * @param args.organizationId - The current workspace (enforces workspace isolation)
  * @returns Prisma BatchPayload with the count of deleted records
+ * @throws {ShelfError} 403 if no note matched (wrong author or workspace)
  * @throws {ShelfError} If the database operation fails
  */
 export async function deleteTeamMemberNote({
   id,
   userId,
-}: Pick<TeamMemberNote, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<TeamMemberNote, "id" | "organizationId"> & { userId: User["id"] }) {
   try {
-    return await db.teamMemberNote.deleteMany({
-      where: { id, userId },
+    const result = await db.teamMemberNote.deleteMany({
+      where: { id, userId, organizationId },
     });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, userId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return result;
   } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the team member note.",
-      additionalData: { id, userId },
+      additionalData: { id, userId, organizationId },
       label,
     });
   }

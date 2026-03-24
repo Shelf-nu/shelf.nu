@@ -127,6 +127,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await deleteTeamMemberNote({
           id: noteId,
           userId,
+          organizationId,
         });
 
         sendNotification({

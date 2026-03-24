@@ -85,15 +85,12 @@ export const UserNotes = ({
       {hasNotes || optimisticNote ? (
         <ul className="notes-list mt-8 w-full">
           {/* Render optimistic note using the same Note component */}
+          {/* Optimistic note has a placeholder ID — don't render actions until the real note exists */}
           {optimisticNote && (
             <Note
               key={optimisticNote.id}
               note={optimisticNote}
-              actionsDropdown={
-                canDelete ? (
-                  <UserNoteActionsDropdown noteId={optimisticNote.id} />
-                ) : undefined
-              }
+              actionsDropdown={undefined}
             />
           )}
           {/* Render all existing notes */}
