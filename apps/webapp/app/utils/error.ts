@@ -88,6 +88,7 @@ export type FailureReason = {
     | "SSO"
     | "Kit"
     | "Note"
+    | "Team Member Note"
     | "Audit Image"
     // Other kinds of errors
     | "DB"
