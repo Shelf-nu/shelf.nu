@@ -614,11 +614,19 @@ function compareCoreField(
           warning: `"${csvValue}" is not a valid number`,
         };
       }
-      const currentNum = asset.valuation ?? 0;
-      if (Math.abs(csvNum - currentNum) > 0.001) {
+      // Distinguish null (no valuation) from 0 (explicit zero)
+      if (asset.valuation == null) {
+        // Any valid number (including 0) is a change when current is empty
         return {
           field: displayName,
-          currentValue: asset.valuation != null ? String(currentNum) : "(none)",
+          currentValue: "(none)",
+          newValue: String(csvNum),
+        };
+      }
+      if (Math.abs(csvNum - asset.valuation) > 0.001) {
+        return {
+          field: displayName,
+          currentValue: String(asset.valuation),
           newValue: String(csvNum),
         };
       }
@@ -726,7 +734,6 @@ function compareCustomField(
     case "NUMBER": {
       const normalizedCsv = normalizeExportedCurrencyValue(csvValue);
       const csvNum = parseFloat(normalizedCsv);
-      const currentNum = parseFloat(currentStr) || 0;
       if (isNaN(csvNum)) {
         return {
           field: displayName,
@@ -735,10 +742,20 @@ function compareCustomField(
           warning: `"${csvValue}" is not a valid number`,
         };
       }
+      // Distinguish empty/null from numeric 0
+      const currentNum = currentStr ? parseFloat(currentStr) : NaN;
+      if (isNaN(currentNum)) {
+        // Current is empty — any valid number (including 0) is a change
+        return {
+          field: displayName,
+          currentValue: "(empty)",
+          newValue: String(csvNum),
+        };
+      }
       if (Math.abs(csvNum - currentNum) > 0.001) {
         return {
           field: displayName,
-          currentValue: currentStr || "(empty)",
+          currentValue: String(currentNum),
           newValue: String(csvNum),
         };
       }
@@ -891,45 +908,62 @@ async function detectNewEntities(
     }
   }
 
-  const newCategories: string[] = [];
-  const newLocations: string[] = [];
-  const newTags: string[] = [];
+  // Batch check categories (single query instead of N)
+  const categoryNamesArr = Array.from(categoryNames);
+  const existingCats =
+    categoryNamesArr.length > 0
+      ? await db.category.findMany({
+          where: {
+            organizationId,
+            name: { in: categoryNamesArr, mode: "insensitive" },
+          },
+          select: { name: true },
+        })
+      : [];
+  const existingCatNamesLc = new Set(
+    existingCats.map((c) => c.name.toLowerCase())
+  );
+  const newCategories = categoryNamesArr.filter(
+    (n) => !existingCatNamesLc.has(n.toLowerCase())
+  );
 
-  // Check categories
-  for (const name of categoryNames) {
-    const existing = await db.category.findFirst({
-      where: {
-        name: { equals: name, mode: "insensitive" },
-        organizationId,
-      },
-      select: { id: true },
-    });
-    if (!existing) newCategories.push(name);
-  }
+  // Batch check locations
+  const locationNamesArr = Array.from(locationNames);
+  const existingLocs =
+    locationNamesArr.length > 0
+      ? await db.location.findMany({
+          where: {
+            organizationId,
+            name: { in: locationNamesArr, mode: "insensitive" },
+          },
+          select: { name: true },
+        })
+      : [];
+  const existingLocNamesLc = new Set(
+    existingLocs.map((l) => l.name.toLowerCase())
+  );
+  const newLocations = locationNamesArr.filter(
+    (n) => !existingLocNamesLc.has(n.toLowerCase())
+  );
 
-  // Check locations
-  for (const name of locationNames) {
-    const existing = await db.location.findFirst({
-      where: {
-        name: { equals: name, mode: "insensitive" },
-        organizationId,
-      },
-      select: { id: true },
-    });
-    if (!existing) newLocations.push(name);
-  }
-
-  // Check tags
-  for (const name of tagNames) {
-    const existing = await db.tag.findFirst({
-      where: {
-        name: { equals: name, mode: "insensitive" },
-        organizationId,
-      },
-      select: { id: true },
-    });
-    if (!existing) newTags.push(name);
-  }
+  // Batch check tags
+  const tagNamesArr = Array.from(tagNames);
+  const existingTags =
+    tagNamesArr.length > 0
+      ? await db.tag.findMany({
+          where: {
+            organizationId,
+            name: { in: tagNamesArr, mode: "insensitive" },
+          },
+          select: { name: true },
+        })
+      : [];
+  const existingTagNamesLc = new Set(
+    existingTags.map((t) => t.name.toLowerCase())
+  );
+  const newTags = tagNamesArr.filter(
+    (n) => !existingTagNamesLc.has(n.toLowerCase())
+  );
 
   return {
     categories: newCategories,
@@ -1010,41 +1044,72 @@ async function resolveLocationNameToId(
 
 /**
  * Resolves an array of tag names to their IDs, creating any that don't exist.
+ * Uses batched queries to avoid N+1 round-trips.
  */
 async function resolveTagNamesToIds(
   names: string[],
   userId: string,
   organizationId: string
 ): Promise<{ id: string }[]> {
-  const result: { id: string }[] = [];
+  const trimmedNames = names.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (trimmedNames.length === 0) return [];
 
-  for (const name of names) {
-    const trimmed = name.trim();
-    if (!trimmed) continue;
-
-    const existing = await db.tag.findFirst({
-      where: {
-        name: { equals: trimmed, mode: "insensitive" },
-        organizationId,
-      },
-      select: { id: true },
-    });
-
-    if (existing) {
-      result.push({ id: existing.id });
-    } else {
-      const created = await db.tag.create({
-        data: {
-          name: trimmed,
-          user: { connect: { id: userId } },
-          organization: { connect: { id: organizationId } },
-        },
-        select: { id: true },
-      });
-      result.push({ id: created.id });
+  // Deduplicate (case-insensitive) while keeping first occurrence
+  const seenLc = new Set<string>();
+  const uniqueNames: string[] = [];
+  for (const name of trimmedNames) {
+    const lc = name.toLowerCase();
+    if (!seenLc.has(lc)) {
+      seenLc.add(lc);
+      uniqueNames.push(name);
     }
   }
 
+  // Batch fetch existing tags
+  const existingTags = await db.tag.findMany({
+    where: {
+      organizationId,
+      name: { in: uniqueNames, mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+
+  const nameToId = new Map<string, string>();
+  for (const tag of existingTags) {
+    nameToId.set(tag.name.toLowerCase(), tag.id);
+  }
+
+  // Create missing tags
+  const toCreate = uniqueNames.filter((n) => !nameToId.has(n.toLowerCase()));
+  if (toCreate.length > 0) {
+    await db.tag.createMany({
+      data: toCreate.map((name) => ({
+        name,
+        userId,
+        organizationId,
+      })),
+      skipDuplicates: true,
+    });
+
+    // Re-fetch to get IDs of newly created tags
+    const newTags = await db.tag.findMany({
+      where: {
+        organizationId,
+        name: { in: toCreate, mode: "insensitive" },
+      },
+      select: { id: true, name: true },
+    });
+    for (const tag of newTags) {
+      nameToId.set(tag.name.toLowerCase(), tag.id);
+    }
+  }
+
+  // Build result preserving original order (including duplicates)
+  const result: { id: string }[] = [];
+  for (const name of trimmedNames) {
+    const id = nameToId.get(name.toLowerCase());
+    if (id) result.push({ id });
+  }
   return result;
 }
 
@@ -1137,17 +1202,27 @@ export async function applyBulkUpdatesFromImport({
   }));
 
   // Build a map from assetId → CSV row index for error reporting
+  // Build row-number index by both primary and fallback identifiers
   const seenIdsForRow = new Map<string, number>();
   for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx++) {
     const row = dataRows[rowIdx];
-    const assetId = row[headerAnalysis.idColumnIndex]?.trim();
-    if (!assetId || seenIdsForRow.has(assetId)) continue;
-    seenIdsForRow.set(assetId, rowIdx);
+    const primaryId = row[headerAnalysis.idColumnIndex]?.trim();
+    if (primaryId && !seenIdsForRow.has(primaryId)) {
+      seenIdsForRow.set(primaryId, rowIdx);
+    }
+    if (headerAnalysis.fallbackId) {
+      const fallbackVal = row[headerAnalysis.fallbackId.index]?.trim();
+      if (fallbackVal && !seenIdsForRow.has(fallbackVal)) {
+        seenIdsForRow.set(fallbackVal, rowIdx);
+      }
+    }
   }
 
   for (const assetPreview of diffs.assetsToUpdate) {
     const { id: matchId, assetDbId, title: assetTitle, changes } = assetPreview;
-    const existingAsset = existingAssets.get(matchId);
+    // Look up in primary map first, then fallback (matches computeAssetDiffs logic)
+    const existingAsset =
+      existingAssets.get(matchId) ?? fallbackAssets?.get(matchId);
     if (!existingAsset) {
       // Asset was deleted between preview and apply
       const rowIdx = seenIdsForRow.get(matchId);
@@ -1166,6 +1241,7 @@ export async function applyBulkUpdatesFromImport({
     try {
       // Separate location changes to handle kit constraint gracefully
       let locationChange: FieldChange | undefined;
+      let locationKitError: string | undefined;
       let availableToBookChange: FieldChange | undefined;
       const otherChanges: FieldChange[] = [];
 
@@ -1316,20 +1392,15 @@ export async function applyBulkUpdatesFromImport({
           } as UpdateAssetPayload);
           changesApplied++;
         } catch (cause) {
-          // If location fails due to kit, record partial failure
+          // If location fails due to kit, track it but don't double-count
           const msg = isLikeShelfError(cause)
             ? (cause as { message: string }).message
             : "Location update failed";
-          if (msg.includes("kit")) {
-            failed.push({
-              id: matchId,
-              title: assetTitle,
-              rowNumber,
-              error: `Location change skipped: ${msg}`,
-            });
-          } else {
+          if (!msg.includes("kit")) {
             throw cause; // Re-throw non-kit errors
           }
+          // Kit location failure — tracked as partial if other fields applied
+          locationKitError = `Location change skipped: ${msg}`;
         }
       }
 
@@ -1352,8 +1423,26 @@ export async function applyBulkUpdatesFromImport({
           title: assetTitle,
           changesApplied,
         });
-      } else if (!failed.some((f) => f.id === matchId)) {
-        // Only mark as skipped if we didn't already record a failure
+        // If location failed due to kit but other fields succeeded,
+        // record as a separate failure entry (partial success)
+        if (locationKitError) {
+          failed.push({
+            id: matchId,
+            title: assetTitle,
+            rowNumber,
+            error: locationKitError,
+          });
+        }
+      } else if (locationKitError) {
+        // Only change was location and it failed
+        failed.push({
+          id: matchId,
+          title: assetTitle,
+          rowNumber,
+          error: locationKitError,
+        });
+      } else {
+        // All changes had warnings — nothing applied
         const warnedCount = changes.filter((c) => c.warning).length;
         if (warnedCount > 0) {
           skipped.push({

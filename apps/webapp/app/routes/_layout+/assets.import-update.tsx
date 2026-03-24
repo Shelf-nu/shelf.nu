@@ -37,8 +37,9 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     await assertUserCanImportAssets({ organizationId, organizations });
 
+    const clonedFormData = await request.clone().formData();
     const { intent } = parseData(
-      await request.clone().formData(),
+      clonedFormData,
       z.object({
         intent: z.enum(["preview-update", "apply-update"]),
       })
@@ -64,6 +65,15 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       }
 
       case "apply-update": {
+        const confirmation = clonedFormData.get("confirmation");
+        if (confirmation !== "I AGREE") {
+          throw new ShelfError({
+            cause: null,
+            message: 'You must type "I AGREE" to confirm the bulk update.',
+            label: "Assets",
+            shouldBeCaptured: false,
+          });
+        }
         const result = await applyBulkUpdatesFromImport({
           csvData,
           organizationId,

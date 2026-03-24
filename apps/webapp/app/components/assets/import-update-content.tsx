@@ -1,6 +1,6 @@
 import type React from "react";
 import type { ChangeEvent } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
 import { isFormProcessing } from "~/utils/form";
@@ -98,7 +98,13 @@ function parseSimpleCsvLine(line: string): string[] {
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
     if (char === '"') {
-      inQuotes = !inQuotes;
+      // Handle escaped quotes ("") inside quoted fields
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
     } else if ((char === "," || char === ";") && !inQuotes) {
       result.push(stripQuotes(current.trim()));
       current = "";
@@ -306,18 +312,19 @@ function UpdateImportForm() {
       }
     | undefined;
 
-  if (
-    previewData &&
-    !previewData.error &&
-    previewData.intent === "preview-update" &&
-    previewData.preview &&
-    previewData.preview !== lastProcessedPreview.current &&
-    (stage === "upload" || stage === "preview")
-  ) {
-    lastProcessedPreview.current = previewData.preview;
-    setPreview(previewData.preview);
-    setStage("preview");
-  }
+  useEffect(() => {
+    if (
+      previewData &&
+      !previewData.error &&
+      previewData.intent === "preview-update" &&
+      previewData.preview &&
+      previewData.preview !== lastProcessedPreview.current
+    ) {
+      lastProcessedPreview.current = previewData.preview;
+      setPreview(previewData.preview);
+      setStage("preview");
+    }
+  }, [previewData]);
 
   // Handle apply response
   const applyData = applyFetcher.data as
@@ -329,16 +336,17 @@ function UpdateImportForm() {
       }
     | undefined;
 
-  if (
-    applyData &&
-    !applyData.error &&
-    applyData.intent === "apply-update" &&
-    applyData.result &&
-    stage === "preview"
-  ) {
-    setResult(applyData.result);
-    setStage("results");
-  }
+  useEffect(() => {
+    if (
+      applyData &&
+      !applyData.error &&
+      applyData.intent === "apply-update" &&
+      applyData.result
+    ) {
+      setResult(applyData.result);
+      setStage("results");
+    }
+  }, [applyData]);
 
   const handleReset = () => {
     setSelectedFile(null);
@@ -949,6 +957,7 @@ function PreviewDisplay({
     if (!formRef.current || !selectedFile) return;
     const fd = new FormData(formRef.current);
     fd.set("intent", "apply-update");
+    fd.set("confirmation", agreed);
     void applyFetcher.submit(fd, {
       method: "post",
       encType: "multipart/form-data",
@@ -1049,11 +1058,14 @@ function SpreadsheetPreview({
                     return (
                       <td
                         key={col}
+                        tabIndex={0}
                         className={`relative cursor-default border-r px-3 py-1.5 ${
                           hasWarning ? "bg-red-50" : "bg-blue-50"
                         }`}
                         onMouseEnter={() => setHoveredCell({ assetIdx, col })}
                         onMouseLeave={() => setHoveredCell(null)}
+                        onFocus={() => setHoveredCell({ assetIdx, col })}
+                        onBlur={() => setHoveredCell(null)}
                       >
                         <div
                           className={`max-w-[180px] truncate font-medium ${
@@ -1145,23 +1157,23 @@ function ResultsDisplay({
 
     for (const asset of result.updated) {
       lines.push(
-        `Updated,"${asset.id}","${escapeCsvValue(asset.title)}",${
+        `Updated,${escapeCsvValue(asset.id)},${escapeCsvValue(asset.title)},${
           asset.changesApplied
         } fields changed`
       );
     }
     for (const asset of result.skipped) {
       lines.push(
-        `Skipped,"${asset.id}","${escapeCsvValue(
+        `Skipped,${escapeCsvValue(asset.id)},${escapeCsvValue(
           asset.title
-        )}","${escapeCsvValue(asset.reason)}"`
+        )},${escapeCsvValue(asset.reason)}`
       );
     }
     for (const row of result.failed) {
       lines.push(
-        `Failed,"${row.id}","${escapeCsvValue(row.title)}","${escapeCsvValue(
-          row.error
-        )}"`
+        `Failed,${escapeCsvValue(row.id)},${escapeCsvValue(
+          row.title
+        )},${escapeCsvValue(row.error)}`
       );
     }
 
@@ -1358,7 +1370,10 @@ function DefectedHeadersTable({
   );
 }
 
-/** Escape a value for CSV output */
+/** Escape a value for CSV output — wraps in quotes if needed */
 function escapeCsvValue(value: string): string {
-  return value.replace(/"/g, '""');
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
 }
