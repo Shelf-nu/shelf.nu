@@ -116,3 +116,83 @@ jobs:
         run: flyctl deploy --remote-only --build-arg COMMIT_SHA=${{ github.sha }} --app ${{ steps.app_name.outputs.value }} --dockerfile apps/webapp/Dockerfile
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  update-docs:
+    name: 📝 Update Website Docs
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    # Only trigger docs updates for production deploys
+    if: ${{ github.ref == 'refs/heads/main' }}
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: 🔍 Find merged PR
+        id: find_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Use the commits-to-PR association API (reliable lookup by SHA)
+          PR_JSON=$(gh api \
+            "repos/${REPO}/commits/${COMMIT_SHA}/pulls" \
+            --jq '.[0] // empty')
+
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "No merged PR found for this commit. Skipping."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
+          HAS_DOCS_LABEL=$(echo "$PR_JSON" | jq '[.labels[]?.name] | any(. == "docs-impact")')
+
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "has_docs_label=$HAS_DOCS_LABEL" >> "$GITHUB_OUTPUT"
+
+          # Write title to file for safe grep (avoids shell injection)
+          echo "$PR_TITLE" > /tmp/pr_title.txt
+
+      - name: 🚦 Check docs eligibility (Gate 1)
+        id: gate
+        if: ${{ steps.find_pr.outputs.eligible != 'false' }}
+        run: |
+          HAS_LABEL="${{ steps.find_pr.outputs.has_docs_label }}"
+
+          # Check for feat: prefix including feat!: and feat(scope):
+          HAS_FEAT_PREFIX=false
+          if grep -iq '^feat[(!:]' /tmp/pr_title.txt; then
+            HAS_FEAT_PREFIX=true
+          fi
+
+          if [[ "$HAS_LABEL" == "true" || "$HAS_FEAT_PREFIX" == "true" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            echo "✅ PR qualifies: label=$HAS_LABEL, feat_prefix=$HAS_FEAT_PREFIX"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️ PR does not qualify for docs update. Skipping."
+          fi
+
+      - name: 🚀 Dispatch to website-v2
+        if: ${{ steps.gate.outputs.eligible == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          PR_NUMBER: ${{ steps.find_pr.outputs.number }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          PAYLOAD=$(jq -n \
+            --argjson pr_number "$PR_NUMBER" \
+            --arg source_repo "$SOURCE_REPO" \
+            '{
+              event_type: "update-docs",
+              client_payload: {
+                pr_number: $pr_number,
+                source_repo: $source_repo
+              }
+            }')
+
+          echo "$PAYLOAD" | gh api repos/Shelf-nu/website-v2/dispatches --input -
+          echo "📤 Dispatched update-docs to website-v2 for PR #${PR_NUMBER}"
