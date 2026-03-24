@@ -34,6 +34,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         email: true,
         sso: true,
         createdAt: true,

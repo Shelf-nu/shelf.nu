@@ -39,6 +39,7 @@ model User {
   username              String  @unique @default(cuid())
   firstName             String?
   lastName              String?
+  displayName           String?
   profilePicture        String?
   usedFreeTrial         Boolean @default(false)
   onboarded             Boolean @default(false)

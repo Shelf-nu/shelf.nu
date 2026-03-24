@@ -12,6 +12,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 const querySchema = z.object({
   q: z.string().trim().max(100).optional(),
@@ -282,7 +283,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
                 custodianUser: {
-                  select: { firstName: true, lastName: true, email: true },
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                    email: true,
+                  },
                 },
                 custodianTeamMember: { select: { name: true } },
               },
@@ -312,6 +318,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   select: {
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     email: true,
                   },
                 },
@@ -370,7 +377,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           description: booking.description || null,
           status: booking.status,
           custodianName: booking.custodianUser
-            ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`.trim()
+            ? resolveUserDisplayName(booking.custodianUser)
             : booking.custodianTeamMember?.name || null,
           from: booking.from?.toISOString() || null,
           to: booking.to?.toISOString() || null,

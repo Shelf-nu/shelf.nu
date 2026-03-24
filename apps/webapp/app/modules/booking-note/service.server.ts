@@ -164,6 +164,7 @@ export async function getBookingNotes({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
       },

@@ -60,6 +60,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
@@ -619,7 +620,7 @@ function UpcomingBookingsColumn({
             <h5 className="mb-1 border-b pb-2 text-sm">Upcoming Bookings</h5>
             {bookings.map((booking) => {
               const custodianName = booking?.custodianUser
-                ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+                ? resolveUserDisplayName(booking.custodianUser)
                 : booking.custodianTeamMember?.name;
 
               let title = booking.name;
@@ -670,7 +671,7 @@ function UpcomingBookingsColumn({
                           },
                           creator: {
                             name: booking.creator
-                              ? `${booking.creator.firstName} ${booking.creator.lastName}`.trim()
+                              ? resolveUserDisplayName(booking.creator)
                               : "Unknown",
                             user: booking.creator
                               ? {

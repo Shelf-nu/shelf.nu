@@ -60,6 +60,7 @@ import {
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import {
   BOOKING_COMMON_INCLUDE,
@@ -163,6 +164,7 @@ export async function createStatusTransitionNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const userLink = wrapUserLinkForNote({
@@ -459,6 +461,7 @@ export async function updateBasicBooking({
                   id: true,
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                 },
               },
             },
@@ -469,6 +472,7 @@ export async function updateBasicBooking({
               email: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
           tags: {
@@ -587,6 +591,7 @@ export async function updateBasicBooking({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         })
       : null;
@@ -666,7 +671,7 @@ export async function updateBasicBooking({
     ) {
       // Build custodian name helpers for the email change description
       const oldCustodianName = booking.custodianUser
-        ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+        ? resolveUserDisplayName(booking.custodianUser)
         : booking.custodianTeamMember?.name ?? "Unknown";
 
       try {
@@ -681,6 +686,7 @@ export async function updateBasicBooking({
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
               },
             },
           },
@@ -709,7 +715,7 @@ export async function updateBasicBooking({
           });
 
           const newCustodianName = newCustodian.user
-            ? `${newCustodian.user.firstName} ${newCustodian.user.lastName}`
+            ? resolveUserDisplayName(newCustodian.user)
             : newCustodian.name;
           changes.push(
             `Custodian changed from ${oldCustodianName} to ${newCustodianName}`
@@ -982,7 +988,7 @@ export async function reserveBooking({
 
     if (bookingFound.custodianUser?.email) {
       const custodian = bookingFound?.custodianUser
-        ? `${bookingFound.custodianUser.firstName} ${bookingFound.custodianUser.lastName}`
+        ? resolveUserDisplayName(bookingFound.custodianUser)
         : bookingFound.custodianTeamMember?.name ?? "";
 
       /** Prepare email content */
@@ -1525,6 +1531,7 @@ export async function checkinBooking({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
 
@@ -1652,7 +1659,7 @@ export async function checkinBooking({
 
     if (updatedBooking.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
-        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        ? resolveUserDisplayName(updatedBooking.custodianUser)
         : updatedBooking.custodianTeamMember?.name ?? "";
 
       const subject = `🎉 Booking completed (${updatedBooking.name}) - shelf.nu`;
@@ -1713,6 +1720,7 @@ export async function partialCheckinBooking({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     // First, validate the booking exists and get its current assets
@@ -2115,6 +2123,7 @@ export async function updateBookingAssets({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         await createSystemBookingNote({
@@ -2168,6 +2177,7 @@ export async function createKitBookingNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     await createSystemBookingNote({
@@ -2328,7 +2338,7 @@ export async function cancelBooking({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
         custodian:
-          `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+          resolveUserDisplayName(booking.custodianUser) ||
           (booking.custodianTeamMember?.name as string),
         from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
         to: booking.to as Date,
@@ -2584,6 +2594,7 @@ export async function extendBooking({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     await createSystemBookingNote({
@@ -2598,7 +2609,7 @@ export async function extendBooking({
     /** Send extended booking email */
     if (updatedBooking?.custodianUser?.email) {
       const custodian = updatedBooking?.custodianUser
-        ? `${updatedBooking.custodianUser.firstName} ${updatedBooking.custodianUser.lastName}`
+        ? resolveUserDisplayName(updatedBooking.custodianUser)
         : updatedBooking.custodianTeamMember?.name ?? "";
 
       const text = extendBookingEmailContent({
@@ -3055,6 +3066,7 @@ export async function getBookings(params: {
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -3276,7 +3288,7 @@ export async function deleteBooking(
         bookingName: b.name,
         assetsCount: b._count.assets,
         custodian:
-          `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+          resolveUserDisplayName(b.custodianUser) ||
           (b.custodianTeamMember?.name as string),
         from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
         to: b.to as Date,
@@ -3516,6 +3528,7 @@ export async function getBookingsForCalendar(params: {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             profilePicture: true,
           },
         },
@@ -3528,7 +3541,7 @@ export async function getBookingsForCalendar(params: {
       .filter((booking) => booking.from && booking.to)
       .map((booking) => {
         const custodianName = booking?.custodianUser
-          ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+          ? resolveUserDisplayName(booking.custodianUser)
           : booking.custodianTeamMember?.name;
 
         let title = booking.name;
@@ -3567,7 +3580,7 @@ export async function getBookingsForCalendar(params: {
             },
             creator: {
               name: booking.creator
-                ? `${booking.creator.firstName} ${booking.creator.lastName}`.trim()
+                ? resolveUserDisplayName(booking.creator)
                 : "Unknown",
               user: booking.creator
                 ? {
@@ -3742,6 +3755,7 @@ export async function bulkDeleteBookings({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -3796,7 +3810,7 @@ export async function bulkDeleteBookings({
           booking.assets.map((asset) => ({
             userId,
             assetId: asset.id,
-            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
+            content: `**${resolveUserDisplayName(user)}** deleted booking **${
               booking.name
             }**.`,
             type: "UPDATE" as const,
@@ -3820,7 +3834,7 @@ export async function bulkDeleteBookings({
           bookingName: b.name,
           assetsCount: b.assets.length,
           custodian:
-            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+            resolveUserDisplayName(b.custodianUser) ||
             (b.custodianTeamMember?.name as string),
           from: b.from as Date,
           to: b.to as Date,
@@ -3975,6 +3989,7 @@ export async function bulkCancelBookings({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -4093,7 +4108,7 @@ export async function bulkCancelBookings({
           bookingName: b.name,
           assetsCount: b._count.assets,
           custodian:
-            `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+            resolveUserDisplayName(b.custodianUser) ||
             (b.custodianTeamMember?.name as string),
           from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
           to: b.to as Date,
@@ -4183,6 +4198,7 @@ async function createNotesForScannedAssetsAndKits({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     } satisfies Prisma.UserSelect,
   });
   const userForNotes = {
@@ -4631,6 +4647,7 @@ export function getPartialCheckinHistory(bookingId: string) {
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
           email: true,
         },
       },
@@ -4681,6 +4698,7 @@ export async function getDetailedPartialCheckinData(bookingId: string) {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },

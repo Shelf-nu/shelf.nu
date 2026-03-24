@@ -7,6 +7,7 @@
  */
 
 import type { Category } from "@prisma/client";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * Wraps a date in Markdoc date tag syntax for proper rendering
@@ -146,16 +147,15 @@ export function wrapKitsWithDataForNote(
  */
 export function wrapUserLinkForNote(user: {
   id: string;
+  displayName?: string | null;
   firstName?: string | null;
   lastName?: string | null;
 }): string {
-  const fullName = `${user.firstName?.trim() || ""} ${
-    user.lastName?.trim() || ""
-  }`.trim();
-  const displayName = fullName || "Unknown User";
-  return `{% link to="/settings/team/users/${
-    user.id
-  }" text="${displayName.replace(/"/g, "&quot;")}" /%}`;
+  const name = resolveUserDisplayName(user) || "Unknown User";
+  return `{% link to="/settings/team/users/${user.id}" text="${name.replace(
+    /"/g,
+    "&quot;"
+  )}" /%}`;
 }
 
 /**
@@ -241,6 +241,7 @@ export function wrapCustodianForNote(custodian: {
     name: string;
     user?: {
       id: string;
+      displayName?: string | null;
       firstName?: string | null;
       lastName?: string | null;
     } | null;
@@ -250,11 +251,7 @@ export function wrapCustodianForNote(custodian: {
 
   if (teamMember.user) {
     // Custodian has a user account, create a link
-    return wrapUserLinkForNote({
-      id: teamMember.user.id,
-      firstName: teamMember.user.firstName,
-      lastName: teamMember.user.lastName,
-    });
+    return wrapUserLinkForNote(teamMember.user);
   } else {
     // Team member without user account, use bold text with escaped asterisks
     return `**${teamMember.name.replace(/\*\*/g, "\\*\\*")}**`;

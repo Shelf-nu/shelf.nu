@@ -1561,7 +1561,7 @@ export async function updateAsset({
         const [user, customFieldsFromForm] = await Promise.all([
           db.user.findFirst({
             where: { id: userId },
-            select: { firstName: true, lastName: true },
+            select: { firstName: true, lastName: true, displayName: true },
           }),
           db.customField.findMany({
             where: {
@@ -2991,6 +2991,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   profilePicture: true,
                 },
               },
@@ -3466,6 +3467,7 @@ export async function bulkCheckOutAssets({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.teamMember.findUnique({
@@ -3477,6 +3479,7 @@ export async function bulkCheckOutAssets({
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -3599,6 +3602,7 @@ export async function bulkCheckInAssets({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -3722,6 +3726,7 @@ export async function bulkUpdateAssetLocation({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -4095,6 +4100,7 @@ export async function relinkAssetQrCode({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     }),
     db.asset.findFirst({

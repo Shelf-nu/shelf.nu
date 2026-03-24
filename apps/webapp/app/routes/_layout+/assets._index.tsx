@@ -88,6 +88,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
           select: {
             firstName: true,
+            displayName: true,
           },
         })
         .catch((cause) => {

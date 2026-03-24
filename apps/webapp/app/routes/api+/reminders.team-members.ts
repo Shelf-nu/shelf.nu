@@ -18,6 +18,7 @@ const TEAM_MEMBER_INCLUDE = {
       email: true,
       firstName: true,
       lastName: true,
+      displayName: true,
       profilePicture: true,
     },
   },
