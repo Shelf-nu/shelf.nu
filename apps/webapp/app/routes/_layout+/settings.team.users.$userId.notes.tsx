@@ -95,7 +95,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Notes",
+  name: "$userId.notes",
 };
 
 /**
@@ -122,7 +122,7 @@ export default function UserNotesPage() {
   });
 
   return (
-    <div className="w-full">
+    <div className="mt-4 w-full">
       {canReadNotes ? (
         <>
           <TextualDivider text="Notes" className="mb-8 lg:hidden" />
